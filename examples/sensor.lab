@@ -1,0 +1,13 @@
+// The source states what must exist and how it will be accepted.
+// The target lab profile selects the manufacturing details.
+plasmid p_sensor {
+  sequence "ATGCGTACGTTAGCTA";
+  topology circular;
+  copies 1;
+
+  acceptance {
+    exact_sequence;
+    minimum_concentration 100 ng_per_ul;
+    minimum_volume 20 ul;
+  }
+}

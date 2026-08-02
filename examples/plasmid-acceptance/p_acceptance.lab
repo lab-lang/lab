@@ -1,0 +1,23 @@
+// This example exercises every biological specification and acceptance feature
+// implemented by the first Lab vertical slice.
+//
+// It intentionally says nothing about Gibson assembly, DH5alpha, colony
+// screening, Sanger sequencing, pipettes, plates, or timing. Those are selected
+// or introduced by later compiler stages.
+//
+// The sequence is synthetic example data. It is useful for demonstrating the
+// compiler and is not a qualified construct or laboratory protocol.
+plasmid p_acceptance {
+  sequence "GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT";
+  topology circular;
+  copies 1;
+
+  // These are acceptance obligations, not claims about the eventual artifact.
+  // They force the workflow to produce sequence, concentration, and volume
+  // evidence before the physical material can reach protocol.accept.
+  acceptance {
+    exact_sequence;
+    minimum_concentration 100 ng_per_ul;
+    minimum_volume 20 ul;
+  }
+}
