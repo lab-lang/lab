@@ -38,7 +38,7 @@ package index plus typed portable IR for each source module.
 `labc` intentionally remains a minimal single-source compiler interface:
 
 ```sh
-labc compiler/docs/language/specimens/plasmid-build.lab --emit module-ir
+labc docs/language/specimens/plasmid-build.lab --emit module-ir
 labc examples/sensor.lab --emit design-ir
 labc examples/sensor.lab --emit target-ir
 labc examples/sensor.lab --emit simulation
@@ -48,8 +48,17 @@ See the [plasmid acceptance example](examples/plasmid-acceptance/README.md) for 
 
 ## Repository layout
 
-- `compiler/` contains the language frontend, compilation pipeline, plan model, and outputs.
-- `cli/` contains the `lab` project and workflow CLI.
+- `crates/lab-compiler/` contains the lowering pipeline, plan model, and compiler tools.
+- `crates/lab-cli/` contains the `lab` project and workflow CLI.
+- `crates/lab-language/` contains the platform-neutral language frontend.
+- `crates/lab-package/` contains manifests, source discovery, and module graphs.
+- `crates/lab-ide/` contains editor intelligence with no protocol or filesystem dependency.
+- `crates/lab-language-server/` adapts `lab-ide` to the Language Server Protocol.
+- `crates/lab-ide-wasm/` exposes the same editor model to browser and embedded hosts.
 - `editors/vscode/` contains Lab language support for VS Code and Cursor.
-- `sdk/` contains experimental Rust and Python APIs.
+- `crates/lab-sdk/` and `crates/lab-python/` contain experimental APIs.
 - `examples/` contains the inputs used to exercise the prototype.
+
+See [editor architecture](docs/language/decisions/0008-editor-architecture.md)
+for the boundaries between the compiler, IDE model, language server, and
+browser API.

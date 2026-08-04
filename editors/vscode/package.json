@@ -8,6 +8,11 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:lab",
+    "onCommand:lab.restartLanguageServer"
+  ],
   "categories": [
     "Programming Languages"
   ],
@@ -48,6 +53,40 @@
         "language": "lab",
         "path": "./snippets/lab.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "lab.restartLanguageServer",
+        "title": "Lab: Restart Language Server"
+      }
+    ],
+    "configuration": {
+      "title": "Lab",
+      "properties": {
+        "lab.languageServer.path": {
+          "type": "string",
+          "default": "lab-language-server",
+          "description": "Path to the Lab language server executable."
+        },
+        "lab.languageServer.trace": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Trace communication with the Lab language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.0"
   }
 }

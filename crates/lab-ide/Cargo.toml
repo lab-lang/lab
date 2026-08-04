@@ -1,0 +1,15 @@
+[package]
+name = "lab-ide"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Platform-neutral incremental IDE services for Lab source code."
+
+[dependencies]
+lab-language.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

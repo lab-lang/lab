@@ -1,0 +1,32 @@
+[package]
+name = "lab-compiler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Lab Compiler biological lowering pipeline for the Lab ecosystem."
+
+[lib]
+name = "lab_compiler"
+path = "src/lib.rs"
+
+[[bin]]
+name = "labc"
+path = "src/main.rs"
+
+[[bin]]
+name = "lab-opt"
+path = "src/bin/lab-opt/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+lab-language.workspace = true
+pliron.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

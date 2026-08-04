@@ -33,4 +33,6 @@ The current compiler checks basic source validity, operation types, target capab
 
 This example does not demonstrate scheduling, reagent quantities, inventory, containers, staff, instrument selection, robot code generation, execution tracking, or successful physical construction. The compiler uses one built-in reference laboratory profile. Its IR and JSON outputs are debugging surfaces, not stable interchange formats.
 
-The Rust and Python SDKs call the same compiler pipeline; see [`sdk/`](../../sdk/) for their small experimental APIs.
+The Rust and Python SDKs call the same compiler pipeline; see
+[`crates/lab-sdk`](../../crates/lab-sdk/) and
+[`crates/lab-python`](../../crates/lab-python/) for their experimental APIs.

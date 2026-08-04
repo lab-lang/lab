@@ -1,0 +1,21 @@
+[package]
+name = "lab-ide-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "WebAssembly bindings for Lab editor intelligence."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+lab-ide.workspace = true
+lab-language.workspace = true
+serde.workspace = true
+serde-wasm-bindgen.workspace = true
+wasm-bindgen.workspace = true
+
+[lints]
+workspace = true

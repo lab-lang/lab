@@ -1,0 +1,23 @@
+[package]
+name = "lab-language-server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Language Server Protocol adapter for Lab editor intelligence."
+
+[[bin]]
+name = "lab-language-server"
+path = "src/main.rs"
+
+[dependencies]
+lab-ide.workspace = true
+lab-language.workspace = true
+lsp-server.workspace = true
+lsp-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
