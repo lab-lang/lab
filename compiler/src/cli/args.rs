@@ -19,6 +19,7 @@ pub(crate) struct Cli {
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub(crate) enum Emit {
     Human,
+    SourceAst,
     SpecificationJson,
     DesignIr,
     #[value(name = "target-ir", alias = "ir")]

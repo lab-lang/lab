@@ -1,30 +1,28 @@
-# Lab Lang: initial grammar
+# Lab source frontend
 
-The first Lab Lang surface is intentionally small. It specifies a physical artifact and its acceptance criteria without choosing a robot, plate layout, pipette, assembly method, or propagation host.
+The frontend has two deliberately different entry points:
+
+- `parse_module` builds a spanned source AST for the language under design;
+- `parse` additionally lowers the currently executable standalone-plasmid
+  subset into the original `ArtifactSpec` pipeline.
+
+The executable subset is:
 
 ```lab
-plasmid p_sensor {
-  sequence "ATGCGTACGTTAGCTA";
-  topology circular;
-  copies 1;
+plasmid p_sensor:
+  sequence = dna("ATGCGTACGTTAGCTA")
+  require topology == circular
 
-  acceptance {
-    exact_sequence;
-    minimum_concentration 100 ng_per_ul;
-    minimum_volume 20 ul;
-  }
-}
+  accept sequence == design.sequence
+  accept concentration >= 100 ng/uL
+  accept volume >= 20 uL
 ```
 
-Supported statements are:
+The source parser also represents whole-module `use` declarations, circuits,
+lab-specific data declarations, typed workflow inputs and bindings, durable
+effects (`<-`), matches, loops, events, and reactive `when` clauses. Until
+resolution, type checking, workflow lowering, and execution exist, passing
+these forms to `parse` produces an explicit `Unsupported` error.
 
-- `sequence "...";` with an unambiguous DNA sequence (`A`, `C`, `G`, `T`);
-- `topology circular;`;
-- `copies <positive integer>;`;
-- `exact_sequence;` inside `acceptance`;
-- `minimum_concentration <integer> ng_per_ul;` inside `acceptance`;
-- `minimum_volume <integer> ul;` inside `acceptance`.
-
-Line comments begin with `//`. Exact sequence verification is currently required because the implemented plasmid pipeline cannot call an artifact validated without sequence evidence. The frontend represents any positive copy count, while the first plasmid compiler lowering deliberately fails closed for counts other than one until replicate material flow is modeled explicitly.
-
-The [plasmid acceptance example](../../../examples/plasmid-acceptance/README.md) follows a Lab Lang source through the current compiler pipeline.
+The evolving language contract, decisions, support matrix, and larger syntax
+specimens live in [`../../docs/language`](../../docs/language/README.md).

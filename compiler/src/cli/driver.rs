@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use clap::Parser;
-use labc::{Compiler, CompilerSession, IrStage, LabProfile, parse, render_human, simulate};
+use labc::{
+    Compiler, CompilerSession, IrStage, LabProfile, parse, parse_module, render_human, simulate,
+};
 
 use super::args::{Cli, Emit};
 
@@ -8,8 +10,15 @@ pub fn run() -> Result<()> {
     let cli = Cli::parse();
     let text = std::fs::read_to_string(&cli.source)
         .with_context(|| format!("failed to read {}", cli.source.display()))?;
+    if matches!(cli.emit, Emit::SourceAst) {
+        let module = parse_module(&text)
+            .with_context(|| format!("failed to parse {}", cli.source.display()))?;
+        println!("{}", serde_json::to_string_pretty(&module)?);
+        return Ok(());
+    }
+
     let specification =
-        parse(&text).with_context(|| format!("failed to parse {}", cli.source.display()))?;
+        parse(&text).with_context(|| format!("failed to lower {}", cli.source.display()))?;
     match cli.emit {
         Emit::SpecificationJson => {
             println!("{}", serde_json::to_string_pretty(&specification)?);
@@ -36,9 +45,10 @@ pub fn run() -> Result<()> {
                     let trace = simulate(compilation.plan())?;
                     println!("{}", serde_json::to_string_pretty(&trace)?);
                 }
-                Emit::SpecificationJson | Emit::DesignIr => unreachable!(),
+                Emit::SourceAst | Emit::SpecificationJson | Emit::DesignIr => unreachable!(),
             }
         }
+        Emit::SourceAst => unreachable!(),
     }
     Ok(())
 }

@@ -1,0 +1,27 @@
+use std.bio.parts
+use std.bio.backbones
+
+circuit regulated_expression<I: Signal, O: Protein>:
+  input promoter: Promoter<I>
+  input coding: CDS<O>
+  output Circuit<I, O>
+
+  layout:
+    promoter
+    B0034
+    coding
+    B0015
+
+tet_reporter = regulated_expression(pTet, sfGFP)
+
+plasmid p_tet_reporter:
+  backbone = p15A_kan
+  cargo = tet_reporter
+
+  require topology == circular
+  require sites(BsaI) == 0
+  require length <= 12 kb
+
+  accept sequence == design.sequence
+  accept concentration >= 100 ng/uL
+  accept volume >= 20 uL

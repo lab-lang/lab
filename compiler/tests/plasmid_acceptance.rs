@@ -31,6 +31,10 @@ fn successful_stdout(kind: &str) -> String {
 
 #[test]
 fn plasmid_acceptance_exposes_each_compiler_boundary() {
+    let source_ast: Value = serde_json::from_str(&successful_stdout("source-ast")).unwrap();
+    assert_eq!(source_ast["items"][0]["item"], "plasmid");
+    assert_eq!(source_ast["items"][0]["name"]["value"], "p_acceptance");
+
     let specification: Value =
         serde_json::from_str(&successful_stdout("specification-json")).unwrap();
     assert_eq!(specification["name"], "p_acceptance");

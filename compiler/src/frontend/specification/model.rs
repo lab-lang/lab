@@ -18,7 +18,7 @@ pub enum SpecError {
     PlasmidMustBeCircular,
     #[error("at least one physical copy must be requested")]
     ZeroCopies,
-    #[error("the current plasmid pipeline requires an exact_sequence acceptance criterion")]
+    #[error("the current plasmid pipeline requires 'accept sequence == design.sequence'")]
     MissingSequenceAcceptance,
 }
 

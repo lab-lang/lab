@@ -1,0 +1,116 @@
+use std.lab.plasmid_actions
+
+observation PlateObservation:
+  image: Image
+  colonies: ColonyMap
+  elapsed: Duration
+
+outcome ColonyGrowth:
+  plate: Material<Plate>
+  observations: List<PlateObservation>
+
+  case Ready:
+    colonies: ColonyMap
+
+  case TimedOut
+
+outcome SequenceCheck:
+  material: Material<Plasmid>
+  evidence: List<Evidence>
+
+  case Exact
+  case Mismatch
+  case Inconclusive
+
+workflow await_colonies:
+  input plate: Material<Plate>
+  output ColonyGrowth
+
+  observations: List<PlateObservation> = []
+
+  when every 30 min:
+    image <- capture image of plate
+    colonies = detect_colonies(image)
+    observation = PlateObservation{
+      image: image,
+      colonies: colonies,
+      elapsed: workflow.elapsed,
+    }
+    observations = observations + [observation]
+
+    if colonies.isolated.count >= 8:
+      return Ready{
+        plate: plate,
+        colonies: colonies,
+        observations: observations,
+      }
+
+  when after 18 h:
+    return TimedOut{
+      plate: plate,
+      observations: observations,
+    }
+
+workflow build_plasmid:
+  input design: Plasmid
+  output Accepted<Plasmid> | Rejected<Plasmid>
+
+  fragments <- synthesize design
+  construct <- assemble fragments
+  cells <- provision competent_ecoli
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  plate <- plate culture on kanamycin
+
+  colony_result <- await_colonies plate
+
+  match colony_result:
+    case TimedOut:
+      return Rejected{
+        material: None,
+        reason: no_colonies,
+        evidence: colony_result.observations,
+      }
+
+    case Ready:
+      candidates <- pick 4 isolated colonies from colony_result.plate
+      screening <- screen candidates against design
+
+  clone = screening.clones.highest_confidence
+  culture <- grow clone at 37 C for 16 h
+  plasmid <- purify culture
+  retained, aliquot <- split plasmid
+  sequence_result <- sequence aliquot
+
+  match sequence_result:
+    case Mismatch:
+      return Rejected{
+        material: retained,
+        reason: sequence_mismatch,
+        evidence: sequence_result.evidence,
+      }
+
+    case Inconclusive:
+      return Rejected{
+        material: retained,
+        reason: inconclusive_sequence,
+        evidence: sequence_result.evidence,
+      }
+
+    case Exact:
+      quantity <- quantify retained
+
+  evidence = sequence_result.evidence + [quantity]
+
+  if design.accepts(evidence):
+    retained <- store retained at -20 C
+    return Accepted{
+      material: retained,
+      evidence: evidence,
+    }
+
+  return Rejected{
+    material: retained,
+    reason: acceptance_failed,
+    evidence: evidence,
+  }

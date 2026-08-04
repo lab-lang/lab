@@ -6,10 +6,9 @@ from lab import compile_lab_lang
 class CompilationTests(unittest.TestCase):
     def test_compiles_to_ir_and_python_plan(self) -> None:
         source = """
-            plasmid p_python {
-                sequence "ACGT";
-                acceptance { exact_sequence; }
-            }
+plasmid p_python:
+  sequence = dna("ACGT")
+  accept sequence == design.sequence
         """
 
         compilation = compile_lab_lang(source)

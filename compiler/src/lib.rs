@@ -13,7 +13,7 @@ mod translations;
 
 pub use frontend::{
     Artifact, ArtifactSpec, AssemblyMethod, Capability, Concentration, DnaSequence, LabProfile,
-    ParseError, PlasmidSpec, SpecError, Topology, Volume, parse,
+    ParseError, PlasmidSpec, SpecError, Topology, Volume, parse, parse_module,
 };
 pub use output::{SimulationError, SimulationEvent, SimulationTrace, render_human, simulate};
 pub use pipeline::{Compilation, Compiler, CompilerError};

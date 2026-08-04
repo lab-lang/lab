@@ -18,10 +18,9 @@ mod tests {
     #[test]
     fn source_to_plan_sdk_path_is_coherent() {
         let source = r#"
-            plasmid p_sdk {
-                sequence "ACGT";
-                acceptance { exact_sequence; }
-            }
+plasmid p_sdk:
+  sequence = dna("ACGT")
+  accept sequence == design.sequence
         "#;
         let compilation = compile_lab_lang(source, &LabProfile::reference()).unwrap();
         assert_eq!(compilation.plan().artifact, "p_sdk");

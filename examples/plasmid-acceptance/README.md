@@ -29,7 +29,7 @@ labc examples/plasmid-acceptance/p_acceptance.lab --emit plan-json
 labc examples/plasmid-acceptance/p_acceptance.lab --emit simulation
 ```
 
-The current compiler checks basic source validity, operation types, target capabilities, single-consumer use of physical material, and connections between requested acceptance criteria and evidence-producing steps. It deliberately rejects plasmid copy counts other than one.
+The current compiler checks basic source validity, operation types, target capabilities, single-consumer use of physical material, and connections between requested acceptance criteria and evidence-producing steps. The first lowering produces one physical copy; replicate material flow is not yet modeled.
 
 This example does not demonstrate scheduling, reagent quantities, inventory, containers, staff, instrument selection, robot code generation, execution tracking, or successful physical construction. The compiler uses one built-in reference laboratory profile. Its IR and JSON outputs are debugging surfaces, not stable interchange formats.
 
