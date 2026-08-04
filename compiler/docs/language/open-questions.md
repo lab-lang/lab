@@ -3,21 +3,21 @@
 These choices are intentionally not hidden behind parser behavior. A parsed
 form is not a settled semantic decision.
 
-## Durable workflow state
+## Concurrent state transitions
 
-The reactive specimen updates `observations` with `=` inside a `when` handler.
-We still need to decide whether captured workflow bindings become durable state
-implicitly, or whether an explicit marker such as `state` or `remember` is
-worth one additional keyword. The runtime semantics must make concurrent event
-updates deterministic and replay-safe either way.
+Durable workflow memory is now explicit with `state`, and ordinary bindings are
+immutable. The remaining question is the transaction model when multiple ready
+handlers read and update the same state: strictly journal-ordered handlers are
+the initial semantics, but conflict diagnostics and future safe parallelism
+still need design work.
 
 ## Effect action grammar
 
-The parser preserves the phrase following `<-` as source text. The portable
-module compiler now resolves the standard plasmid-action phrases used by the
-representative workflow and checks their operand and result types. We still
-need one extensible signature grammar for package-defined actions rather than a
-compiler-owned set of phrase shapes.
+The parser preserves a phrase-shaped action syntax after `<-`. The module
+compiler resolves standard actions through typed contracts that declare phrase
+slots, operand ownership, result types, and a dispatch capability. We still
+need source syntax and package metadata for declaring non-standard actions
+without adding them to the compiler-owned registry.
 
 ## Concurrency and cancellation
 

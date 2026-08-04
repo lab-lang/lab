@@ -26,7 +26,7 @@ workflow await_colonies:
   input plate: Material<Plate>
   output ColonyGrowth
 
-  observations: List<PlateObservation> = []
+  state observations: List<PlateObservation> = []
 
   when every 30 min:
     image <- capture image of plate

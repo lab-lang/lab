@@ -136,6 +136,7 @@ pub struct ClaimStmt {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stmt {
+    State(StateStmt),
     Binding(BindingStmt),
     Effect(EffectStmt),
     Return(ReturnStmt),
@@ -149,6 +150,7 @@ pub enum Stmt {
 impl Stmt {
     pub fn span(&self) -> Span {
         match self {
+            Self::State(stmt) => stmt.span,
             Self::Binding(stmt) => stmt.span,
             Self::Effect(stmt) => stmt.span,
             Self::Return(stmt) => stmt.span,
@@ -159,6 +161,14 @@ impl Stmt {
             Self::Emit(stmt) => stmt.span,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StateStmt {
+    pub name: Identifier,
+    pub ty: TypeExpr,
+    pub initial: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -3,6 +3,8 @@
 //! Every expression and action operand is structured and typed. Source text is
 //! deliberately absent: later compiler passes must not reinterpret syntax.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +99,12 @@ impl CheckedType {
             Self::Bool => "Bool".to_owned(),
             Self::None => "None".to_owned(),
         }
+    }
+}
+
+impl fmt::Display for CheckedType {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.display_name())
     }
 }
 
@@ -207,6 +215,7 @@ pub struct ResolvedAction {
     pub operation: String,
     pub capability: Option<String>,
     pub arguments: Vec<CheckedActionArgument>,
+    pub results: Vec<CheckedField>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -3,9 +3,10 @@
 Status: accepted, initial implementation
 
 Complete Lab modules compile first to verified portable module IR. This boundary
-contains resolved imports, nominal and laboratory types, inferred binding and
-effect-result types, normalized standard-library operations, checked outcome
-constructors, control-flow continuation, and reactive handler structure.
+contains resolved imports, structured nominal and laboratory types, typed
+expression trees, explicit workflow state, action capabilities and operand
+ownership modes, checked outcome constructors, control-flow continuation, and
+reactive handler structure.
 
 Portable module IR is intentionally above laboratory target selection. Producing
 it does not mean that a workflow has been scheduled, that material linearity has

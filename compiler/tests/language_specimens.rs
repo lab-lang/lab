@@ -36,7 +36,10 @@ fn plasmid_design_compiles_through_the_portable_module_boundary() {
     let declarations = module["declarations"].as_array().unwrap();
     assert!(declarations.iter().any(|declaration| {
         declaration["kind"] == "binding"
-            && declaration["inferred_types"][0] == "Circuit<Tetracycline, GreenFluorescentProtein>"
+            && declaration["targets"][0]["type"]["name"] == "Circuit"
+            && declaration["targets"][0]["type"]["arguments"][0]["name"] == "Tetracycline"
+            && declaration["targets"][0]["type"]["arguments"][1]["name"]
+                == "GreenFluorescentProtein"
     }));
     assert!(declarations.iter().any(|declaration| {
         declaration["kind"] == "plasmid"
@@ -62,17 +65,22 @@ fn plasmid_build_compiles_typed_effects_and_reactive_handlers() {
         .iter()
         .find(|declaration| declaration["name"] == "build_plasmid")
         .unwrap();
-    assert_eq!(workflow["output"], "Accepted<Plasmid> | Rejected<Plasmid>");
+    assert_eq!(workflow["output"]["kind"], "union");
+    assert_eq!(workflow["output"]["alternatives"][0]["name"], "Accepted");
+    assert_eq!(workflow["output"]["alternatives"][1]["name"], "Rejected");
     let serialized = serde_json::to_string(workflow).unwrap();
     assert!(serialized.contains("workflow.await_colonies"));
     assert!(serialized.contains("std.lab.plasmid_actions.split"));
-    assert!(serialized.contains("Material<Plasmid>"));
+    assert!(serialized.contains("\"mode\":\"take\""));
+    assert!(serialized.contains("\"mode\":\"borrow\""));
 
     let await_colonies = declarations
         .iter()
         .find(|declaration| declaration["name"] == "await_colonies")
         .unwrap();
     let serialized = serde_json::to_string(await_colonies).unwrap();
+    assert_eq!(await_colonies["state"][0]["name"], "observations");
+    assert!(serialized.contains("\"kind\":\"state_update\""));
     assert!(serialized.contains("\"kind\":\"every\""));
     assert!(serialized.contains("\"kind\":\"after\""));
 

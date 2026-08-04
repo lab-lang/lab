@@ -1,17 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
+use super::action_contracts::{
+    ActionContractSpec, ContractType, PhrasePart, standard_action_contract,
+};
 use super::ast::*;
 use super::checked::*;
 use super::semantic_error::SemanticError;
 use super::source::Span;
 
-pub(crate) fn check_module(source: &str, module: &Module) -> Result<CheckedModule, SemanticError> {
-    Checker::new(source, module).check(module)
+pub(crate) fn check_module(module: &Module) -> Result<CheckedModule, SemanticError> {
+    Checker::new(module).check(module)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Ty {
+pub(super) enum Ty {
     Named(String, Vec<Ty>),
     Union(Vec<Ty>),
     List(Box<Ty>),
@@ -25,11 +28,11 @@ enum Ty {
 }
 
 impl Ty {
-    fn named(name: impl Into<String>) -> Self {
+    pub(super) fn named(name: impl Into<String>) -> Self {
         Self::Named(name.into(), Vec::new())
     }
 
-    fn material(inner: Ty) -> Self {
+    pub(super) fn material(inner: Ty) -> Self {
         Self::Named("Material".to_owned(), vec![inner])
     }
 }
@@ -90,8 +93,7 @@ struct WorkflowSignature {
     output: Ty,
 }
 
-struct Checker<'a> {
-    source: &'a str,
+struct Checker {
     known_types: BTreeSet<String>,
     imports: BTreeSet<String>,
     values: HashMap<String, Ty>,
@@ -102,8 +104,8 @@ struct Checker<'a> {
     workflows: HashMap<String, WorkflowSignature>,
 }
 
-impl<'a> Checker<'a> {
-    fn new(source: &'a str, module: &Module) -> Self {
+impl Checker {
+    fn new(module: &Module) -> Self {
         let known_types = [
             "Accepted",
             "Antibiotic",
@@ -149,7 +151,6 @@ impl<'a> Checker<'a> {
         }))
         .collect();
         Self {
-            source,
             known_types,
             imports: BTreeSet::new(),
             values: HashMap::new(),
@@ -430,8 +431,8 @@ impl<'a> Checker<'a> {
                 entries: section
                     .entries
                     .iter()
-                    .map(|expression| self.text(expression.span()))
-                    .collect(),
+                    .map(|expression| self.lower_checked_expr(expression, &environment, None))
+                    .collect::<Result<Vec<_>, _>>()?,
             });
         }
         Ok(CheckedDeclaration::Circuit {
@@ -447,7 +448,7 @@ impl<'a> Checker<'a> {
                 .zip(&signature.inputs)
                 .map(|(field, ty)| checked_field(&field.name.value, ty))
                 .collect(),
-            output: signature.output.to_string(),
+            output: to_checked_type(&signature.output),
             sections,
         })
     }
@@ -502,11 +503,19 @@ impl<'a> Checker<'a> {
                 }
                 PlasmidMember::Requirement(claim) => {
                     self.require_bool(&claim.predicate, &environment, "require")?;
-                    requirements.push(self.text(claim.predicate.span()));
+                    requirements.push(self.lower_checked_expr(
+                        &claim.predicate,
+                        &environment,
+                        None,
+                    )?);
                 }
                 PlasmidMember::Acceptance(claim) => {
                     self.require_bool(&claim.predicate, &environment, "accept")?;
-                    acceptance.push(self.text(claim.predicate.span()));
+                    acceptance.push(self.lower_checked_expr(
+                        &claim.predicate,
+                        &environment,
+                        None,
+                    )?);
                 }
                 PlasmidMember::Section(section) => {
                     return Err(SemanticError::new(
@@ -567,7 +576,44 @@ impl<'a> Checker<'a> {
         for (field, ty) in declaration.inputs.iter().zip(&signature.inputs) {
             environment.insert(field.name.value.clone(), ty.clone());
         }
-        let checked = self.check_block(&declaration.body, &environment, &signature.output)?;
+        let mut state = Vec::new();
+        let mut state_types = HashMap::new();
+        let mut body_start = 0;
+        for statement in &declaration.body {
+            let Stmt::State(declaration) = statement else {
+                break;
+            };
+            let ty = self.lower_type(&declaration.ty, &BTreeSet::new())?;
+            let initial_ty = self.infer_expr(&declaration.initial, &environment)?;
+            if !compatible(&initial_ty, &ty) {
+                return Err(SemanticError::new(
+                    declaration.initial.span(),
+                    format!("state has type {initial_ty}, but declaration requires {ty}"),
+                ));
+            }
+            if environment
+                .insert(declaration.name.value.clone(), ty.clone())
+                .is_some()
+            {
+                return Err(SemanticError::new(
+                    declaration.name.span,
+                    format!("duplicate state name '{}'", declaration.name.value),
+                ));
+            }
+            state_types.insert(declaration.name.value.clone(), ty.clone());
+            state.push(CheckedState {
+                name: declaration.name.value.clone(),
+                r#type: to_checked_type(&ty),
+                initial: self.lower_checked_expr(&declaration.initial, &environment, Some(&ty))?,
+            });
+            body_start += 1;
+        }
+        let checked = self.check_block(
+            &declaration.body[body_start..],
+            &environment,
+            &signature.output,
+            &state_types,
+        )?;
         if !checked.terminates
             && !declaration
                 .body
@@ -590,7 +636,8 @@ impl<'a> Checker<'a> {
                 .zip(&signature.inputs)
                 .map(|(field, ty)| checked_field(&field.name.value, ty))
                 .collect(),
-            output: signature.output.to_string(),
+            output: to_checked_type(&signature.output),
+            state,
             body: checked.statements,
         })
     }
@@ -600,6 +647,7 @@ impl<'a> Checker<'a> {
         statements: &[Stmt],
         starting_environment: &HashMap<String, Ty>,
         output: &Ty,
+        state_types: &HashMap<String, Ty>,
     ) -> Result<CheckedBlock, SemanticError> {
         let mut environment = starting_environment.clone();
         let mut checked = Vec::new();
@@ -612,18 +660,47 @@ impl<'a> Checker<'a> {
                 ));
             }
             match statement {
-                Stmt::Binding(binding) => {
-                    checked.push(CheckedStatement::Binding(
-                        self.check_binding(binding, &mut environment)?.0,
+                Stmt::State(state) => {
+                    return Err(SemanticError::new(
+                        state.span,
+                        "state declarations must appear before workflow statements",
                     ));
                 }
+                Stmt::Binding(binding) => {
+                    let is_state_update = state_types.contains_key(&binding.names[0].value);
+                    if environment.contains_key(&binding.names[0].value) && !is_state_update {
+                        return Err(SemanticError::new(
+                            binding.span,
+                            format!(
+                                "cannot reassign '{}'; declare durable workflow memory with 'state'",
+                                binding.names[0].value
+                            ),
+                        ));
+                    }
+                    let (binding_ir, ty) = self.check_binding(binding, &mut environment)?;
+                    if let Some(state_type) = state_types.get(&binding.names[0].value) {
+                        if !compatible(&ty, state_type) {
+                            return Err(SemanticError::new(
+                                binding.span,
+                                format!("state update expects {state_type}, found {ty}"),
+                            ));
+                        }
+                        checked.push(CheckedStatement::StateUpdate {
+                            state: binding.names[0].value.clone(),
+                            value: binding_ir.value,
+                        });
+                    } else {
+                        checked.push(CheckedStatement::Binding(binding_ir));
+                    }
+                }
                 Stmt::Effect(effect) => {
-                    let (operation, result_types) = self.check_effect(effect, &environment)?;
+                    let (action, result_types) = self.check_effect(effect, &environment)?;
                     if effect.names.len() != result_types.len() {
                         return Err(SemanticError::new(
                             effect.span,
                             format!(
-                                "operation '{operation}' returns {} value(s), but {} name(s) were provided",
+                                "operation '{}' returns {} value(s), but {} name(s) were provided",
+                                action.operation,
                                 result_types.len(),
                                 effect.names.len()
                             ),
@@ -638,11 +715,7 @@ impl<'a> Checker<'a> {
                             checked_field(&name.value, &ty)
                         })
                         .collect();
-                    checked.push(CheckedStatement::Effect {
-                        results,
-                        action: effect.action.clone(),
-                        operation,
-                    });
+                    checked.push(CheckedStatement::Effect { results, action });
                 }
                 Stmt::Return(statement) => {
                     let ty = self.infer_expr(&statement.value, &environment)?;
@@ -653,17 +726,20 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     checked.push(CheckedStatement::Return {
-                        expression: self.text(statement.value.span()),
-                        r#type: ty.to_string(),
+                        value: self.lower_checked_expr(
+                            &statement.value,
+                            &environment,
+                            Some(&ty),
+                        )?,
                     });
                     terminates = true;
                 }
                 Stmt::If(statement) => {
                     self.require_bool(&statement.condition, &environment, "if")?;
                     let then_block =
-                        self.check_block(&statement.then_body, &environment, output)?;
+                        self.check_block(&statement.then_body, &environment, output, state_types)?;
                     let else_block =
-                        self.check_block(&statement.else_body, &environment, output)?;
+                        self.check_block(&statement.else_body, &environment, output, state_types)?;
                     if !statement.else_body.is_empty()
                         && then_block.terminates
                         && else_block.terminates
@@ -671,7 +747,11 @@ impl<'a> Checker<'a> {
                         terminates = true;
                     }
                     checked.push(CheckedStatement::If {
-                        condition: self.text(statement.condition.span()),
+                        condition: self.lower_checked_expr(
+                            &statement.condition,
+                            &environment,
+                            Some(&Ty::Bool),
+                        )?,
                         body: then_block.statements,
                         else_body: else_block.statements,
                     });
@@ -699,12 +779,13 @@ impl<'a> Checker<'a> {
                         if let Some(guard) = &case.guard {
                             self.require_bool(guard, &environment, "case guard")?;
                         }
-                        let block = self.check_block(&case.body, &environment, output)?;
+                        let block =
+                            self.check_block(&case.body, &environment, output, state_types)?;
                         if !block.terminates {
                             continuing_environments.push(block.environment.clone());
                         }
                         cases.push(CheckedMatchCase {
-                            pattern: self.text(pattern_span(&case.pattern)),
+                            pattern: self.checked_pattern(&case.pattern),
                             body: block.statements,
                             terminates: block.terminates,
                         });
@@ -737,7 +818,11 @@ impl<'a> Checker<'a> {
                         );
                     }
                     checked.push(CheckedStatement::Match {
-                        expression: self.text(statement.value.span()),
+                        value: self.lower_checked_expr(
+                            &statement.value,
+                            &environment,
+                            Some(&matched_type),
+                        )?,
                         cases,
                     });
                 }
@@ -754,10 +839,15 @@ impl<'a> Checker<'a> {
                     };
                     let mut loop_environment = environment.clone();
                     loop_environment.insert(statement.binding.value.clone(), element.clone());
-                    let body = self.check_block(&statement.body, &loop_environment, output)?;
+                    let body =
+                        self.check_block(&statement.body, &loop_environment, output, state_types)?;
                     checked.push(CheckedStatement::For {
                         binding: checked_field(&statement.binding.value, &element),
-                        iterable: self.text(statement.iterable.span()),
+                        iterable: self.lower_checked_expr(
+                            &statement.iterable,
+                            &environment,
+                            None,
+                        )?,
                         body: body.statements,
                     });
                 }
@@ -766,24 +856,29 @@ impl<'a> Checker<'a> {
                         Trigger::Every(expression) => {
                             self.require_duration(expression, &environment)?;
                             CheckedTrigger::Every {
-                                duration: self.text(expression.span()),
+                                duration: self.lower_checked_expr(
+                                    expression,
+                                    &environment,
+                                    None,
+                                )?,
                             }
                         }
                         Trigger::After(expression) => {
                             self.require_duration(expression, &environment)?;
                             CheckedTrigger::After {
-                                duration: self.text(expression.span()),
+                                duration: self.lower_checked_expr(
+                                    expression,
+                                    &environment,
+                                    None,
+                                )?,
                             }
                         }
-                        Trigger::Event(expression) => {
-                            let ty = self.infer_expr(expression, &environment)?;
-                            CheckedTrigger::Event {
-                                expression: self.text(expression.span()),
-                                r#type: ty.to_string(),
-                            }
-                        }
+                        Trigger::Event(expression) => CheckedTrigger::Event {
+                            expression: self.lower_checked_expr(expression, &environment, None)?,
+                        },
                     };
-                    let body = self.check_block(&statement.body, &environment, output)?;
+                    let body =
+                        self.check_block(&statement.body, &environment, output, state_types)?;
                     checked.push(CheckedStatement::When {
                         trigger,
                         body: body.statements,
@@ -800,8 +895,11 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     checked.push(CheckedStatement::Emit {
-                        expression: self.text(statement.event.span()),
-                        r#type: ty.to_string(),
+                        event: self.lower_checked_expr(
+                            &statement.event,
+                            &environment,
+                            Some(&ty),
+                        )?,
                     });
                 }
             }
@@ -845,13 +943,12 @@ impl<'a> Checker<'a> {
         environment.insert(binding.names[0].value.clone(), ty.clone());
         Ok((
             CheckedBinding {
-                names: binding
+                targets: binding
                     .names
                     .iter()
-                    .map(|name| name.value.clone())
+                    .map(|name| checked_field(&name.value, &ty))
                     .collect(),
-                inferred_types: vec![ty.to_string()],
-                expression: self.text(binding.value.span()),
+                value: self.lower_checked_expr(&binding.value, environment, Some(&ty))?,
             },
             ty,
         ))
@@ -861,12 +958,21 @@ impl<'a> Checker<'a> {
         &self,
         effect: &EffectStmt,
         environment: &HashMap<String, Ty>,
-    ) -> Result<(String, Vec<Ty>), SemanticError> {
+    ) -> Result<(ResolvedAction, Vec<Ty>), SemanticError> {
         let words = effect.action.split_whitespace().collect::<Vec<_>>();
         let operation = words
             .first()
             .copied()
             .ok_or_else(|| SemanticError::new(effect.span, "empty effect action"))?;
+        if let Some(contract) = standard_action_contract(operation) {
+            if !self.imports.contains("std.lab.plasmid_actions") {
+                return Err(SemanticError::new(
+                    effect.span,
+                    "durable plasmid actions require 'use std.lab.plasmid_actions'",
+                ));
+            }
+            return self.check_standard_action_contract(effect, &words, environment, contract);
+        }
         if !self.workflows.contains_key(operation)
             && !self.imports.contains("std.lab.plasmid_actions")
         {
@@ -1100,12 +1206,180 @@ impl<'a> Checker<'a> {
                 ));
             }
         };
-        let resolved_operation = if self.workflows.contains_key(operation) {
-            format!("workflow.{operation}")
-        } else {
-            format!("std.lab.plasmid_actions.{operation}")
-        };
-        Ok((resolved_operation, results))
+        let signature = self.workflows.get(operation).ok_or_else(|| {
+            SemanticError::new(
+                effect.span,
+                format!("unknown durable operation '{operation}'"),
+            )
+        })?;
+        let arguments = words[1..]
+            .iter()
+            .zip(&signature.inputs)
+            .enumerate()
+            .map(|(index, (word, ty))| {
+                Ok(CheckedActionArgument {
+                    name: format!("input_{index}"),
+                    mode: if is_material_type(ty) {
+                        OwnershipMode::Take
+                    } else {
+                        OwnershipMode::Copy
+                    },
+                    value: action_reference(word, ty),
+                })
+            })
+            .collect::<Result<Vec<_>, SemanticError>>()?;
+        Ok((
+            ResolvedAction {
+                operation: format!("workflow.{operation}"),
+                capability: None,
+                arguments,
+                results: vec![checked_field("outcome", &signature.output)],
+            },
+            results,
+        ))
+    }
+
+    fn check_standard_action_contract(
+        &self,
+        effect: &EffectStmt,
+        words: &[&str],
+        environment: &HashMap<String, Ty>,
+        contract: ActionContractSpec,
+    ) -> Result<(ResolvedAction, Vec<Ty>), SemanticError> {
+        let mut cursor = 0;
+        let mut operands = HashMap::new();
+        let mut arguments = Vec::new();
+        for part in &contract.phrase {
+            match part {
+                PhrasePart::Word(expected) => {
+                    if words.get(cursor) != Some(expected) {
+                        return Err(SemanticError::new(
+                            effect.span,
+                            format!("malformed '{}' action phrase", contract.operation),
+                        ));
+                    }
+                    cursor += 1;
+                }
+                PhrasePart::Operand { name, r#type, mode } => {
+                    let word = words.get(cursor).ok_or_else(|| {
+                        SemanticError::new(
+                            effect.span,
+                            format!(
+                                "action '{}' is missing operand '{name}'",
+                                contract.operation
+                            ),
+                        )
+                    })?;
+                    let actual = self.resolve_action_operand(word, environment, effect.span)?;
+                    let expected = resolve_contract_type(r#type, &operands, effect.span)?;
+                    require_action_type(actual.clone(), expected, effect.span, contract.operation)?;
+                    operands.insert((*name).to_owned(), actual.clone());
+                    arguments.push(CheckedActionArgument {
+                        name: (*name).to_owned(),
+                        mode: *mode,
+                        value: action_reference(word, &actual),
+                    });
+                    cursor += 1;
+                }
+                PhrasePart::Integer { name, signed } => {
+                    let word = words.get(cursor).ok_or_else(|| {
+                        SemanticError::new(
+                            effect.span,
+                            format!(
+                                "action '{}' is missing integer '{name}'",
+                                contract.operation
+                            ),
+                        )
+                    })?;
+                    let value = checked_integer_literal(word, *signed, effect.span)?;
+                    arguments.push(CheckedActionArgument {
+                        name: (*name).to_owned(),
+                        mode: OwnershipMode::Copy,
+                        value,
+                    });
+                    cursor += 1;
+                }
+                PhrasePart::Quantity {
+                    name,
+                    signed,
+                    units,
+                } => {
+                    let magnitude = words.get(cursor).ok_or_else(|| {
+                        SemanticError::new(
+                            effect.span,
+                            format!(
+                                "action '{}' is missing quantity '{name}'",
+                                contract.operation
+                            ),
+                        )
+                    })?;
+                    checked_integer_literal(magnitude, *signed, effect.span)?;
+                    let unit = words.get(cursor + 1).ok_or_else(|| {
+                        SemanticError::new(
+                            effect.span,
+                            format!(
+                                "action '{}' is missing a unit for '{name}'",
+                                contract.operation
+                            ),
+                        )
+                    })?;
+                    if !units.contains(unit) {
+                        return Err(SemanticError::new(
+                            effect.span,
+                            format!(
+                                "action '{}' expects unit {units:?} for '{name}', found '{unit}'",
+                                contract.operation
+                            ),
+                        ));
+                    }
+                    arguments.push(CheckedActionArgument {
+                        name: (*name).to_owned(),
+                        mode: OwnershipMode::Copy,
+                        value: TypedExpression {
+                            r#type: CheckedType::Quantity {
+                                unit: (*unit).to_owned(),
+                            },
+                            value: CheckedExpression::Quantity {
+                                magnitude: (*magnitude).to_owned(),
+                                unit: (*unit).to_owned(),
+                            },
+                        },
+                    });
+                    cursor += 2;
+                }
+            }
+        }
+        if cursor != words.len() {
+            return Err(SemanticError::new(
+                effect.span,
+                format!("malformed '{}' action phrase", contract.operation),
+            ));
+        }
+        let result_contracts = contract
+            .results
+            .iter()
+            .map(|result| {
+                let ty = resolve_contract_type(&result.r#type, &operands, effect.span)?;
+                Ok((checked_field(result.name, &ty), ty))
+            })
+            .collect::<Result<Vec<_>, SemanticError>>()?;
+        let results = result_contracts
+            .iter()
+            .map(|(_, ty)| ty.clone())
+            .collect::<Vec<_>>();
+        let checked_results = result_contracts
+            .into_iter()
+            .map(|(field, _)| field)
+            .collect::<Vec<_>>();
+        Ok((
+            ResolvedAction {
+                operation: contract.operation.to_owned(),
+                capability: Some(contract.capability.to_owned()),
+                arguments,
+                results: checked_results,
+            },
+            results,
+        ))
     }
 
     fn resolve_action_operand(
@@ -1124,6 +1398,129 @@ impl<'a> Checker<'a> {
             ty = self.field_type(&ty, field, span)?;
         }
         Ok(ty)
+    }
+
+    fn lower_checked_expr(
+        &self,
+        expression: &Expr,
+        environment: &HashMap<String, Ty>,
+        expected: Option<&Ty>,
+    ) -> Result<TypedExpression, SemanticError> {
+        let inferred = self.infer_expr(expression, environment)?;
+        let ty = expected.unwrap_or(&inferred);
+        let value = match expression {
+            Expr::Path(path) => CheckedExpression::Reference {
+                path: path
+                    .segments
+                    .iter()
+                    .map(|segment| segment.value.clone())
+                    .collect(),
+            },
+            Expr::Integer { value, .. } => CheckedExpression::Integer { value: *value },
+            Expr::Decimal { text, .. } => CheckedExpression::Decimal { text: text.clone() },
+            Expr::String { value, .. } => CheckedExpression::String {
+                value: value.clone(),
+            },
+            Expr::Quantity {
+                magnitude, unit, ..
+            } => CheckedExpression::Quantity {
+                magnitude: numeric_text(magnitude)?,
+                unit: unit.clone(),
+            },
+            Expr::List { elements, .. } => CheckedExpression::List {
+                elements: elements
+                    .iter()
+                    .map(|element| self.lower_checked_expr(element, environment, None))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            Expr::Call {
+                callee, arguments, ..
+            } => {
+                let Expr::Path(path) = callee.as_ref() else {
+                    return Err(SemanticError::new(
+                        callee.span(),
+                        "checked call target is not a resolved path",
+                    ));
+                };
+                let name = path_text(path);
+                let operation = if self.circuits.contains_key(&name) {
+                    format!("circuit.{name}")
+                } else {
+                    match name.as_str() {
+                        "dna" => "std.bio.dna".to_owned(),
+                        "detect_colonies" => "std.lab.imaging.detect_colonies".to_owned(),
+                        "sites" => "std.bio.sequence.sites".to_owned(),
+                        "design.accepts" => "Plasmid.accepts".to_owned(),
+                        _ => name,
+                    }
+                };
+                CheckedExpression::Call {
+                    operation,
+                    arguments: arguments
+                        .iter()
+                        .map(|argument| {
+                            Ok(CheckedArgument {
+                                name: argument.name.as_ref().map(|name| name.value.clone()),
+                                value: self.lower_checked_expr(
+                                    &argument.value,
+                                    environment,
+                                    None,
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, SemanticError>>()?,
+                }
+            }
+            Expr::Record {
+                constructor,
+                fields,
+                ..
+            } => {
+                let name = path_text(constructor);
+                let constructor = if let Some(parent) = self.cases.get(&name) {
+                    format!("outcome.{parent}.{name}")
+                } else if self.data.contains_key(&name) {
+                    format!("data.{name}")
+                } else {
+                    format!("std.outcome.{name}")
+                };
+                CheckedExpression::Construct {
+                    constructor,
+                    fields: fields
+                        .iter()
+                        .map(|field| {
+                            Ok(CheckedFieldValue {
+                                name: field.name.value.clone(),
+                                value: self.lower_checked_expr(&field.value, environment, None)?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, SemanticError>>()?,
+                }
+            }
+            Expr::Field { subject, field, .. } => CheckedExpression::Field {
+                subject: Box::new(self.lower_checked_expr(subject, environment, None)?),
+                field: field.value.clone(),
+            },
+            Expr::Unary { op, operand, .. } => CheckedExpression::Unary {
+                operator: match op {
+                    UnaryOp::Negate => "negate",
+                    UnaryOp::Not => "not",
+                }
+                .to_owned(),
+                operand: Box::new(self.lower_checked_expr(operand, environment, None)?),
+            },
+            Expr::Binary {
+                op, left, right, ..
+            } => CheckedExpression::Binary {
+                operator: binary_operator_name(*op).to_owned(),
+                left: Box::new(self.lower_checked_expr(left, environment, None)?),
+                right: Box::new(self.lower_checked_expr(right, environment, None)?),
+            },
+        };
+        Ok(TypedExpression {
+            r#type: to_checked_type(ty),
+            value,
+        })
     }
 
     fn infer_expr(
@@ -1486,7 +1883,7 @@ impl<'a> Checker<'a> {
             (Ty::Named(name, _), "count") if name == "Colonies" => Some(Ty::Integer),
             (Ty::Named(name, _), "clones") if name == "Screening" => Some(Ty::named("CloneSet")),
             (Ty::Named(name, _), "highest_confidence") if name == "CloneSet" => {
-                Some(Ty::named("Clone"))
+                Some(Ty::material(Ty::named("Clone")))
             }
             (Ty::Named(name, _), "elapsed") if name == "WorkflowContext" => {
                 Some(Ty::named("Duration"))
@@ -1514,6 +1911,31 @@ impl<'a> Checker<'a> {
             ));
         }
         Ok(())
+    }
+
+    fn checked_pattern(&self, pattern: &Pattern) -> CheckedPattern {
+        match pattern {
+            Pattern::Name(name) => CheckedPattern::Binding {
+                name: name.value.clone(),
+            },
+            Pattern::Constructor { path, fields, .. } => {
+                let name = path_text(path);
+                let constructor = self
+                    .cases
+                    .get(&name)
+                    .map_or_else(|| name.clone(), |parent| format!("outcome.{parent}.{name}"));
+                CheckedPattern::Constructor {
+                    constructor,
+                    fields: fields
+                        .iter()
+                        .map(|field| CheckedPatternField {
+                            field: field.field.value.clone(),
+                            binding: field.binding.value.clone(),
+                        })
+                        .collect(),
+                }
+            }
+        }
     }
 
     fn require_bool(
@@ -1598,10 +2020,6 @@ impl<'a> Checker<'a> {
             )),
         }
     }
-
-    fn text(&self, span: Span) -> String {
-        self.source[span.start..span.end].trim().to_owned()
-    }
 }
 
 struct CheckedBlock {
@@ -1614,11 +2032,109 @@ fn named(name: impl Into<String>, arguments: Vec<Ty>) -> Ty {
     Ty::Named(name.into(), arguments)
 }
 
+fn to_checked_type(ty: &Ty) -> CheckedType {
+    match ty {
+        Ty::Named(name, arguments) => CheckedType::Named {
+            name: name.clone(),
+            arguments: arguments.iter().map(to_checked_type).collect(),
+        },
+        Ty::Union(alternatives) => CheckedType::Union {
+            alternatives: alternatives.iter().map(to_checked_type).collect(),
+        },
+        Ty::List(element) => CheckedType::List {
+            element: Box::new(to_checked_type(element)),
+        },
+        Ty::Quantity(unit) => CheckedType::Quantity { unit: unit.clone() },
+        Ty::Integer => CheckedType::Integer,
+        Ty::Decimal => CheckedType::Decimal,
+        Ty::String => CheckedType::String,
+        Ty::Bool => CheckedType::Bool,
+        Ty::None => CheckedType::None,
+        Ty::EmptyList => CheckedType::List {
+            element: Box::new(CheckedType::Named {
+                name: "_".to_owned(),
+                arguments: Vec::new(),
+            }),
+        },
+    }
+}
+
 fn checked_field(name: &str, ty: &Ty) -> CheckedField {
     CheckedField {
         name: name.to_owned(),
-        r#type: ty.to_string(),
+        r#type: to_checked_type(ty),
     }
+}
+
+fn resolve_contract_type(
+    r#type: &ContractType,
+    operands: &HashMap<String, Ty>,
+    span: Span,
+) -> Result<Ty, SemanticError> {
+    match r#type {
+        ContractType::Concrete(ty) => Ok(ty.clone()),
+        ContractType::SameAs(name) => operands.get(*name).cloned().ok_or_else(|| {
+            SemanticError::new(
+                span,
+                format!("action contract references unknown operand '{name}'"),
+            )
+        }),
+    }
+}
+
+fn action_reference(path: &str, ty: &Ty) -> TypedExpression {
+    TypedExpression {
+        r#type: to_checked_type(ty),
+        value: CheckedExpression::Reference {
+            path: path.split('.').map(str::to_owned).collect(),
+        },
+    }
+}
+
+fn checked_integer_literal(
+    text: &str,
+    signed: bool,
+    span: Span,
+) -> Result<TypedExpression, SemanticError> {
+    if signed {
+        let value = text.parse::<i64>().map_err(|_| {
+            SemanticError::new(span, format!("expected an integer, found '{text}'"))
+        })?;
+        if value < 0 {
+            return Ok(TypedExpression {
+                r#type: CheckedType::Integer,
+                value: CheckedExpression::Unary {
+                    operator: "negate".to_owned(),
+                    operand: Box::new(TypedExpression {
+                        r#type: CheckedType::Integer,
+                        value: CheckedExpression::Integer {
+                            value: value.unsigned_abs(),
+                        },
+                    }),
+                },
+            });
+        }
+        return Ok(TypedExpression {
+            r#type: CheckedType::Integer,
+            value: CheckedExpression::Integer {
+                value: value as u64,
+            },
+        });
+    }
+    let value = text.parse::<u64>().map_err(|_| {
+        SemanticError::new(
+            span,
+            format!("expected a non-negative integer, found '{text}'"),
+        )
+    })?;
+    Ok(TypedExpression {
+        r#type: CheckedType::Integer,
+        value: CheckedExpression::Integer { value },
+    })
+}
+
+fn is_material_type(ty: &Ty) -> bool {
+    matches!(ty, Ty::Named(name, _) if name == "Material")
 }
 
 fn path_text(path: &Path) -> String {
@@ -1629,10 +2145,37 @@ fn path_text(path: &Path) -> String {
         .join(".")
 }
 
-fn pattern_span(pattern: &Pattern) -> Span {
-    match pattern {
-        Pattern::Name(name) => name.span,
-        Pattern::Constructor { span, .. } => *span,
+fn numeric_text(expression: &Expr) -> Result<String, SemanticError> {
+    match expression {
+        Expr::Integer { value, .. } => Ok(value.to_string()),
+        Expr::Decimal { text, .. } => Ok(text.clone()),
+        Expr::Unary {
+            op: UnaryOp::Negate,
+            operand,
+            ..
+        } => Ok(format!("-{}", numeric_text(operand)?)),
+        _ => Err(SemanticError::new(
+            expression.span(),
+            "quantity magnitude must be numeric",
+        )),
+    }
+}
+
+fn binary_operator_name(operator: BinaryOp) -> &'static str {
+    match operator {
+        BinaryOp::Or => "or",
+        BinaryOp::And => "and",
+        BinaryOp::Equal => "equal",
+        BinaryOp::NotEqual => "not_equal",
+        BinaryOp::Less => "less",
+        BinaryOp::LessEqual => "less_equal",
+        BinaryOp::Greater => "greater",
+        BinaryOp::GreaterEqual => "greater_equal",
+        BinaryOp::Range => "range",
+        BinaryOp::Add => "add",
+        BinaryOp::Subtract => "subtract",
+        BinaryOp::Multiply => "multiply",
+        BinaryOp::Divide => "divide",
     }
 }
 
@@ -1899,7 +2442,92 @@ workflow invalid:
         assert!(
             error
                 .to_string()
-                .contains("operation 'quantify' expects Material<Plasmid>, found Image")
+                .contains("expects Material<Plasmid>, found Image")
+        );
+    }
+
+    #[test]
+    fn lowers_action_capability_ownership_and_result_contract() {
+        let module = compile_module(
+            r#"use std.lab.plasmid_actions
+
+workflow preserve:
+  input plasmid: Material<Plasmid>
+  output Material<Plasmid>
+  plasmid <- store plasmid at -20 C
+  return plasmid
+"#,
+        )
+        .unwrap();
+
+        let CheckedDeclaration::Workflow { body, .. } = &module.declarations[0] else {
+            panic!("expected workflow")
+        };
+        let CheckedStatement::Effect { action, .. } = &body[0] else {
+            panic!("expected effect")
+        };
+        assert_eq!(action.operation, "std.lab.plasmid_actions.store");
+        assert_eq!(action.capability.as_deref(), Some("cold_storage"));
+        assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
+        assert_eq!(action.results[0].name, "material");
+        assert_eq!(action.results[0].r#type.display_name(), "Material<Plasmid>");
+    }
+
+    #[test]
+    fn lowers_explicit_state_and_state_updates() {
+        let module = compile_module(
+            r#"workflow counter:
+  output Integer
+  state count: Integer = 0
+  count = count + 1
+  return count
+"#,
+        )
+        .unwrap();
+
+        let CheckedDeclaration::Workflow { state, body, .. } = &module.declarations[0] else {
+            panic!("expected workflow")
+        };
+        assert_eq!(state.len(), 1);
+        assert_eq!(state[0].name, "count");
+        assert!(matches!(
+            &body[0],
+            CheckedStatement::StateUpdate { state, .. } if state == "count"
+        ));
+    }
+
+    #[test]
+    fn rejects_reassigning_an_ordinary_binding() {
+        let error = compile_module(
+            r#"workflow invalid:
+  output Integer
+  count = 0
+  count = count + 1
+  return count
+"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot reassign 'count'"));
+        assert!(error.to_string().contains("with 'state'"));
+    }
+
+    #[test]
+    fn rejects_state_after_executable_statements() {
+        let error = compile_module(
+            r#"workflow invalid:
+  output Integer
+  count = 0
+  state remembered: Integer = count
+  return remembered
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("state declarations must appear before workflow statements")
         );
     }
 }

@@ -20,13 +20,16 @@ not imply target selection or physical execution.
 | Tagged `outcome` declarations and constructors | yes | yes | yes | yes | no |
 | Workflow declarations and calls | yes | yes | yes | yes | no |
 | Pure workflow bindings | yes | yes | yes | yes | no |
+| Explicit durable workflow `state` | yes | yes | yes | yes | no |
 | Built-in durable operations with `<-` | yes | yes | yes | yes | no |
+| Structured typed expression IR | n/a | yes | yes | yes | no |
+| Action capability and ownership contracts | n/a | built-ins | built-ins | yes | no |
 | `return` and output checking | yes | yes | yes | yes | no |
 | `match` / `case` with continuing-branch bindings | yes | yes | yes | yes | no |
 | `if` / `else` and `for` / `in` | yes | yes | yes | yes | no |
 | `when every` / `when after` | yes | yes | yes | yes | no |
 | Event emission | yes | yes | yes | yes | no |
-| Affine material-flow checking in portable workflows | n/a | n/a | material kinds only | no | no |
+| Affine material-flow checking in portable workflows | n/a | ownership modes | material kinds only | no | no |
 | Durable workflow runtime | no | no | no | no | no |
 
 The older executable artifact pipeline deliberately requires one directly

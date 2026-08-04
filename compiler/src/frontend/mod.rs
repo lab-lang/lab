@@ -1,5 +1,6 @@
 //! Lab Lang source frontend for the compiler.
 
+mod action_contracts;
 pub mod ast;
 mod checked;
 mod checker;
@@ -13,8 +14,10 @@ mod specification;
 mod token;
 
 pub use checked::{
-    CheckedBinding, CheckedCase, CheckedDeclaration, CheckedField, CheckedMatchCase, CheckedModule,
-    CheckedSection, CheckedStatement, CheckedTrigger, ResolvedImport,
+    CheckedActionArgument, CheckedArgument, CheckedBinding, CheckedCase, CheckedDeclaration,
+    CheckedExpression, CheckedField, CheckedFieldValue, CheckedMatchCase, CheckedModule,
+    CheckedPattern, CheckedPatternField, CheckedSection, CheckedState, CheckedStatement,
+    CheckedTrigger, CheckedType, OwnershipMode, ResolvedAction, ResolvedImport, TypedExpression,
 };
 pub use error::ParseError;
 pub use parser::parse_module;
@@ -37,5 +40,5 @@ pub fn parse(source: &str) -> Result<ArtifactSpec, ParseError> {
 /// backend-neutral frontend IR.
 pub fn compile_module(source: &str) -> Result<CheckedModule, ModuleError> {
     let module = parse_module(source)?;
-    Ok(checker::check_module(source, &module)?)
+    Ok(checker::check_module(&module)?)
 }

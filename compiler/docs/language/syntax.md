@@ -20,7 +20,7 @@ The kernel keeps orchestration mechanics distinct from domain operations:
 | Modules | `use` |
 | Biological declarations | `part`, `circuit`, `plasmid` |
 | Laboratory data declarations | `record`, `material`, `observation`, `evidence`, `event`, `outcome` |
-| Orchestration declaration | `workflow` |
+| Orchestration declarations | `workflow`, `state` |
 | Signatures and contracts | `input`, `output`, `require`, `accept` |
 | Control | `if`, `else`, `for`, `in`, `match`, `case`, `return` |
 | Reactive control | `when`, `every`, `after`, `emit` |
@@ -48,13 +48,15 @@ The core punctuation has one job each:
 
 ```lab
 expected = design.sequence
+state observations: List<PlateObservation> = []
 observed <- sequence aliquot
 <- dispose aliquot
 ```
 
-`=` performs deterministic language evaluation. `<-` performs a durable effect
-and binds its recorded result. A bare `<-` performs an effect whose result is
-not retained.
+An ordinary `=` binding is immutable. `state` declares durable workflow memory,
+and a later `=` to that name is a checked state transition. `<-` performs a
+durable effect and binds its recorded result. A bare `<-` performs an effect
+whose result is not retained.
 
 ## Laboratory declarations
 
@@ -68,6 +70,7 @@ evidence     information evaluated against a claim
 event        durable orchestration occurrence
 outcome      tagged workflow result
 workflow     durable orchestration definition
+state        durable mutable memory owned by one workflow instance
 ```
 
 The declaration words are meaningful only if the compiler assigns different

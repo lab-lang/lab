@@ -226,6 +226,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        if self.check_word("state") {
+            return self.parse_state().map(Stmt::State);
+        }
         if self.check_word("return") {
             return self.parse_return().map(Stmt::Return);
         }
@@ -248,6 +251,22 @@ impl<'a> Parser<'a> {
             return self.parse_effect().map(Stmt::Effect);
         }
         self.parse_binding().map(Stmt::Binding)
+    }
+
+    fn parse_state(&mut self) -> Result<StateStmt, ParseError> {
+        let start = self.expect_word("state")?.span;
+        let name = self.take_identifier("a state name")?;
+        self.expect(TokenKind::Colon)?;
+        let ty = self.parse_type()?;
+        self.expect(TokenKind::Equal)?;
+        let initial = self.parse_expr()?;
+        let end = self.expect_line_end()?;
+        Ok(StateStmt {
+            name,
+            ty,
+            initial,
+            span: start.join(end),
+        })
     }
 
     fn parse_binding(&mut self) -> Result<BindingStmt, ParseError> {
@@ -952,7 +971,7 @@ outcome ColonyGrowth:
 workflow await_colonies:
   input plate: Material<Plate>
   output ColonyGrowth
-  observations: List<PlateObservation> = []
+  state observations: List<PlateObservation> = []
 
   when every 30 min:
     image <- capture image of plate
@@ -973,6 +992,7 @@ workflow await_colonies:
             panic!("expected workflow")
         };
         assert_eq!(workflow.body.len(), 3);
+        assert!(matches!(workflow.body[0], Stmt::State(_)));
         assert!(matches!(workflow.body[1], Stmt::When(_)));
         assert!(matches!(workflow.body[2], Stmt::When(_)));
 

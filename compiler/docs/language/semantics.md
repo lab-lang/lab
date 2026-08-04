@@ -25,6 +25,13 @@ Workflow replay must not repeat completed physical actions. Time, randomness,
 inventory queries, device interaction, network access, and human decisions are
 effects rather than ambient language operations.
 
+Every resolved action contract names the capability required to dispatch it,
+the type of each operand and result, and how each operand participates in
+physical ownership. `copy` is for freely reusable information, `borrow` permits
+observation without consuming a material, and `take` transfers a material into
+the action. These modes are inputs to the material-flow checker; recording them
+in module IR does not by itself prove affine use.
+
 ## Acceptance
 
 The compiler may establish that a workflow can produce the kinds of evidence
@@ -40,6 +47,10 @@ Only the third judgment produces an accepted physical material.
 ## Reactive execution
 
 A workflow is a deterministic durable state machine over recorded events.
+Durable mutable memory must be declared explicitly with `state`. Ordinary
+bindings are immutable, so assigning to an existing non-state name is an error.
+State initializers and transitions are deterministic typed expressions; a
+runtime must journal their committed values together with the event transition.
 Handlers for one workflow instance are processed atomically and in journal
 order. Returning an outcome terminates the workflow and closes its remaining
 logical subscriptions; it does not implicitly cancel physical actions already

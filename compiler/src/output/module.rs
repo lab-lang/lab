@@ -37,7 +37,15 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
                 name, output: ty, ..
             } => output.push_str(&format!("  - workflow {name} -> {ty}\n")),
             CheckedDeclaration::Binding(binding) => {
-                output.push_str(&format!("  - binding {}\n", binding.names.join(", ")));
+                output.push_str(&format!(
+                    "  - binding {}\n",
+                    binding
+                        .targets
+                        .iter()
+                        .map(|target| target.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
             }
         }
     }
