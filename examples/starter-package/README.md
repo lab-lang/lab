@@ -1,6 +1,6 @@
 # Starter Lab package
 
-From this directory:
+First [install the `lab` CLI](../../crates/lab-cli/README.md). Then, from this directory:
 
 ```sh
 lab check

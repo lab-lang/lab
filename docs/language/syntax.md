@@ -2,12 +2,9 @@
 
 ## Layout
 
-Lab uses newlines and indentation for statement blocks. A colon introduces an
-indented block. Tabs are not accepted for indentation.
+Lab uses newlines and indentation for statement blocks. A colon introduces an indented block. Tabs are not accepted for indentation.
 
-Braces construct or destructure data; they never delimit control-flow blocks.
-Parentheses call pure functions and group expressions. Brackets construct
-collections. Angle brackets delimit type arguments.
+Braces construct or destructure data; they never delimit control-flow blocks. Parentheses call pure functions and group expressions. Brackets construct collections. Angle brackets delimit type arguments.
 
 Line comments begin with `#`.
 
@@ -26,9 +23,7 @@ The kernel keeps orchestration mechanics distinct from domain operations:
 | Reactive control | `when`, `every`, `after`, `emit` |
 | Boolean operators | `and`, `or`, `not` |
 
-Most of these are contextual: for example, `input` has declaration meaning in
-a circuit or workflow body. Laboratory verbs such as `synthesize`, `assemble`,
-`sequence`, `store`, and `dispose` are library operations, not keywords.
+Most of these are contextual: for example, `input` has declaration meaning in a circuit or workflow body. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
 
 The core punctuation has one job each:
 
@@ -53,10 +48,7 @@ observed <- sequence aliquot
 <- dispose aliquot
 ```
 
-An ordinary `=` binding is immutable. `state` declares durable workflow memory,
-and a later `=` to that name is a checked state transition. `<-` performs a
-durable effect and binds its recorded result. A bare `<-` performs an effect
-whose result is not retained.
+An ordinary `=` binding is immutable. `state` declares durable workflow memory, and a later `=` to that name is a checked state transition. `<-` performs a durable effect and binds its recorded result. A bare `<-` performs an effect whose result is not retained.
 
 ## Laboratory declarations
 
@@ -73,8 +65,7 @@ workflow     durable orchestration definition
 state        durable mutable memory owned by one workflow instance
 ```
 
-The declaration words are meaningful only if the compiler assigns different
-laws to their values.
+The declaration words are meaningful only if the compiler assigns different laws to their values.
 
 ## Plasmid requirements and acceptance
 
@@ -89,8 +80,7 @@ plasmid p_sensor:
   accept volume >= 20 uL
 ```
 
-`require` is checked before physical construction. `accept` describes a runtime
-claim that must be supported by evidence.
+`require` is checked before physical construction. `accept` describes a runtime claim that must be supported by evidence.
 
 ## Data construction
 
@@ -102,8 +92,7 @@ return Rejected{
 }
 ```
 
-Record fields use `name: value`; multiline constructors conventionally retain a
-trailing comma.
+Record fields use `name: value`; multiline constructors conventionally retain a trailing comma.
 
 ## Reactive clauses
 
@@ -118,5 +107,4 @@ when after 18 h:
   }
 ```
 
-`when` introduces an event pattern. `every` is a periodic timer pattern and
-`after` is a one-shot timer pattern.
+`when` introduces an event pattern. `every` is a periodic timer pattern and `after` is a one-shot timer pattern.

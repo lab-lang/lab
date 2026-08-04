@@ -10,14 +10,9 @@ use std.lab.plasmid_actions
 use my_lab.policies.plasmid_acceptance
 ```
 
-The provisional rule is that a whole-module import makes that module's public
-names available in the importing module. Ambiguous names must be diagnosed;
-import order must not decide which declaration wins. Selective imports, aliases,
-visibility, and version resolution remain open decisions.
+The provisional rule is that a whole-module import makes that module's public names available in the importing module. Ambiguous names must be diagnosed; import order must not decide which declaration wins. Selective imports, aliases, visibility, and version resolution remain open decisions.
 
-`std` is the language-owned standard library namespace. Biological catalogs,
-laboratory integrations, and organization-specific policies should normally be
-separate versioned packages rather than silently entering `std`.
+`std` is the language-owned standard library namespace. Biological catalogs, laboratory integrations, and organization-specific policies should normally be separate versioned packages rather than silently entering `std`.
 
 ## Project layout
 
@@ -46,13 +41,10 @@ tests/
 - `designs` holds reusable biological intent.
 - `policies` holds site- or project-specific scientific acceptance decisions.
 - `workflows` holds reusable durable orchestration.
-- `programs` wires designs, policies, parameters, and workflows into runnable
-  entry points.
-- `.lab/runs` is generated runtime state and provenance, never hand-authored
-  source.
+- `programs` wires designs, policies, parameters, and workflows into runnable entry points.
+- `.lab/runs` is generated runtime state and provenance, never hand-authored source.
 
-These names are conventions rather than keywords. The module system should not
-give a directory magical semantics merely because it is called `workflows`.
+These names are conventions rather than keywords. The module system should not give a directory magical semantics merely because it is called `workflows`.
 
 ## Initial package manifest
 
@@ -72,12 +64,6 @@ parts = "1.2"
 local-policies = { path = "../policies" }
 ```
 
-Source modules are discovered recursively beneath `src`. Their names are the
-normalized package name followed by their relative path, so
-`src/workflows/build-plasmid.lab` becomes
-`tet_reporter.workflows.build_plasmid`.
+Source modules are discovered recursively beneath `src`. Their names are the normalized package name followed by their relative path, so `src/workflows/build-plasmid.lab` becomes `tet_reporter.workflows.build_plasmid`.
 
-The manifest parser models version, path, and registry dependencies, but the
-initial CLI rejects a package with dependencies rather than silently ignoring
-them. Dependency graph resolution, integrity, lockfiles, caches, and importing
-their public symbols must land as one coherent package-resolution milestone.
+The manifest parser models version, path, and registry dependencies, but the initial CLI rejects a package with dependencies rather than silently ignoring them. Dependency graph resolution, integrity, lockfiles, caches, and importing their public symbols must land as one coherent package-resolution milestone.

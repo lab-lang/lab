@@ -1,8 +1,6 @@
 # Language support
 
-Support is tracked by compiler phase. `Lower` means verified portable module IR
-unless the row explicitly names the older executable artifact pipeline. It does
-not imply target selection or physical execution.
+Support is tracked by compiler phase. `Lower` means verified portable module IR unless the row explicitly names the older executable artifact pipeline. It does not imply target selection or physical execution.
 
 | Feature | Parse | Resolve | Type | Lower | Execute |
 | --- | --- | --- | --- | --- | --- |
@@ -34,10 +32,7 @@ not imply target selection or physical execution.
 | Affine material-flow checking in portable workflows | n/a | action ownership modes | yes | yes | no |
 | Durable workflow runtime | no | no | no | no | no |
 
-The older executable artifact pipeline deliberately requires one directly
-specified plasmid. Complete modules use the separate portable-module boundary;
-requesting artifact-specific target IR, plans, or simulation for them still
-reports an explicit unsupported-feature diagnostic.
+The older executable artifact pipeline deliberately requires one directly specified plasmid. Complete modules use the separate portable-module boundary; requesting artifact-specific target IR, plans, or simulation for them still reports an explicit unsupported-feature diagnostic.
 
 ## Editor support
 
