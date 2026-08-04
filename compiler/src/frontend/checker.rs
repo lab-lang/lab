@@ -1219,7 +1219,7 @@ impl Checker {
             .map(|(index, (word, ty))| {
                 Ok(CheckedActionArgument {
                     name: format!("input_{index}"),
-                    mode: if is_material_type(ty) {
+                    mode: if self.type_contains_material(ty, &mut BTreeSet::new()) {
                         OwnershipMode::Take
                     } else {
                         OwnershipMode::Copy
@@ -1271,8 +1271,26 @@ impl Checker {
                         )
                     })?;
                     let actual = self.resolve_action_operand(word, environment, effect.span)?;
-                    let expected = resolve_contract_type(r#type, &operands, effect.span)?;
-                    require_action_type(actual.clone(), expected, effect.span, contract.operation)?;
+                    if matches!(r#type, ContractType::AnyMaterial) {
+                        if !matches!(&actual, Ty::Named(name, arguments) if name == "Material" && arguments.len() == 1)
+                        {
+                            return Err(SemanticError::new(
+                                effect.span,
+                                format!(
+                                    "operation '{}' expects physical Material<T>, found {actual}",
+                                    contract.operation
+                                ),
+                            ));
+                        }
+                    } else {
+                        let expected = resolve_contract_type(r#type, &operands, effect.span)?;
+                        require_action_type(
+                            actual.clone(),
+                            expected,
+                            effect.span,
+                            contract.operation,
+                        )?;
+                    }
                     operands.insert((*name).to_owned(), actual.clone());
                     arguments.push(CheckedActionArgument {
                         name: (*name).to_owned(),
@@ -1398,6 +1416,34 @@ impl Checker {
             ty = self.field_type(&ty, field, span)?;
         }
         Ok(ty)
+    }
+
+    fn type_contains_material(&self, ty: &Ty, visiting: &mut BTreeSet<String>) -> bool {
+        match ty {
+            Ty::Named(name, _) if name == "Material" => true,
+            Ty::List(element) => self.type_contains_material(element, visiting),
+            Ty::Union(alternatives) => alternatives
+                .iter()
+                .any(|alternative| self.type_contains_material(alternative, visiting)),
+            Ty::Named(name, _) if name == "Screening" => true,
+            Ty::Named(name, arguments) => {
+                if !visiting.insert(name.clone()) {
+                    return false;
+                }
+                let contains = self.data.get(name).is_some_and(|signature| {
+                    signature
+                        .fields
+                        .values()
+                        .chain(signature.cases.values().flat_map(|fields| fields.values()))
+                        .any(|field| self.type_contains_material(field, visiting))
+                }) || arguments
+                    .iter()
+                    .any(|argument| self.type_contains_material(argument, visiting));
+                visiting.remove(name);
+                contains
+            }
+            _ => false,
+        }
     }
 
     fn lower_checked_expr(
@@ -2008,6 +2054,7 @@ impl Checker {
                     "Integer" => Ty::Integer,
                     "String" => Ty::String,
                     "Bool" => Ty::Bool,
+                    "None" => Ty::None,
                     "List" if arguments.len() == 1 => Ty::List(Box::new(arguments[0].clone())),
                     _ => Ty::Named(name, arguments),
                 })
@@ -2079,6 +2126,10 @@ fn resolve_contract_type(
                 format!("action contract references unknown operand '{name}'"),
             )
         }),
+        ContractType::AnyMaterial => Err(SemanticError::new(
+            span,
+            "action result cannot use unconstrained AnyMaterial",
+        )),
     }
 }
 
@@ -2131,10 +2182,6 @@ fn checked_integer_literal(
         r#type: CheckedType::Integer,
         value: CheckedExpression::Integer { value },
     })
-}
-
-fn is_material_type(ty: &Ty) -> bool {
-    matches!(ty, Ty::Named(name, _) if name == "Material")
 }
 
 fn path_text(path: &Path) -> String {

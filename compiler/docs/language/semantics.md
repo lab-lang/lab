@@ -29,8 +29,20 @@ Every resolved action contract names the capability required to dispatch it,
 the type of each operand and result, and how each operand participates in
 physical ownership. `copy` is for freely reusable information, `borrow` permits
 observation without consuming a material, and `take` transfers a material into
-the action. These modes are inputs to the material-flow checker; recording them
-in module IR does not by itself prove affine use.
+the action.
+
+The portable material-flow verifier follows these modes through each workflow.
+It tracks material places, including projections such as
+`colony_result.plate`, and rejects copying, use after `take`, hidden loss at a
+terminating path, and incompatible ownership at control-flow joins. A returned,
+stored, transferred, or disposed material leaves the workflow's ownership; an
+action result establishes fresh ownership. `borrow` never changes ownership.
+
+Reactive handlers are checked from their shared captured state. A handler that
+does not terminate the workflow must preserve captured material ownership so a
+later event cannot observe a material consumed by an earlier invocation.
+Iteration over material collections remains unavailable until the language has
+an explicit consuming iterator contract.
 
 ## Acceptance
 

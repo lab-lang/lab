@@ -25,9 +25,11 @@ the representative specimens and emits structured typed expressions rather
 than copied source fragments. It checks circuit applications, data
 constructors, explicit durable workflow state, returns and control flow,
 timers, and data-driven action contracts with capability and ownership modes.
-It does not select a laboratory target, prove affine material flow, or dispatch
-physical actions. Passing these forms to the legacy `parse` artifact entry
-point still produces an explicit `Unsupported` error.
+Before returning portable module IR it verifies affine material flow across
+actions, projections, branches, matches, returns, and reactive handlers. It
+does not select a laboratory target or dispatch physical actions. Passing these
+forms to the legacy `parse` artifact entry point still produces an explicit
+`Unsupported` error.
 
 The evolving language contract, decisions, support matrix, and larger syntax
 specimens live in [`../../docs/language`](../../docs/language/README.md).

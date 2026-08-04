@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use super::ParseError;
+use super::material_flow::MaterialFlowError;
 use super::source::Span;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -9,6 +10,8 @@ pub enum ModuleError {
     Parse(#[from] ParseError),
     #[error(transparent)]
     Semantic(#[from] SemanticError),
+    #[error(transparent)]
+    MaterialFlow(#[from] MaterialFlowError),
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

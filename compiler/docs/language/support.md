@@ -29,7 +29,7 @@ not imply target selection or physical execution.
 | `if` / `else` and `for` / `in` | yes | yes | yes | yes | no |
 | `when every` / `when after` | yes | yes | yes | yes | no |
 | Event emission | yes | yes | yes | yes | no |
-| Affine material-flow checking in portable workflows | n/a | ownership modes | material kinds only | no | no |
+| Affine material-flow checking in portable workflows | n/a | action ownership modes | yes | yes | no |
 | Durable workflow runtime | no | no | no | no | no |
 
 The older executable artifact pipeline deliberately requires one directly

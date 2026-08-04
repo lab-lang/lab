@@ -10,6 +10,7 @@ use super::checker::Ty;
 pub(super) enum ContractType {
     Concrete(Ty),
     SameAs(&'static str),
+    AnyMaterial,
 }
 
 #[derive(Clone)]
@@ -250,7 +251,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             capability: "waste_handling",
             phrase: vec![
                 PhrasePart::Word("dispose"),
-                operand("material", concrete(material(named("Plasmid"))), take),
+                operand("material", ContractType::AnyMaterial, take),
             ],
             results: Vec::new(),
         },

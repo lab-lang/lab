@@ -7,6 +7,7 @@ mod checker;
 mod error;
 mod lexer;
 mod lowering;
+mod material_flow;
 mod parser;
 mod semantic_error;
 mod source;
@@ -20,6 +21,7 @@ pub use checked::{
     CheckedTrigger, CheckedType, OwnershipMode, ResolvedAction, ResolvedImport, TypedExpression,
 };
 pub use error::ParseError;
+pub use material_flow::MaterialFlowError;
 pub use parser::parse_module;
 pub use semantic_error::{ModuleError, SemanticError};
 pub use source::{Identifier, Span, Spanned};
@@ -40,5 +42,7 @@ pub fn parse(source: &str) -> Result<ArtifactSpec, ParseError> {
 /// backend-neutral frontend IR.
 pub fn compile_module(source: &str) -> Result<CheckedModule, ModuleError> {
     let module = parse_module(source)?;
-    Ok(checker::check_module(&module)?)
+    let checked = checker::check_module(&module)?;
+    material_flow::verify_module(&checked)?;
+    Ok(checked)
 }

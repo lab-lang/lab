@@ -66,6 +66,7 @@ workflow build_plasmid:
 
   match colony_result:
     case TimedOut:
+      <- dispose colony_result.plate
       return Rejected{
         material: None,
         reason: no_colonies,
@@ -74,6 +75,7 @@ workflow build_plasmid:
 
     case Ready:
       candidates <- pick 4 isolated colonies from colony_result.plate
+      <- dispose colony_result.plate
       screening <- screen candidates against design
 
   clone = screening.clones.highest_confidence
@@ -84,6 +86,7 @@ workflow build_plasmid:
 
   match sequence_result:
     case Mismatch:
+      <- dispose sequence_result.material
       return Rejected{
         material: retained,
         reason: sequence_mismatch,
@@ -91,6 +94,7 @@ workflow build_plasmid:
       }
 
     case Inconclusive:
+      <- dispose sequence_result.material
       return Rejected{
         material: retained,
         reason: inconclusive_sequence,
@@ -98,6 +102,7 @@ workflow build_plasmid:
       }
 
     case Exact:
+      <- dispose sequence_result.material
       quantity <- quantify retained
 
   evidence = sequence_result.evidence + [quantity]
