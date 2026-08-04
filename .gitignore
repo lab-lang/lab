@@ -1,4 +1,5 @@
 /target
+.lab/
 .venv/
 *.rs.bk
 .DS_Store

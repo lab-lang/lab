@@ -13,7 +13,7 @@ use my_lab.policies.plasmid_acceptance
 The provisional rule is that a whole-module import makes that module's public
 names available in the importing module. Ambiguous names must be diagnosed;
 import order must not decide which declaration wins. Selective imports, aliases,
-visibility, package manifests, and version resolution remain open decisions.
+visibility, and version resolution remain open decisions.
 
 `std` is the language-owned standard library namespace. Biological catalogs,
 laboratory integrations, and organization-specific policies should normally be
@@ -53,3 +53,31 @@ tests/
 
 These names are conventions rather than keywords. The module system should not
 give a directory magical semantics merely because it is called `workflows`.
+
+## Initial package manifest
+
+`lab` discovers a project through `lab.toml`:
+
+```toml
+[package]
+name = "tet-reporter"
+version = "0.1.0"
+edition = "2026"
+
+[build]
+entry = "src/programs/main.lab"
+
+[dependencies]
+parts = "1.2"
+local-policies = { path = "../policies" }
+```
+
+Source modules are discovered recursively beneath `src`. Their names are the
+normalized package name followed by their relative path, so
+`src/workflows/build-plasmid.lab` becomes
+`tet_reporter.workflows.build_plasmid`.
+
+The manifest parser models version, path, and registry dependencies, but the
+initial CLI rejects a package with dependencies rather than silently ignoring
+them. Dependency graph resolution, integrity, lockfiles, caches, and importing
+their public symbols must land as one coherent package-resolution milestone.

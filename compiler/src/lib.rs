@@ -4,6 +4,7 @@ mod analyses;
 pub mod frontend;
 mod ir;
 mod output;
+pub mod package;
 mod passes;
 mod pipeline;
 mod plan;
@@ -19,6 +20,10 @@ pub use frontend::{
 pub use output::{
     SimulationError, SimulationEvent, SimulationTrace, render_checked_module, render_human,
     simulate,
+};
+pub use package::{
+    BuildMetadata, DependencyDetail, DependencySpec, LabPackage, PackageError, PackageManifest,
+    PackageMetadata, PackageSource,
 };
 pub use pipeline::{Compilation, Compiler, CompilerError};
 pub use plan::{

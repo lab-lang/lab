@@ -1,0 +1,31 @@
+{
+  "Workflow": {
+    "prefix": "workflow",
+    "body": [
+      "workflow ${1:name}:",
+      "  input ${2:design}: ${3:Plasmid}",
+      "  output ${4:Accepted<Plasmid> | Rejected<Plasmid>}",
+      "",
+      "  ${0}"
+    ],
+    "description": "Create a durable Lab workflow"
+  },
+  "Reactive handler": {
+    "prefix": "when",
+    "body": [
+      "when every ${1:30 min}:",
+      "  ${0}"
+    ],
+    "description": "Create a reactive workflow handler"
+  },
+  "Outcome return": {
+    "prefix": "return outcome",
+    "body": [
+      "return ${1:Accepted}{",
+      "  material: ${2:material},",
+      "  evidence: ${3:evidence},",
+      "}"
+    ],
+    "description": "Return a structured workflow outcome"
+  }
+}

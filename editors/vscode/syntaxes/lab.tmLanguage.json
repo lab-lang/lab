@@ -1,0 +1,159 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Lab",
+  "scopeName": "source.lab",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#imports" },
+    { "include": "#declarations" },
+    { "include": "#effects" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#quantities" },
+    { "include": "#numbers" },
+    { "include": "#strings" },
+    { "include": "#calls" },
+    { "include": "#fields" },
+    { "include": "#operators" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.number-sign.lab",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "imports": {
+      "patterns": [
+        {
+          "match": "^\\s*(use)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
+          "captures": {
+            "1": { "name": "keyword.control.import.lab" },
+            "2": { "name": "entity.name.namespace.lab" }
+          }
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "^\\s*(part|circuit|plasmid|record|material|observation|evidence|event|outcome|workflow)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.type.lab" },
+            "2": { "name": "entity.name.type.lab" }
+          }
+        },
+        {
+          "match": "^\\s*(state)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.lab" },
+            "2": { "name": "variable.other.readwrite.lab" }
+          }
+        }
+      ]
+    },
+    "effects": {
+      "patterns": [
+        {
+          "match": "(<-)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.operator.effect.lab" },
+            "2": { "name": "support.function.action.lab" }
+          }
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.lab",
+          "match": "\\b(if|else|for|in|match|case|return)\\b"
+        },
+        {
+          "name": "keyword.control.event.lab",
+          "match": "\\b(when|every|after|emit)\\b"
+        },
+        {
+          "name": "keyword.other.contract.lab",
+          "match": "\\b(input|output|require|accept)\\b"
+        },
+        {
+          "name": "keyword.operator.logical.lab",
+          "match": "\\b(and|or|not)\\b"
+        },
+        {
+          "name": "constant.language.lab",
+          "match": "\\b(None|true|false)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "support.type.lab",
+          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "quantities": {
+      "patterns": [
+        {
+          "match": "(?<![A-Za-z0-9_])(-?\\d+(?:\\.\\d+)?)\\s*(ng/uL|ug/uL|mg/mL|nM|uM|mM|uL|mL|min|h|C)\\b",
+          "captures": {
+            "1": { "name": "constant.numeric.lab" },
+            "2": { "name": "support.constant.unit.lab" }
+          }
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.lab",
+          "match": "(?<![A-Za-z0-9_])-?\\d+(?:\\.\\d+)?\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.lab",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.lab",
+              "match": "\\\\[\\\\\"nrt]"
+            }
+          ]
+        }
+      ]
+    },
+    "calls": {
+      "patterns": [
+        {
+          "name": "entity.name.function.call.lab",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        }
+      ]
+    },
+    "fields": {
+      "patterns": [
+        {
+          "name": "variable.other.member.lab",
+          "match": "(?<=\\.)[A-Za-z_][A-Za-z0-9_]*\\b"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.lab",
+          "match": "<-|==|!=|<=|>=|\\.\\.|[=<>+\\-*/|]"
+        }
+      ]
+    }
+  }
+}

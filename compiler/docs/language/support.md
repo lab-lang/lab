@@ -13,6 +13,8 @@ not imply target selection or physical execution.
 | `accept` predicates | sequence/concentration/volume | yes | yes | yes | yes |
 | Built-in `std` module imports | yes | yes | n/a | yes | no |
 | Project/package imports | yes | no | no | no | no |
+| `lab.toml` manifest and source discovery | n/a | yes | n/a | yes | no |
+| External dependency resolution and lockfile | n/a | no | no | no | no |
 | Circuit declarations and applications | yes | yes | yes | yes | no |
 | Top-level pure bindings | yes | yes | yes | yes | no |
 | `record`, `material`, `observation`, `evidence`, and `event` | yes | yes | yes | yes | no |

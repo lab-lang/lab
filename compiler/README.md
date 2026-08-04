@@ -1,6 +1,9 @@
 # Compiler implementation notes
 
-`compiler/` builds the experimental `labc` compiler and `lab-opt` IR tool. Neither is a stable interface yet.
+`compiler/` builds the experimental `labc` compiler and `lab-opt` IR tool.
+These are deliberately compiler-development interfaces. The standard Lab
+workflow is exposed through the repository's `lab` binary. None is a stable
+interface yet.
 
 The current pipeline is:
 

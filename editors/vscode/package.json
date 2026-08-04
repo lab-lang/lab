@@ -1,0 +1,53 @@
+{
+  "name": "lab-language",
+  "displayName": "Lab Language",
+  "description": "Language support for programmable biology with Lab.",
+  "version": "0.1.0",
+  "publisher": "lab-language",
+  "license": "Apache-2.0",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "lab",
+    "biology",
+    "bioautomation",
+    "synthetic biology",
+    "workflow"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/marpaia/lab"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "lab",
+        "aliases": [
+          "Lab",
+          "lab"
+        ],
+        "extensions": [
+          ".lab"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "lab",
+        "scopeName": "source.lab",
+        "path": "./syntaxes/lab.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "lab",
+        "path": "./snippets/lab.json"
+      }
+    ]
+  }
+}
