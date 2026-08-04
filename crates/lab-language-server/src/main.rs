@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 
 use lab_ide::{SemanticTokenKind, SymbolKind, Workspace};
-use lab_language::{DiagnosticCode, SourceId, Span};
+use lab_language::{DiagnosticCode, DiagnosticSeverity, SourceId, Span};
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types as lsp;
 use serde::de::DeserializeOwned;
@@ -208,10 +208,14 @@ impl Server {
         let params: lsp::ReferenceParams = params(request.params.clone())?;
         let source = source_id(&params.text_document_position.text_document.uri);
         let offset = self.offset(&source, params.text_document_position.position);
+        let declaration = (!params.context.include_declaration)
+            .then(|| self.workspace.definition(&source, offset))
+            .flatten();
         let locations = self
             .workspace
             .references(&source, offset)
             .into_iter()
+            .filter(|location| declaration.as_ref() != Some(location))
             .filter_map(|location| {
                 Some(lsp::Location {
                     uri: location.source.0.parse().ok()?,
@@ -266,18 +270,33 @@ impl Server {
             .workspace
             .document_symbols(&source)
             .into_iter()
-            .map(|symbol| lsp::DocumentSymbol {
-                name: symbol.name,
-                detail: None,
-                kind: symbol_kind(symbol.kind),
-                tags: None,
-                deprecated: None,
-                range: self.range(&source, symbol.span),
-                selection_range: self.range(&source, symbol.selection_span),
-                children: None,
-            })
+            .map(|symbol| self.document_symbol(&source, symbol))
             .collect::<Vec<_>>();
         ok(request, lsp::DocumentSymbolResponse::Nested(symbols))
+    }
+
+    #[allow(deprecated)]
+    fn document_symbol(
+        &self,
+        source: &SourceId,
+        symbol: lab_ide::DocumentSymbol,
+    ) -> lsp::DocumentSymbol {
+        lsp::DocumentSymbol {
+            name: symbol.name,
+            detail: None,
+            kind: symbol_kind(symbol.kind),
+            tags: None,
+            deprecated: None,
+            range: self.range(source, symbol.span),
+            selection_range: self.range(source, symbol.selection_span),
+            children: (!symbol.children.is_empty()).then(|| {
+                symbol
+                    .children
+                    .into_iter()
+                    .map(|child| self.document_symbol(source, child))
+                    .collect()
+            }),
+        }
     }
 
     fn semantic_tokens(&self, request: &Request) -> Result<Response, serde_json::Error> {
@@ -350,12 +369,27 @@ impl Server {
             .iter()
             .map(|diagnostic| lsp::Diagnostic {
                 range: self.range(source, diagnostic.span),
-                severity: Some(lsp::DiagnosticSeverity::ERROR),
+                severity: Some(diagnostic_severity(diagnostic.severity)),
                 code: Some(lsp::NumberOrString::String(
                     diagnostic_code(diagnostic.code).to_owned(),
                 )),
                 source: Some("lab".to_owned()),
                 message: diagnostic.message.clone(),
+                related_information: (!diagnostic.related.is_empty()).then(|| {
+                    diagnostic
+                        .related
+                        .iter()
+                        .filter_map(|related| {
+                            Some(lsp::DiagnosticRelatedInformation {
+                                location: lsp::Location {
+                                    uri: related.source.0.parse().ok()?,
+                                    range: self.range(&related.source, related.span),
+                                },
+                                message: related.message.clone(),
+                            })
+                        })
+                        .collect()
+                }),
                 ..lsp::Diagnostic::default()
             })
             .collect();
@@ -473,6 +507,15 @@ fn diagnostic_code(code: DiagnosticCode) -> &'static str {
         DiagnosticCode::Specification => "specification",
         DiagnosticCode::Semantic => "semantic",
         DiagnosticCode::MaterialFlow => "material-flow",
+    }
+}
+
+fn diagnostic_severity(severity: DiagnosticSeverity) -> lsp::DiagnosticSeverity {
+    match severity {
+        DiagnosticSeverity::Error => lsp::DiagnosticSeverity::ERROR,
+        DiagnosticSeverity::Warning => lsp::DiagnosticSeverity::WARNING,
+        DiagnosticSeverity::Information => lsp::DiagnosticSeverity::INFORMATION,
+        DiagnosticSeverity::Hint => lsp::DiagnosticSeverity::HINT,
     }
 }
 

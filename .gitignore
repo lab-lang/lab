@@ -6,5 +6,8 @@
 crates/lab-python/python/lab/_native.*
 editors/vscode/node_modules/
 editors/vscode/out/
+editors/vscode/server/
+editors/vscode/dist/
+editors/vscode/LICENSE
 *.pyc
 __pycache__/

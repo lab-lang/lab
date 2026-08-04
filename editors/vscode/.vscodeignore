@@ -1,3 +1,8 @@
 .gitignore
 **/*.map
 **/node_modules/**
+scripts/**
+dist/**
+src/**
+tsconfig.json
+package-lock.json

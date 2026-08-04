@@ -65,12 +65,16 @@
       "properties": {
         "lab.languageServer.path": {
           "type": "string",
-          "default": "lab-language-server",
-          "description": "Path to the Lab language server executable."
+          "default": "",
+          "description": "Optional path to the Lab language server executable. The extension uses its bundled server when this is empty, then falls back to lab-language-server on PATH."
         },
         "lab.languageServer.trace": {
           "type": "string",
-          "enum": ["off", "messages", "verbose"],
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
           "default": "off",
           "description": "Trace communication with the Lab language server."
         }
@@ -78,8 +82,12 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "vscode:prepublish": "npm run compile",
+    "check": "tsc -p ./ --noEmit",
+    "compile": "npm run check && esbuild src/extension.ts --bundle --external:vscode --format=cjs --platform=node --sourcemap --outfile=out/extension.js",
+    "install:cursor": "node ./scripts/package.mjs --install-cursor",
+    "package": "node ./scripts/package.mjs",
+    "watch": "esbuild src/extension.ts --bundle --external:vscode --format=cjs --platform=node --sourcemap --outfile=out/extension.js --watch"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -87,6 +95,8 @@
   "devDependencies": {
     "@types/node": "^20.17.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.0"
   }
 }
