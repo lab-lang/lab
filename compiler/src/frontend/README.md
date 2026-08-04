@@ -3,6 +3,8 @@
 The frontend has two deliberately different entry points:
 
 - `parse_module` builds a spanned source AST for the language under design;
+- `compile_module` resolves and type-checks a complete module and lowers it to
+  verified portable module IR;
 - `parse` additionally lowers the currently executable standalone-plasmid
   subset into the original `ArtifactSpec` pipeline.
 
@@ -18,11 +20,12 @@ plasmid p_sensor:
   accept volume >= 20 uL
 ```
 
-The source parser also represents whole-module `use` declarations, circuits,
-lab-specific data declarations, typed workflow inputs and bindings, durable
-effects (`<-`), matches, loops, events, and reactive `when` clauses. Until
-resolution, type checking, workflow lowering, and execution exist, passing
-these forms to `parse` produces an explicit `Unsupported` error.
+The module compiler resolves the built-in standard-library modules exercised by
+the representative specimens, checks circuit applications, data constructors,
+workflow returns and control flow, timers, and typed durable action signatures.
+It does not select a laboratory target or dispatch physical actions. Passing
+these forms to the legacy `parse` artifact entry point still produces an
+explicit `Unsupported` error.
 
 The evolving language contract, decisions, support matrix, and larger syntax
 specimens live in [`../../docs/language`](../../docs/language/README.md).

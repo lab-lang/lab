@@ -12,10 +12,14 @@ mod stages;
 mod translations;
 
 pub use frontend::{
-    Artifact, ArtifactSpec, AssemblyMethod, Capability, Concentration, DnaSequence, LabProfile,
-    ParseError, PlasmidSpec, SpecError, Topology, Volume, parse, parse_module,
+    Artifact, ArtifactSpec, AssemblyMethod, Capability, CheckedModule, Concentration, DnaSequence,
+    LabProfile, ModuleError, ParseError, PlasmidSpec, SemanticError, SpecError, Topology, Volume,
+    compile_module, parse, parse_module,
 };
-pub use output::{SimulationError, SimulationEvent, SimulationTrace, render_human, simulate};
+pub use output::{
+    SimulationError, SimulationEvent, SimulationTrace, render_checked_module, render_human,
+    simulate,
+};
 pub use pipeline::{Compilation, Compiler, CompilerError};
 pub use plan::{
     AcceptanceCriterion, AcceptanceObligation, ExecutablePlan, OperationKind, PlanError, PlanStep,

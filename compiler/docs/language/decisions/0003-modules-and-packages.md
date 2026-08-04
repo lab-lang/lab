@@ -1,6 +1,6 @@
 # 0003: Whole-module imports and source organization
 
-Status: provisional, parsing implemented
+Status: provisional, built-in standard-library resolution implemented
 
 Lab uses a compact `use dotted.module.path` form. Rust-style brace selectors are
 not part of the language. The compiler parses imports as source-level module

@@ -29,8 +29,18 @@ The language is organized around three source-level concerns:
 Actual executions are runtime records, not source modules. A program may be run
 many times, with each run receiving an independent identity and event journal.
 
-Inspect any syntax specimen without asking the executable subset to lower it:
+Inspect any syntax specimen without semantic checking:
 
 ```sh
 labc compiler/docs/language/specimens/plasmid-build.lab --emit source-ast
 ```
+
+Compile either representative specimen into verified portable module IR:
+
+```sh
+labc compiler/docs/language/specimens/plasmid-design.lab --emit module-ir
+labc compiler/docs/language/specimens/plasmid-build.lab --emit module-ir
+```
+
+Portable module compilation resolves and checks the program but does not select
+a laboratory target, schedule work, or dispatch physical actions.

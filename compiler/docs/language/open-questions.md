@@ -13,11 +13,11 @@ updates deterministic and replay-safe either way.
 
 ## Effect action grammar
 
-The parser currently preserves the phrase following `<-` as source text. This
-lets us test readable forms such as `sequence aliquot` and `pick 4 isolated
-colonies from plate` without prematurely fixing how prepositions map to typed
-arguments. We need one uniform signature and name-resolution model before these
-phrases are lowered.
+The parser preserves the phrase following `<-` as source text. The portable
+module compiler now resolves the standard plasmid-action phrases used by the
+representative workflow and checks their operand and result types. We still
+need one extensible signature grammar for package-defined actions rather than a
+compiler-owned set of phrase shapes.
 
 ## Concurrency and cancellation
 
@@ -34,6 +34,7 @@ is still open. The compiler should not reduce all of these to untyped fields.
 
 ## Package resolution
 
-Whole-module `use` syntax is settled enough to parse. Package manifests,
-versions, aliases, visibility, cyclic imports, and the exact boundary between
-`std` and versioned biological catalogs remain to be specified and implemented.
+Whole-module `use` syntax and the specimen's three built-in `std` modules now
+resolve. Package manifests, filesystem modules, versions, aliases, visibility,
+cyclic imports, and the exact boundary between `std` and versioned biological
+catalogs remain to be specified and implemented.
