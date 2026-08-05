@@ -223,5 +223,5 @@ The [documentation index](docs/README.md) separates accepted language decisions,
 | `crates/lab-language-server` | native Language Server Protocol adapter |
 | `crates/lab-ide-wasm` | browser and embedded editor bindings |
 | `editors/vscode` | VS Code and Cursor integration |
-| `crates/lab-sdk`, `crates/lab-python` | experimental embedding APIs |
+| `crates/lab-python` | experimental Python bindings over the compiler API |
 | `docs`, `examples` | language design, decisions, specimens, and runnable examples |

@@ -3,18 +3,18 @@
 //! Phrase syntax, operand types, ownership modes, results, and capabilities
 //! live together so the semantic checker does not assign meaning by verb.
 
-use super::checked::OwnershipMode;
-use super::checker::Ty;
+use super::super::checked::OwnershipMode;
+use super::super::type_system::Ty;
 
 #[derive(Clone)]
-pub(super) enum ContractType {
+pub(crate) enum ContractType {
     Concrete(Ty),
     SameAs(&'static str),
     AnyMaterial,
 }
 
 #[derive(Clone)]
-pub(super) enum PhrasePart {
+pub(crate) enum PhrasePart {
     Word(&'static str),
     Operand {
         name: &'static str,
@@ -32,12 +32,12 @@ pub(super) enum PhrasePart {
     },
 }
 
-pub(super) struct ResultSpec {
+pub(crate) struct ResultSpec {
     pub name: &'static str,
     pub r#type: ContractType,
 }
 
-pub(super) struct ActionContractSpec {
+pub(crate) struct ActionContractSpec {
     pub operation: &'static str,
     pub capability: &'static str,
     pub phrase: Vec<PhrasePart>,

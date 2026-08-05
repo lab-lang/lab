@@ -1,6 +1,5 @@
 //! Lab Lang source frontend for the compiler.
 
-mod action_contracts;
 pub mod ast;
 mod checked;
 mod checker;
@@ -14,6 +13,7 @@ mod semantic_error;
 mod source;
 mod standard_library;
 mod token;
+mod type_system;
 
 pub use checked::{
     CheckedActionArgument, CheckedArgument, CheckedBinding, CheckedCase, CheckedDeclaration,

@@ -28,4 +28,4 @@ The frontend checks source validity, names, types, requirements, acceptance expr
 
 This example does not select a laboratory target or demonstrate scheduling, reagent quantities, inventory, containers, staff, instrument selection, robot code generation, execution tracking, or successful physical construction. Its JSON output is a compiler-development surface, not a stable interchange format.
 
-The Rust and Python SDKs call the same portable frontend; see [`crates/lab-sdk`](../../crates/lab-sdk/) and [`crates/lab-python`](../../crates/lab-python/) for their experimental APIs.
+Rust callers use the public `lab-compiler` API directly. The [`crates/lab-python`](../../crates/lab-python/) binding exposes that same portable frontend to Python.

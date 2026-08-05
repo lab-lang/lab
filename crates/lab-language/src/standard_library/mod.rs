@@ -4,8 +4,11 @@
 //! cases. A future package loader can provide the same catalog interface from
 //! separately compiled Lab packages.
 
-use super::action_contracts::{ActionContractSpec, standard_action_contract};
-use super::checker::Ty;
+mod actions;
+
+use super::type_system::Ty;
+use actions::standard_action_contract;
+pub(super) use actions::{ActionContractSpec, ContractType, PhrasePart};
 
 pub(super) struct StandardModule {
     pub path: &'static str,

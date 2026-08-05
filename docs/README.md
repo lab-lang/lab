@@ -48,7 +48,7 @@ Decision records preserve the reasoning and status behind the language rather th
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
-- [Rust SDK](../crates/lab-sdk) and [Python SDK](../crates/lab-python/README.md) expose experimental compiler APIs.
+- The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for the first manual and OT-2 end-to-end tutorial.
 
 ## Examples versus specimens

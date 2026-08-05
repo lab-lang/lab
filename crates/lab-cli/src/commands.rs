@@ -6,7 +6,7 @@ use lab_compiler::{CheckedModule, compile_module};
 use lab_package::{LabPackage, PackageManifest};
 use serde::Serialize;
 
-use crate::output::Output;
+use crate::Output;
 
 pub(crate) fn new_project(path: PathBuf, name: Option<String>, output: &Output) -> Result<()> {
     if path.exists() && fs::read_dir(&path)?.next().is_some() {
