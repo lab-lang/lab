@@ -180,9 +180,22 @@ impl<'a> Parser<'a> {
     fn parse_workflow(&mut self) -> Result<WorkflowDecl, ParseError> {
         let start = self.expect_word("workflow")?.span;
         let name = self.take_identifier("a workflow name")?;
-        let inputs = self.parse_signature_fields()?;
+        let inputs = self.parse_signature_fields("a parameter name")?;
         self.expect(TokenKind::RightArrow)?;
-        let output = self.parse_type()?;
+        let outputs = if self.check(&TokenKind::LeftParen) {
+            let fields = self.parse_signature_fields("a result name")?;
+            if fields.is_empty() {
+                return Err(syntax_span(
+                    name.span,
+                    "a named workflow result list cannot be empty; use 'None' for no value",
+                ));
+            }
+            WorkflowOutputs::Named { fields }
+        } else {
+            WorkflowOutputs::Single {
+                ty: self.parse_type()?,
+            }
+        };
         self.open_block()?;
         let mut body = Vec::new();
         while !self.check(&TokenKind::Dedent) {
@@ -192,17 +205,20 @@ impl<'a> Parser<'a> {
         Ok(WorkflowDecl {
             name,
             inputs,
-            output,
+            outputs,
             body,
             span: start.join(end),
         })
     }
 
-    fn parse_signature_fields(&mut self) -> Result<Vec<FieldDecl>, ParseError> {
+    fn parse_signature_fields(
+        &mut self,
+        expected_name: &'static str,
+    ) -> Result<Vec<FieldDecl>, ParseError> {
         self.expect(TokenKind::LeftParen)?;
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RightParen) {
-            let name = self.take_identifier("a parameter name")?;
+            let name = self.take_identifier(expected_name)?;
             self.expect(TokenKind::Colon)?;
             let ty = self.parse_type()?;
             let span = name.span.join(ty.span());
@@ -342,10 +358,13 @@ impl<'a> Parser<'a> {
 
     fn parse_return(&mut self) -> Result<ReturnStmt, ParseError> {
         let start = self.expect_word("return")?.span;
-        let value = self.parse_expr()?;
+        let mut values = vec![self.parse_expr()?];
+        while self.consume(&TokenKind::Comma).is_some() {
+            values.push(self.parse_expr()?);
+        }
         let end = self.expect_line_end()?;
         Ok(ReturnStmt {
-            value,
+            values,
             span: start.join(end),
         })
     }
@@ -987,13 +1006,55 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
         assert_eq!(workflow.inputs.len(), 1);
         assert_eq!(workflow.inputs[0].name.value, "plate");
         assert!(matches!(
-            &workflow.output,
-            TypeExpr::Path { path, .. } if path.segments[0].value == "ColonyGrowth"
+            &workflow.outputs,
+            WorkflowOutputs::Single {
+                ty: TypeExpr::Path { path, .. },
+            } if path.segments[0].value == "ColonyGrowth"
         ));
         assert_eq!(workflow.body.len(), 3);
         assert!(matches!(workflow.body[0], Stmt::State(_)));
         assert!(matches!(workflow.body[1], Stmt::When(_)));
         assert!(matches!(workflow.body[2], Stmt::When(_)));
+    }
+
+    #[test]
+    fn parses_named_workflow_results_and_direct_returns() {
+        let module = parse_module(
+            r#"workflow preserve(
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
+  return product, plate
+"#,
+        )
+        .unwrap();
+        let Item::Workflow(workflow) = &module.items[0] else {
+            panic!("expected workflow")
+        };
+        let WorkflowOutputs::Named { fields } = &workflow.outputs else {
+            panic!("expected named workflow results")
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[0].name.value, "product");
+        assert_eq!(fields[1].name.value, "plate");
+        let Stmt::Return(statement) = &workflow.body[0] else {
+            panic!("expected return")
+        };
+        assert_eq!(statement.values.len(), 2);
+    }
+
+    #[test]
+    fn rejects_empty_named_workflow_results() {
+        let error = parse_module("workflow empty() -> ():\n  return None\n").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("named workflow result list cannot be empty"),
+            "{error}"
+        );
     }
 
     #[test]

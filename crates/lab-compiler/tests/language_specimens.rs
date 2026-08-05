@@ -66,9 +66,16 @@ fn plasmid_build_compiles_typed_effects_and_reactive_handlers() {
         .iter()
         .find(|declaration| declaration["name"] == "build_plasmid")
         .unwrap();
-    assert_eq!(workflow["output"]["kind"], "union");
-    assert_eq!(workflow["output"]["alternatives"][0]["name"], "Accepted");
-    assert_eq!(workflow["output"]["alternatives"][1]["name"], "Rejected");
+    assert_eq!(workflow["outputs"][0]["name"], "outcome");
+    assert_eq!(workflow["outputs"][0]["type"]["kind"], "union");
+    assert_eq!(
+        workflow["outputs"][0]["type"]["alternatives"][0]["name"],
+        "Accepted"
+    );
+    assert_eq!(
+        workflow["outputs"][0]["type"]["alternatives"][1]["name"],
+        "Rejected"
+    );
     let serialized = serde_json::to_string(workflow).unwrap();
     assert!(serialized.contains("workflow.await_colonies"));
     assert!(serialized.contains("std.lab.plasmid_actions.split"));
@@ -145,6 +152,8 @@ fn dependency_specimen_preserves_typed_material_edges_without_levels() {
         .unwrap();
     assert_eq!(workflow["inputs"][0]["name"], "promoter_carrier");
     assert_eq!(workflow["inputs"][0]["type"]["name"], "Material");
+    assert_eq!(workflow["outputs"][0]["name"], "product");
+    assert_eq!(workflow["outputs"][1]["name"], "plate");
     let serialized = serde_json::to_string(workflow).unwrap();
     assert!(serialized.contains("std.bio.build.realize"));
     assert!(!serialized.contains("level1"));

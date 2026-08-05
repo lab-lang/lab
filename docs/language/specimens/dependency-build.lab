@@ -5,10 +5,6 @@ use std.lab.plasmid_actions
 # Synthetic compiler fixture. Ordering is derived from typed workflow inputs;
 # the source does not assign artifacts to biological assembly levels.
 
-record BuiltArtifact:
-  product: Material<Plasmid>
-  plate: Material<Plate>
-
 J23101 = part("J23101")
 B0034 = part("B0034")
 GFP = part("GFP")
@@ -51,7 +47,10 @@ plasmid reporter_region:
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_promoter_carrier() -> BuiltArtifact:
+workflow realize_promoter_carrier() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize promoter_carrier from dependencies
   cells <- provision DH5alpha
@@ -59,11 +58,14 @@ workflow realize_promoter_carrier() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on ampicillin
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 
 workflow realize_reporter_region(
   promoter_carrier: Material<Plasmid>,
-) -> BuiltArtifact:
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = [promoter_carrier]
   product, construct <- realize reporter_region from dependencies
   cells <- provision DH5alpha
@@ -71,4 +73,4 @@ workflow realize_reporter_region(
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate

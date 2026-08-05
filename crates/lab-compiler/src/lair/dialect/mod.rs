@@ -36,3 +36,4 @@ pub(crate) mod attributes {
 
 pub(crate) mod design;
 pub(crate) mod protocol;
+pub(crate) mod workflow;

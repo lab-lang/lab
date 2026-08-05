@@ -10,5 +10,11 @@ mod contract;
 mod lab;
 mod prelude;
 
-pub(crate) use catalog::{PureFunctionSpec, StandardLibrary, StandardModule};
+pub(crate) use catalog::{
+    ConstructorSpec, PureFunctionSpec, StandardLibrary, StandardModule, TypeSpec,
+};
 pub(crate) use contract::{ActionContractSpec, ContractType, PhrasePart};
+
+pub(crate) fn render_markdown() -> String {
+    StandardLibrary::bundled().render_markdown()
+}

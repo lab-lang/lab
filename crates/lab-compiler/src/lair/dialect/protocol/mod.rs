@@ -25,6 +25,8 @@ pub enum MaterialType {
     CircularDna,
     TransformedCulture,
     RecoveredCulture,
+    DilutedCulture,
+    SelectionPlate,
     ColonyPool,
     SelectedClone,
     CloneCulture,
@@ -56,5 +58,6 @@ impl EvidenceType {
     }
 }
 
-#[cfg(test)]
-pub use manufacturing::{AssembleOp, SynthesizeOp};
+pub(crate) use manufacturing::{
+    AssembleOp, DiluteOp, PlateOp, ProvisionOp, RecoverOp, SynthesizeOp, TransformOp,
+};

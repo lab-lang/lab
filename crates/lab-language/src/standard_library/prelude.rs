@@ -1,41 +1,54 @@
 //! Implicitly imported foundational types, values, and pure operations.
 
-use crate::standard_library::catalog::{PureFunctionSpec, StandardModule};
+use crate::standard_library::catalog::{
+    ConstructorSpec, PureFunctionSpec, StandardModule, TypeSpec,
+};
 use crate::type_system::Ty;
 
 pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
     let named = Ty::named;
     let types = [
-        "Accepted",
-        "Antibiotic",
-        "Backbone",
-        "CDS",
-        "Circuit",
-        "Clone",
-        "CloneSet",
-        "Colonies",
-        "ColonyMap",
-        "Construct",
-        "Culture",
-        "DNA",
-        "Duration",
-        "Evidence",
-        "Fragment",
-        "Image",
-        "Material",
-        "Part",
-        "Plate",
-        "Plasmid",
-        "Promoter",
-        "Protein",
-        "Reason",
-        "Rejected",
-        "RestrictionEnzyme",
-        "Screening",
-        "Signal",
-        "Strain",
-        "Topology",
-        "WorkflowContext",
+        TypeSpec::nominal("Accepted").parameters(1),
+        TypeSpec::nominal("Antibiotic"),
+        TypeSpec::nominal("Backbone"),
+        TypeSpec::nominal("CDS").parameters(1),
+        TypeSpec::nominal("Circuit").parameters(2),
+        TypeSpec::nominal("Clone"),
+        TypeSpec::nominal("CloneSet")
+            .with_fields([("highest_confidence", Ty::material(named("Clone")))]),
+        TypeSpec::nominal("Colonies").with_fields([("count", Ty::Integer)]),
+        TypeSpec::nominal("ColonyMap").with_fields([("isolated", named("Colonies"))]),
+        TypeSpec::nominal("Construct"),
+        TypeSpec::nominal("Culture"),
+        TypeSpec::nominal("DNA"),
+        TypeSpec::nominal("Duration"),
+        TypeSpec::nominal("Evidence"),
+        TypeSpec::nominal("Fragment"),
+        TypeSpec::nominal("Image"),
+        TypeSpec::nominal("List").parameters(1),
+        TypeSpec::nominal("Material").parameters(1),
+        TypeSpec::nominal("Part"),
+        TypeSpec::nominal("Plate"),
+        TypeSpec::nominal("Plasmid")
+            .with_fields([
+                ("topology", named("Topology")),
+                ("length", Ty::Quantity("bp".to_owned())),
+                ("sequence", named("DNA")),
+                ("concentration", Ty::Quantity("ng/uL".to_owned())),
+                ("volume", Ty::Quantity("uL".to_owned())),
+                ("design", named("Plasmid")),
+            ])
+            .documented("A backend-neutral plasmid design."),
+        TypeSpec::nominal("Promoter").parameters(1),
+        TypeSpec::nominal("Protein"),
+        TypeSpec::nominal("Reason"),
+        TypeSpec::nominal("Rejected").parameters(1),
+        TypeSpec::nominal("RestrictionEnzyme"),
+        TypeSpec::nominal("Screening").with_fields([("clones", named("CloneSet"))]),
+        TypeSpec::nominal("Signal"),
+        TypeSpec::nominal("Strain"),
+        TypeSpec::nominal("Topology"),
+        TypeSpec::nominal("WorkflowContext").with_fields([("elapsed", named("Duration"))]),
     ];
     let values = [
         ("circular", named("Topology")),
@@ -46,7 +59,8 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         ("acceptance_failed", named("Reason")),
     ];
     let functions = [
-        PureFunctionSpec::new("dna", "std.bio.dna", vec![Ty::String], named("DNA")),
+        PureFunctionSpec::new("dna", "std.bio.dna", vec![Ty::String], named("DNA"))
+            .documented("Construct a DNA value from a nucleotide sequence."),
         PureFunctionSpec::new(
             "detect_colonies",
             "std.lab.imaging.detect_colonies",
@@ -66,11 +80,40 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
             Ty::Bool,
         ),
     ];
+    let evidence = Ty::List(Box::new(named("Evidence")));
+    let constructors = [
+        ConstructorSpec::new(
+            "Accepted",
+            "std.outcome.Accepted",
+            [
+                ("material", Ty::material(named("Plasmid"))),
+                ("evidence", evidence.clone()),
+            ],
+            Ty::Named("Accepted".to_owned(), vec![named("Plasmid")]),
+        )
+        .documented("An accepted material paired with its supporting evidence."),
+        ConstructorSpec::new(
+            "Rejected",
+            "std.outcome.Rejected",
+            [
+                (
+                    "material",
+                    Ty::Union(vec![Ty::material(named("Plasmid")), Ty::None]),
+                ),
+                ("evidence", evidence),
+                ("reason", named("Reason")),
+            ],
+            Ty::Named("Rejected".to_owned(), vec![named("Plasmid")]),
+        )
+        .documented("A rejected material with evidence and a machine-readable reason."),
+    ];
 
     vec![
         StandardModule::prelude("std.prelude")
-            .with_types(types)
+            .documented("Foundational types and operations available to every Lab module.")
+            .with_type_specs(types)
             .with_values(values)
-            .with_functions(functions),
+            .with_functions(functions)
+            .with_constructors(constructors),
     ]
 }

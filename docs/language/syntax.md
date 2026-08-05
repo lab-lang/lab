@@ -37,7 +37,7 @@ The core punctuation has one job each:
 | `<...>` | type arguments |
 | `=` | deterministic evaluation or state transition |
 | `<-` | durable physical or external effect |
-| `->` | workflow result type |
+| `->` | workflow result declaration |
 | `==`, `!=`, `<`, `<=`, `>`, `>=` | comparison |
 | `+`, `-`, `*`, `/`, `..` | arithmetic, composition, or range operations selected by types |
 
@@ -62,7 +62,7 @@ The phrase after `<-` is resolved through an imported action contract. The contr
 
 ## Workflow signatures
 
-Workflow inputs and output are part of the declaration signature:
+Workflow inputs and results are part of the declaration signature. A workflow with one result names its type directly:
 
 ```lab
 workflow preserve_sample(
@@ -72,7 +72,20 @@ workflow preserve_sample(
   return source
 ```
 
-Parentheses are required, including for a zero-input workflow, and the result type after `->` is mandatory. Parameters are comma-separated typed fields and may span lines with a trailing comma. The indented body contains state and executable statements—not interface declarations.
+Named results use a parenthesized typed field list and return their values directly:
+
+```lab
+workflow preserve_build(
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
+  return product, plate
+```
+
+Parentheses are required for workflow parameters, including for a zero-input workflow, and an explicit result declaration after `->` is mandatory. Parameters and named results are comma-separated typed fields and may span lines with a trailing comma. A multi-value `return` is comma-separated and must match the declared result arity and types. `-> None` with `return None` is the no-information form; `-> ()` is rejected. The indented body contains state and executable statements—not interface declarations.
 
 ## Laboratory declarations
 
@@ -174,10 +187,16 @@ use std.bio.build
 
 workflow realize_reporter_region(
   promoter_carrier: Material<Plasmid>,
-) -> Material<Plasmid>:
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = [promoter_carrier]
-  product <- realize reporter_region from dependencies
-  return product
+  product, construct <- realize reporter_region from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  plate <- plate culture on chloramphenicol
+  return product, plate
 ```
 
 `realize` is a bundled standard-library operation. The checker resolves its typed inputs, ownership, results, and capability. Target lowering reads that structured checked operation; it does not reinterpret the source phrase. Build ordering, graph depth, fixed-point retries, and roots derive from material flow rather than declaration names or compiler-defined assembly levels.

@@ -9,7 +9,10 @@ Lab source expresses an artifact dependency as a typed material input to a workf
 ```lab
 workflow realize_reporter(
   carrier: Material<Plasmid>,
-) -> BuiltArtifact:
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = [carrier]
   product, construct <- realize reporter from dependencies
 ```

@@ -5,10 +5,6 @@ use std.lab.plasmid_actions
 # Synthetic compiler fixture: typed identities are not proof of inventory
 # availability, and this is not a qualified laboratory protocol.
 
-record BuiltArtifact:
-  product: Material<Plasmid>
-  plate: Material<Plate>
-
 J23101 = part("J23101")
 B0034 = part("B0034")
 GFP = part("GFP")
@@ -33,7 +29,10 @@ plasmid reporter:
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_reporter() -> BuiltArtifact:
+workflow realize_reporter() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize reporter from dependencies
   cells <- provision DH5alpha
@@ -41,4 +40,4 @@ workflow realize_reporter() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate

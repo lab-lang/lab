@@ -2,7 +2,8 @@
 // independently of the compiler's source frontend.
 #![allow(dead_code)]
 
-use pliron::builtin::attributes::StringAttr;
+use pliron::attribute::AttrObj;
+use pliron::builtin::attributes::{IntegerAttr, StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::NOpdsInterface;
 use pliron::common_traits::Verify;
 use pliron::context::Context;
@@ -12,6 +13,7 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::value::Value;
 
+use crate::lair::dialect::attributes::{u32_attr, u32_value, verify_u32_attr};
 use crate::lair::dialect::design::DesignType;
 use crate::lair::dialect::protocol::validation::{require_attr, require_material};
 use crate::lair::dialect::protocol::{AssemblyMethodAttr, MaterialType};
@@ -93,7 +95,15 @@ impl Verify for SynthesizeOp {
 #[pliron_op(
     name = "protocol.assemble",
     format,
-    attributes = (assembly_method: AssemblyMethodAttr),
+    attributes = (
+        assembly_method: AssemblyMethodAttr,
+        assembly_artifact: StringAttr,
+        assembly_backbone: StringAttr,
+        assembly_components: VecAttr,
+        assembly_dependencies: VecAttr,
+        assembly_restriction_enzyme: StringAttr,
+        assembly_replicates: IntegerAttr
+    ),
     operands = (input: MaterialType),
     results = (construct: MaterialType)
 )]
@@ -101,7 +111,18 @@ impl Verify for SynthesizeOp {
 pub struct AssembleOp;
 
 impl AssembleOp {
-    pub fn new(ctx: &mut Context, input: Value, method: AssemblyMethodAttr) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ctx: &mut Context,
+        input: Value,
+        method: AssemblyMethodAttr,
+        artifact_name: impl Into<String>,
+        backbone: impl Into<String>,
+        components: Vec<String>,
+        dependencies: Vec<String>,
+        restriction_enzyme: impl Into<String>,
+        replicates: u8,
+    ) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
@@ -113,6 +134,13 @@ impl AssembleOp {
             ),
         };
         result.set_attr_assembly_method(ctx, method);
+        result.set_attr_assembly_artifact(ctx, StringAttr::new(artifact_name.into()));
+        result.set_attr_assembly_backbone(ctx, StringAttr::new(backbone.into()));
+        result.set_attr_assembly_components(ctx, string_vec(components));
+        result.set_attr_assembly_dependencies(ctx, string_vec(dependencies));
+        result
+            .set_attr_assembly_restriction_enzyme(ctx, StringAttr::new(restriction_enzyme.into()));
+        result.set_attr_assembly_replicates(ctx, u32_attr(ctx, replicates.into()));
         result
     }
 }
@@ -123,6 +151,37 @@ impl Verify for AssembleOp {
             self.get_attr_assembly_method(ctx).is_some(),
             "assembly_method",
             self.loc(ctx),
+        )?;
+        require_nonempty_string(
+            self.get_attr_assembly_artifact(ctx).as_deref(),
+            "assembly_artifact",
+            self.loc(ctx),
+        )?;
+        require_nonempty_string(
+            self.get_attr_assembly_backbone(ctx).as_deref(),
+            "assembly_backbone",
+            self.loc(ctx),
+        )?;
+        require_string_vec(
+            self.get_attr_assembly_components(ctx).as_deref(),
+            "assembly_components",
+            self.loc(ctx),
+        )?;
+        require_string_vec(
+            self.get_attr_assembly_dependencies(ctx).as_deref(),
+            "assembly_dependencies",
+            self.loc(ctx),
+        )?;
+        require_nonempty_string(
+            self.get_attr_assembly_restriction_enzyme(ctx).as_deref(),
+            "assembly_restriction_enzyme",
+            self.loc(ctx),
+        )?;
+        require_count(
+            self.get_attr_assembly_replicates(ctx).as_deref(),
+            "assembly_replicates",
+            self.loc(ctx),
+            ctx,
         )?;
         require_material(
             self.get_operand_input(ctx),
@@ -142,7 +201,7 @@ impl Verify for AssembleOp {
 #[pliron_op(
     name = "protocol.transform",
     format,
-    attributes = (host: StringAttr),
+    attributes = (host: StringAttr, transformation_replicates: IntegerAttr),
     operands = (construct: MaterialType, cells: MaterialType),
     results = (culture: MaterialType)
 )]
@@ -150,7 +209,13 @@ impl Verify for AssembleOp {
 pub struct TransformOp;
 
 impl TransformOp {
-    pub fn new(ctx: &mut Context, construct: Value, cells: Value, host: impl Into<String>) -> Self {
+    pub fn new(
+        ctx: &mut Context,
+        construct: Value,
+        cells: Value,
+        host: impl Into<String>,
+        replicates: u8,
+    ) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
@@ -162,6 +227,7 @@ impl TransformOp {
             ),
         };
         result.set_attr_host(ctx, StringAttr::new(host.into()));
+        result.set_attr_transformation_replicates(ctx, u32_attr(ctx, replicates.into()));
         result
     }
 }
@@ -169,6 +235,12 @@ impl TransformOp {
 impl Verify for TransformOp {
     fn verify(&self, ctx: &Context) -> Result<()> {
         require_attr(self.get_attr_host(ctx).is_some(), "host", self.loc(ctx))?;
+        require_count(
+            self.get_attr_transformation_replicates(ctx).as_deref(),
+            "transformation_replicates",
+            self.loc(ctx),
+            ctx,
+        )?;
         require_material(
             self.get_operand_construct(ctx),
             MaterialType::CircularDna,
@@ -193,6 +265,7 @@ impl Verify for TransformOp {
 #[pliron_op(
     name = "protocol.recover",
     format,
+    attributes = (recovery_duration_magnitude: StringAttr, recovery_duration_unit: StringAttr),
     operands = (culture: MaterialType),
     results = (recovered: MaterialType)
 )]
@@ -200,8 +273,13 @@ impl Verify for TransformOp {
 pub struct RecoverOp;
 
 impl RecoverOp {
-    pub fn new(ctx: &mut Context, culture: Value) -> Self {
-        Self {
+    pub fn new(
+        ctx: &mut Context,
+        culture: Value,
+        duration_magnitude: impl Into<String>,
+        duration_unit: impl Into<String>,
+    ) -> Self {
+        let result = Self {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
@@ -210,12 +288,26 @@ impl RecoverOp {
                 vec![],
                 0,
             ),
-        }
+        };
+        result
+            .set_attr_recovery_duration_magnitude(ctx, StringAttr::new(duration_magnitude.into()));
+        result.set_attr_recovery_duration_unit(ctx, StringAttr::new(duration_unit.into()));
+        result
     }
 }
 
 impl Verify for RecoverOp {
     fn verify(&self, ctx: &Context) -> Result<()> {
+        require_nonempty_string(
+            self.get_attr_recovery_duration_magnitude(ctx).as_deref(),
+            "recovery_duration_magnitude",
+            self.loc(ctx),
+        )?;
+        require_nonempty_string(
+            self.get_attr_recovery_duration_unit(ctx).as_deref(),
+            "recovery_duration_unit",
+            self.loc(ctx),
+        )?;
         require_material(
             self.get_operand_culture(ctx),
             MaterialType::TransformedCulture,
@@ -225,6 +317,117 @@ impl Verify for RecoverOp {
         require_material(
             self.get_result_recovered(ctx),
             MaterialType::RecoveredCulture,
+            self.loc(ctx),
+            ctx,
+        )
+    }
+}
+
+#[pliron_op(
+    name = "protocol.dilute",
+    format,
+    attributes = (serial_dilutions: IntegerAttr),
+    operands = (culture: MaterialType),
+    results = (diluted: MaterialType)
+)]
+/// Apply a selected serial-dilution procedure to recovered culture.
+pub struct DiluteOp;
+
+impl DiluteOp {
+    pub fn new(ctx: &mut Context, culture: Value, serial_dilutions: u8) -> Self {
+        let result = Self {
+            op: Operation::new(
+                ctx,
+                Self::get_concrete_op_info(),
+                vec![MaterialType::DilutedCulture.get(ctx)],
+                vec![culture],
+                vec![],
+                0,
+            ),
+        };
+        result.set_attr_serial_dilutions(ctx, u32_attr(ctx, serial_dilutions.into()));
+        result
+    }
+}
+
+impl Verify for DiluteOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        require_count(
+            self.get_attr_serial_dilutions(ctx).as_deref(),
+            "serial_dilutions",
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_material(
+            self.get_operand_culture(ctx),
+            MaterialType::RecoveredCulture,
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_material(
+            self.get_result_diluted(ctx),
+            MaterialType::DilutedCulture,
+            self.loc(ctx),
+            ctx,
+        )
+    }
+}
+
+#[pliron_op(
+    name = "protocol.plate",
+    format,
+    attributes = (plating_selection: StringAttr, plating_replicates: IntegerAttr),
+    operands = (culture: MaterialType),
+    results = (plate: MaterialType)
+)]
+/// Plate diluted culture under the selected antibiotic condition.
+pub struct PlateOp;
+
+impl PlateOp {
+    pub fn new(
+        ctx: &mut Context,
+        culture: Value,
+        selection: impl Into<String>,
+        replicates: u8,
+    ) -> Self {
+        let result = Self {
+            op: Operation::new(
+                ctx,
+                Self::get_concrete_op_info(),
+                vec![MaterialType::SelectionPlate.get(ctx)],
+                vec![culture],
+                vec![],
+                0,
+            ),
+        };
+        result.set_attr_plating_selection(ctx, StringAttr::new(selection.into()));
+        result.set_attr_plating_replicates(ctx, u32_attr(ctx, replicates.into()));
+        result
+    }
+}
+
+impl Verify for PlateOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        require_nonempty_string(
+            self.get_attr_plating_selection(ctx).as_deref(),
+            "plating_selection",
+            self.loc(ctx),
+        )?;
+        require_count(
+            self.get_attr_plating_replicates(ctx).as_deref(),
+            "plating_replicates",
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_material(
+            self.get_operand_culture(ctx),
+            MaterialType::DilutedCulture,
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_material(
+            self.get_result_plate(ctx),
+            MaterialType::SelectionPlate,
             self.loc(ctx),
             ctx,
         )
@@ -401,4 +604,63 @@ impl Verify for PurifyOp {
             ctx,
         )
     }
+}
+
+fn string_vec(values: Vec<String>) -> VecAttr {
+    VecAttr::new(
+        values
+            .into_iter()
+            .map(|value| StringAttr::new(value).into())
+            .collect(),
+    )
+}
+
+fn require_nonempty_string(
+    value: Option<&StringAttr>,
+    name: &str,
+    location: pliron::location::Location,
+) -> Result<()> {
+    if value.is_none_or(|value| value.as_str().is_empty()) {
+        return pliron::verify_err!(
+            location,
+            "protocol operation requires non-empty attribute {name}"
+        );
+    }
+    Ok(())
+}
+
+fn require_string_vec(
+    value: Option<&VecAttr>,
+    name: &str,
+    location: pliron::location::Location,
+) -> Result<()> {
+    let Some(value) = value else {
+        return pliron::verify_err!(location, "protocol operation is missing attribute {name}");
+    };
+    if value.0.iter().any(|item: &AttrObj| {
+        item.downcast_ref::<StringAttr>()
+            .is_none_or(|value| value.as_str().is_empty())
+    }) {
+        return pliron::verify_err!(
+            location,
+            "protocol attribute {name} must contain only non-empty strings"
+        );
+    }
+    Ok(())
+}
+
+fn require_count(
+    value: Option<&IntegerAttr>,
+    name: &str,
+    location: pliron::location::Location,
+    ctx: &Context,
+) -> Result<()> {
+    let Some(value) = value else {
+        return pliron::verify_err!(location, "protocol operation is missing attribute {name}");
+    };
+    verify_u32_attr(value, name, location.clone(), ctx)?;
+    if u32_value(value) == 0 {
+        return pliron::verify_err!(location, "protocol attribute {name} must be non-zero");
+    }
+    Ok(())
 }

@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::backend::opentrons_ot2::Ot2ExecutionPlan;
+use crate::backend::opentrons_ot2::plan::Ot2ExecutionPlan;
 
 pub(in crate::backend::opentrons_ot2) fn render_manual_protocol(
     manifest: &Ot2ExecutionPlan,

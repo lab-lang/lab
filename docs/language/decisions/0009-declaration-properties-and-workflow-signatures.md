@@ -19,10 +19,10 @@ Workflow parameters and results form a mandatory callable signature in the decla
 ```lab
 workflow realize_reporter(
   carrier: Material<Plasmid>,
-) -> BuiltArtifact:
+) -> Material<Plasmid>:
 ```
 
-Parentheses are required even when a workflow has no parameters, and every workflow declares one result type after `->`. `input` and `output` remain circuit-port syntax; they are not statements at the beginning of a workflow body.
+Parentheses are required even when a workflow has no parameters, and every workflow declares its results after `->`. A result may be one type or, as accepted in [0012](0012-named-workflow-results.md), a parenthesized list of named typed fields. `input` and `output` remain circuit-port syntax; they are not statements at the beginning of a workflow body.
 
 ## Consequences
 

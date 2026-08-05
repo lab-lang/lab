@@ -1,75 +1,52 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ops::{Deref, DerefMut};
+
+mod context;
+mod interface;
+
+use context::{CircuitSignature, DataSignature, SemanticContext, WorkflowSignature};
+use interface::build_interface;
 
 use crate::ast::*;
 use crate::checked::*;
 use crate::semantic_error::SemanticError;
+use crate::semantics::{DefinitionId, ModuleId, SemanticEnvironment};
 use crate::source::Span;
-use crate::standard_library::{
-    ActionContractSpec, ContractType, PhrasePart, PureFunctionSpec, StandardLibrary, StandardModule,
-};
+use crate::standard_library::{ActionContractSpec, ConstructorSpec, ContractType, PhrasePart};
 use crate::type_system::{
-    Ty, common_type, comparable, compatible, satisfies_bound, substitute, to_checked_type, unify,
+    Ty, common_type, comparable, compatible, substitute, to_checked_type, unify,
 };
 
-pub(crate) fn check_module(module: &Module) -> Result<CheckedModule, SemanticError> {
-    Checker::new().check(module)
-}
-
-#[derive(Clone)]
-struct CircuitSignature {
-    parameters: Vec<String>,
-    bounds: HashMap<String, Ty>,
-    inputs: Vec<Ty>,
-    output: Ty,
-}
-
-#[derive(Clone)]
-struct DataSignature {
-    kind: DataKind,
-    fields: BTreeMap<String, Ty>,
-    cases: BTreeMap<String, BTreeMap<String, Ty>>,
-}
-
-#[derive(Clone)]
-struct WorkflowSignature {
-    inputs: Vec<Ty>,
-    output: Ty,
+pub(crate) fn check_module(
+    module_id: ModuleId,
+    environment: &SemanticEnvironment,
+    module: &Module,
+) -> Result<CheckedModule, SemanticError> {
+    Checker::new(module_id, environment.clone()).check(module)
 }
 
 struct Checker {
-    standard_library: StandardLibrary,
-    known_types: BTreeSet<String>,
-    imports: BTreeSet<String>,
-    imported_names: HashMap<String, String>,
-    values: HashMap<String, Ty>,
-    pure_functions: HashMap<String, PureFunctionSpec>,
-    actions: HashMap<String, ActionContractSpec>,
-    circuits: HashMap<String, CircuitSignature>,
-    data: HashMap<String, DataSignature>,
-    cases: HashMap<String, String>,
-    event_types: BTreeSet<String>,
-    workflows: HashMap<String, WorkflowSignature>,
+    context: SemanticContext,
+}
+
+impl Deref for Checker {
+    type Target = SemanticContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.context
+    }
+}
+
+impl DerefMut for Checker {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.context
+    }
 }
 
 impl Checker {
-    fn new() -> Self {
-        let known_types = ["Bool", "Decimal", "Integer", "List", "None", "String"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
+    fn new(module_id: ModuleId, provided_modules: SemanticEnvironment) -> Self {
         Self {
-            standard_library: StandardLibrary::bundled(),
-            known_types,
-            imports: BTreeSet::new(),
-            imported_names: HashMap::new(),
-            values: HashMap::new(),
-            pure_functions: HashMap::new(),
-            actions: HashMap::new(),
-            circuits: HashMap::new(),
-            data: HashMap::new(),
-            cases: HashMap::new(),
-            event_types: BTreeSet::new(),
-            workflows: HashMap::new(),
+            context: SemanticContext::new(module_id, provided_modules),
         }
     }
 
@@ -102,13 +79,21 @@ impl Checker {
             }
         }
 
+        let interface = build_interface(&self.module_id, &declarations);
         Ok(CheckedModule {
+            schema_version: PORTABLE_MODULE_SCHEMA_VERSION.to_owned(),
+            module: self.module_id.clone(),
+            interface,
             imports: self
                 .imports
                 .iter()
                 .map(|module| ResolvedImport {
                     module: module.clone(),
-                    provider: "builtin-standard-library".to_owned(),
+                    provider: self
+                        .import_providers
+                        .get(module)
+                        .cloned()
+                        .unwrap_or_else(|| "builtin-standard-library".to_owned()),
                 })
                 .collect(),
             declarations,
@@ -130,75 +115,18 @@ impl Checker {
                 continue;
             };
             let path = path_text(&import.path);
-            let standard = self
-                .standard_library
-                .module(&path)
-                .cloned()
-                .ok_or_else(|| {
-                    SemanticError::new(import.span, format!("module '{path}' cannot be resolved"))
-                })?;
-            self.insert_import(standard.path, import.span)?;
-            self.register_standard_module(standard, import.span)?;
-        }
-        Ok(())
-    }
-
-    fn register_standard_module(
-        &mut self,
-        module: StandardModule,
-        span: Span,
-    ) -> Result<(), SemanticError> {
-        for name in module.types {
-            if !self.known_types.insert(name.to_owned()) {
+            if let Some(standard) = self.standard_library.module(&path).cloned() {
+                self.insert_import(standard.path, "builtin-standard-library", import.span)?;
+                self.register_standard_module(standard, import.span)?;
+            } else if let Some(interface) = self.provided_modules.module(&path).cloned() {
+                self.insert_import(&path, "package", import.span)?;
+                self.register_module_interface(&interface, import.span)?;
+            } else {
                 return Err(SemanticError::new(
-                    span,
-                    format!("imported type '{name}' is ambiguous"),
+                    import.span,
+                    format!("module '{path}' cannot be resolved"),
                 ));
             }
-        }
-        for (name, ty) in module.values {
-            self.insert_imported_name(module.path, name, span)?;
-            self.values.insert(name.to_owned(), ty);
-        }
-        for function in module.functions {
-            self.insert_imported_name(module.path, function.name, span)?;
-            self.pure_functions
-                .insert(function.name.to_owned(), function);
-        }
-        for action in module.actions {
-            let name = action
-                .source_name()
-                .expect("catalog validation guarantees an action source name");
-            self.insert_imported_name(module.path, name, span)?;
-            self.actions.insert(name.to_owned(), action);
-        }
-        Ok(())
-    }
-
-    fn insert_imported_name(
-        &mut self,
-        module: &str,
-        name: &str,
-        span: Span,
-    ) -> Result<(), SemanticError> {
-        if let Some(previous) = self
-            .imported_names
-            .insert(name.to_owned(), module.to_owned())
-        {
-            return Err(SemanticError::new(
-                span,
-                format!("imported name '{name}' is ambiguous between '{previous}' and '{module}'"),
-            ));
-        }
-        Ok(())
-    }
-
-    fn insert_import(&mut self, path: &str, span: Span) -> Result<(), SemanticError> {
-        if !self.imports.insert(path.to_owned()) {
-            return Err(SemanticError::new(
-                span,
-                format!("module '{path}' is imported more than once"),
-            ));
         }
         Ok(())
     }
@@ -308,10 +236,10 @@ impl Checker {
                         .iter()
                         .map(|field| self.lower_type(&field.ty, &BTreeSet::new()))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let output = self.lower_type(&declaration.output, &BTreeSet::new())?;
+                    let outputs = self.lower_workflow_outputs(&declaration.outputs)?;
                     self.workflows.insert(
                         declaration.name.value.clone(),
-                        WorkflowSignature { inputs, output },
+                        WorkflowSignature { inputs, outputs },
                     );
                 }
                 Item::Plasmid(declaration) => {
@@ -340,6 +268,36 @@ impl Checker {
             }
         }
         Ok(result)
+    }
+
+    fn lower_workflow_outputs(
+        &self,
+        outputs: &WorkflowOutputs,
+    ) -> Result<Vec<(String, Ty)>, SemanticError> {
+        match outputs {
+            WorkflowOutputs::Single { ty } => Ok(vec![(
+                "outcome".to_owned(),
+                self.lower_type(ty, &BTreeSet::new())?,
+            )]),
+            WorkflowOutputs::Named { fields } => {
+                let mut names = BTreeSet::new();
+                fields
+                    .iter()
+                    .map(|field| {
+                        if !names.insert(field.name.value.clone()) {
+                            return Err(SemanticError::new(
+                                field.name.span,
+                                format!("duplicate workflow result '{}'", field.name.value),
+                            ));
+                        }
+                        Ok((
+                            field.name.value.clone(),
+                            self.lower_type(&field.ty, &BTreeSet::new())?,
+                        ))
+                    })
+                    .collect()
+            }
+        }
     }
 
     fn check_circuit(
@@ -421,14 +379,14 @@ impl Checker {
             matches!(member, PlasmidMember::Property(property) if property.name.value == "sequence")
         });
         let mut environment = self.values.clone();
-        environment.extend([
-            ("topology".to_owned(), Ty::named("Topology")),
-            ("length".to_owned(), Ty::Quantity("bp".to_owned())),
-            ("sequence".to_owned(), Ty::named("DNA")),
-            ("concentration".to_owned(), Ty::Quantity("ng/uL".to_owned())),
-            ("volume".to_owned(), Ty::Quantity("uL".to_owned())),
-            ("design".to_owned(), Ty::named("Plasmid")),
-        ]);
+        environment.extend(
+            self.standard_types
+                .get("Plasmid")
+                .expect("the bundled prelude defines Plasmid")
+                .fields
+                .iter()
+                .map(|(name, ty)| ((*name).to_owned(), ty.clone())),
+        );
         let mut properties = Vec::new();
         let mut property_names = BTreeSet::new();
         let mut requirements = Vec::new();
@@ -572,7 +530,7 @@ impl Checker {
         let checked = self.check_block(
             &declaration.body[body_start..],
             &environment,
-            &signature.output,
+            &signature.outputs,
             &state_types,
         )?;
         if !checked.terminates
@@ -584,7 +542,7 @@ impl Checker {
             return Err(SemanticError::new(
                 declaration.span,
                 format!(
-                    "workflow '{}' may finish without returning an outcome",
+                    "workflow '{}' may finish without returning its declared results",
                     declaration.name.value
                 ),
             ));
@@ -597,7 +555,11 @@ impl Checker {
                 .zip(&signature.inputs)
                 .map(|(field, ty)| checked_field(&field.name.value, ty))
                 .collect(),
-            output: to_checked_type(&signature.output),
+            outputs: signature
+                .outputs
+                .iter()
+                .map(|(name, ty)| checked_field(name, ty))
+                .collect(),
             state,
             body: checked.statements,
         })
@@ -607,7 +569,7 @@ impl Checker {
         &self,
         statements: &[Stmt],
         starting_environment: &HashMap<String, Ty>,
-        output: &Ty,
+        outputs: &[(String, Ty)],
         state_types: &HashMap<String, Ty>,
     ) -> Result<CheckedBlock, SemanticError> {
         let mut environment = starting_environment.clone();
@@ -679,28 +641,49 @@ impl Checker {
                     checked.push(CheckedStatement::Effect { results, action });
                 }
                 Stmt::Return(statement) => {
-                    let ty = self.infer_expr(&statement.value, &environment)?;
-                    if !compatible(&ty, output) {
+                    if statement.values.len() != outputs.len() {
                         return Err(SemanticError::new(
-                            statement.value.span(),
-                            format!("workflow returns {ty}, expected {output}"),
+                            statement.span,
+                            format!(
+                                "workflow returns {} value(s), expected {}",
+                                statement.values.len(),
+                                outputs.len()
+                            ),
                         ));
                     }
-                    checked.push(CheckedStatement::Return {
-                        value: self.lower_checked_expr(
-                            &statement.value,
-                            &environment,
-                            Some(&ty),
-                        )?,
-                    });
+                    let values = statement
+                        .values
+                        .iter()
+                        .zip(outputs)
+                        .map(|(value, (name, expected))| {
+                            let actual = self.infer_expr(value, &environment)?;
+                            if !compatible(&actual, expected) {
+                                return Err(SemanticError::new(
+                                    value.span(),
+                                    format!(
+                                        "workflow result '{name}' has type {actual}, expected {expected}"
+                                    ),
+                                ));
+                            }
+                            Ok(CheckedFieldValue {
+                                name: name.clone(),
+                                value: self.lower_checked_expr(
+                                    value,
+                                    &environment,
+                                    Some(&actual),
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, SemanticError>>()?;
+                    checked.push(CheckedStatement::Return { values });
                     terminates = true;
                 }
                 Stmt::If(statement) => {
                     self.require_bool(&statement.condition, &environment, "if")?;
                     let then_block =
-                        self.check_block(&statement.then_body, &environment, output, state_types)?;
+                        self.check_block(&statement.then_body, &environment, outputs, state_types)?;
                     let else_block =
-                        self.check_block(&statement.else_body, &environment, output, state_types)?;
+                        self.check_block(&statement.else_body, &environment, outputs, state_types)?;
                     if !statement.else_body.is_empty()
                         && then_block.terminates
                         && else_block.terminates
@@ -741,7 +724,7 @@ impl Checker {
                             self.require_bool(guard, &environment, "case guard")?;
                         }
                         let block =
-                            self.check_block(&case.body, &environment, output, state_types)?;
+                            self.check_block(&case.body, &environment, outputs, state_types)?;
                         if !block.terminates {
                             continuing_environments.push(block.environment.clone());
                         }
@@ -801,7 +784,7 @@ impl Checker {
                     let mut loop_environment = environment.clone();
                     loop_environment.insert(statement.binding.value.clone(), element.clone());
                     let body =
-                        self.check_block(&statement.body, &loop_environment, output, state_types)?;
+                        self.check_block(&statement.body, &loop_environment, outputs, state_types)?;
                     checked.push(CheckedStatement::For {
                         binding: checked_field(&statement.binding.value, &element),
                         iterable: self.lower_checked_expr(
@@ -839,7 +822,7 @@ impl Checker {
                         },
                     };
                     let body =
-                        self.check_block(&statement.body, &environment, output, state_types)?;
+                        self.check_block(&statement.body, &environment, outputs, state_types)?;
                     checked.push(CheckedStatement::When {
                         trigger,
                         body: body.statements,
@@ -959,7 +942,7 @@ impl Checker {
                 ));
             }
         }
-        let results = vec![signature.output.clone()];
+        let results = signature.outputs.iter().map(|(_, ty)| ty.clone()).collect();
         let arguments = words[1..]
             .iter()
             .zip(&signature.inputs)
@@ -972,7 +955,7 @@ impl Checker {
                     } else {
                         OwnershipMode::Copy
                     },
-                    value: action_reference(word, ty),
+                    value: action_reference(self.definition_for_action_word(word), word, ty),
                 })
             })
             .collect::<Result<Vec<_>, SemanticError>>()?;
@@ -981,7 +964,11 @@ impl Checker {
                 operation: format!("workflow.{operation}"),
                 capability: None,
                 arguments,
-                results: vec![checked_field("outcome", &signature.output)],
+                results: signature
+                    .outputs
+                    .iter()
+                    .map(|(name, ty)| checked_field(name, ty))
+                    .collect(),
             },
             results,
         ))
@@ -1043,7 +1030,11 @@ impl Checker {
                     arguments.push(CheckedActionArgument {
                         name: (*name).to_owned(),
                         mode: *mode,
-                        value: action_reference(word, &actual),
+                        value: action_reference(
+                            self.definition_for_action_word(word),
+                            word,
+                            &actual,
+                        ),
                     });
                     cursor += 1;
                 }
@@ -1204,6 +1195,7 @@ impl Checker {
         let ty = expected.unwrap_or(&inferred);
         let value = match expression {
             Expr::Path(path) => CheckedExpression::Reference {
+                definition: self.definition_for_path(path),
                 path: path
                     .segments
                     .iter()
@@ -1271,8 +1263,10 @@ impl Checker {
                     format!("outcome.{parent}.{name}")
                 } else if self.data.contains_key(&name) {
                     format!("data.{name}")
+                } else if let Some(spec) = self.constructors.get(&name) {
+                    spec.operation.to_owned()
                 } else {
-                    format!("std.outcome.{name}")
+                    name
                 };
                 CheckedExpression::Construct {
                     constructor,
@@ -1471,7 +1465,7 @@ impl Checker {
                         format!("could not infer circuit type parameter '{parameter}'"),
                     )
                 })?;
-                if !satisfies_bound(inferred, bound) {
+                if !self.satisfies_bound(inferred, bound) {
                     return Err(SemanticError::new(
                         span,
                         format!(
@@ -1549,32 +1543,10 @@ impl Checker {
         } else if let Some(signature) = self.data.get(&name) {
             self.check_constructor_fields(&name, fields, &signature.fields, environment, span)?;
             Ty::named(&name)
-        } else if name == "Accepted" || name == "Rejected" {
-            let evidence_type = Ty::Union(
-                std::iter::once(Ty::named("Evidence"))
-                    .chain(
-                        self.data
-                            .iter()
-                            .filter(|(_, signature)| {
-                                matches!(signature.kind, DataKind::Observation | DataKind::Evidence)
-                            })
-                            .map(|(name, _)| Ty::named(name)),
-                    )
-                    .collect(),
-            );
-            let mut expected = BTreeMap::from([
-                ("material".to_owned(), Ty::material(Ty::named("Plasmid"))),
-                ("evidence".to_owned(), Ty::List(Box::new(evidence_type))),
-            ]);
-            if name == "Rejected" {
-                expected.insert(
-                    "material".to_owned(),
-                    Ty::Union(vec![Ty::material(Ty::named("Plasmid")), Ty::None]),
-                );
-                expected.insert("reason".to_owned(), Ty::named("Reason"));
-            }
+        } else if let Some(constructor) = self.constructors.get(&name) {
+            let expected = self.constructor_fields(constructor);
             self.check_constructor_fields(&name, fields, &expected, environment, span)?;
-            Ty::Named(name, vec![Ty::named("Plasmid")])
+            constructor.result.clone()
         } else {
             return Err(SemanticError::new(
                 span,
@@ -1582,6 +1554,34 @@ impl Checker {
             ));
         };
         Ok(result)
+    }
+
+    fn constructor_fields(&self, constructor: &ConstructorSpec) -> BTreeMap<String, Ty> {
+        constructor
+            .fields
+            .iter()
+            .map(|(name, ty)| {
+                let ty = if matches!(ty, Ty::List(element) if **element == Ty::named("Evidence")) {
+                    let evidence = std::iter::once(Ty::named("Evidence"))
+                        .chain(
+                            self.data
+                                .iter()
+                                .filter(|(_, signature)| {
+                                    matches!(
+                                        signature.kind,
+                                        DataKind::Observation | DataKind::Evidence
+                                    )
+                                })
+                                .map(|(name, _)| Ty::named(name)),
+                        )
+                        .collect();
+                    Ty::List(Box::new(Ty::Union(evidence)))
+                } else {
+                    ty.clone()
+                };
+                ((*name).to_owned(), ty)
+            })
+            .collect()
     }
 
     fn check_constructor_fields(
@@ -1663,16 +1663,11 @@ impl Checker {
                         .find_map(|fields| fields.get(field).cloned())
                 })
             }
-            (Ty::Named(name, _), "isolated") if name == "ColonyMap" => Some(Ty::named("Colonies")),
-            (Ty::Named(name, _), "count") if name == "Colonies" => Some(Ty::Integer),
-            (Ty::Named(name, _), "clones") if name == "Screening" => Some(Ty::named("CloneSet")),
-            (Ty::Named(name, _), "highest_confidence") if name == "CloneSet" => {
-                Some(Ty::material(Ty::named("Clone")))
-            }
-            (Ty::Named(name, _), "elapsed") if name == "WorkflowContext" => {
-                Some(Ty::named("Duration"))
-            }
-            (Ty::Named(name, _), "sequence") if name == "Plasmid" => Some(Ty::named("DNA")),
+            (Ty::Named(name, _), field) => self
+                .standard_types
+                .get(name)
+                .and_then(|spec| spec.fields.get(field))
+                .cloned(),
             _ => None,
         };
         result.ok_or_else(|| {
@@ -1772,11 +1767,7 @@ impl Checker {
                     .iter()
                     .map(|argument| self.lower_type(argument, generics))
                     .collect::<Result<Vec<_>, _>>()?;
-                let expected_arity = match name.as_str() {
-                    "Accepted" | "CDS" | "List" | "Material" | "Promoter" | "Rejected" => Some(1),
-                    "Circuit" => Some(2),
-                    _ => None,
-                };
+                let expected_arity = self.standard_types.get(&name).map(|spec| spec.parameters);
                 if let Some(expected) = expected_arity
                     && arguments.len() != expected
                 {
@@ -1804,6 +1795,23 @@ impl Checker {
                     .collect::<Result<Vec<_>, _>>()?,
             )),
         }
+    }
+
+    fn satisfies_bound(&self, actual: &Ty, bound: &Ty) -> bool {
+        if compatible(actual, bound) {
+            return true;
+        }
+        let (Ty::Named(actual, actual_arguments), Ty::Named(bound, bound_arguments)) =
+            (actual, bound)
+        else {
+            return false;
+        };
+        actual_arguments.is_empty()
+            && bound_arguments.is_empty()
+            && self
+                .standard_types
+                .get(actual)
+                .is_some_and(|spec| spec.implements.contains(&bound.as_str()))
     }
 }
 
@@ -1840,10 +1848,11 @@ fn resolve_contract_type(
     }
 }
 
-fn action_reference(path: &str, ty: &Ty) -> TypedExpression {
+fn action_reference(definition: DefinitionId, path: &str, ty: &Ty) -> TypedExpression {
     TypedExpression {
         r#type: to_checked_type(ty),
         value: CheckedExpression::Reference {
+            definition,
             path: path.split('.').map(str::to_owned).collect(),
         },
     }
@@ -1974,7 +1983,8 @@ fn promote_common_bindings(
 #[cfg(test)]
 mod tests {
     use crate::checker::*;
-    use crate::compile_module;
+    use crate::standard_library::{PureFunctionSpec, StandardModule};
+    use crate::{compile_module, compile_module_in_environment, compile_module_with_id};
 
     #[test]
     fn compiles_representative_design_module() {
@@ -1987,6 +1997,30 @@ mod tests {
                 .declarations
                 .iter()
                 .any(|declaration| matches!(declaration, CheckedDeclaration::Plasmid { .. }))
+        );
+    }
+
+    #[test]
+    fn emits_stable_module_interfaces_and_resolved_definition_ids() {
+        let module = compile_module_with_id(
+            ModuleId::new("reporter.design"),
+            "use std.bio.parts\n\nreporter = sfGFP\n",
+        )
+        .unwrap();
+        assert_eq!(module.module.as_str(), "reporter.design");
+        assert_eq!(
+            module.interface.exports["reporter"].definition,
+            DefinitionId::exported("reporter.design", "reporter")
+        );
+        let CheckedDeclaration::Binding(binding) = &module.declarations[0] else {
+            panic!("expected binding")
+        };
+        let CheckedExpression::Reference { definition, .. } = &binding.value.value else {
+            panic!("expected resolved reference")
+        };
+        assert_eq!(
+            definition,
+            &DefinitionId::exported("std.bio.parts", "sfGFP")
         );
     }
 
@@ -2060,6 +2094,142 @@ mod tests {
     }
 
     #[test]
+    fn checks_named_workflow_results_and_multi_result_calls() {
+        let module = compile_module(
+            r#"workflow preserve(
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
+  return product, plate
+
+workflow delegate(
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
+  preserved_product, preserved_plate <- preserve product plate
+  return preserved_product, preserved_plate
+"#,
+        )
+        .unwrap();
+
+        let CheckedDeclaration::Workflow { outputs, .. } = &module.declarations[0] else {
+            panic!("expected workflow")
+        };
+        assert_eq!(outputs[0].name, "product");
+        assert_eq!(outputs[1].name, "plate");
+        let callable = module.interface.exports["preserve"]
+            .callable
+            .as_ref()
+            .unwrap();
+        assert_eq!(callable.outputs, *outputs);
+
+        let CheckedDeclaration::Workflow { body, .. } = &module.declarations[1] else {
+            panic!("expected workflow")
+        };
+        let CheckedStatement::Effect { action, .. } = &body[0] else {
+            panic!("expected workflow call")
+        };
+        assert_eq!(action.operation, "workflow.preserve");
+        assert_eq!(action.results[0].name, "product");
+        assert_eq!(action.results[1].name, "plate");
+    }
+
+    #[test]
+    fn rejects_named_workflow_return_arity_and_type_mismatches() {
+        let duplicate = compile_module(
+            r#"workflow invalid() -> (
+  value: Integer,
+  value: String,
+):
+  return 1, "one"
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            duplicate
+                .to_string()
+                .contains("duplicate workflow result 'value'"),
+            "{duplicate}"
+        );
+
+        let arity = compile_module(
+            r#"workflow invalid(product: Material<Plasmid>) -> (
+  product: Material<Plasmid>,
+  count: Integer,
+):
+  return product
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            arity
+                .to_string()
+                .contains("workflow returns 1 value(s), expected 2"),
+            "{arity}"
+        );
+
+        let r#type = compile_module(
+            r#"workflow invalid(product: Material<Plasmid>) -> (
+  product: Material<Plasmid>,
+  count: Integer,
+):
+  return product, "many"
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            r#type
+                .to_string()
+                .contains("workflow result 'count' has type String, expected Integer"),
+            "{type}"
+        );
+    }
+
+    #[test]
+    fn imports_named_workflow_result_interfaces() {
+        let provider = compile_module_with_id(
+            ModuleId::new("tools"),
+            r#"workflow pair(left: Integer, right: String) -> (
+  left: Integer,
+  right: String,
+):
+  return left, right
+"#,
+        )
+        .unwrap();
+        let environment = SemanticEnvironment::new([provider.interface]);
+        let consumer = compile_module_in_environment(
+            ModuleId::new("consumer"),
+            r#"use tools
+
+workflow forward(left: Integer, right: String) -> (
+  left: Integer,
+  right: String,
+):
+  forwarded_left, forwarded_right <- pair left right
+  return forwarded_left, forwarded_right
+"#,
+            &environment,
+        )
+        .unwrap();
+
+        let CheckedDeclaration::Workflow { body, .. } = &consumer.declarations[0] else {
+            panic!("expected workflow")
+        };
+        let CheckedStatement::Effect { action, .. } = &body[0] else {
+            panic!("expected imported workflow call")
+        };
+        assert_eq!(action.results[0].name, "left");
+        assert_eq!(action.results[1].name, "right");
+    }
+
+    #[test]
     fn inventory_constructors_require_their_standard_module() {
         let error = compile_module("J23101 = part(\"J23101\")\n").unwrap_err();
         assert!(
@@ -2071,7 +2241,7 @@ mod tests {
 
     #[test]
     fn imported_standard_modules_reject_ambiguous_exports() {
-        let mut checker = Checker::new();
+        let mut checker = Checker::new(ModuleId::standalone(), SemanticEnvironment::default());
         checker
             .register_standard_module(
                 StandardModule::new("std.first").with_values([("shared", Ty::String)]),

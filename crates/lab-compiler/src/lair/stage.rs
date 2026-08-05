@@ -12,6 +12,8 @@ use pliron::operation::Operation;
 pub enum IrStage {
     /// Target-neutral biological artifact intent expressed only in Design IR.
     Design,
+    /// Target-neutral artifact intent plus explicit Workflow material dataflow.
+    DesignWorkflow,
     /// Target-selected Protocol IR plus the retained Design value it currently consumes.
     TargetSelectedProtocol,
 }
@@ -20,6 +22,7 @@ impl Display for IrStage {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Design => "design",
+            Self::DesignWorkflow => "design-workflow",
             Self::TargetSelectedProtocol => "target-selected-protocol",
         })
     }
@@ -31,9 +34,10 @@ impl FromStr for IrStage {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "design" => Ok(Self::Design),
+            "design-workflow" => Ok(Self::DesignWorkflow),
             "target-selected-protocol" => Ok(Self::TargetSelectedProtocol),
             other => Err(format!(
-                "unknown IR stage '{other}'; expected design or target-selected-protocol"
+                "unknown IR stage '{other}'; expected design, design-workflow, or target-selected-protocol"
             )),
         }
     }
@@ -66,30 +70,35 @@ impl StageContract {
 }
 
 pub(crate) fn detect_stage(context: &Context, module: ModuleOp) -> Result<IrStage, String> {
-    let (design_operations, protocol_operations) = operation_counts(context, module)?;
-    match (design_operations, protocol_operations) {
-        (1, 0) => Ok(IrStage::Design),
-        (1, 1..) => Ok(IrStage::TargetSelectedProtocol),
-        (0, _) => Err("a Lab Compiler module must contain exactly one design operation".into()),
-        (count, _) => Err(format!(
-            "a Lab Compiler module must contain exactly one design operation, found {count}"
-        )),
+    let (design_operations, workflow_operations, protocol_operations) =
+        operation_counts(context, module)?;
+    match (design_operations, workflow_operations, protocol_operations) {
+        (1.., 0, 0) => Ok(IrStage::Design),
+        (1.., 1.., 0) => Ok(IrStage::DesignWorkflow),
+        (1.., 0, 1..) => Ok(IrStage::TargetSelectedProtocol),
+        (0, _, _) => Err("a Lab Compiler module must contain at least one design operation".into()),
+        (_, 1.., 1..) => Err(
+            "Workflow operations must be fully eliminated before the target-selected Protocol boundary"
+                .into(),
+        ),
     }
 }
 
-fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize), String> {
+fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize, usize), String> {
     let block = module
         .get_region(context)
         .deref(context)
         .get_head()
         .ok_or_else(|| "builtin.module has no entry block".to_owned())?;
     let mut design_operations = 0;
+    let mut workflow_operations = 0;
     let mut protocol_operations = 0;
 
     for operation in block.deref(context).iter(context) {
         let op_id = Operation::get_opid(operation, context);
         match op_id.dialect.as_ref() {
             "design" => design_operations += 1,
+            "workflow" => workflow_operations += 1,
             "protocol" => protocol_operations += 1,
             dialect => {
                 return Err(format!(
@@ -98,5 +107,5 @@ fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize
             }
         }
     }
-    Ok((design_operations, protocol_operations))
+    Ok((design_operations, workflow_operations, protocol_operations))
 }

@@ -8,6 +8,20 @@
     ],
     "description": "Create a durable Lab workflow"
   },
+  "Workflow with named results": {
+    "prefix": "workflow results",
+    "body": [
+      "workflow ${1:name}(",
+      "  ${2:source}: ${3:Material<Plasmid>},",
+      ") -> (",
+      "  ${4:product}: ${5:Material<Plasmid>},",
+      "  ${6:plate}: ${7:Material<Plate>},",
+      "):",
+      "  ${0}",
+      "  return ${4:product}, ${6:plate}"
+    ],
+    "description": "Create a durable Lab workflow with named typed results"
+  },
   "Reactive handler": {
     "prefix": "when",
     "body": [

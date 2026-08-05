@@ -122,9 +122,16 @@ pub struct FieldDecl {
 pub struct WorkflowDecl {
     pub name: Identifier,
     pub inputs: Vec<FieldDecl>,
-    pub output: TypeExpr,
+    pub outputs: WorkflowOutputs,
     pub body: Vec<Stmt>,
     pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkflowOutputs {
+    Single { ty: TypeExpr },
+    Named { fields: Vec<FieldDecl> },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -199,7 +206,7 @@ pub struct EffectStmt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ReturnStmt {
-    pub value: Expr,
+    pub values: Vec<Expr>,
     pub span: Span,
 }
 

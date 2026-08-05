@@ -302,13 +302,15 @@ impl<'a> MaterialFlowAnalyzer<'a> {
                         self.introduce_field(&mut flow, result, &statement_location)?;
                     }
                 }
-                CheckedStatement::Return { value } => {
-                    self.use_expression(
-                        &mut flow,
-                        value,
-                        OwnershipMode::Take,
-                        &statement_location,
-                    )?;
+                CheckedStatement::Return { values } => {
+                    for value in values {
+                        self.use_expression(
+                            &mut flow,
+                            &value.value,
+                            OwnershipMode::Take,
+                            &statement_location,
+                        )?;
+                    }
                     self.require_empty(&flow, &statement_location)?;
                     terminated = true;
                 }
@@ -501,7 +503,7 @@ impl<'a> MaterialFlowAnalyzer<'a> {
         location: &str,
     ) -> Result<(), MaterialFlowError> {
         match &expression.value {
-            CheckedExpression::Reference { path } => {
+            CheckedExpression::Reference { path, .. } => {
                 if self.shapes.contains_material(&expression.r#type) {
                     self.use_places(
                         flow,
@@ -668,7 +670,7 @@ impl<'a> MaterialFlowAnalyzer<'a> {
 
 fn expression_path(expression: &TypedExpression) -> Option<Vec<String>> {
     match &expression.value {
-        CheckedExpression::Reference { path } => Some(path.clone()),
+        CheckedExpression::Reference { path, .. } => Some(path.clone()),
         CheckedExpression::Field { subject, field } => {
             let mut path = expression_path(subject)?;
             path.push(field.clone());
@@ -725,6 +727,9 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
     fn rejects_implicit_physical_copying() {
         let sample_type = material("Plasmid");
         let module = CheckedModule {
+            schema_version: PORTABLE_MODULE_SCHEMA_VERSION.to_owned(),
+            module: crate::ModuleId::standalone(),
+            interface: crate::ModuleInterface::empty(crate::ModuleId::standalone()),
             imports: Vec::new(),
             declarations: vec![CheckedDeclaration::Workflow {
                 name: "invalid".to_owned(),
@@ -732,7 +737,10 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
                     name: "sample".to_owned(),
                     r#type: sample_type.clone(),
                 }],
-                output: sample_type.clone(),
+                outputs: vec![CheckedField {
+                    name: "outcome".to_owned(),
+                    r#type: sample_type.clone(),
+                }],
                 state: Vec::new(),
                 body: vec![CheckedStatement::Binding(CheckedBinding {
                     targets: vec![
@@ -748,6 +756,7 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
                     value: TypedExpression {
                         r#type: sample_type,
                         value: CheckedExpression::Reference {
+                            definition: crate::DefinitionId::exported("standalone", "sample"),
                             path: vec!["sample".to_owned()],
                         },
                     },

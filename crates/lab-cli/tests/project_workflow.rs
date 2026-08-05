@@ -53,6 +53,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
+    assert!(project.join("lab.lock").is_file());
 
     let metadata = run(&["metadata", &project_text, "--json"]);
     assert!(metadata.status.success());
@@ -67,7 +68,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
 }
 
 #[test]
-fn package_dependencies_fail_closed_until_the_resolver_exists() {
+fn registry_dependencies_fail_closed_without_being_ignored() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
     let created = run(&["new", &project_text]);
@@ -79,9 +80,7 @@ fn package_dependencies_fail_closed_until_the_resolver_exists() {
 
     let checked = run(&["check", &project_text]);
     assert!(!checked.status.success());
-    assert!(
-        String::from_utf8_lossy(&checked.stderr).contains("no dependency was silently ignored")
-    );
+    assert!(String::from_utf8_lossy(&checked.stderr).contains("not a path dependency"));
 
     std::fs::remove_dir_all(&project).unwrap();
 }

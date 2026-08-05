@@ -32,9 +32,23 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
             CheckedDeclaration::Data { category, name, .. } => {
                 output.push_str(&format!("  - {category} {name}\n"))
             }
-            CheckedDeclaration::Workflow {
-                name, output: ty, ..
-            } => output.push_str(&format!("  - workflow {name} -> {ty}\n")),
+            CheckedDeclaration::Workflow { name, outputs, .. } => {
+                let rendered = if let [result] = outputs.as_slice()
+                    && result.name == "outcome"
+                {
+                    result.r#type.to_string()
+                } else {
+                    format!(
+                        "({})",
+                        outputs
+                            .iter()
+                            .map(|field| format!("{}: {}", field.name, field.r#type))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                output.push_str(&format!("  - workflow {name} -> {rendered}\n"));
+            }
             CheckedDeclaration::Binding(binding) => {
                 output.push_str(&format!(
                     "  - binding {}\n",

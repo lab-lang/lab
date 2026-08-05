@@ -6,7 +6,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | --- | --- | --- | --- | --- | --- |
 | Indented plasmid declaration | yes | yes | yes | portable module | specialized targets |
 | Declarative plasmid properties with `:` | yes | expressions | inferred checked values | `CheckedProperty` | target-dependent |
-| Mandatory workflow `(inputs) -> output` signature | yes | yes | inputs and return | yes | runtime pending |
+| Mandatory workflow `(inputs) -> T` or `-> (name: T, ...)` signature | yes | yes | inputs, result arity, names, and types | yes | runtime pending |
 | Quantity literals | acceptance subset | built-in units | dimension subset | yes | yes |
 | `require` predicates | topology subset | yes | yes | yes | yes |
 | `accept` predicates | sequence/concentration/volume | yes | yes | yes | yes |
@@ -27,7 +27,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Built-in durable operations with `<-` | yes | yes | yes | yes | no |
 | Structured typed expression IR | n/a | yes | yes | yes | no |
 | Action capability and ownership contracts | n/a | built-ins | built-ins | yes | no |
-| `return` and output checking | yes | yes | yes | yes | no |
+| Direct `return value, ...` and result checking | yes | yes | arity and per-result type | named result fields | no |
 | `match` / `case` with continuing-branch bindings | yes | yes | yes | yes | no |
 | `if` / `else` and `for` / `in` | yes | yes | yes | yes | no |
 | `when every` / `when after` | yes | yes | yes | yes | no |
@@ -50,7 +50,7 @@ The target validates fixed reaction volumes and single-plate, rack, and tip capa
 | --- | --- |
 | Source-aware diagnostics | byte-spanned syntax, semantic, and material-flow diagnostics |
 | Parse recovery | one syntax diagnostic; multi-error recovery pending |
-| Outline | top-level declarations plus data fields/cases and workflow inputs |
+| Outline | top-level declarations plus data fields/cases and workflow input/result fields |
 | Completion and hover | keywords and open-document top-level declarations |
 | Definition, references, rename | open documents; name-based fallback pending symbol identities/scopes |
 | Semantic highlighting | parsed declaration kinds before lexical fallback; comments, keywords, strings, numbers, types, functions, values, operators |

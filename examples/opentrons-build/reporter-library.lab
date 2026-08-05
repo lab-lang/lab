@@ -2,10 +2,6 @@ use std.bio.build
 use std.bio.inventory
 use std.lab.plasmid_actions
 
-record BuiltArtifact:
-  product: Material<Plasmid>
-  plate: Material<Plate>
-
 J23101 = part("J23101")
 J23106 = part("J23106")
 B0034 = part("B0034")
@@ -51,7 +47,10 @@ plasmid p_rfp:
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_p_gfp() -> BuiltArtifact:
+workflow realize_p_gfp() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize p_gfp from dependencies
   cells <- provision DH5alpha
@@ -59,9 +58,12 @@ workflow realize_p_gfp() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 
-workflow realize_p_rfp() -> BuiltArtifact:
+workflow realize_p_rfp() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize p_rfp from dependencies
   cells <- provision DH5alpha
@@ -69,4 +71,4 @@ workflow realize_p_rfp() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate

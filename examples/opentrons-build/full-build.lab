@@ -2,10 +2,6 @@ use std.bio.build
 use std.bio.inventory
 use std.lab.plasmid_actions
 
-record BuiltArtifact:
-  product: Material<Plasmid>
-  plate: Material<Plate>
-
 J23101 = part("J23101")
 J23106 = part("J23106")
 B0034 = part("B0034")
@@ -83,7 +79,10 @@ plasmid final_device:
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_promoter_carrier() -> BuiltArtifact:
+workflow realize_promoter_carrier() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize promoter_carrier from dependencies
   cells <- provision DH5alpha
@@ -91,9 +90,12 @@ workflow realize_promoter_carrier() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on ampicillin
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 
-workflow realize_regulator_region() -> BuiltArtifact:
+workflow realize_regulator_region() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize regulator_region from dependencies
   cells <- provision DH5alpha
@@ -101,9 +103,14 @@ workflow realize_regulator_region() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 
-workflow realize_reporter_region(promoter_carrier: Material<Plasmid>) -> BuiltArtifact:
+workflow realize_reporter_region(
+  promoter_carrier: Material<Plasmid>,
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = [promoter_carrier]
   product, construct <- realize reporter_region from dependencies
   cells <- provision DH5alpha
@@ -111,12 +118,15 @@ workflow realize_reporter_region(promoter_carrier: Material<Plasmid>) -> BuiltAr
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 
 workflow realize_final_device(
   reporter_region: Material<Plasmid>,
   regulator_region: Material<Plasmid>,
-) -> BuiltArtifact:
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = [reporter_region, regulator_region]
   product, construct <- realize final_device from dependencies
   cells <- provision DH5alpha
@@ -124,4 +134,4 @@ workflow realize_final_device(
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on kanamycin
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate

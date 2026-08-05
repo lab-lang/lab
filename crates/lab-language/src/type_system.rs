@@ -93,6 +93,25 @@ pub(crate) fn to_checked_type(ty: &Ty) -> CheckedType {
     }
 }
 
+pub(crate) fn from_checked_type(ty: &CheckedType) -> Ty {
+    match ty {
+        CheckedType::Named { name, arguments } => Ty::Named(
+            name.clone(),
+            arguments.iter().map(from_checked_type).collect(),
+        ),
+        CheckedType::Union { alternatives } => {
+            Ty::Union(alternatives.iter().map(from_checked_type).collect())
+        }
+        CheckedType::List { element } => Ty::List(Box::new(from_checked_type(element))),
+        CheckedType::Quantity { unit } => Ty::Quantity(unit.clone()),
+        CheckedType::Integer => Ty::Integer,
+        CheckedType::Decimal => Ty::Decimal,
+        CheckedType::String => Ty::String,
+        CheckedType::Bool => Ty::Bool,
+        CheckedType::None => Ty::None,
+    }
+}
+
 pub(crate) fn compatible(actual: &Ty, expected: &Ty) -> bool {
     if actual == expected || matches!(actual, Ty::EmptyList) && matches!(expected, Ty::List(_)) {
         return true;
@@ -145,23 +164,6 @@ pub(crate) fn comparable(left: &Ty, right: &Ty) -> bool {
     compatible(left, right)
         || compatible(right, left)
         || matches!((left, right), (Ty::Quantity(_), Ty::Quantity(_)))
-}
-
-pub(crate) fn satisfies_bound(actual: &Ty, bound: &Ty) -> bool {
-    compatible(actual, bound)
-        || matches!(
-            (actual, bound),
-            (
-                Ty::Named(actual, arguments),
-                Ty::Named(bound, bound_arguments)
-            ) if arguments.is_empty()
-                && bound_arguments.is_empty()
-                && matches!(
-                    (actual.as_str(), bound.as_str()),
-                    ("Tetracycline", "Signal")
-                        | ("GreenFluorescentProtein", "Protein")
-                )
-        )
 }
 
 pub(crate) fn unify(

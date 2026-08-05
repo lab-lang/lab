@@ -3,5 +3,9 @@
 pub(crate) mod analysis;
 pub(crate) mod dialect;
 pub mod pipeline;
+pub mod program;
 pub mod session;
 pub mod stage;
+
+pub(crate) mod protocol_selection;
+pub(crate) mod source_lowering;

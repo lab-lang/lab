@@ -1,24 +1,18 @@
 //! Dependency-aware OT-2 package composition.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::{ArtifactBundle, ArtifactError};
+use crate::{ArtifactBundle, ArtifactError, ProtocolLairProgram};
 
 use crate::planning::{ArtifactResolution, BuildInventory, DependencyBuildManifest};
-use crate::planning::{BuildGraph, BuildGraphNode, DependencyGraphError, resolve_dependency_graph};
+use crate::planning::{DependencyGraphError, resolve_dependency_graph};
 
-use crate::backend::opentrons_ot2::{Ot2BuildArtifact, Ot2BuildError, Ot2BuildIr, compile_build};
-
-const STANDARD_MATERIALS: [&str; 4] = [
-    "T4_DNA_ligase",
-    "T4_DNA_ligase_buffer",
-    "nuclease_free_water",
-    "recovery_medium",
-];
+use crate::backend::opentrons_ot2::plan::{plan_selected_build, protocol_build_graph};
+use crate::backend::opentrons_ot2::{Ot2BuildError, Ot2Bundle};
 
 #[derive(Clone, Debug)]
 pub struct DependencyBuildBundle {
@@ -61,46 +55,13 @@ pub enum DependencyBuildError {
 /// requirements projected into each graph node and the emitted batches are
 /// owned by this module.
 pub fn compile_dependency_build(
-    build: &Ot2BuildIr,
+    protocol: &ProtocolLairProgram,
     inventory: &BuildInventory,
 ) -> Result<DependencyBuildBundle, DependencyBuildError> {
-    let declared = build
-        .artifacts()
-        .iter()
-        .map(|artifact| (artifact.name().to_owned(), artifact))
-        .collect::<BTreeMap<_, _>>();
-    let graph = BuildGraph {
-        nodes: declared
-            .iter()
-            .map(|(name, artifact)| {
-                let recipe = artifact.build_recipe();
-                let dependencies = artifact
-                    .dependencies
-                    .iter()
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-                let mut required_materials = recipe
-                    .components()
-                    .iter()
-                    .filter(|component| !dependencies.contains(*component))
-                    .cloned()
-                    .collect::<BTreeSet<_>>();
-                required_materials.insert(recipe.backbone().to_owned());
-                required_materials.insert(recipe.restriction_enzyme().to_owned());
-                required_materials.insert(recipe.host().to_owned());
-                required_materials.insert(recipe.selection().to_owned());
-                required_materials.extend(STANDARD_MATERIALS.into_iter().map(str::to_owned));
-                (
-                    name.clone(),
-                    BuildGraphNode {
-                        dependencies,
-                        steps: recipe.steps().to_vec(),
-                        required_materials,
-                    },
-                )
-            })
-            .collect(),
-    };
+    let graph = protocol_build_graph(protocol).map_err(|source| DependencyBuildError::Backend {
+        artifact: "<protocol>".into(),
+        source: Ot2BuildError::Planning(source),
+    })?;
     let manifest = resolve_dependency_graph(&graph, inventory)?;
     let mut scheduled = manifest
         .nodes
@@ -129,12 +90,17 @@ pub fn compile_dependency_build(
     )?;
     let mut instruction_batches = Vec::new();
     for (index, (artifact_name, iteration)) in scheduled.into_iter().enumerate() {
-        let artifact: Ot2BuildArtifact = declared[&artifact_name].clone();
-        let single = Ot2BuildIr::new(vec![artifact]).expect("one target artifact is a build");
-        let automation =
-            compile_build(&single).map_err(|source| DependencyBuildError::Backend {
+        let selected = BTreeSet::from([artifact_name.clone()]);
+        let plan = plan_selected_build(protocol, Some(&selected)).map_err(|source| {
+            DependencyBuildError::Backend {
                 artifact: artifact_name.clone(),
-                source,
+                source: Ot2BuildError::Planning(source),
+            }
+        })?;
+        let automation =
+            Ot2Bundle::from_plan(plan).map_err(|source| DependencyBuildError::Backend {
+                artifact: artifact_name.clone(),
+                source: Ot2BuildError::Emission(source),
             })?;
         let directory = format!("batch-{:03}-{}", index + 1, artifact_name);
         instruction_batches.push((
@@ -335,7 +301,6 @@ fn pretty_json(value: &impl Serialize) -> Result<String, DependencyBuildError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::opentrons_ot2::lower_build;
     use crate::planning::DependencyBuildStatus;
     use lab_language::compile_module;
 
@@ -345,10 +310,6 @@ mod tests {
 use std.bio.build
 use std.bio.inventory
 use std.lab.plasmid_actions
-
-record BuiltArtifact:
-  product: Material<Plasmid>
-  plate: Material<Plate>
 
 terminal_part = part("terminal_part")
 source_part = part("source_part")
@@ -379,7 +340,10 @@ plasmid final_artifact:
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_intermediate() -> BuiltArtifact:
+workflow realize_intermediate() -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = []
   product, construct <- realize intermediate from dependencies
   cells <- provision DH5alpha
@@ -387,9 +351,14 @@ workflow realize_intermediate() -> BuiltArtifact:
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 
-workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifact:
+workflow realize_final_artifact(
+  intermediate: Material<Plasmid>,
+) -> (
+  product: Material<Plasmid>,
+  plate: Material<Plate>,
+):
   dependencies = [intermediate]
   product, construct <- realize final_artifact from dependencies
   cells <- provision DH5alpha
@@ -397,7 +366,7 @@ workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifac
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return BuiltArtifact{product: product, plate: plate}
+  return product, plate
 "#;
 
     fn inventory() -> BuildInventory {
@@ -425,8 +394,12 @@ workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifac
 
     #[test]
     fn derives_graph_waves_and_retries_from_checked_material_dataflow() {
-        let build = lower_build(&compile_module(SOURCE).unwrap()).unwrap();
-        let bundle = compile_dependency_build(&build, &inventory()).unwrap();
+        let checked = compile_module(SOURCE).unwrap();
+        let protocol = crate::PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
+        let bundle = compile_dependency_build(&protocol, &inventory()).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         assert_eq!(bundle.manifest.roots, ["final_artifact"]);
         assert_eq!(
@@ -473,8 +446,12 @@ workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifac
 
     #[test]
     fn reports_missing_leaves_without_silent_success() {
-        let build = lower_build(&compile_module(SOURCE).unwrap()).unwrap();
-        let bundle = compile_dependency_build(&build, &BuildInventory::default()).unwrap();
+        let checked = compile_module(SOURCE).unwrap();
+        let protocol = crate::PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
+        let bundle = compile_dependency_build(&protocol, &BuildInventory::default()).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Partial);
         assert!(bundle.manifest.generated_artifacts.is_empty());
         assert!(bundle.manifest.nodes.iter().any(|node| {
@@ -485,12 +462,16 @@ workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifac
 
     #[test]
     fn reuses_existing_artifacts_without_resolving_their_recipe_leaves() {
-        let build = lower_build(&compile_module(SOURCE).unwrap()).unwrap();
+        let checked = compile_module(SOURCE).unwrap();
+        let protocol = crate::PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
         let mut inventory = inventory();
         inventory.available_artifacts.insert("intermediate".into());
         inventory.available_materials.remove("source_part");
         inventory.available_materials.remove("carrier");
-        let bundle = compile_dependency_build(&build, &inventory).unwrap();
+        let bundle = compile_dependency_build(&protocol, &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         let intermediate = bundle
             .manifest
@@ -512,11 +493,15 @@ workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifac
     #[test]
     fn detects_cycles_from_source_references() {
         let source = SOURCE.replace(
-            "workflow realize_intermediate() -> BuiltArtifact:\n  dependencies = []",
-            "workflow realize_intermediate(final_artifact: Material<Plasmid>) -> BuiltArtifact:\n  dependencies = [final_artifact]",
+            "workflow realize_intermediate() -> (\n  product: Material<Plasmid>,\n  plate: Material<Plate>,\n):\n  dependencies = []",
+            "workflow realize_intermediate(\n  final_artifact: Material<Plasmid>,\n) -> (\n  product: Material<Plasmid>,\n  plate: Material<Plate>,\n):\n  dependencies = [final_artifact]",
         );
-        let build = lower_build(&compile_module(&source).unwrap()).unwrap();
-        let bundle = compile_dependency_build(&build, &inventory()).unwrap();
+        let checked = compile_module(&source).unwrap();
+        let protocol = crate::PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
+        let bundle = compile_dependency_build(&protocol, &inventory()).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Partial);
         assert!(
             bundle
@@ -530,7 +515,7 @@ workflow realize_final_artifact(intermediate: Material<Plasmid>) -> BuiltArtifac
         inventory
             .available_artifacts
             .insert("final_artifact".into());
-        let bundle = compile_dependency_build(&build, &inventory).unwrap();
+        let bundle = compile_dependency_build(&protocol, &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         assert_eq!(
             bundle

@@ -13,6 +13,9 @@ pub use lab_language::{
     parse_module, render_checked_module,
 };
 pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
+pub use lair::program::{
+    PortableLairError, PortableLairProgram, ProtocolLairError, ProtocolLairProgram,
+};
 pub use lair::session::{CompilerSession, SessionError, SessionOptions};
 pub use lair::stage::{IrStage, StageContract};
 pub use planning::{

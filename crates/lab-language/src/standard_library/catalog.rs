@@ -8,11 +8,87 @@ use crate::standard_library::contract::ActionContractSpec;
 use crate::type_system::Ty;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TypeSpec {
+    pub name: &'static str,
+    pub parameters: usize,
+    pub fields: BTreeMap<&'static str, Ty>,
+    pub implements: Vec<&'static str>,
+    pub documentation: &'static str,
+}
+
+impl TypeSpec {
+    pub(crate) fn nominal(name: &'static str) -> Self {
+        Self {
+            name,
+            parameters: 0,
+            fields: BTreeMap::new(),
+            implements: Vec::new(),
+            documentation: "",
+        }
+    }
+
+    pub(crate) fn parameters(mut self, parameters: usize) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    pub(crate) fn with_fields(
+        mut self,
+        fields: impl IntoIterator<Item = (&'static str, Ty)>,
+    ) -> Self {
+        self.fields.extend(fields);
+        self
+    }
+
+    pub(crate) fn implements(mut self, contracts: impl IntoIterator<Item = &'static str>) -> Self {
+        self.implements.extend(contracts);
+        self
+    }
+
+    pub(crate) fn documented(mut self, documentation: &'static str) -> Self {
+        self.documentation = documentation;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PureFunctionSpec {
     pub name: &'static str,
     pub operation: &'static str,
     pub parameters: Vec<Ty>,
     pub result: Ty,
+    pub documentation: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ConstructorSpec {
+    pub name: &'static str,
+    pub operation: &'static str,
+    pub fields: BTreeMap<&'static str, Ty>,
+    pub result: Ty,
+    pub documentation: &'static str,
+}
+
+impl ConstructorSpec {
+    pub(crate) fn new(
+        name: &'static str,
+        operation: &'static str,
+        fields: impl IntoIterator<Item = (&'static str, Ty)>,
+        result: Ty,
+    ) -> Self {
+        Self {
+            name,
+            operation,
+            fields: fields.into_iter().collect(),
+            result,
+            documentation: "",
+        }
+    }
+
+    pub(crate) fn documented(mut self, documentation: &'static str) -> Self {
+        self.documentation = documentation;
+        self
+    }
 }
 
 impl PureFunctionSpec {
@@ -27,7 +103,13 @@ impl PureFunctionSpec {
             operation,
             parameters,
             result,
+            documentation: "",
         }
+    }
+
+    pub(crate) fn documented(mut self, documentation: &'static str) -> Self {
+        self.documentation = documentation;
+        self
     }
 }
 
@@ -35,9 +117,11 @@ impl PureFunctionSpec {
 pub(crate) struct StandardModule {
     pub path: &'static str,
     pub prelude: bool,
-    pub types: Vec<&'static str>,
+    pub documentation: &'static str,
+    pub types: Vec<TypeSpec>,
     pub values: Vec<(&'static str, Ty)>,
     pub functions: Vec<PureFunctionSpec>,
+    pub constructors: Vec<ConstructorSpec>,
     pub actions: Vec<ActionContractSpec>,
 }
 
@@ -46,9 +130,11 @@ impl StandardModule {
         Self {
             path,
             prelude: false,
+            documentation: "",
             types: Vec::new(),
             values: Vec::new(),
             functions: Vec::new(),
+            constructors: Vec::new(),
             actions: Vec::new(),
         }
     }
@@ -60,8 +146,13 @@ impl StandardModule {
         }
     }
 
-    pub(crate) fn with_types(mut self, types: impl IntoIterator<Item = &'static str>) -> Self {
+    pub(crate) fn with_type_specs(mut self, types: impl IntoIterator<Item = TypeSpec>) -> Self {
         self.types.extend(types);
+        self
+    }
+
+    pub(crate) fn documented(mut self, documentation: &'static str) -> Self {
+        self.documentation = documentation;
         self
     }
 
@@ -81,6 +172,14 @@ impl StandardModule {
         self
     }
 
+    pub(crate) fn with_constructors(
+        mut self,
+        constructors: impl IntoIterator<Item = ConstructorSpec>,
+    ) -> Self {
+        self.constructors.extend(constructors);
+        self
+    }
+
     pub(crate) fn with_actions(
         mut self,
         actions: impl IntoIterator<Item = ActionContractSpec>,
@@ -95,17 +194,25 @@ impl StandardModule {
         }
 
         let mut type_names = BTreeSet::new();
-        for name in &self.types {
+        for spec in &self.types {
+            let name = spec.name;
             if !valid_export_name(name) {
                 return Err(CatalogError::InvalidExport {
                     module: self.path.to_owned(),
-                    name: (*name).to_owned(),
+                    name: name.to_owned(),
                 });
             }
-            if !type_names.insert(*name) {
+            if !type_names.insert(name) {
                 return Err(CatalogError::DuplicateType {
                     module: self.path.to_owned(),
-                    name: (*name).to_owned(),
+                    name: name.to_owned(),
+                });
+            }
+            if spec.implements.iter().any(|contract| contract.is_empty()) {
+                return Err(CatalogError::InvalidType {
+                    module: self.path.to_owned(),
+                    name: name.to_owned(),
+                    message: "implemented type names cannot be empty".to_owned(),
                 });
             }
         }
@@ -116,6 +223,7 @@ impl StandardModule {
             .iter()
             .map(|(name, _)| *name)
             .chain(self.functions.iter().map(|function| function.name))
+            .chain(self.constructors.iter().map(|constructor| constructor.name))
             .chain(
                 self.actions
                     .iter()
@@ -141,6 +249,16 @@ impl StandardModule {
                 return Err(CatalogError::InvalidFunction {
                     module: self.path.to_owned(),
                     name: function.name.to_owned(),
+                    message: "operation identity cannot be empty".to_owned(),
+                });
+            }
+        }
+
+        for constructor in &self.constructors {
+            if constructor.operation.is_empty() {
+                return Err(CatalogError::InvalidConstructor {
+                    module: self.path.to_owned(),
+                    name: constructor.name.to_owned(),
                     message: "operation identity cannot be empty".to_owned(),
                 });
             }
@@ -187,6 +305,12 @@ impl StandardLibrary {
                 .functions
                 .iter()
                 .map(|function| function.operation)
+                .chain(
+                    module
+                        .constructors
+                        .iter()
+                        .map(|constructor| constructor.operation),
+                )
                 .chain(module.actions.iter().map(|action| action.operation))
             {
                 if let Some(previous) = operations.insert(operation, module.path) {
@@ -235,6 +359,54 @@ impl StandardLibrary {
             .map(|module| module.path)
             .collect()
     }
+
+    pub(crate) fn render_markdown(&self) -> String {
+        let mut output = String::from("# Lab standard library\n\n");
+        for module in self.modules.values() {
+            output.push_str(&format!("## `{}`\n\n", module.path));
+            if !module.documentation.is_empty() {
+                output.push_str(module.documentation);
+                output.push_str("\n\n");
+            }
+            for spec in &module.types {
+                output.push_str(&format!("- type `{}`", spec.name));
+                if spec.parameters != 0 {
+                    output.push_str(&format!(" ({} type parameter(s))", spec.parameters));
+                }
+                if !spec.implements.is_empty() {
+                    output.push_str(&format!(" implements {}", spec.implements.join(", ")));
+                }
+                if !spec.documentation.is_empty() {
+                    output.push_str(&format!(": {}", spec.documentation));
+                }
+                output.push('\n');
+            }
+            for (name, ty) in &module.values {
+                output.push_str(&format!("- value `{name}: {ty}`\n"));
+            }
+            for function in &module.functions {
+                output.push_str(&format!("- function `{}`", function.name));
+                if !function.documentation.is_empty() {
+                    output.push_str(&format!(": {}", function.documentation));
+                }
+                output.push('\n');
+            }
+            for constructor in &module.constructors {
+                output.push_str(&format!("- constructor `{}`", constructor.name));
+                if !constructor.documentation.is_empty() {
+                    output.push_str(&format!(": {}", constructor.documentation));
+                }
+                output.push('\n');
+            }
+            for action in &module.actions {
+                if let Some(name) = action.source_name() {
+                    output.push_str(&format!("- action `{name}` [{}]\n", action.capability));
+                }
+            }
+            output.push('\n');
+        }
+        output
+    }
 }
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -245,12 +417,24 @@ enum CatalogError {
     DuplicateModule(String),
     #[error("type '{name}' is exported more than once by '{module}'")]
     DuplicateType { module: String, name: String },
+    #[error("invalid type '{name}' in '{module}': {message}")]
+    InvalidType {
+        module: String,
+        name: String,
+        message: String,
+    },
     #[error("name '{name}' is exported more than once by '{module}'")]
     DuplicateExport { module: String, name: String },
     #[error("invalid exported name '{name}' in '{module}'")]
     InvalidExport { module: String, name: String },
     #[error("invalid pure function '{name}' in '{module}': {message}")]
     InvalidFunction {
+        module: String,
+        name: String,
+        message: String,
+    },
+    #[error("invalid constructor '{name}' in '{module}': {message}")]
+    InvalidConstructor {
         module: String,
         name: String,
         message: String,
@@ -302,7 +486,7 @@ mod tests {
     fn bundled_catalog_has_expected_namespaces_and_prelude() {
         let library = StandardLibrary::bundled();
         let prelude = library.module("std.prelude").unwrap();
-        assert!(prelude.types.contains(&"Plasmid"));
+        assert!(prelude.types.iter().any(|spec| spec.name == "Plasmid"));
         assert!(
             prelude
                 .functions
@@ -375,5 +559,14 @@ mod tests {
         let result = StandardLibrary::from_modules([StandardModule::new("std.test")
             .with_functions([PureFunctionSpec::new("broken", "", Vec::new(), Ty::String)])]);
         assert!(matches!(result, Err(CatalogError::InvalidFunction { .. })));
+    }
+
+    #[test]
+    fn renders_reference_docs_from_the_semantic_catalog() {
+        let docs = StandardLibrary::bundled().render_markdown();
+        assert!(docs.contains("## `std.prelude`"));
+        assert!(docs.contains("type `Plasmid`"));
+        assert!(docs.contains("function `dna`"));
+        assert!(docs.contains("action `transform`"));
     }
 }

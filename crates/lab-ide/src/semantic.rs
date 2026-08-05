@@ -75,6 +75,10 @@ pub(crate) fn symbol_from_item(item: &ast::Item) -> DocumentSymbol {
         ast::Item::Workflow(workflow) => workflow
             .inputs
             .iter()
+            .chain(match &workflow.outputs {
+                ast::WorkflowOutputs::Single { .. } => [].as_slice().iter(),
+                ast::WorkflowOutputs::Named { fields } => fields.as_slice().iter(),
+            })
             .map(|field| DocumentSymbol {
                 name: field.name.value.clone(),
                 kind: SymbolKind::Field,

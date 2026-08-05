@@ -17,13 +17,16 @@ checker special cases.
 - `lab/` mirrors the `std.lab.*` namespace, with one registration file per
   standard module.
 
-A `StandardModule` owns all of its exported types, values, pure functions, and
-durable actions. Adding a bundled module means constructing another module
-specification and returning it from the appropriate namespace registrar.
+A `StandardModule` owns all of its exported type specifications, values, pure
+functions, constructors, and durable actions. Type specifications carry
+generic arity, fields, biological conformance relationships, and documentation.
+Adding a bundled module means constructing another module specification and
+returning it from the appropriate namespace registrar.
 Catalog construction rejects duplicate module paths, duplicate exported names,
 duplicate operation identities, and malformed action contracts.
 
-The catalog is deliberately internal while `Ty` is an internal checker type.
-Future compiled packages should provide equivalent checked public contracts,
-then be merged into import scope through a provider boundary rather than by
-adding parser productions or checker match arms.
+`lab_language::standard_library_markdown` renders reference documentation from
+this same catalog, so documentation cannot silently invent a second export
+surface. Compiled packages provide equivalent `ModuleInterface` contracts and
+the project host merges those contracts into import scope through
+`SemanticEnvironment`, without adding parser productions or checker match arms.

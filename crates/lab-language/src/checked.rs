@@ -7,8 +7,15 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
+
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v1";
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
+    pub schema_version: String,
+    pub module: ModuleId,
+    pub interface: ModuleInterface,
     pub imports: Vec<ResolvedImport>,
     pub declarations: Vec<CheckedDeclaration>,
 }
@@ -44,7 +51,7 @@ pub enum CheckedDeclaration {
     Workflow {
         name: String,
         inputs: Vec<CheckedField>,
-        output: CheckedType,
+        outputs: Vec<CheckedField>,
         state: Vec<CheckedState>,
         body: Vec<CheckedStatement>,
     },
@@ -155,6 +162,7 @@ pub struct TypedExpression {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CheckedExpression {
     Reference {
+        definition: DefinitionId,
         path: Vec<String>,
     },
     Integer {
@@ -244,7 +252,7 @@ pub enum CheckedStatement {
         action: ResolvedAction,
     },
     Return {
-        value: TypedExpression,
+        values: Vec<CheckedFieldValue>,
     },
     If {
         condition: TypedExpression,

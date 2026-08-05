@@ -1,6 +1,6 @@
 //! Rendering for standalone typed Opentrons protocol modules.
 
-use crate::backend::opentrons_ot2::{Ot2EmissionError, Ot2ExecutionPlan};
+use crate::backend::opentrons_ot2::plan::{Ot2EmissionError, Ot2ExecutionPlan};
 
 const PLAN_TYPES_SOURCE: &str = include_str!("../python/src/lab_opentrons_ot2/plan_types.py");
 const ASSEMBLY_SOURCE: &str = include_str!("../python/src/lab_opentrons_ot2/protocols/assembly.py");
@@ -128,16 +128,18 @@ fn replace_once(
 mod tests {
     use lab_language::compile_module;
 
-    use crate::backend::opentrons_ot2::lower_build;
-
     use crate::backend::opentrons_ot2::emit::python::*;
 
     #[test]
     fn emitted_protocol_is_standalone_typed_python() {
         let source =
             include_str!("../../../../../../examples/opentrons-build/reporter-library.lab");
-        let build = lower_build(&compile_module(source).unwrap()).unwrap();
-        let plan = crate::backend::opentrons_ot2::plan_build(&build).unwrap();
+        let checked = compile_module(source).unwrap();
+        let protocol = crate::PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
+        let plan = crate::backend::opentrons_ot2::plan_build(&protocol).unwrap();
         let protocol = render_assembly_protocol(&plan).unwrap();
 
         assert!(!protocol.contains("from lab_opentrons_ot2"));

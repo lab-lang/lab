@@ -409,6 +409,7 @@ dependencies = [
  "clap",
  "lab-compiler",
  "lab-package",
+ "lab-project",
  "serde",
  "serde_json",
 ]
@@ -469,6 +470,18 @@ dependencies = [
 name = "lab-package"
 version = "0.1.0"
 dependencies = [
+ "semver",
+ "serde",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "lab-project"
+version = "0.1.0"
+dependencies = [
+ "lab-language",
+ "lab-package",
  "semver",
  "serde",
  "thiserror",

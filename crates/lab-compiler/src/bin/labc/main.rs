@@ -3,11 +3,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use lab_compiler::backend::Backend;
-use lab_compiler::backend::opentrons_ot2::{
-    Ot2Backend, compile_dependency_build, emit_program, lower_build,
-};
+use lab_compiler::backend::opentrons_ot2::{Ot2Backend, compile_dependency_build, emit_program};
 use lab_compiler::planning::BuildInventory;
-use lab_compiler::{compile_module, parse_module, render_checked_module};
+use lab_compiler::{PortableLairProgram, compile_module, parse_module, render_checked_module};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -79,9 +77,15 @@ fn main() -> Result<()> {
     ) {
         let checked = compile_module(&text)
             .with_context(|| format!("failed to check build module {}", cli.source.display()))?;
+        let lair = PortableLairProgram::lower(&checked)
+            .with_context(|| format!("failed to lower LAIR for {}", cli.source.display()))?;
+        let protocol = lair.select_protocol().with_context(|| {
+            format!(
+                "failed to select plasmid-build Protocol LAIR for {}",
+                cli.source.display()
+            )
+        })?;
         if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {
-            let build = lower_build(&checked)
-                .with_context(|| format!("failed to lower OT-2 build {}", cli.source.display()))?;
             let inventory = if let Some(path) = &cli.inventory {
                 let contents = std::fs::read_to_string(path)
                     .with_context(|| format!("failed to read inventory {}", path.display()))?;
@@ -90,7 +94,7 @@ fn main() -> Result<()> {
             } else {
                 BuildInventory::default()
             };
-            let bundle = compile_dependency_build(&build, &inventory).with_context(|| {
+            let bundle = compile_dependency_build(&protocol, &inventory).with_context(|| {
                 format!(
                     "failed to compile dependency build {}",
                     cli.source.display()
@@ -127,7 +131,7 @@ fn main() -> Result<()> {
         }
 
         let program = Ot2Backend
-            .compile(&checked)
+            .compile(&protocol)
             .with_context(|| format!("failed to compile OT-2 build {}", cli.source.display()))?;
         let bundle = emit_program(&program).with_context(|| {
             format!("failed to compile automated build {}", cli.source.display())

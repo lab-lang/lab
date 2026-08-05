@@ -34,7 +34,9 @@ Reactive handlers are checked from their shared captured state. A handler that d
 
 ## Workflow interfaces and artifact dependencies
 
-A workflow's parameters and result are part of its declaration signature. A parameter of type `Material<T>` transfers an owned physical input into a workflow instance; it is not documentation attached to the first lines of the body.
+A workflow's parameters and results are part of its declaration signature. A parameter of type `Material<T>` transfers an owned physical input into a workflow instance; it is not documentation attached to the first lines of the body. Inputs express requirements and caller-controlled variability. Results express guarantees and the values or physical ownership transferred back to the caller.
+
+A workflow may declare one result type or an ordered parenthesized list of named typed results. A direct comma-separated `return` must match that arity and each corresponding type. Named results are operation results rather than an implicit record value; a workflow call binds them with the same multi-result effect syntax used by other durable actions. Returning several materials transfers each of them out of the terminating path before the affine checker requires the workflow to own nothing else.
 
 Artifact dependencies are expressed with these ordinary typed interfaces. When a realization workflow consumes `List<Material<Plasmid>>`, the checked operand values identify which artifacts must already exist. A later planner may derive edges, roots, build waves, cycles, and inventory blockers from that dataflow. The language does not encode biological assembly levels or infer dependencies by matching component-name strings.
 

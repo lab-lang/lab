@@ -79,7 +79,11 @@ pub fn analyze_module(source_id: SourceId, text: &str) -> Analysis {
             checked: None,
             diagnostics: vec![diagnostic_from_parse(source_id, error)],
         },
-        Ok(syntax) => match compile_parsed_module(&syntax) {
+        Ok(syntax) => match compile_parsed_module(
+            crate::ModuleId::standalone(),
+            &crate::SemanticEnvironment::default(),
+            &syntax,
+        ) {
             Ok(checked) => Analysis {
                 syntax: Some(syntax),
                 checked: Some(checked),

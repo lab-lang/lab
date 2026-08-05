@@ -36,9 +36,10 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0006: Affine material flow](language/decisions/0006-affine-material-flow.md) | one owning place for each physical material, checked across control flow |
 | [0007: Toolchain CLI boundary](language/decisions/0007-toolchain-cli-boundary.md) | `lab` for working with Lab; `labc` and `lab-opt` for compiler internals |
 | [0008: Editor architecture](language/decisions/0008-editor-architecture.md) | shared language and IDE cores behind native LSP and WebAssembly hosts |
-| [0009: Properties and workflow signatures](language/decisions/0009-declaration-properties-and-workflow-signatures.md) | `name: value` declaration properties and `(inputs) -> output` workflow interfaces |
+| [0009: Properties and workflow signatures](language/decisions/0009-declaration-properties-and-workflow-signatures.md) | `name: value` declaration properties and explicit workflow interfaces |
 | [0010: Standard-library and inventory contracts](language/decisions/0010-standard-library-contracts-and-inventory-identities.md) | module-provided operations and typed external identities rather than domain grammar |
 | [0011: Dependencies from material dataflow](language/decisions/0011-dependencies-from-material-dataflow.md) | build graphs derived from checked workflow values rather than biological level labels |
+| [0012: Named workflow results](language/decisions/0012-named-workflow-results.md) | explicit named result fields and direct comma-separated returns without synthetic wrapper records |
 
 ## Implementation and embedding
 

@@ -90,9 +90,29 @@ mod tests {
         let synthesize = SynthesizeOp::new(ctx, design_value);
         let fragment = synthesize.get_result_material(ctx);
         inserter.append_op(ctx, &synthesize);
-        let first_assembly = AssembleOp::new(ctx, fragment, AssemblyMethodAttr::Gibson);
+        let first_assembly = AssembleOp::new(
+            ctx,
+            fragment,
+            AssemblyMethodAttr::Gibson,
+            "p_test",
+            "backbone",
+            vec!["part".into()],
+            vec![],
+            "enzyme",
+            1,
+        );
         inserter.append_op(ctx, &first_assembly);
-        let second_assembly = AssembleOp::new(ctx, fragment, AssemblyMethodAttr::Gibson);
+        let second_assembly = AssembleOp::new(
+            ctx,
+            fragment,
+            AssemblyMethodAttr::Gibson,
+            "p_test_2",
+            "backbone",
+            vec!["part".into()],
+            vec![],
+            "enzyme",
+            1,
+        );
         inserter.append_op(ctx, &second_assembly);
 
         assert!(

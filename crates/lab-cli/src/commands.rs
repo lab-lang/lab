@@ -2,8 +2,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::{CheckedModule, compile_module};
+use lab_compiler::compile_module;
 use lab_package::{LabPackage, PackageManifest};
+use lab_project::{LOCK_FILE, LabProject};
 use serde::Serialize;
 
 use crate::Output;
@@ -66,29 +67,31 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
         );
     }
 
-    let package = load_package(&path)?;
-    reject_unresolved_dependencies(&package)?;
-    let modules = compile_package(&package)?;
+    let project = LabProject::discover(&path)
+        .with_context(|| format!("failed to load project from {}", path.display()))?;
+    let compiled = project.compile()?;
+    let package = project.root_package();
     output.success(
         "checked",
         PackageChecked {
             package: package.manifest.package.name.clone(),
             version: package.manifest.package.version.clone(),
-            modules: modules.len(),
+            modules: compiled.modules.len(),
         },
         format!(
             "Checked {} {} ({} modules)",
             package.manifest.package.name,
             package.manifest.package.version,
-            modules.len()
+            compiled.modules.len()
         ),
     )
 }
 
 pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
-    let package = load_package(&path)?;
-    reject_unresolved_dependencies(&package)?;
-    let modules = compile_package(&package)?;
+    let project = LabProject::discover(&path)
+        .with_context(|| format!("failed to load project from {}", path.display()))?;
+    let compiled = project.compile()?;
+    let package = project.root_package();
     let output_root = match out_dir {
         Some(path) if path.is_absolute() => path,
         Some(path) => package.root.join(path),
@@ -98,7 +101,9 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         .with_context(|| format!("failed to create {}", output_root.display()))?;
 
     let mut artifacts = Vec::new();
-    for (source, module) in package.sources.iter().zip(&modules) {
+    for compiled_module in &compiled.modules {
+        let source = &compiled_module.source;
+        let module = &compiled_module.module;
         let relative_artifact = PathBuf::from("modules")
             .join(source.module.replace('.', "/"))
             .with_extension("module.json");
@@ -112,6 +117,7 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         fs::write(&artifact_path, json)
             .with_context(|| format!("failed to write {}", artifact_path.display()))?;
         artifacts.push(BuildModule {
+            package: compiled_module.package.clone(),
             module: source.module.clone(),
             source: source.relative_path.clone(),
             artifact: relative_artifact,
@@ -131,6 +137,10 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
     json.push('\n');
     fs::write(&index_path, json)
         .with_context(|| format!("failed to write {}", index_path.display()))?;
+    let lock_path = package.root.join(LOCK_FILE);
+    let lock = compiled.lock.to_toml()?;
+    fs::write(&lock_path, lock)
+        .with_context(|| format!("failed to write {}", lock_path.display()))?;
 
     output.success(
         "built",
@@ -181,34 +191,6 @@ pub(crate) fn metadata(path: PathBuf, output: &Output) -> Result<()> {
 fn load_package(path: &Path) -> Result<LabPackage> {
     LabPackage::discover(path)
         .with_context(|| format!("failed to load package from {}", path.display()))
-}
-
-fn reject_unresolved_dependencies(package: &LabPackage) -> Result<()> {
-    if package.manifest.dependencies.is_empty() {
-        return Ok(());
-    }
-    bail!(
-        "package '{}' declares dependencies, but dependency resolution is not implemented yet; no dependency was silently ignored",
-        package.manifest.package.name
-    )
-}
-
-fn compile_package(package: &LabPackage) -> Result<Vec<CheckedModule>> {
-    package
-        .sources
-        .iter()
-        .map(|source| {
-            let text = fs::read_to_string(&source.path)
-                .with_context(|| format!("failed to read {}", source.path.display()))?;
-            compile_module(&text).with_context(|| {
-                format!(
-                    "failed to check module '{}' ({})",
-                    source.module,
-                    source.path.display()
-                )
-            })
-        })
-        .collect()
 }
 
 fn validate_package_name(name: &str) -> Result<()> {
@@ -289,6 +271,7 @@ struct BuildIndex {
 
 #[derive(Serialize)]
 struct BuildModule {
+    package: String,
     module: String,
     source: PathBuf,
     artifact: PathBuf,

@@ -8,6 +8,7 @@ members = [
     "crates/lab-language",
     "crates/lab-language-server",
     "crates/lab-package",
+    "crates/lab-project",
     "crates/lab-python",
 ]
 default-members = ["crates/lab-compiler"]
@@ -42,6 +43,7 @@ lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }
 lab-language-server = { path = "crates/lab-language-server", version = "0.1.0" }
 lab-package = { path = "crates/lab-package", version = "0.1.0" }
+lab-project = { path = "crates/lab-project", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
