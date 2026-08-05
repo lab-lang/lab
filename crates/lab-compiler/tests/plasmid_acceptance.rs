@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-use lab_compiler::{CompilerSession, IrStage};
 use serde_json::Value;
 
 fn example() -> PathBuf {
@@ -31,40 +30,25 @@ fn successful_stdout(kind: &str) -> String {
 }
 
 #[test]
-fn plasmid_acceptance_exposes_each_compiler_boundary() {
+fn plasmid_acceptance_uses_the_canonical_frontend_boundary() {
     let source_ast: Value = serde_json::from_str(&successful_stdout("source-ast")).unwrap();
     assert_eq!(source_ast["items"][0]["item"], "plasmid");
     assert_eq!(source_ast["items"][0]["name"]["value"], "p_acceptance");
 
-    let specification: Value =
-        serde_json::from_str(&successful_stdout("specification-json")).unwrap();
-    assert_eq!(specification["name"], "p_acceptance");
-    assert_eq!(specification["copies"], 1);
-    assert_eq!(specification["acceptance"].as_array().unwrap().len(), 3);
-
-    let mut design = CompilerSession::default();
-    design.parse_ir(&successful_stdout("design-ir")).unwrap();
-    design.verify_stage(IrStage::Design).unwrap();
-
-    let mut target = CompilerSession::default();
-    target.parse_ir(&successful_stdout("target-ir")).unwrap();
-    target
-        .verify_stage(IrStage::TargetSelectedProtocol)
-        .unwrap();
-
-    let plan: Value = serde_json::from_str(&successful_stdout("plan-json")).unwrap();
-    assert_eq!(plan["lab_profile"], "reference-lab");
-    assert_eq!(plan["steps"].as_array().unwrap().len(), 13);
-    assert_eq!(plan["acceptance"].as_array().unwrap().len(), 3);
+    let module: Value = serde_json::from_str(&successful_stdout("module-ir")).unwrap();
+    assert_eq!(module["declarations"][0]["kind"], "plasmid");
+    assert_eq!(module["declarations"][0]["name"], "p_acceptance");
+    assert_eq!(
+        module["declarations"][0]["acceptance"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
 
     let human = successful_stdout("human");
-    assert!(human.contains("Phase 5 — Accept or reject"));
-    assert!(human.contains("13. Evaluate acceptance"));
-    assert!(human.contains("[ ] Concentration is at least 100 ng/µL"));
-    assert!(human.contains("[ ] Retained volume is at least 20 µL"));
-    assert!(!human.contains("p_acceptance.sequence_evidence"));
-
-    let simulation: Value = serde_json::from_str(&successful_stdout("simulation")).unwrap();
-    assert_eq!(simulation["events"].as_array().unwrap().len(), 13);
-    assert_eq!(simulation["acceptance"].as_array().unwrap().len(), 3);
+    assert!(human.contains("Lab module compiled"));
+    assert!(human.contains("plasmid p_acceptance"));
+    assert!(human.contains("3 acceptance claims"));
+    assert!(human.contains("no laboratory target was selected or executed"));
 }

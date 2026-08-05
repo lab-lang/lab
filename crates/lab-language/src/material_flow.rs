@@ -710,9 +710,7 @@ mod tests {
         let error = compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow invalid:
-  input sample: Material<Plasmid>
-  output Material<Plasmid>
+workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
   <- dispose sample
   evidence <- quantify sample
   return sample
@@ -771,10 +769,10 @@ workflow invalid:
         let error = compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow invalid:
-  input should_dispose: Bool
-  input sample: Material<Plasmid>
-  output None
+workflow invalid(
+  should_dispose: Bool,
+  sample: Material<Plasmid>,
+) -> None:
   if should_dispose:
     <- dispose sample
   return None
@@ -795,9 +793,7 @@ workflow invalid:
         compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow valid:
-  input sample: Material<Plasmid>
-  output Material<Plasmid>
+workflow valid(sample: Material<Plasmid>) -> Material<Plasmid>:
   first <- quantify sample
   second <- quantify sample
   return sample
@@ -816,9 +812,7 @@ outcome Inspection:
   observations: List<Evidence>
   case Complete
 
-workflow valid:
-  input inspection: Inspection
-  output List<Evidence>
+workflow valid(inspection: Inspection) -> List<Evidence>:
   <- dispose inspection.sample
   return inspection.observations
 "#,
@@ -829,9 +823,7 @@ workflow valid:
     #[test]
     fn rejects_a_terminating_path_that_leaks_material() {
         let error = compile_module(
-            r#"workflow invalid:
-  input sample: Material<Plasmid>
-  output None
+            r#"workflow invalid(sample: Material<Plasmid>) -> None:
   return None
 "#,
         )
@@ -850,9 +842,7 @@ workflow valid:
         let error = compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow invalid:
-  input sample: Material<Plasmid>
-  output Material<Plasmid>
+workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
   when every 1 h:
     sample <- store sample at -20 C
   when after 24 h:
@@ -874,9 +864,7 @@ workflow invalid:
         compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow valid:
-  input initial: Material<Plasmid>
-  output Material<Plasmid>
+workflow valid(initial: Material<Plasmid>) -> Material<Plasmid>:
   state sample: Material<Plasmid> = initial
   when every 1 h:
     updated <- store sample at -20 C

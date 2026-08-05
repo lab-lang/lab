@@ -54,6 +54,7 @@ Lab keeps its kernel small and gives each construct a clear laboratory meaning:
 | `material`, `observation`, `evidence`, `outcome` | laboratory values with distinct semantic laws |
 | `workflow` | a durable, replayable orchestration |
 | `state` | explicit durable memory owned by a workflow instance |
+| `name: value` | a checked property in a biological declaration |
 | `=` | deterministic evaluation or state transition |
 | `<-` | a durable physical or external effect |
 | `require` | a property that must hold before construction |
@@ -84,8 +85,8 @@ circuit regulated_expression<I: Signal, O: Protein>:
 tet_reporter = regulated_expression(pTet, sfGFP)
 
 plasmid p_tet_reporter:
-  backbone = p15A_kan
-  cargo = tet_reporter
+  backbone: p15A_kan
+  cargo: tet_reporter
 
   require topology == circular
   require sites(BsaI) == 0
@@ -95,9 +96,13 @@ plasmid p_tet_reporter:
 ```
 
 ```lab
-workflow build_plasmid:
-  input design: Plasmid
-  output Accepted<Plasmid> | Rejected<Plasmid>
+use std.bio.inventory
+use std.lab.plasmid_actions
+
+competent_ecoli = strain("competent_ecoli")
+kanamycin = antibiotic("kanamycin")
+
+workflow build_plasmid(design: Plasmid) -> Accepted<Plasmid> | Rejected<Plasmid>:
 
   fragments <- synthesize design
   construct <- assemble fragments
@@ -171,6 +176,25 @@ Compiler contributors can inspect individual frontend and lowering boundaries wi
 labc docs/language/specimens/plasmid-build.lab --emit module-ir
 ```
 
+The initial Opentrons concept backend can lower explicit standard-library realization workflows into English instructions, three OT-2 Python protocols, and a deterministic Lab automation manifest:
+
+```sh
+labc examples/opentrons-build/reporter-library.lab \
+  --emit automation-bundle \
+  --output-dir /tmp/lab-reporter-build
+```
+
+See [`examples/opentrons-build`](examples/opentrons-build/README.md) for the full tutorial and its current safety boundary.
+
+The same tutorial includes a dependency-driven full build. Imported `std.bio.build.realize` operations consume typed `Material<Plasmid>` workflow inputs; that checked dataflow forms the abstract graph from which inventory reuse, build waves, retries, roots, and blockers are derived:
+
+```sh
+labc examples/opentrons-build/full-build.lab \
+  --emit full-build-bundle \
+  --inventory examples/opentrons-build/full-build-inventory.json \
+  --output-dir /tmp/lab-full-build
+```
+
 ## Editor support
 
 The VS Code/Cursor extension combines a TextMate grammar with semantic editor support from `lab-language-server`: diagnostics, completion, hover, definitions, references, rename, document symbols, semantic highlighting, and conservative formatting.
@@ -181,7 +205,7 @@ See [editors/vscode](editors/vscode/README.md) for local development.
 
 ## Project status
 
-Lab is an early prototype and its syntax, semantics, IRs, packages, and runtime will continue to evolve. Today the frontend parses and checks the representative plasmid design and reactive construction workflows, produces typed portable module IR, verifies action contracts and affine material flow, and provides the first editor APIs. The narrower executable plasmid pipeline already demonstrates Design IR, capability-aware method selection, target-selected Protocol IR, material-linearity verification, plan export, and symbolic simulation.
+Lab is an early prototype and its syntax, semantics, IRs, packages, and runtime will continue to evolve. Today the frontend parses and checks the representative plasmid design and reactive construction workflows, produces typed portable module IR, verifies action contracts and affine material flow, and provides the first editor APIs. Specialized backends consume that same checked module boundary; the initial OT-2 backend produces dependency-aware human instructions, manifests, and robot protocols.
 
 There is not yet a durable workflow runtime. Package dependency acquisition, imported public-symbol checking, multi-error parser recovery, fully scoped IDE navigation, incremental analysis, and a syntax-aware formatter are also still in progress. Unsupported behavior is kept explicit rather than silently approximated.
 
@@ -199,5 +223,5 @@ The [documentation index](docs/README.md) separates accepted language decisions,
 | `crates/lab-language-server` | native Language Server Protocol adapter |
 | `crates/lab-ide-wasm` | browser and embedded editor bindings |
 | `editors/vscode` | VS Code and Cursor integration |
-| `crates/lab-sdk`, `crates/lab-python` | experimental embedding APIs |
+| `crates/lab-python` | experimental Python bindings over the compiler API |
 | `docs`, `examples` | language design, decisions, specimens, and runnable examples |

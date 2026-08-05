@@ -1,17 +1,16 @@
 # Lab Python SDK
 
-The Python package is a thin PyO3 binding over `lab-sdk`; it does not reimplement parsing or compilation. The initial API compiles Lab Lang for the reference laboratory profile and returns both the printed target-selected LAIR module (Design plus Protocol dialects) and a Python-native executable plan.
+The Python package is a thin PyO3 binding over `lab-compiler`; it does not reimplement parsing or semantic checking. Its API returns the backend-neutral checked module as Python-native data.
 
 ```python
-from lab import compile_lab_lang
+from lab import compile_lab_module
 
-compilation = compile_lab_lang(source)
-print(compilation.ir)
-print(compilation.plan["steps"])
+module = compile_lab_module(source)
+print(module["declarations"])
 ```
 
-Build or install it with Maturin from this directory. Once installed, run the Python boundary test with:
+The Python module, native extension, tests, linter, and strict typechecker are one maintained unit. Run every gate from the repository root with:
 
 ```sh
-python -m unittest discover -s tests
+scripts/check-python-sdk.sh
 ```

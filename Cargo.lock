@@ -476,18 +476,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "lab-sdk"
-version = "0.1.0"
-dependencies = [
- "lab-compiler",
- "thiserror",
-]
-
-[[package]]
 name = "lab-sdk-python"
 version = "0.1.0"
 dependencies = [
- "lab-sdk",
+ "lab-compiler",
  "pyo3",
  "serde_json",
 ]

@@ -2,10 +2,12 @@
 
 This directory records what Lab is becoming, what has been decided, and what the current implementation can honestly do.
 
-If you are new to the language, start with the [repository introduction](../README.md), then read the two representative programs:
+If you are new to the language, start with the [repository introduction](../README.md), then read the representative programs:
 
 - [plasmid design](language/specimens/plasmid-design.lab) shows typed biological composition, requirements, and evidence-based acceptance;
 - [plasmid construction](language/specimens/plasmid-build.lab) shows durable actions, explicit state, reactive timers, structured outcomes, and affine material flow.
+- [inventory-backed plasmid](language/specimens/inventory-plasmid.lab) shows typed external identities, declarative properties, and a realization workflow;
+- [dependency build](language/specimens/dependency-build.lab) shows artifact ordering derived from typed material inputs rather than named assembly levels.
 
 ## Language guide
 
@@ -34,16 +36,20 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0006: Affine material flow](language/decisions/0006-affine-material-flow.md) | one owning place for each physical material, checked across control flow |
 | [0007: Toolchain CLI boundary](language/decisions/0007-toolchain-cli-boundary.md) | `lab` for working with Lab; `labc` and `lab-opt` for compiler internals |
 | [0008: Editor architecture](language/decisions/0008-editor-architecture.md) | shared language and IDE cores behind native LSP and WebAssembly hosts |
+| [0009: Properties and workflow signatures](language/decisions/0009-declaration-properties-and-workflow-signatures.md) | `name: value` declaration properties and `(inputs) -> output` workflow interfaces |
+| [0010: Standard-library and inventory contracts](language/decisions/0010-standard-library-contracts-and-inventory-identities.md) | module-provided operations and typed external identities rather than domain grammar |
+| [0011: Dependencies from material dataflow](language/decisions/0011-dependencies-from-material-dataflow.md) | build graphs derived from checked workflow values rather than biological level labels |
 
 ## Implementation and embedding
 
-- [LAIR overview](../crates/lab-compiler/src/ir/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
-- [Protocol IR](../crates/lab-compiler/src/ir/protocol/README.md) describes the current target-selected biological-procedure boundary and what deliberately remains for resource and hardware lowering.
+- [LAIR overview](../crates/lab-compiler/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
+- [Protocol IR](../crates/lab-compiler/src/lair/dialect/protocol/README.md) describes the current target-selected biological-procedure boundary and what deliberately remains for resource and hardware lowering.
 - [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
-- [Rust SDK](../crates/lab-sdk) and [Python SDK](../crates/lab-python/README.md) expose experimental compiler APIs.
+- The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
+- [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for the first manual and OT-2 end-to-end tutorial.
 
 ## Examples versus specimens
 

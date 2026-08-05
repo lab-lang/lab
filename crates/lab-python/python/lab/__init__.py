@@ -1,25 +1,15 @@
-"""Python SDK for the Lab Compiler."""
+"""Python SDK for the Lab frontend."""
 
-from dataclasses import dataclass
 import json
-from typing import Any
+from typing import Any, cast
 
-from ._native import compile_lab_lang as _compile_lab_lang
-
-
-@dataclass(frozen=True)
-class Compilation:
-    """Verified compiler output exposed in Python-native forms."""
-
-    ir: str
-    plan: dict[str, Any]
+from ._native import compile_lab_module as _compile_lab_module
 
 
-def compile_lab_lang(source: str) -> Compilation:
-    """Compile Lab Lang using the reference laboratory profile."""
+def compile_lab_module(source: str) -> dict[str, Any]:
+    """Parse, resolve, and type-check a Lab source module."""
 
-    ir, plan_json = _compile_lab_lang(source)
-    return Compilation(ir=ir, plan=json.loads(plan_json))
+    return cast(dict[str, Any], json.loads(_compile_lab_module(source)))
 
 
-__all__ = ["Compilation", "compile_lab_lang"]
+__all__ = ["compile_lab_module"]

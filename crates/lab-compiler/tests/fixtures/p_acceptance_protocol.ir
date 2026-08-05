@@ -1,0 +1,34 @@
+builtin.module @p_acceptance 
+{
+  ^block1v1():
+    design_v0 = design.plasmid () [] [copies: builtin.integer <1: ui32>, artifact_name: builtin.string "p_acceptance", exact_sequence_required: builtin.bool true, sequence: builtin.string "GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT", acceptance_minimum_volume_ul: builtin.integer <20: ui32>, topology: design.topology Circular, acceptance_minimum_concentration_ng_per_ul: builtin.integer <100: ui32>]: <() -> (design.artifact )> !0;
+    competent_cells_v1 = protocol.provision () [] [item: builtin.string "DH5alpha"]: <() -> (protocol.material CompetentCells)> !1;
+    dna_fragments_v2 = protocol.synthesize (design_v0) [] []: <(design.artifact ) -> (protocol.material LinearDna)> !2;
+    assembled_construct_v3 = protocol.assemble (dna_fragments_v2) [] [assembly_method: protocol.assembly_method Gibson]: <(protocol.material LinearDna) -> (protocol.material CircularDna)> !3;
+    transformed_culture_v4 = protocol.transform (assembled_construct_v3, competent_cells_v1) [] [host: builtin.string "DH5alpha"]: <(protocol.material CircularDna, protocol.material CompetentCells) -> (protocol.material TransformedCulture)> !4;
+    recovered_culture_v5 = protocol.recover (transformed_culture_v4) [] []: <(protocol.material TransformedCulture) -> (protocol.material RecoveredCulture)> !5;
+    selected_colonies_v6 = protocol.select (recovered_culture_v5) [] []: <(protocol.material RecoveredCulture) -> (protocol.material ColonyPool)> !6;
+    screened_clone_v7 = protocol.screen (selected_colonies_v6) [] [screening_method: builtin.string "colony screening"]: <(protocol.material ColonyPool) -> (protocol.material SelectedClone)> !7;
+    clone_culture_v8 = protocol.grow (screened_clone_v7) [] []: <(protocol.material SelectedClone) -> (protocol.material CloneCulture)> !8;
+    purified_plasmid_v9 = protocol.purify (clone_culture_v8) [] []: <(protocol.material CloneCulture) -> (protocol.material PurifiedPlasmid)> !9;
+    retained_after_sequencing_v10, sequencing_aliquot_v11 = protocol.sample (purified_plasmid_v9) [] [purpose: builtin.string "sequence verification"]: <(protocol.material PurifiedPlasmid) -> (protocol.material PurifiedPlasmid, protocol.material AssayAliquot)> !10;
+    sequence_evidence_v12 = protocol.sequence (sequencing_aliquot_v11) [] []: <(protocol.material AssayAliquot) -> (protocol.evidence SequenceIdentity)> !11;
+    retained_after_quantification_v13, concentration_evidence_v14, volume_evidence_v15 = protocol.quantify (retained_after_sequencing_v10) [] [minimum_volume_ul: builtin.integer <20: ui32>, minimum_concentration_ng_per_ul: builtin.integer <100: ui32>]: <(protocol.material PurifiedPlasmid) -> (protocol.material PurifiedPlasmid, protocol.evidence Concentration, protocol.evidence Volume)> !12;
+    validated_artifact_v16 = protocol.accept (retained_after_quantification_v13, sequence_evidence_v12, concentration_evidence_v14, volume_evidence_v15) [] []: <(protocol.material PurifiedPlasmid, protocol.evidence SequenceIdentity, protocol.evidence Concentration, protocol.evidence Volume) -> (protocol.material ValidatedPlasmid)> !13
+}
+
+outlined_attributes:
+!0 = [builtin_debug_info = builtin.debug_info [design]]
+!1 = [builtin_debug_info = builtin.debug_info [competent_cells]]
+!2 = [builtin_debug_info = builtin.debug_info [dna_fragments]]
+!3 = [builtin_debug_info = builtin.debug_info [assembled_construct]]
+!4 = [builtin_debug_info = builtin.debug_info [transformed_culture]]
+!5 = [builtin_debug_info = builtin.debug_info [recovered_culture]]
+!6 = [builtin_debug_info = builtin.debug_info [selected_colonies]]
+!7 = [builtin_debug_info = builtin.debug_info [screened_clone]]
+!8 = [builtin_debug_info = builtin.debug_info [clone_culture]]
+!9 = [builtin_debug_info = builtin.debug_info [purified_plasmid]]
+!10 = [builtin_debug_info = builtin.debug_info [retained_after_sequencing, sequencing_aliquot]]
+!11 = [builtin_debug_info = builtin.debug_info [sequence_evidence]]
+!12 = [builtin_debug_info = builtin.debug_info [retained_after_quantification, concentration_evidence, volume_evidence]]
+!13 = [builtin_debug_info = builtin.debug_info [validated_artifact]]

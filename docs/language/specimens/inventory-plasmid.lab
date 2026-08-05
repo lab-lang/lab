@@ -1,0 +1,44 @@
+use std.bio.build
+use std.bio.inventory
+use std.lab.plasmid_actions
+
+# Synthetic compiler fixture: typed identities are not proof of inventory
+# availability, and this is not a qualified laboratory protocol.
+
+record BuiltArtifact:
+  product: Material<Plasmid>
+  plate: Material<Plate>
+
+J23101 = part("J23101")
+B0034 = part("B0034")
+GFP = part("GFP")
+B0015 = part("B0015")
+pSB1C3 = backbone("pSB1C3")
+BsaI = restriction_enzyme("BsaI")
+DH5alpha = strain("DH5alpha")
+chloramphenicol = antibiotic("chloramphenicol")
+
+plasmid reporter:
+  sequence: dna("ACGTACGT")
+  backbone: pSB1C3
+  components: [J23101, B0034, GFP, B0015]
+  restriction_enzyme: BsaI
+  host: DH5alpha
+  selection: chloramphenicol
+  assembly_replicates: 1
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow realize_reporter() -> BuiltArtifact:
+  dependencies = []
+  product, construct <- realize reporter from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return BuiltArtifact{product: product, plate: plate}

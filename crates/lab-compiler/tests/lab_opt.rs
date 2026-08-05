@@ -1,23 +1,8 @@
 use std::io::Write;
 use std::process::{Command, Output, Stdio};
 
-use lab_compiler::Compiler;
-use lab_compiler::{
-    AcceptanceCriterion, ArtifactSpec, DnaSequence, LabProfile, PlasmidSpec, Topology,
-};
-
-fn compiled_ir() -> String {
-    let specification = ArtifactSpec::plasmid(
-        "p_opt",
-        PlasmidSpec::new(DnaSequence::new("ACGT").unwrap(), Topology::Circular).unwrap(),
-        1,
-        vec![AcceptanceCriterion::ExactSequence],
-    )
-    .unwrap();
-    Compiler
-        .compile(&specification, &LabProfile::reference())
-        .unwrap()
-        .ir()
+fn compiled_ir() -> &'static str {
+    include_str!("fixtures/p_acceptance_protocol.ir")
 }
 
 fn run_with_stdin(arguments: &[&str], input: &str) -> Output {
@@ -46,7 +31,7 @@ fn optimizer_verifies_runs_a_named_pipeline_and_prints_ir() {
             "--pass-pipeline",
             "builtin.module(protocol-check-material-linearity)",
         ],
-        &compiled_ir(),
+        compiled_ir(),
     );
 
     assert!(
@@ -55,7 +40,7 @@ fn optimizer_verifies_runs_a_named_pipeline_and_prints_ir() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("builtin.module @p_opt"));
+    assert!(stdout.contains("builtin.module @p_acceptance"));
     assert!(stdout.contains("outlined_attributes:"));
 }
 

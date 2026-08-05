@@ -1,6 +1,6 @@
 # Plasmid acceptance example
 
-[`p_acceptance.lab`](p_acceptance.lab) exercises the prototype's full supported path: one circular plasmid with exact-sequence, minimum-concentration, and minimum-volume acceptance criteria.
+[`p_acceptance.lab`](p_acceptance.lab) exercises portable frontend checking for one circular plasmid with exact-sequence, minimum-concentration, and minimum-volume acceptance criteria.
 
 Run it from the repository root:
 
@@ -8,29 +8,24 @@ Run it from the repository root:
 labc examples/plasmid-acceptance/p_acceptance.lab
 ```
 
-The compiler currently passes the input through these representations:
+The compiler passes the input through one source frontend:
 
 ```text
 Lab Lang source
-  -> validated artifact specification
-  -> target-neutral Design IR
-  -> target-selected Design + Protocol IR
-  -> executable plan
-  -> human output or symbolic simulation
+  -> spanned source AST
+  -> resolved and type-checked portable module IR
+  -> human summary or a separately selected backend
 ```
 
-Each intermediate form can be inspected with `--emit`:
+The frontend forms can be inspected with `--emit`:
 
 ```sh
-labc examples/plasmid-acceptance/p_acceptance.lab --emit specification-json
-labc examples/plasmid-acceptance/p_acceptance.lab --emit design-ir
-labc examples/plasmid-acceptance/p_acceptance.lab --emit target-ir
-labc examples/plasmid-acceptance/p_acceptance.lab --emit plan-json
-labc examples/plasmid-acceptance/p_acceptance.lab --emit simulation
+labc examples/plasmid-acceptance/p_acceptance.lab --emit source-ast
+labc examples/plasmid-acceptance/p_acceptance.lab --emit module-ir
 ```
 
-The current compiler checks basic source validity, operation types, target capabilities, single-consumer use of physical material, and connections between requested acceptance criteria and evidence-producing steps. The first lowering produces one physical copy; replicate material flow is not yet modeled.
+The frontend checks source validity, names, types, requirements, acceptance expressions, action contracts, and affine material flow where workflows manipulate physical materials.
 
-This example does not demonstrate scheduling, reagent quantities, inventory, containers, staff, instrument selection, robot code generation, execution tracking, or successful physical construction. The compiler uses one built-in reference laboratory profile. Its IR and JSON outputs are debugging surfaces, not stable interchange formats.
+This example does not select a laboratory target or demonstrate scheduling, reagent quantities, inventory, containers, staff, instrument selection, robot code generation, execution tracking, or successful physical construction. Its JSON output is a compiler-development surface, not a stable interchange format.
 
-The Rust and Python SDKs call the same compiler pipeline; see [`crates/lab-sdk`](../../crates/lab-sdk/) and [`crates/lab-python`](../../crates/lab-python/) for their experimental APIs.
+Rust callers use the public `lab-compiler` API directly. The [`crates/lab-python`](../../crates/lab-python/) binding exposes that same portable frontend to Python.

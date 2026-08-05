@@ -1,21 +1,19 @@
 import unittest
 
-from lab import compile_lab_lang
+from lab import compile_lab_module
 
 
 class CompilationTests(unittest.TestCase):
-    def test_compiles_to_ir_and_python_plan(self) -> None:
+    def test_compiles_to_checked_module(self) -> None:
         source = """
 plasmid p_python:
-  sequence = dna("ACGT")
+  sequence: dna("ACGT")
   accept sequence == design.sequence
         """
 
-        compilation = compile_lab_lang(source)
+        module = compile_lab_module(source)
 
-        self.assertIn("protocol.accept", compilation.ir)
-        self.assertEqual(compilation.plan["artifact"], "p_python")
-        self.assertGreater(len(compilation.plan["steps"]), 0)
+        self.assertEqual(module["declarations"][0]["name"], "p_python")
 
 
 if __name__ == "__main__":

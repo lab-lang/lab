@@ -22,17 +22,36 @@ The language is organized around three source-level concerns:
 
 Actual executions are runtime records, not source modules. A program may be run many times, with each run receiving an independent identity and event journal.
 
+## Specimen guide
+
+| Specimen | Language boundary exercised |
+| --- | --- |
+| [`plasmid-design.lab`](specimens/plasmid-design.lab) | circuits, typed composition, declarative plasmid properties, requirements, and acceptance |
+| [`plasmid-build.lab`](specimens/plasmid-build.lab) | workflow signatures, durable effects, explicit state, reactive handlers, outcomes, and affine materials |
+| [`inventory-plasmid.lab`](specimens/inventory-plasmid.lab) | typed inventory identities, heterogeneous component lists, target-neutral properties, and one realization workflow |
+| [`dependency-build.lab`](specimens/dependency-build.lab) | dependencies expressed as `Material<Plasmid>` workflow inputs and resolved `realize` operands |
+
+Specimens define provider symbols before declarations that depend on them. This is a readability convention, not an assembly-level system and not a replacement for name resolution.
+
 Inspect any syntax specimen without semantic checking:
 
 ```sh
 labc docs/language/specimens/plasmid-build.lab --emit source-ast
 ```
 
-Compile either representative specimen into verified portable module IR:
+Compile any representative specimen into verified portable module IR:
 
 ```sh
 labc docs/language/specimens/plasmid-design.lab --emit module-ir
 labc docs/language/specimens/plasmid-build.lab --emit module-ir
+labc docs/language/specimens/inventory-plasmid.lab --emit module-ir
+labc docs/language/specimens/dependency-build.lab --emit module-ir
 ```
 
 Portable module compilation resolves and checks the program but does not select a laboratory target, schedule work, or dispatch physical actions.
+
+The latest accepted design records are:
+
+- [`0009`](decisions/0009-declaration-properties-and-workflow-signatures.md): declaration properties and callable workflow signatures;
+- [`0010`](decisions/0010-standard-library-contracts-and-inventory-identities.md): module-provided contracts and typed external identities; and
+- [`0011`](decisions/0011-dependencies-from-material-dataflow.md): dependency graphs derived from checked material dataflow.

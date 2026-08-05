@@ -11,3 +11,6 @@ editors/vscode/dist/
 editors/vscode/LICENSE
 *.pyc
 __pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

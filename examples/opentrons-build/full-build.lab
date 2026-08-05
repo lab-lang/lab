@@ -1,0 +1,127 @@
+use std.bio.build
+use std.bio.inventory
+use std.lab.plasmid_actions
+
+record BuiltArtifact:
+  product: Material<Plasmid>
+  plate: Material<Plate>
+
+J23101 = part("J23101")
+J23106 = part("J23106")
+B0034 = part("B0034")
+GFP = part("GFP")
+TetR = part("TetR")
+B0015 = part("B0015")
+part_receiver = backbone("part_receiver")
+region_receiver = backbone("region_receiver")
+final_receiver = backbone("final_receiver")
+BsaI = restriction_enzyme("BsaI")
+BsmBI = restriction_enzyme("BsmBI")
+DH5alpha = strain("DH5alpha")
+ampicillin = antibiotic("ampicillin")
+chloramphenicol = antibiotic("chloramphenicol")
+kanamycin = antibiotic("kanamycin")
+
+# A three-wave build expressed through typed workflow material dependencies.
+#
+# The compiler derives ordering from Material<Plasmid> workflow dataflow below.
+# None of these declarations is assigned a biological assembly level.
+
+plasmid promoter_carrier:
+  sequence: dna("ACGT")
+  backbone: part_receiver
+  components: [J23101]
+  restriction_enzyme: BsmBI
+  host: DH5alpha
+  selection: ampicillin
+  assembly_replicates: 1
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+  require topology == circular
+  accept sequence == design.sequence
+
+plasmid regulator_region:
+  sequence: dna("TGCATGCA")
+  backbone: region_receiver
+  components: [J23106, B0034, TetR, B0015]
+  restriction_enzyme: BsaI
+  host: DH5alpha
+  selection: chloramphenicol
+  assembly_replicates: 1
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+  require topology == circular
+  accept sequence == design.sequence
+
+plasmid reporter_region:
+  sequence: dna("ACGTACGT")
+  backbone: region_receiver
+  components: [promoter_carrier, B0034, GFP, B0015]
+  restriction_enzyme: BsaI
+  host: DH5alpha
+  selection: chloramphenicol
+  assembly_replicates: 1
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+  require topology == circular
+  accept sequence == design.sequence
+
+plasmid final_device:
+  sequence: dna("ACGTACGTACGT")
+  backbone: final_receiver
+  components: [reporter_region, regulator_region]
+  restriction_enzyme: BsmBI
+  host: DH5alpha
+  selection: kanamycin
+  assembly_replicates: 1
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow realize_promoter_carrier() -> BuiltArtifact:
+  dependencies = []
+  product, construct <- realize promoter_carrier from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on ampicillin
+  return BuiltArtifact{product: product, plate: plate}
+
+workflow realize_regulator_region() -> BuiltArtifact:
+  dependencies = []
+  product, construct <- realize regulator_region from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return BuiltArtifact{product: product, plate: plate}
+
+workflow realize_reporter_region(promoter_carrier: Material<Plasmid>) -> BuiltArtifact:
+  dependencies = [promoter_carrier]
+  product, construct <- realize reporter_region from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return BuiltArtifact{product: product, plate: plate}
+
+workflow realize_final_device(
+  reporter_region: Material<Plasmid>,
+  regulator_region: Material<Plasmid>,
+) -> BuiltArtifact:
+  dependencies = [reporter_region, regulator_region]
+  product, construct <- realize final_device from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on kanamycin
+  return BuiltArtifact{product: product, plate: plate}

@@ -115,8 +115,10 @@ impl<'a> Parser<'a> {
                 } else {
                     PlasmidMember::Requirement(claim)
                 });
-            } else if self.line_has(TokenKind::Equal) {
-                members.push(PlasmidMember::Binding(self.parse_binding()?));
+            } else if self.peek_kind(1) == Some(&TokenKind::Colon)
+                && self.peek_kind(2) != Some(&TokenKind::Newline)
+            {
+                members.push(PlasmidMember::Property(self.parse_property()?));
             } else {
                 members.push(PlasmidMember::Section(self.parse_section()?));
             }
@@ -178,24 +180,13 @@ impl<'a> Parser<'a> {
     fn parse_workflow(&mut self) -> Result<WorkflowDecl, ParseError> {
         let start = self.expect_word("workflow")?.span;
         let name = self.take_identifier("a workflow name")?;
+        let inputs = self.parse_signature_fields()?;
+        self.expect(TokenKind::RightArrow)?;
+        let output = self.parse_type()?;
         self.open_block()?;
-        let mut inputs = Vec::new();
-        let mut output = None;
         let mut body = Vec::new();
         while !self.check(&TokenKind::Dedent) {
-            if self.check_word("input") {
-                self.next();
-                inputs.push(self.parse_field_line()?);
-            } else if self.check_word("output") {
-                let keyword = self.next().expect("checked");
-                if output.is_some() {
-                    return Err(syntax_span(keyword.span, "duplicate workflow output"));
-                }
-                output = Some(self.parse_type()?);
-                self.expect_line_end()?;
-            } else {
-                body.push(self.parse_stmt()?);
-            }
+            body.push(self.parse_stmt()?);
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(WorkflowDecl {
@@ -205,6 +196,23 @@ impl<'a> Parser<'a> {
             body,
             span: start.join(end),
         })
+    }
+
+    fn parse_signature_fields(&mut self) -> Result<Vec<FieldDecl>, ParseError> {
+        self.expect(TokenKind::LeftParen)?;
+        let mut fields = Vec::new();
+        while !self.check(&TokenKind::RightParen) {
+            let name = self.take_identifier("a parameter name")?;
+            self.expect(TokenKind::Colon)?;
+            let ty = self.parse_type()?;
+            let span = name.span.join(ty.span());
+            fields.push(FieldDecl { name, ty, span });
+            if self.consume(&TokenKind::Comma).is_none() {
+                break;
+            }
+        }
+        self.expect(TokenKind::RightParen)?;
+        Ok(fields)
     }
 
     fn parse_section(&mut self) -> Result<Section, ParseError> {
@@ -283,6 +291,19 @@ impl<'a> Parser<'a> {
         Ok(BindingStmt {
             names: vec![name],
             annotation,
+            value,
+            span: start.join(end),
+        })
+    }
+
+    fn parse_property(&mut self) -> Result<PropertyDecl, ParseError> {
+        let name = self.take_identifier("a property name")?;
+        let start = name.span;
+        self.expect(TokenKind::Colon)?;
+        let value = self.parse_expr()?;
+        let end = self.expect_line_end()?;
+        Ok(PropertyDecl {
+            name,
             value,
             span: start.join(end),
         })
@@ -930,32 +951,6 @@ fn is_numeric(expression: &Expr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AcceptanceCriterion, Artifact, SpecError, Topology, parse};
-
-    #[test]
-    fn parses_and_lowers_a_declarative_plasmid() {
-        let source = r#"
-# implementation details are intentionally absent
-plasmid p_sensor:
-  sequence = dna("acgtacgt")
-  require topology == circular
-  accept sequence == design.sequence
-  accept concentration >= 100 ng/uL
-  accept volume >= 20 uL
-"#;
-
-        let spec = parse(source).unwrap();
-        assert_eq!(spec.name(), "p_sensor");
-        assert_eq!(spec.copies().get(), 1);
-        assert_eq!(spec.acceptance().len(), 3);
-        assert!(
-            spec.acceptance()
-                .contains(&AcceptanceCriterion::ExactSequence)
-        );
-        let Artifact::Plasmid(plasmid) = spec.artifact();
-        assert_eq!(plasmid.sequence().as_str(), "ACGTACGT");
-        assert_eq!(plasmid.topology(), Topology::Circular);
-    }
 
     #[test]
     fn parses_reactive_workflows_without_pretending_to_lower_them() {
@@ -968,9 +963,7 @@ outcome ColonyGrowth:
     colonies: ColonyMap
   case TimedOut
 
-workflow await_colonies:
-  input plate: Material<Plate>
-  output ColonyGrowth
+workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
   state observations: List<PlateObservation> = []
 
   when every 30 min:
@@ -991,13 +984,25 @@ workflow await_colonies:
         let Item::Workflow(workflow) = &module.items[2] else {
             panic!("expected workflow")
         };
+        assert_eq!(workflow.inputs.len(), 1);
+        assert_eq!(workflow.inputs[0].name.value, "plate");
+        assert!(matches!(
+            &workflow.output,
+            TypeExpr::Path { path, .. } if path.segments[0].value == "ColonyGrowth"
+        ));
         assert_eq!(workflow.body.len(), 3);
         assert!(matches!(workflow.body[0], Stmt::State(_)));
         assert!(matches!(workflow.body[1], Stmt::When(_)));
         assert!(matches!(workflow.body[2], Stmt::When(_)));
+    }
 
-        let error = parse(source).unwrap_err();
-        assert!(matches!(error, ParseError::Unsupported { .. }));
+    #[test]
+    fn rejects_body_level_workflow_signatures() {
+        let error = parse_module(
+            "workflow legacy:\n  input sample: Material<Plasmid>\n  output None\n  return None\n",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("expected '('"), "{error}");
     }
 
     #[test]
@@ -1026,18 +1031,11 @@ workflow await_colonies:
     }
 
     #[test]
-    fn rejects_a_plan_without_verification_evidence() {
-        let error = parse(
-            r#"plasmid p_unverified:
-  sequence = dna("ACGT")
-  accept volume >= 20 uL
-"#,
+    fn rejects_executable_binding_syntax_for_plasmid_properties() {
+        let error = parse_module(
+            "plasmid legacy:\n  sequence = dna(\"ACGT\")\n  require topology == circular\n  accept sequence == design.sequence\n",
         )
         .unwrap_err();
-
-        assert_eq!(
-            error,
-            ParseError::Specification(SpecError::MissingSequenceAcceptance)
-        );
+        assert!(error.to_string().contains("expected ':'"), "{error}");
     }
 }
