@@ -5,15 +5,14 @@ use super::checked::*;
 use super::semantic_error::SemanticError;
 use super::source::Span;
 use super::standard_library::{
-    ActionContractSpec, ContractType, PhrasePart, resolve_action, resolve_module,
-    resolve_pure_function,
+    ActionContractSpec, ContractType, PhrasePart, PureFunctionSpec, StandardLibrary, StandardModule,
 };
 use super::type_system::{
     Ty, common_type, comparable, compatible, satisfies_bound, substitute, to_checked_type, unify,
 };
 
 pub(crate) fn check_module(module: &Module) -> Result<CheckedModule, SemanticError> {
-    Checker::new(module).check(module)
+    Checker::new().check(module)
 }
 
 #[derive(Clone)]
@@ -38,9 +37,13 @@ struct WorkflowSignature {
 }
 
 struct Checker {
+    standard_library: StandardLibrary,
     known_types: BTreeSet<String>,
     imports: BTreeSet<String>,
+    imported_names: HashMap<String, String>,
     values: HashMap<String, Ty>,
+    pure_functions: HashMap<String, PureFunctionSpec>,
+    actions: HashMap<String, ActionContractSpec>,
     circuits: HashMap<String, CircuitSignature>,
     data: HashMap<String, DataSignature>,
     cases: HashMap<String, String>,
@@ -49,55 +52,19 @@ struct Checker {
 }
 
 impl Checker {
-    fn new(module: &Module) -> Self {
-        let known_types = [
-            "Accepted",
-            "Antibiotic",
-            "Backbone",
-            "Bool",
-            "CDS",
-            "Circuit",
-            "Clone",
-            "CloneSet",
-            "Colonies",
-            "ColonyMap",
-            "Construct",
-            "Culture",
-            "DNA",
-            "Duration",
-            "Evidence",
-            "Fragment",
-            "Image",
-            "Integer",
-            "List",
-            "Material",
-            "None",
-            "Part",
-            "Plate",
-            "Plasmid",
-            "Promoter",
-            "Protein",
-            "Reason",
-            "Rejected",
-            "RestrictionEnzyme",
-            "Screening",
-            "Signal",
-            "Strain",
-            "String",
-            "Topology",
-            "WorkflowContext",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .chain(module.items.iter().filter_map(|item| match item {
-            Item::Data(declaration) => Some(declaration.name.value.clone()),
-            _ => None,
-        }))
-        .collect();
+    fn new() -> Self {
+        let known_types = ["Bool", "Decimal", "Integer", "List", "None", "String"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
         Self {
+            standard_library: StandardLibrary::bundled(),
             known_types,
             imports: BTreeSet::new(),
+            imported_names: HashMap::new(),
             values: HashMap::new(),
+            pure_functions: HashMap::new(),
+            actions: HashMap::new(),
             circuits: HashMap::new(),
             data: HashMap::new(),
             cases: HashMap::new(),
@@ -149,28 +116,79 @@ impl Checker {
     }
 
     fn resolve_imports(&mut self, module: &Module) -> Result<(), SemanticError> {
+        let preludes = self
+            .standard_library
+            .prelude_modules()
+            .cloned()
+            .collect::<Vec<_>>();
+        for prelude in preludes {
+            self.register_standard_module(prelude, Span::at(0))?;
+        }
+
         for item in &module.items {
             let Item::Use(import) = item else {
                 continue;
             };
             let path = path_text(&import.path);
-            let standard = resolve_module(&path).ok_or_else(|| {
-                SemanticError::new(import.span, format!("module '{path}' cannot be resolved"))
-            })?;
+            let standard = self
+                .standard_library
+                .module(&path)
+                .cloned()
+                .ok_or_else(|| {
+                    SemanticError::new(import.span, format!("module '{path}' cannot be resolved"))
+                })?;
             self.insert_import(standard.path, import.span)?;
-            for (name, ty) in standard.values {
-                self.insert_value(name, ty, import.span)?;
+            self.register_standard_module(standard, import.span)?;
+        }
+        Ok(())
+    }
+
+    fn register_standard_module(
+        &mut self,
+        module: StandardModule,
+        span: Span,
+    ) -> Result<(), SemanticError> {
+        for name in module.types {
+            if !self.known_types.insert(name.to_owned()) {
+                return Err(SemanticError::new(
+                    span,
+                    format!("imported type '{name}' is ambiguous"),
+                ));
             }
         }
-        for (name, ty) in [
-            ("circular", Ty::named("Topology")),
-            ("None", Ty::None),
-            ("no_colonies", Ty::named("Reason")),
-            ("sequence_mismatch", Ty::named("Reason")),
-            ("inconclusive_sequence", Ty::named("Reason")),
-            ("acceptance_failed", Ty::named("Reason")),
-        ] {
+        for (name, ty) in module.values {
+            self.insert_imported_name(module.path, name, span)?;
             self.values.insert(name.to_owned(), ty);
+        }
+        for function in module.functions {
+            self.insert_imported_name(module.path, function.name, span)?;
+            self.pure_functions
+                .insert(function.name.to_owned(), function);
+        }
+        for action in module.actions {
+            let name = action
+                .source_name()
+                .expect("catalog validation guarantees an action source name");
+            self.insert_imported_name(module.path, name, span)?;
+            self.actions.insert(name.to_owned(), action);
+        }
+        Ok(())
+    }
+
+    fn insert_imported_name(
+        &mut self,
+        module: &str,
+        name: &str,
+        span: Span,
+    ) -> Result<(), SemanticError> {
+        if let Some(previous) = self
+            .imported_names
+            .insert(name.to_owned(), module.to_owned())
+        {
+            return Err(SemanticError::new(
+                span,
+                format!("imported name '{name}' is ambiguous between '{previous}' and '{module}'"),
+            ));
         }
         Ok(())
     }
@@ -180,16 +198,6 @@ impl Checker {
             return Err(SemanticError::new(
                 span,
                 format!("module '{path}' is imported more than once"),
-            ));
-        }
-        Ok(())
-    }
-
-    fn insert_value(&mut self, name: &str, ty: Ty, span: Span) -> Result<(), SemanticError> {
-        if self.values.insert(name.to_owned(), ty).is_some() {
-            return Err(SemanticError::new(
-                span,
-                format!("imported name '{name}' is ambiguous"),
             ));
         }
         Ok(())
@@ -206,10 +214,16 @@ impl Checker {
                 Item::Workflow(value) => (&value.name.value, value.name.span),
                 Item::Binding(value) => (&value.names[0].value, value.names[0].span),
             };
-            if !names.insert(name.clone()) || self.values.contains_key(name) {
+            if !names.insert(name.clone()) || self.imported_names.contains_key(name) {
                 return Err(SemanticError::new(
                     span,
                     format!("duplicate declaration '{name}'"),
+                ));
+            }
+            if matches!(item, Item::Data(_)) && !self.known_types.insert(name.clone()) {
+                return Err(SemanticError::new(
+                    span,
+                    format!("type '{name}' is already defined"),
                 ));
             }
         }
@@ -911,21 +925,15 @@ impl Checker {
             .first()
             .copied()
             .ok_or_else(|| SemanticError::new(effect.span, "empty effect action"))?;
-        if let Some(contract) = resolve_action(operation) {
-            let required_module = contract
-                .operation
-                .rsplit_once('.')
-                .map_or(contract.operation, |(module, _)| module);
-            if !self.imports.contains(required_module) {
-                return Err(SemanticError::new(
-                    effect.span,
-                    format!(
-                        "operation '{}' requires 'use {required_module}'",
-                        contract.operation
-                    ),
-                ));
-            }
+        if let Some(contract) = self.actions.get(operation).cloned() {
             return self.check_standard_action_contract(effect, &words, environment, contract);
+        }
+        let providers = self.standard_library.action_providers(operation);
+        if let [required_module] = providers.as_slice() {
+            return Err(SemanticError::new(
+                effect.span,
+                format!("operation '{operation}' requires 'use {required_module}'"),
+            ));
         }
         let signature = self.workflows.get(operation).ok_or_else(|| {
             SemanticError::new(
@@ -1231,16 +1239,10 @@ impl Checker {
                 let name = path_text(path);
                 let operation = if self.circuits.contains_key(&name) {
                     format!("circuit.{name}")
-                } else if let Some(function) = resolve_pure_function(&name) {
+                } else if let Some(function) = self.pure_functions.get(&name) {
                     function.operation.to_owned()
                 } else {
-                    match name.as_str() {
-                        "dna" => "std.bio.dna".to_owned(),
-                        "detect_colonies" => "std.lab.imaging.detect_colonies".to_owned(),
-                        "sites" => "std.bio.sequence.sites".to_owned(),
-                        "design.accepts" => "Plasmid.accepts".to_owned(),
-                        _ => name,
-                    }
+                    name
                 };
                 CheckedExpression::Call {
                     operation,
@@ -1480,20 +1482,7 @@ impl Checker {
             }
             return Ok(substitute(&signature.output, &substitutions));
         }
-        if let Some(function) = resolve_pure_function(&name) {
-            let required_module = function
-                .operation
-                .rsplit_once('.')
-                .map_or(function.operation, |(module, _)| module);
-            if !self.imports.contains(required_module) {
-                return Err(SemanticError::new(
-                    span,
-                    format!(
-                        "operation '{}' requires 'use {required_module}'",
-                        function.operation
-                    ),
-                ));
-            }
+        if let Some(function) = self.pure_functions.get(&name) {
             let actual =
                 self.require_call_arguments(arguments, function.parameters.len(), environment)?;
             for (actual, expected) in actual.iter().zip(&function.parameters) {
@@ -1507,36 +1496,19 @@ impl Checker {
                     ));
                 }
             }
-            return Ok(function.result);
+            return Ok(function.result.clone());
         }
-        match name.as_str() {
-            "dna" => {
-                let arguments = self.require_call_arguments(arguments, 1, environment)?;
-                if arguments[0] != Ty::String {
-                    return Err(SemanticError::new(
-                        span,
-                        format!("dna expects String, found {}", arguments[0]),
-                    ));
-                }
-                Ok(Ty::named("DNA"))
-            }
-            "detect_colonies" => {
-                self.require_call_arguments(arguments, 1, environment)?;
-                Ok(Ty::named("ColonyMap"))
-            }
-            "sites" => {
-                self.require_call_arguments(arguments, 1, environment)?;
-                Ok(Ty::Integer)
-            }
-            "design.accepts" => {
-                self.require_call_arguments(arguments, 1, environment)?;
-                Ok(Ty::Bool)
-            }
-            _ => Err(SemanticError::new(
+        let providers = self.standard_library.function_providers(&name);
+        if let [required_module] = providers.as_slice() {
+            return Err(SemanticError::new(
                 span,
-                format!("unknown pure operation '{name}'"),
-            )),
+                format!("operation '{name}' requires 'use {required_module}'"),
+            ));
         }
+        Err(SemanticError::new(
+            span,
+            format!("unknown pure operation '{name}'"),
+        ))
     }
 
     fn require_call_arguments(
@@ -2095,6 +2067,33 @@ mod tests {
                 .to_string()
                 .contains("requires 'use std.bio.inventory'")
         );
+    }
+
+    #[test]
+    fn imported_standard_modules_reject_ambiguous_exports() {
+        let mut checker = Checker::new();
+        checker
+            .register_standard_module(
+                StandardModule::new("std.first").with_values([("shared", Ty::String)]),
+                Span::at(0),
+            )
+            .unwrap();
+        let error = checker
+            .register_standard_module(
+                StandardModule::new("std.second").with_functions([PureFunctionSpec::new(
+                    "shared",
+                    "std.second.shared",
+                    Vec::new(),
+                    Ty::String,
+                )]),
+                Span::at(0),
+            )
+            .unwrap_err();
+
+        let message = error.to_string();
+        assert!(message.contains("std.first"));
+        assert!(message.contains("std.second"));
+        assert!(message.contains("shared"));
     }
 
     #[test]

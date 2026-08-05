@@ -20,13 +20,18 @@ The current frontend resolves a small bundled registry through the same conceptu
 
 | Module | Current role |
 | --- | --- |
+| `std.prelude` | implicitly imported foundational types, values, and pure operations used by every module |
 | `std.bio.parts` | fixed demonstration part values used by the design specimen |
 | `std.bio.backbones` | fixed demonstration backbone values used by the design specimen |
 | `std.bio.inventory` | pure constructors for typed external part, backbone, enzyme, strain, and antibiotic identities |
 | `std.bio.build` | typed artifact-realization effects |
 | `std.lab.plasmid_actions` | typed laboratory action contracts used by the workflow specimens |
 
-Module resolution supplies values, pure-function signatures, and action contracts to the generic checker. It does not add module-specific parser or AST cases. The bundled registry is an implementation bridge; changing catalogs and site-specific actions should move to ordinary versioned packages once package-defined public contracts exist.
+Each bundled module owns one checked specification containing all of its exported types, values, pure-function signatures, and action contracts. Import resolution adds those exports to the generic checker scope and diagnoses ambiguous names. The checker does not maintain separate verb or constructor lookup tables, and adding a module does not add parser or AST cases.
+
+`std.prelude` is the one explicit exception to source-level `use`: it supplies the foundational nominal types and currently unqualified operations such as `dna` to every module. Keeping that surface in a named module makes implicit language vocabulary inspectable and prevents it from accumulating as checker special cases.
+
+The bundled catalog validates module paths, export uniqueness, stable operation identities, and action-contract structure when it is constructed. It remains an implementation bridge; changing catalogs and site-specific actions should move to ordinary versioned packages once package-defined public contracts exist.
 
 ## Project layout
 

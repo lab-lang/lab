@@ -8,6 +8,7 @@ Domain vocabulary enters the generic frontend through resolved module values, pu
 
 The initial bundled registry includes:
 
+- `std.prelude` for the explicitly identified implicitly imported foundation;
 - `std.bio.parts` and `std.bio.backbones` for fixed demonstration values;
 - `std.bio.inventory` for typed external identities;
 - `std.bio.build` for artifact-realization operations; and
@@ -28,6 +29,8 @@ kanamycin = antibiotic("kanamycin")
 The left-hand source symbol and the external string have different identities and may be changed independently. Downstream source refers to the symbol, never to an untyped component-name string. Capitalization does not change whether a symbol is a value or a type.
 
 Action contracts declare a stable operation identity, phrase operands, operand ownership (`copy`, `borrow`, or `take`), result types, and a dispatch capability. Checked IR stores the resolved operation and structured operands so later passes do not reinterpret source text.
+
+Every standard module owns a single specification containing its types, values, pure functions, and durable actions. The bundled catalog indexes those specifications and validates duplicate modules, duplicate exports, duplicate operation identities, and malformed action contracts. Importing a module populates the checker scope from that specification; the checker does not independently dispatch standard functions or actions by spelling.
 
 ## Boundary
 

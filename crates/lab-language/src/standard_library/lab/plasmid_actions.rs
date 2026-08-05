@@ -1,50 +1,11 @@
-//! Typed contracts for the built-in laboratory action package.
-//!
-//! Phrase syntax, operand types, ownership modes, results, and capabilities
-//! live together so the semantic checker does not assign meaning by verb.
+//! `std.lab.plasmid_actions` durable action contracts.
 
-use super::super::checked::OwnershipMode;
-use super::super::type_system::Ty;
+use super::super::catalog::StandardModule;
+use super::super::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
+use crate::checked::OwnershipMode;
+use crate::type_system::Ty;
 
-#[derive(Clone)]
-pub(crate) enum ContractType {
-    Concrete(Ty),
-    SameAs(&'static str),
-    AnyMaterial,
-}
-
-#[derive(Clone)]
-pub(crate) enum PhrasePart {
-    Word(&'static str),
-    Operand {
-        name: &'static str,
-        r#type: ContractType,
-        mode: OwnershipMode,
-    },
-    Integer {
-        name: &'static str,
-        signed: bool,
-    },
-    Quantity {
-        name: &'static str,
-        signed: bool,
-        units: &'static [&'static str],
-    },
-}
-
-pub(crate) struct ResultSpec {
-    pub name: &'static str,
-    pub r#type: ContractType,
-}
-
-pub(crate) struct ActionContractSpec {
-    pub operation: &'static str,
-    pub capability: &'static str,
-    pub phrase: Vec<PhrasePart>,
-    pub results: Vec<ResultSpec>,
-}
-
-pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContractSpec> {
+pub(super) fn module() -> StandardModule {
     let copy = OwnershipMode::Copy;
     let borrow = OwnershipMode::Borrow;
     let take = OwnershipMode::Take;
@@ -54,26 +15,8 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
     let named = Ty::named;
     let material = Ty::material;
 
-    Some(match operation {
-        "realize" => ActionContractSpec {
-            operation: "std.bio.build.realize",
-            capability: "artifact_realization",
-            phrase: vec![
-                PhrasePart::Word("realize"),
-                operand("design", concrete(named("Plasmid")), copy),
-                PhrasePart::Word("from"),
-                operand(
-                    "dependencies",
-                    concrete(Ty::List(Box::new(material(named("Plasmid"))))),
-                    take,
-                ),
-            ],
-            results: vec![
-                result("product", concrete(material(named("Plasmid")))),
-                result("construct", concrete(material(named("Construct")))),
-            ],
-        },
-        "capture" => ActionContractSpec {
+    let plasmid_actions = vec![
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.capture",
             capability: "plate_imaging",
             phrase: vec![
@@ -84,7 +27,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("image", concrete(named("Image")))],
         },
-        "synthesize" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.synthesize",
             capability: "dna_synthesis",
             phrase: vec![
@@ -96,7 +39,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
                 concrete(Ty::List(Box::new(named("Fragment")))),
             )],
         },
-        "assemble" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.assemble",
             capability: "dna_assembly",
             phrase: vec![
@@ -109,7 +52,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("construct", concrete(material(named("Construct"))))],
         },
-        "provision" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.provision",
             capability: "inventory",
             phrase: vec![
@@ -118,7 +61,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("cells", concrete(material(named("Strain"))))],
         },
-        "transform" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.transform",
             capability: "chemical_transformation",
             phrase: vec![
@@ -129,7 +72,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("culture", concrete(material(named("Culture"))))],
         },
-        "recover" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.recover",
             capability: "culture_incubation",
             phrase: vec![
@@ -144,7 +87,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("culture", concrete(material(named("Culture"))))],
         },
-        "dilute" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.dilute",
             capability: "liquid_handling",
             phrase: vec![
@@ -153,7 +96,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("culture", concrete(material(named("Culture"))))],
         },
-        "plate" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.plate",
             capability: "antibiotic_selection",
             phrase: vec![
@@ -164,7 +107,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("plate", concrete(material(named("Plate"))))],
         },
-        "pick" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.pick",
             capability: "colony_picking",
             phrase: vec![
@@ -183,7 +126,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
                 concrete(Ty::List(Box::new(material(named("Clone"))))),
             )],
         },
-        "screen" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.screen",
             capability: "clone_screening",
             phrase: vec![
@@ -198,7 +141,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("screening", concrete(named("Screening")))],
         },
-        "grow" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.grow",
             capability: "culture_incubation",
             phrase: vec![
@@ -219,7 +162,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("culture", concrete(material(named("Culture"))))],
         },
-        "purify" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.purify",
             capability: "plasmid_purification",
             phrase: vec![
@@ -228,7 +171,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("plasmid", concrete(material(named("Plasmid"))))],
         },
-        "split" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.split",
             capability: "liquid_handling",
             phrase: vec![
@@ -240,7 +183,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
                 result("aliquot", ContractType::SameAs("material")),
             ],
         },
-        "sequence" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.sequence",
             capability: "sanger_sequencing",
             phrase: vec![
@@ -249,7 +192,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("result", concrete(named("SequenceCheck")))],
         },
-        "quantify" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.quantify",
             capability: "dna_quantification",
             phrase: vec![
@@ -258,7 +201,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("evidence", concrete(named("Evidence")))],
         },
-        "store" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.store",
             capability: "cold_storage",
             phrase: vec![
@@ -273,7 +216,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: vec![result("material", ContractType::SameAs("material"))],
         },
-        "dispose" => ActionContractSpec {
+        ActionContractSpec {
             operation: "std.lab.plasmid_actions.dispose",
             capability: "waste_handling",
             phrase: vec![
@@ -282,6 +225,7 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
             ],
             results: Vec::new(),
         },
-        _ => return None,
-    })
+    ];
+
+    StandardModule::new("std.lab.plasmid_actions").with_actions(plasmid_actions)
 }
