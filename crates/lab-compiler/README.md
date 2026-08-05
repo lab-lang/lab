@@ -10,18 +10,16 @@ The current Protocol IR is target-selected but not hardware-level. Containers, i
 
 The source tree follows semantic ownership and dependency direction:
 
-- `src/compiler/` is the public orchestration facade and typed compilation result;
-- `src/lair/` contains Pliron dialects, analyses, transformations, lowering, stages, and sessions;
+- `src/lair/` contains the Pliron dialects, material-linearity analysis and pass, stage contracts, and textual IR session;
 - `src/planning/protocol/` defines and validates backend-neutral scientific plans;
 - `src/planning/dependencies/` resolves artifact graphs against inventory without robot knowledge;
-- `src/execution/` turns a validated protocol plan into a backend-neutral operational graph;
-- `src/simulation/` interprets execution graphs into shared lab state and event traces;
+- `src/simulation/` owns the symbolic execution graph and interprets it into shared lab state and event traces;
 - `src/backend/` defines backend contracts and contains concrete robot implementations;
 - `src/artifact/` defines generated files independently of filesystem persistence;
 - `src/render/` contains human projections of compiler-owned representations; and
 - `src/bin/labc/` and `src/bin/lab-opt/` contain developer-facing command orchestration.
 
-The dependency direction is language model → planning/LAIR → execution → backend → artifacts, with simulation consuming execution graphs and command-line applications owning filesystem writes. LAIR and generic planning do not depend on concrete robots.
+The dependency direction is language model → planning/LAIR → backend → artifacts, with simulation consuming planning models independently and command-line applications owning filesystem writes. LAIR and generic planning do not depend on concrete robots.
 
 `labc --emit` can expose the source AST, checked module IR, or an artifact emitted by a backend. `lab-opt` separately parses, verifies, transforms, and prints textual LAIR without acting as another source frontend. The OT-2 backend lives entirely under `src/backend/opentrons_ot2/`. It lowers checked source into `Ot2BuildIr`, validates and allocates an `Ot2ExecutionPlan`, then renders the manifest, manual protocol, and three OT-2 protocol stages from that one execution plan. Robot constants, deck capacities, labware choices, Python generation, and robot-specific package text do not live in generic rendering, planning, or the language frontend. Robot behavior is maintained in the backend-local `python/` project and checked with Ruff, strict mypy, pytest, byte compilation, and Opentrons simulation; Rust bundles those Python modules and injects the execution plan.
 

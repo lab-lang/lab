@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use pliron::builtin::ops::ModuleOp;
 use pliron::combine::{Parser, eof};
 use pliron::context::Context;
@@ -5,14 +7,76 @@ use pliron::irfmt::parsers::spaced;
 use pliron::op::Op;
 use pliron::operation::{Operation, verify_operation};
 use pliron::parsable::parse_from_str;
-use pliron::pass::{AnalysisManager, Pass};
+use pliron::pass::{AnalysisManager, PMConfig, Pass};
 use pliron::printable::Printable;
+use thiserror::Error;
 
-use crate::lair::dialect::detect_stage;
-use crate::lair::pipeline::build_material_linearity_pass;
+use crate::lair::pipeline::{
+    PassPipeline, PassPipelineError, RegisteredPass, build_material_linearity_pass,
+};
+use crate::lair::stage::detect_stage;
 use crate::{IrStage, StageContract};
 
-use super::{PassPipeline, RegisteredPass, SessionError, SessionOptions};
+#[derive(Debug, Error)]
+pub enum SessionError {
+    #[error("this compiler session already contains an IR module")]
+    ModuleAlreadyLoaded,
+    #[error("this compiler session does not contain an IR module")]
+    NoModule,
+    #[error("failed to parse compiler IR: {0}")]
+    ParseIr(String),
+    #[error("expected a builtin.module root operation, found '{0}'")]
+    ExpectedModule(String),
+    #[error("compiler IR failed verification: {0}")]
+    VerificationFailed(String),
+    #[error("IR stage contract failed: {0}")]
+    StageContract(String),
+    #[error("pass '{name}' failed: {diagnostic}")]
+    PassFailed { name: String, diagnostic: String },
+    #[error(transparent)]
+    PassPipeline(#[from] PassPipelineError),
+}
+
+/// Configuration for verification and pass instrumentation in one compiler session.
+#[derive(Clone, Debug)]
+pub struct SessionOptions {
+    /// Verify the complete IR immediately before and after every pass.
+    pub verify_each: bool,
+    /// Log the complete IR immediately before every pass.
+    pub print_before_all: bool,
+    /// Log the complete IR immediately after every pass.
+    pub print_after_all: bool,
+    /// Measure and log the running time of every pass.
+    pub time_passes: bool,
+    /// Write requested before/after IR snapshots to this directory.
+    pub ir_printing_dir: Option<PathBuf>,
+}
+
+impl SessionOptions {
+    fn pass_manager_config(&self) -> PMConfig {
+        PMConfig {
+            print_before_all: self.print_before_all,
+            print_after_all: self.print_after_all,
+            ir_printing_dir: self.ir_printing_dir.clone(),
+            verify_before_all: self.verify_each,
+            verify_after_all: self.verify_each,
+            time_all_passes: self.time_passes,
+            ..PMConfig::default()
+        }
+    }
+}
+
+impl Default for SessionOptions {
+    fn default() -> Self {
+        Self {
+            verify_each: true,
+            print_before_all: false,
+            print_after_all: false,
+            time_passes: false,
+            ir_printing_dir: None,
+        }
+    }
+}
 
 /// Owns the context, analyses, and one IR module for a compilation invocation.
 pub struct CompilerSession {

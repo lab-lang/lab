@@ -79,7 +79,6 @@ mod tests {
     use lab_language::compile_module;
 
     use super::*;
-    use crate::Compiler;
 
     #[test]
     fn compiles_checked_modules_through_the_backend_contract() {
@@ -88,11 +87,11 @@ mod tests {
         ))
         .unwrap();
 
-        let compilation = Compiler.compile_backend(&module, &Ot2Backend).unwrap();
-        assert_eq!(compilation.descriptor().id, "opentrons");
-        assert_eq!(compilation.program().constructs.len(), 2);
+        let program = Ot2Backend.compile(&module).unwrap();
+        assert_eq!(Ot2Backend.descriptor().id, "opentrons");
+        assert_eq!(program.constructs.len(), 2);
 
-        let artifacts = Ot2Backend.emit(compilation.program()).unwrap();
+        let artifacts = Ot2Backend.emit(&program).unwrap();
         assert_eq!(artifacts.len(), 5);
         assert!(artifacts.get("assembly_protocol.py").is_some());
     }

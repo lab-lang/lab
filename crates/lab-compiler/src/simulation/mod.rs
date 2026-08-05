@@ -5,12 +5,14 @@
 //! timing, containers, liquids, devices, and backend adapters can grow here.
 
 mod error;
+mod execution;
 mod trace;
 
 pub use error::SimulationError;
+pub use execution::{ExecutionDependency, ExecutionGraph, ExecutionOperation};
 pub use trace::{LabState, SimulatedValue, SimulationEvent, SimulationTrace};
 
-use crate::{ExecutionGraph, ValueKind};
+use crate::ValueKind;
 
 pub fn simulate(graph: &ExecutionGraph) -> Result<SimulationTrace, SimulationError> {
     let mut state = LabState::default();

@@ -2,9 +2,9 @@
 
 LAIR—the Lab Automation Intermediate Representation—is the Lab ecosystem's multi-layer compiler IR. It is implemented as a family of Pliron dialects that preserve biological and physical meaning while programs are progressively lowered from artifact intent toward laboratory execution.
 
-LAIR is currently internal to the `labc` package. This matches its present use: only compiler lowering, verification, and plan export consume these representations. It can be extracted into a crate later when an independent consumer requires a stable LAIR API.
+LAIR is currently maintained inside `lab-compiler`. Its active consumer is the `lab-opt` textual IR tool, which parses, verifies, transforms, and reprints LAIR modules. It can be extracted into a crate later when an independent consumer requires a stable LAIR API.
 
-Pliron is an implementation detail of this internal layer. Pliron contexts, modules, values, and pointers must not appear in `labc`'s public API. Public session and compilation APIs exchange Lab domain types, textual LAIR, plans, and compiler-owned errors; raw Pliron entities remain inside `compiler::ir` and the session/lowering adapters that operate on it.
+Pliron is an implementation detail of this layer. Pliron contexts, modules, values, and pointers do not cross the public session boundary; callers exchange textual LAIR, stage and pipeline descriptions, and compiler-owned errors. Raw Pliron entities remain inside the dialect, analysis, pipeline, stage, and session modules.
 
 ## Initial dialects
 

@@ -13,7 +13,7 @@ use pliron::result::Result;
 use pliron::value::Value;
 use pliron::verify_err;
 
-use super::shared::{require_any_evidence, require_attr, require_evidence, require_material};
+use super::validation::{require_any_evidence, require_attr, require_evidence, require_material};
 use crate::lair::dialect::attributes::{u32_attr, verify_u32_attr};
 use crate::lair::dialect::protocol::{EvidenceType, MaterialType};
 

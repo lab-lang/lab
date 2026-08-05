@@ -12,7 +12,7 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::value::Value;
 
-use super::shared::{require_attr, require_material};
+use super::validation::{require_attr, require_material};
 use crate::lair::dialect::design::DesignType;
 use crate::lair::dialect::protocol::{AssemblyMethodAttr, MaterialType};
 

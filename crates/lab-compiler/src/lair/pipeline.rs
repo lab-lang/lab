@@ -1,9 +1,41 @@
+//! LAIR pass construction.
+
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+use pliron::builtin::ops::ModuleOp;
+use pliron::context::{Context, Ptr};
+use pliron::operation::Operation;
+use pliron::pass::{AnalysisManager, OpGuard, OpPass, Pass, PassResult};
+use pliron::result::Result as PlironResult;
 use thiserror::Error;
 
+use crate::lair::analysis::MaterialLinearityAnalysis;
 use crate::lair::stage::IrStage;
+
+/// Require every physical Protocol material value to have at most one consumer.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CheckMaterialLinearityPass;
+
+impl Pass for CheckMaterialLinearityPass {
+    fn name(&self) -> &str {
+        "protocol-check-material-linearity"
+    }
+
+    fn run(
+        &mut self,
+        operation: Ptr<Operation>,
+        context: &mut Context,
+        analyses: &mut AnalysisManager,
+    ) -> PlironResult<PassResult> {
+        let _linearity = analyses.get_analysis::<MaterialLinearityAnalysis>(operation, context)?;
+        Ok(PassResult::default())
+    }
+}
+
+pub(crate) fn build_material_linearity_pass() -> OpPass<ModuleOp, CheckMaterialLinearityPass> {
+    OpPass::<ModuleOp, _>::new(OpGuard::default(), CheckMaterialLinearityPass)
+}
 
 /// A discoverable compiler pass and the stage contract it preserves.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
