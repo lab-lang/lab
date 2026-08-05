@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::{AcceptanceCriterion, OperationKind, ProtocolPlan};
 
-pub(super) fn write_strategy(output: &mut String, plan: &ProtocolPlan) {
+pub(in crate::render::human) fn write_strategy(output: &mut String, plan: &ProtocolPlan) {
     writeln!(output, "Selected strategy").unwrap();
     if let Some(method) = parameter(plan, OperationKind::Assemble, "method") {
         writeln!(output, "  Assembly: {method}").unwrap();

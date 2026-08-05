@@ -1,11 +1,11 @@
 //! Artifact-realization operations in `std.bio.build`.
 
-use super::super::catalog::StandardModule;
-use super::super::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 use crate::checked::OwnershipMode;
+use crate::standard_library::catalog::StandardModule;
+use crate::standard_library::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 use crate::type_system::Ty;
 
-pub(super) fn module() -> StandardModule {
+pub(in crate::standard_library::bio) fn module() -> StandardModule {
     let named = Ty::named;
     let material = Ty::material;
     let concrete = ContractType::Concrete;

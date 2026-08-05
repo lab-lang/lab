@@ -2,8 +2,8 @@
 
 mod plasmid_actions;
 
-use super::catalog::StandardModule;
+use crate::standard_library::catalog::StandardModule;
 
-pub(super) fn modules() -> Vec<StandardModule> {
+pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
     vec![plasmid_actions::module()]
 }

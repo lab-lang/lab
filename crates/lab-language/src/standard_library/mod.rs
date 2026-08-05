@@ -10,5 +10,5 @@ mod contract;
 mod lab;
 mod prelude;
 
-pub(super) use catalog::{PureFunctionSpec, StandardLibrary, StandardModule};
-pub(super) use contract::{ActionContractSpec, ContractType, PhrasePart};
+pub(crate) use catalog::{PureFunctionSpec, StandardLibrary, StandardModule};
+pub(crate) use contract::{ActionContractSpec, ContractType, PhrasePart};

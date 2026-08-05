@@ -207,8 +207,8 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::SemanticTokenKind;
+    use crate::workspace::*;
 
     #[test]
     fn indexes_symbols_and_renames_across_documents() {

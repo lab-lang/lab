@@ -1,8 +1,8 @@
-use super::ast::*;
-use super::error::{ParseError, syntax_span};
-use super::lexer::lex;
-use super::source::{Identifier, Span, Spanned};
-use super::token::{Token, TokenKind};
+use crate::ast::*;
+use crate::error::{ParseError, syntax_span};
+use crate::lexer::lex;
+use crate::source::{Identifier, Span, Spanned};
+use crate::token::{Token, TokenKind};
 
 /// Parse a complete Lab source module without lowering it.
 pub fn parse_module(source: &str) -> Result<Module, ParseError> {
@@ -950,7 +950,7 @@ fn is_numeric(expression: &Expr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::parser::*;
 
     #[test]
     fn parses_reactive_workflows_without_pretending_to_lower_them() {

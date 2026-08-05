@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
-use super::{
+use crate::planning::dependencies::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildInventory, DependencyBuildManifest,
     DependencyBuildStatus, DependencyEdge, DependencyNode,
 };
@@ -245,8 +245,8 @@ fn cyclic_nodes(graph: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<String> 
 
 #[cfg(test)]
 mod tests {
-    use super::super::BuildGraphNode;
-    use super::*;
+    use crate::planning::dependencies::BuildGraphNode;
+    use crate::planning::dependencies::resolution::*;
 
     #[test]
     fn schedules_graph_waves_without_target_knowledge() {

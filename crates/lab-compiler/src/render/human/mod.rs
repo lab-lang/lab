@@ -52,7 +52,7 @@ pub fn render_human(plan: &ProtocolPlan) -> String {
 mod tests {
     use crate::{AcceptanceCriterion, AcceptanceObligation, OperationKind, PlanStep, PlanValue};
 
-    use super::*;
+    use crate::render::human::*;
 
     #[test]
     fn renders_a_scientific_build_plan_without_compiler_identifiers() {

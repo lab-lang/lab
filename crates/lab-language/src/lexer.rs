@@ -1,6 +1,6 @@
-use super::error::{ParseError, syntax, syntax_span};
-use super::source::Span;
-use super::token::{Token, TokenKind};
+use crate::error::{ParseError, syntax, syntax_span};
+use crate::source::Span;
+use crate::token::{Token, TokenKind};
 
 /// Lex Lab's layout-sensitive surface syntax.
 ///
@@ -330,7 +330,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::lexer::*;
 
     #[test]
     fn emits_layout_only_for_significant_lines() {

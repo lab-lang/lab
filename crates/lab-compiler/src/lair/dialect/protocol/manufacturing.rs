@@ -12,8 +12,8 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::value::Value;
 
-use super::validation::{require_attr, require_material};
 use crate::lair::dialect::design::DesignType;
+use crate::lair::dialect::protocol::validation::{require_attr, require_material};
 use crate::lair::dialect::protocol::{AssemblyMethodAttr, MaterialType};
 
 #[pliron_op(

@@ -1,11 +1,11 @@
 //! `std.lab.plasmid_actions` durable action contracts.
 
-use super::super::catalog::StandardModule;
-use super::super::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 use crate::checked::OwnershipMode;
+use crate::standard_library::catalog::StandardModule;
+use crate::standard_library::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 use crate::type_system::Ty;
 
-pub(super) fn module() -> StandardModule {
+pub(in crate::standard_library::lab) fn module() -> StandardModule {
     let copy = OwnershipMode::Copy;
     let borrow = OwnershipMode::Borrow;
     let take = OwnershipMode::Take;

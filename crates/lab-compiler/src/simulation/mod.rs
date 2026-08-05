@@ -81,7 +81,7 @@ pub fn simulate(graph: &ExecutionGraph) -> Result<SimulationTrace, SimulationErr
 mod tests {
     use crate::{ExecutionGraph, OperationKind, PlanStep, PlanValue, ProtocolPlan};
 
-    use super::*;
+    use crate::simulation::*;
 
     #[test]
     fn symbolically_executes_a_valid_plan_in_order() {

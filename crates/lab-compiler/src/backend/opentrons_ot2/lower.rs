@@ -7,7 +7,9 @@ use lab_language::{
 };
 use thiserror::Error;
 
-use super::{Ot2BuildArtifact, Ot2BuildIr, Ot2BuildIrError, Ot2BuildRecipe};
+use crate::backend::opentrons_ot2::{
+    Ot2BuildArtifact, Ot2BuildIr, Ot2BuildIrError, Ot2BuildRecipe,
+};
 
 struct RealizationFlow {
     dependencies: Vec<String>,

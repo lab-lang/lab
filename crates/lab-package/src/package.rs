@@ -204,7 +204,7 @@ fn normalize_relative(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::package::*;
 
     #[test]
     fn derives_namespaced_module_names() {

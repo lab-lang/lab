@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-use super::ParseError;
-use super::material_flow::MaterialFlowError;
-use super::source::Span;
+use crate::ParseError;
+use crate::material_flow::MaterialFlowError;
+use crate::source::Span;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 pub enum ModuleError {

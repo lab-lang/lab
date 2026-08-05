@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{
+use crate::{
     CheckedModule, ModuleError, ParseError, Span, ast, compile_parsed_module, parse_module,
 };
 
@@ -132,7 +132,7 @@ fn diagnostic_from_module(source: SourceId, fallback: Span, error: ModuleError) 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::diagnostics::*;
 
     #[test]
     fn preserves_syntax_for_semantic_errors() {

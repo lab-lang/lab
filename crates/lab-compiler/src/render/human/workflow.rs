@@ -40,7 +40,7 @@ impl Phase {
     }
 }
 
-pub(super) fn write_workflow(output: &mut String, plan: &ProtocolPlan) {
+pub(in crate::render::human) fn write_workflow(output: &mut String, plan: &ProtocolPlan) {
     writeln!(output, "Workflow").unwrap();
     let mut previous_phase = None;
     for (index, step) in plan.steps.iter().enumerate() {

@@ -1,6 +1,6 @@
 use crate::ArtifactBundle;
 
-use super::BackendDescriptor;
+use crate::backend::BackendDescriptor;
 
 /// Typed compilation boundary implemented by a concrete robot backend.
 ///

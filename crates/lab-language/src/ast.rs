@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::source::{Identifier, Span};
+use crate::source::{Identifier, Span};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Module {

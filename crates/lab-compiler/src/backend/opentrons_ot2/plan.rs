@@ -5,11 +5,11 @@ use thiserror::Error;
 
 use crate::{ArtifactBundle, ArtifactError};
 
-use super::emit::{
+use crate::backend::opentrons_ot2::emit::{
     render_assembly_protocol, render_manual_protocol, render_plating_protocol,
     render_transformation_protocol,
 };
-use super::{
+use crate::backend::opentrons_ot2::{
     Ot2BuildArtifact, Ot2BuildIr, Ot2BuildRecipe, Ot2ConstructPlan, Ot2ExecutionPlan,
     Ot2PlatingPlan, Ot2TransformationPlan, TargetConstraintError,
 };
@@ -63,7 +63,9 @@ pub struct Ot2Bundle {
 }
 
 impl Ot2Bundle {
-    pub(super) fn from_plan(manifest: Ot2ExecutionPlan) -> Result<Self, Ot2EmissionError> {
+    pub(in crate::backend::opentrons_ot2) fn from_plan(
+        manifest: Ot2ExecutionPlan,
+    ) -> Result<Self, Ot2EmissionError> {
         let mut artifacts = ArtifactBundle::new();
         artifacts.insert_text(
             "automation_manifest.json",
@@ -489,7 +491,7 @@ mod tests {
     use crate::backend::opentrons_ot2::{Ot2LoweringError, lower_build};
     use lab_language::compile_module;
 
-    use super::*;
+    use crate::backend::opentrons_ot2::plan::*;
 
     const SOURCE: &str = r#"
 use std.bio.build

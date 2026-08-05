@@ -129,7 +129,7 @@ fn valid_package_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::manifest::*;
 
     #[test]
     fn parses_manifest_dependencies_and_defaults() {

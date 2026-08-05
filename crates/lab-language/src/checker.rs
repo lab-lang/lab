@@ -1,13 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use super::ast::*;
-use super::checked::*;
-use super::semantic_error::SemanticError;
-use super::source::Span;
-use super::standard_library::{
+use crate::ast::*;
+use crate::checked::*;
+use crate::semantic_error::SemanticError;
+use crate::source::Span;
+use crate::standard_library::{
     ActionContractSpec, ContractType, PhrasePart, PureFunctionSpec, StandardLibrary, StandardModule,
 };
-use super::type_system::{
+use crate::type_system::{
     Ty, common_type, comparable, compatible, satisfies_bound, substitute, to_checked_type, unify,
 };
 
@@ -1973,8 +1973,8 @@ fn promote_common_bindings(
 
 #[cfg(test)]
 mod tests {
-    use super::super::compile_module;
-    use super::*;
+    use crate::checker::*;
+    use crate::compile_module;
 
     #[test]
     fn compiles_representative_design_module() {

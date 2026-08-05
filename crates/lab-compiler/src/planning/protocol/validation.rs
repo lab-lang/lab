@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::AcceptanceCriterion;
+use crate::planning::protocol::AcceptanceCriterion;
 use thiserror::Error;
 
-use super::{OperationKind, PlanValue, ProtocolPlan, ValueKind};
+use crate::planning::protocol::{OperationKind, PlanValue, ProtocolPlan, ValueKind};
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PlanError {
@@ -112,9 +112,9 @@ fn insert_value(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{AcceptanceObligation, PlanStep};
+    use crate::planning::protocol::{AcceptanceObligation, PlanStep};
 
-    use super::*;
+    use crate::planning::protocol::validation::*;
 
     #[test]
     fn rejects_implicit_material_copying() {

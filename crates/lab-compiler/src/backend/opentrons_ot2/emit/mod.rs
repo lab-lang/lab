@@ -3,7 +3,7 @@
 mod manual;
 mod python;
 
-pub(super) use manual::render_manual_protocol;
-pub(super) use python::{
+pub(in crate::backend::opentrons_ot2) use manual::render_manual_protocol;
+pub(in crate::backend::opentrons_ot2) use python::{
     render_assembly_protocol, render_plating_protocol, render_transformation_protocol,
 };

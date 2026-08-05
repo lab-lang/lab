@@ -50,7 +50,7 @@ pub enum TargetConstraintError {
 
 #[cfg(test)]
 mod tests {
-    use super::TargetConstraintError;
+    use crate::backend::constraints::TargetConstraintError;
 
     #[test]
     fn capacity_diagnostics_do_not_encode_a_protocol() {

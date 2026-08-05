@@ -1,6 +1,6 @@
 use std::fmt;
 
-use super::source::Span;
+use crate::source::Span;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Token {

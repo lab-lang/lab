@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use super::source::Span;
+use crate::source::Span;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ParseError {

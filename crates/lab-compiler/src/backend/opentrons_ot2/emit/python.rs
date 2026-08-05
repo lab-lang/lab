@@ -1,6 +1,6 @@
 //! Rendering for standalone typed Opentrons protocol modules.
 
-use super::super::{Ot2EmissionError, Ot2ExecutionPlan};
+use crate::backend::opentrons_ot2::{Ot2EmissionError, Ot2ExecutionPlan};
 
 const PLAN_TYPES_SOURCE: &str = include_str!("../python/src/lab_opentrons_ot2/plan_types.py");
 const ASSEMBLY_SOURCE: &str = include_str!("../python/src/lab_opentrons_ot2/protocols/assembly.py");
@@ -130,14 +130,14 @@ mod tests {
 
     use crate::backend::opentrons_ot2::lower_build;
 
-    use super::*;
+    use crate::backend::opentrons_ot2::emit::python::*;
 
     #[test]
     fn emitted_protocol_is_standalone_typed_python() {
         let source =
             include_str!("../../../../../../examples/opentrons-build/reporter-library.lab");
         let build = lower_build(&compile_module(source).unwrap()).unwrap();
-        let plan = super::super::super::plan_build(&build).unwrap();
+        let plan = crate::backend::opentrons_ot2::plan_build(&build).unwrap();
         let protocol = render_assembly_protocol(&plan).unwrap();
 
         assert!(!protocol.contains("from lab_opentrons_ot2"));

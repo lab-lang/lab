@@ -1,9 +1,9 @@
 //! Fixed demonstration exports for `std.bio.parts`.
 
-use super::super::catalog::StandardModule;
+use crate::standard_library::catalog::StandardModule;
 use crate::type_system::Ty;
 
-pub(super) fn module() -> StandardModule {
+pub(in crate::standard_library::bio) fn module() -> StandardModule {
     let named = Ty::named;
     StandardModule::new("std.bio.parts").with_values([
         (

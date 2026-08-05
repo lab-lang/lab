@@ -125,7 +125,7 @@ fn validate_package_path(path: &str) -> Result<(), ArtifactError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::artifact::bundle::*;
 
     #[test]
     fn rejects_paths_that_escape_the_package() {

@@ -2,7 +2,7 @@ use std::fmt::Write;
 
 use crate::{AcceptanceCriterion, ProtocolPlan};
 
-pub(super) fn write_acceptance(output: &mut String, plan: &ProtocolPlan) {
+pub(in crate::render::human) fn write_acceptance(output: &mut String, plan: &ProtocolPlan) {
     writeln!(output, "Acceptance requirements").unwrap();
     if plan.acceptance.is_empty() {
         writeln!(

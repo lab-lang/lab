@@ -9,7 +9,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use super::checked::*;
+use crate::checked::*;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[error("affine material-flow error in workflow '{workflow}' at {location}: {message}")]
@@ -692,8 +692,8 @@ fn display_places(places: &BTreeSet<Place>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::super::compile_module;
-    use super::*;
+    use crate::compile_module;
+    use crate::material_flow::*;
 
     fn material(inner: &str) -> CheckedType {
         CheckedType::Named {

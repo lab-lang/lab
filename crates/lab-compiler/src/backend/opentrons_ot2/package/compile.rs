@@ -11,7 +11,7 @@ use crate::{ArtifactBundle, ArtifactError};
 use crate::planning::{ArtifactResolution, BuildInventory, DependencyBuildManifest};
 use crate::planning::{BuildGraph, BuildGraphNode, DependencyGraphError, resolve_dependency_graph};
 
-use super::super::{Ot2BuildArtifact, Ot2BuildError, Ot2BuildIr, compile_build};
+use crate::backend::opentrons_ot2::{Ot2BuildArtifact, Ot2BuildError, Ot2BuildIr, compile_build};
 
 const STANDARD_MATERIALS: [&str; 4] = [
     "T4_DNA_ligase",
@@ -339,7 +339,7 @@ mod tests {
     use crate::planning::DependencyBuildStatus;
     use lab_language::compile_module;
 
-    use super::*;
+    use crate::backend::opentrons_ot2::package::compile::*;
 
     const SOURCE: &str = r#"
 use std.bio.build

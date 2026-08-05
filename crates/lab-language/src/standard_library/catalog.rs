@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
-use super::contract::ActionContractSpec;
+use crate::standard_library::contract::ActionContractSpec;
 use crate::type_system::Ty;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -166,10 +166,10 @@ pub(crate) struct StandardLibrary {
 
 impl StandardLibrary {
     pub(crate) fn bundled() -> Self {
-        let modules = super::prelude::modules()
+        let modules = crate::standard_library::prelude::modules()
             .into_iter()
-            .chain(super::bio::modules())
-            .chain(super::lab::modules());
+            .chain(crate::standard_library::bio::modules())
+            .chain(crate::standard_library::lab::modules());
         Self::from_modules(modules).expect("bundled standard-library catalog must be valid")
     }
 
@@ -295,7 +295,7 @@ fn valid_export_name(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::standard_library::catalog::*;
     use crate::standard_library::contract::{ContractType, PhrasePart};
 
     #[test]

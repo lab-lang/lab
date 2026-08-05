@@ -80,7 +80,7 @@ impl ExecutionGraph {
 mod tests {
     use crate::{OperationKind, PlanStep, PlanValue, ProtocolPlan};
 
-    use super::*;
+    use crate::simulation::execution::*;
 
     #[test]
     fn records_data_dependencies_without_backend_allocations() {

@@ -510,7 +510,7 @@ fn diagnostic_severity(severity: DiagnosticSeverity) -> lsp::DiagnosticSeverity 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::server::*;
 
     #[test]
     fn converts_utf16_positions() {

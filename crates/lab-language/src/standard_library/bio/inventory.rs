@@ -1,9 +1,9 @@
 //! Typed external-identity constructors in `std.bio.inventory`.
 
-use super::super::catalog::{PureFunctionSpec, StandardModule};
+use crate::standard_library::catalog::{PureFunctionSpec, StandardModule};
 use crate::type_system::Ty;
 
-pub(super) fn module() -> StandardModule {
+pub(in crate::standard_library::bio) fn module() -> StandardModule {
     let named = Ty::named;
     StandardModule::new("std.bio.inventory").with_functions([
         PureFunctionSpec::new(

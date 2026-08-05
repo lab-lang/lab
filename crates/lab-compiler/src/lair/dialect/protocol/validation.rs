@@ -7,14 +7,18 @@ use pliron::verify_err;
 
 use crate::lair::dialect::protocol::{EvidenceType, MaterialType};
 
-pub(super) fn require_attr(present: bool, name: &str, location: Location) -> Result<()> {
+pub(in crate::lair::dialect::protocol) fn require_attr(
+    present: bool,
+    name: &str,
+    location: Location,
+) -> Result<()> {
     if !present {
         return verify_err!(location, "operation is missing required attribute {name}");
     }
     Ok(())
 }
 
-pub(super) fn require_material(
+pub(in crate::lair::dialect::protocol) fn require_material(
     value: Value,
     expected: MaterialType,
     location: Location,
@@ -34,7 +38,7 @@ pub(super) fn require_material(
     Ok(())
 }
 
-pub(super) fn require_evidence(
+pub(in crate::lair::dialect::protocol) fn require_evidence(
     value: Value,
     expected: EvidenceType,
     location: Location,
@@ -54,7 +58,11 @@ pub(super) fn require_evidence(
     Ok(())
 }
 
-pub(super) fn require_any_evidence(value: Value, location: Location, ctx: &Context) -> Result<()> {
+pub(in crate::lair::dialect::protocol) fn require_any_evidence(
+    value: Value,
+    location: Location,
+    ctx: &Context,
+) -> Result<()> {
     let handle = value.get_type(ctx);
     let ty = handle.deref(ctx);
     if ty.downcast_ref::<EvidenceType>().is_none() {

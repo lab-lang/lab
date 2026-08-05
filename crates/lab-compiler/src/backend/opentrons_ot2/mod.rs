@@ -26,8 +26,10 @@ use lab_language::CheckedModule;
 use std::collections::BTreeSet;
 use thiserror::Error;
 
-use super::{Backend, BackendDescriptor, BackendEmitter, BackendTarget, TargetConstraintError};
 use crate::ArtifactBundle;
+use crate::backend::{
+    Backend, BackendDescriptor, BackendEmitter, BackendTarget, TargetConstraintError,
+};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Ot2Backend;
@@ -78,7 +80,7 @@ impl BackendEmitter<Ot2ExecutionPlan> for Ot2Backend {
 mod tests {
     use lab_language::compile_module;
 
-    use super::*;
+    use crate::backend::opentrons_ot2::*;
 
     #[test]
     fn compiles_checked_modules_through_the_backend_contract() {

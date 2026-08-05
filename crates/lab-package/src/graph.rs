@@ -83,7 +83,7 @@ impl ModuleGraph {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::graph::*;
 
     #[test]
     fn resolves_standard_local_and_dependency_modules() {

@@ -1,9 +1,9 @@
 //! Implicitly imported foundational types, values, and pure operations.
 
-use super::catalog::{PureFunctionSpec, StandardModule};
+use crate::standard_library::catalog::{PureFunctionSpec, StandardModule};
 use crate::type_system::Ty;
 
-pub(super) fn modules() -> Vec<StandardModule> {
+pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
     let named = Ty::named;
     let types = [
         "Accepted",

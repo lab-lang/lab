@@ -75,7 +75,7 @@ mod tests {
     use crate::lair::dialect::design::DesignPlasmidOp;
     use crate::lair::dialect::protocol::{AssembleOp, AssemblyMethodAttr, SynthesizeOp};
 
-    use super::*;
+    use crate::lair::analysis::*;
 
     #[test]
     fn rejects_two_consumers_of_one_physical_value() {

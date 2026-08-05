@@ -5,9 +5,9 @@ mod build;
 mod inventory;
 mod parts;
 
-use super::catalog::StandardModule;
+use crate::standard_library::catalog::StandardModule;
 
-pub(super) fn modules() -> Vec<StandardModule> {
+pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
     vec![
         parts::module(),
         backbones::module(),

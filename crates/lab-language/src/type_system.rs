@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use super::checked::CheckedType;
-use super::semantic_error::SemanticError;
-use super::source::Span;
+use crate::checked::CheckedType;
+use crate::semantic_error::SemanticError;
+use crate::source::Span;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Ty {
+pub(crate) enum Ty {
     Named(String, Vec<Ty>),
     Union(Vec<Ty>),
     List(Box<Ty>),
@@ -22,11 +22,11 @@ pub(super) enum Ty {
 }
 
 impl Ty {
-    pub(super) fn named(name: impl Into<String>) -> Self {
+    pub(crate) fn named(name: impl Into<String>) -> Self {
         Self::Named(name.into(), Vec::new())
     }
 
-    pub(super) fn material(inner: Ty) -> Self {
+    pub(crate) fn material(inner: Ty) -> Self {
         Self::Named("Material".to_owned(), vec![inner])
     }
 }
@@ -66,7 +66,7 @@ impl fmt::Display for Ty {
     }
 }
 
-pub(super) fn to_checked_type(ty: &Ty) -> CheckedType {
+pub(crate) fn to_checked_type(ty: &Ty) -> CheckedType {
     match ty {
         Ty::Named(name, arguments) => CheckedType::Named {
             name: name.clone(),
@@ -93,7 +93,7 @@ pub(super) fn to_checked_type(ty: &Ty) -> CheckedType {
     }
 }
 
-pub(super) fn compatible(actual: &Ty, expected: &Ty) -> bool {
+pub(crate) fn compatible(actual: &Ty, expected: &Ty) -> bool {
     if actual == expected || matches!(actual, Ty::EmptyList) && matches!(expected, Ty::List(_)) {
         return true;
     }
@@ -119,7 +119,7 @@ pub(super) fn compatible(actual: &Ty, expected: &Ty) -> bool {
     }
 }
 
-pub(super) fn common_type(left: Ty, right: Ty) -> Ty {
+pub(crate) fn common_type(left: Ty, right: Ty) -> Ty {
     if compatible(&right, &left) {
         return left;
     }
@@ -141,13 +141,13 @@ pub(super) fn common_type(left: Ty, right: Ty) -> Ty {
     Ty::Union(alternatives)
 }
 
-pub(super) fn comparable(left: &Ty, right: &Ty) -> bool {
+pub(crate) fn comparable(left: &Ty, right: &Ty) -> bool {
     compatible(left, right)
         || compatible(right, left)
         || matches!((left, right), (Ty::Quantity(_), Ty::Quantity(_)))
 }
 
-pub(super) fn satisfies_bound(actual: &Ty, bound: &Ty) -> bool {
+pub(crate) fn satisfies_bound(actual: &Ty, bound: &Ty) -> bool {
     compatible(actual, bound)
         || matches!(
             (actual, bound),
@@ -164,7 +164,7 @@ pub(super) fn satisfies_bound(actual: &Ty, bound: &Ty) -> bool {
         )
 }
 
-pub(super) fn unify(
+pub(crate) fn unify(
     template: &Ty,
     actual: &Ty,
     parameters: &[String],
@@ -212,7 +212,7 @@ pub(super) fn unify(
     }
 }
 
-pub(super) fn substitute(ty: &Ty, substitutions: &HashMap<String, Ty>) -> Ty {
+pub(crate) fn substitute(ty: &Ty, substitutions: &HashMap<String, Ty>) -> Ty {
     match ty {
         Ty::Named(name, arguments) if arguments.is_empty() && substitutions.contains_key(name) => {
             substitutions[name].clone()
