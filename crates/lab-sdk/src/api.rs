@@ -1,29 +1,24 @@
-use lab_compiler::LabProfile;
-use lab_compiler::{Compilation, Compiler};
+use lab_compiler::CheckedModule;
 
 use crate::Error;
 
-/// Parse Lab Lang and compile it for a laboratory target.
-pub fn compile_lab_lang(source: &str, lab: &LabProfile) -> Result<Compilation, Error> {
-    let specification = lab_compiler::parse(source)?;
-    Ok(Compiler.compile(&specification, lab)?)
+/// Parse, resolve, and type-check a Lab source module.
+pub fn compile_lab_module(source: &str) -> Result<CheckedModule, Error> {
+    Ok(lab_compiler::compile_module(source)?)
 }
 
 #[cfg(test)]
 mod tests {
-    use lab_compiler::LabProfile;
-
     use super::*;
 
     #[test]
-    fn source_to_plan_sdk_path_is_coherent() {
+    fn source_to_checked_module_sdk_path_is_coherent() {
         let source = r#"
 plasmid p_sdk:
-  sequence = dna("ACGT")
+  sequence: dna("ACGT")
   accept sequence == design.sequence
         "#;
-        let compilation = compile_lab_lang(source, &LabProfile::reference()).unwrap();
-        assert_eq!(compilation.plan().artifact, "p_sdk");
-        assert!(compilation.ir().contains("protocol.accept"));
+        let module = compile_lab_module(source).unwrap();
+        assert_eq!(module.declarations.len(), 1);
     }
 }

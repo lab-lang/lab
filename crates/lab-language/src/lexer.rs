@@ -334,11 +334,12 @@ mod tests {
 
     #[test]
     fn emits_layout_only_for_significant_lines() {
-        let kinds = lex("workflow grow:\n  # note\n  x = f(\n    1,\n    2,\n  )\nnext = 3\n")
-            .unwrap()
-            .into_iter()
-            .map(|token| token.kind)
-            .collect::<Vec<_>>();
+        let kinds =
+            lex("workflow grow() -> Integer:\n  # note\n  x = f(\n    1,\n    2,\n  )\nnext = 3\n")
+                .unwrap()
+                .into_iter()
+                .map(|token| token.kind)
+                .collect::<Vec<_>>();
 
         assert_eq!(
             kinds
@@ -358,7 +359,7 @@ mod tests {
 
     #[test]
     fn rejects_tabs_in_indentation() {
-        let error = lex("plasmid p:\n\tsequence = dna(\"ACGT\")\n").unwrap_err();
+        let error = lex("plasmid p:\n\tsequence: dna(\"ACGT\")\n").unwrap_err();
         assert!(error.to_string().contains("tabs are not allowed"));
     }
 }

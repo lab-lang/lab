@@ -1,4 +1,8 @@
+use std.bio.inventory
 use std.lab.plasmid_actions
+
+competent_ecoli = strain("competent_ecoli")
+kanamycin = antibiotic("kanamycin")
 
 observation PlateObservation:
   image: Image
@@ -22,9 +26,7 @@ outcome SequenceCheck:
   case Mismatch
   case Inconclusive
 
-workflow await_colonies:
-  input plate: Material<Plate>
-  output ColonyGrowth
+workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
 
   state observations: List<PlateObservation> = []
 
@@ -51,9 +53,7 @@ workflow await_colonies:
       observations: observations,
     }
 
-workflow build_plasmid:
-  input design: Plasmid
-  output Accepted<Plasmid> | Rejected<Plasmid>
+workflow build_plasmid(design: Plasmid) -> Accepted<Plasmid> | Rejected<Plasmid>:
 
   fragments <- synthesize design
   construct <- assemble fragments

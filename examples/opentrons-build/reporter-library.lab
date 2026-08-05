@@ -1,0 +1,72 @@
+use std.bio.build
+use std.bio.inventory
+use std.lab.plasmid_actions
+
+record BuiltArtifact:
+  product: Material<Plasmid>
+  plate: Material<Plate>
+
+J23101 = part("J23101")
+J23106 = part("J23106")
+B0034 = part("B0034")
+GFP = part("GFP")
+RFP = part("RFP")
+B0015 = part("B0015")
+pSB1C3 = backbone("pSB1C3")
+BsaI = restriction_enzyme("BsaI")
+DH5alpha = strain("DH5alpha")
+chloramphenicol = antibiotic("chloramphenicol")
+
+# End-to-end Lab automation fixture for the OT-2 specialization.
+# Names identify inventory items; the compiler does not yet resolve lots or SBOL.
+# Sequences are synthetic compiler fixtures, not qualified biological designs.
+
+plasmid p_gfp:
+  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone: pSB1C3
+  components: [J23101, B0034, GFP, B0015]
+  restriction_enzyme: BsaI
+  host: DH5alpha
+  selection: chloramphenicol
+  assembly_replicates: 1
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
+
+  require topology == circular
+  accept sequence == design.sequence
+
+plasmid p_rfp:
+  sequence: dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
+  backbone: pSB1C3
+  components: [J23106, B0034, RFP, B0015]
+  restriction_enzyme: BsaI
+  host: DH5alpha
+  selection: chloramphenicol
+  assembly_replicates: 1
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
+
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow realize_p_gfp() -> BuiltArtifact:
+  dependencies = []
+  product, construct <- realize p_gfp from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return BuiltArtifact{product: product, plate: plate}
+
+workflow realize_p_rfp() -> BuiltArtifact:
+  dependencies = []
+  product, construct <- realize p_rfp from dependencies
+  cells <- provision DH5alpha
+  culture <- transform construct into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return BuiltArtifact{product: product, plate: plate}

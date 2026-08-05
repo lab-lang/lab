@@ -31,7 +31,7 @@ pub enum CheckedDeclaration {
     },
     Plasmid {
         name: String,
-        bindings: Vec<CheckedBinding>,
+        properties: Vec<CheckedProperty>,
         requirements: Vec<TypedExpression>,
         acceptance: Vec<TypedExpression>,
     },
@@ -129,6 +129,12 @@ pub struct CheckedSection {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedBinding {
     pub targets: Vec<CheckedField>,
+    pub value: TypedExpression,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedProperty {
+    pub name: String,
     pub value: TypedExpression,
 }
 

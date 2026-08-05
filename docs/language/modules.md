@@ -14,6 +14,20 @@ The provisional rule is that a whole-module import makes that module's public na
 
 `std` is the language-owned standard library namespace. Biological catalogs, laboratory integrations, and organization-specific policies should normally be separate versioned packages rather than silently entering `std`.
 
+## Bundled standard-library surface
+
+The current frontend resolves a small bundled registry through the same conceptual boundary that future packages should implement:
+
+| Module | Current role |
+| --- | --- |
+| `std.bio.parts` | fixed demonstration part values used by the design specimen |
+| `std.bio.backbones` | fixed demonstration backbone values used by the design specimen |
+| `std.bio.inventory` | pure constructors for typed external part, backbone, enzyme, strain, and antibiotic identities |
+| `std.bio.build` | typed artifact-realization effects |
+| `std.lab.plasmid_actions` | typed laboratory action contracts used by the workflow specimens |
+
+Module resolution supplies values, pure-function signatures, and action contracts to the generic checker. It does not add module-specific parser or AST cases. The bundled registry is an implementation bridge; changing catalogs and site-specific actions should move to ordinary versioned packages once package-defined public contracts exist.
+
 ## Project layout
 
 An idiomatic project separates reusable intent from the runnable composition:
@@ -45,6 +59,8 @@ tests/
 - `.lab/runs` is generated runtime state and provenance, never hand-authored source.
 
 These names are conventions rather than keywords. The module system should not give a directory magical semantics merely because it is called `workflows`.
+
+Within a module, examples conventionally put providers before consumers: imports first, then shared data types, inventory values, biological declarations, and finally workflows. Dependency correctness still comes from resolved symbols and typed dataflow rather than textual order, filenames, or names such as “level 1” and “level 2.”
 
 ## Initial package manifest
 

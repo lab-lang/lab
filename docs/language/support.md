@@ -1,15 +1,18 @@
 # Language support
 
-Support is tracked by compiler phase. `Lower` means verified portable module IR unless the row explicitly names the older executable artifact pipeline. It does not imply target selection or physical execution.
+Support is tracked by compiler phase. `Lower` means verified portable module IR unless a row explicitly names a target. `Execute` distinguishes generated or legacy executable artifacts from the still-missing durable workflow runtime.
 
 | Feature | Parse | Resolve | Type | Lower | Execute |
 | --- | --- | --- | --- | --- | --- |
-| Indented plasmid declaration | yes | yes | yes | yes | yes |
-| Pure binding with `=` | plasmid fields | plasmid fields | plasmid fields | yes | yes |
+| Indented plasmid declaration | yes | yes | yes | portable module | specialized targets |
+| Declarative plasmid properties with `:` | yes | expressions | inferred checked values | `CheckedProperty` | target-dependent |
+| Mandatory workflow `(inputs) -> output` signature | yes | yes | inputs and return | yes | runtime pending |
 | Quantity literals | acceptance subset | built-in units | dimension subset | yes | yes |
 | `require` predicates | topology subset | yes | yes | yes | yes |
 | `accept` predicates | sequence/concentration/volume | yes | yes | yes | yes |
-| Built-in `std` module imports | yes | yes | n/a | yes | no |
+| Bundled `std` module imports | yes | five modules | module values and contracts | yes | no runtime dispatch |
+| Typed inventory constructors | yes | `std.bio.inventory` | nominal values | structured calls | no live inventory lookup |
+| Heterogeneous list union inference | yes | symbols | e.g. `List<Plasmid | Part>` | yes | target-dependent |
 | Project/package import graph | yes | module paths | no imported symbols | no | no |
 | `lab.toml` manifest and source discovery | n/a | yes | n/a | yes | no |
 | External dependency resolution and lockfile | n/a | no | no | no | no |
@@ -18,7 +21,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | `record`, `material`, `observation`, `evidence`, and `event` | yes | yes | yes | yes | no |
 | Biological `part` declarations | syntax pending | no | no | no | no |
 | Tagged `outcome` declarations and constructors | yes | yes | yes | yes | no |
-| Workflow declarations and calls | yes | yes | yes | yes | no |
+| Workflow declarations and calls | yes | yes | yes | yes | runtime pending |
 | Pure workflow bindings | yes | yes | yes | yes | no |
 | Explicit durable workflow `state` | yes | yes | yes | yes | no |
 | Built-in durable operations with `<-` | yes | yes | yes | yes | no |
@@ -30,9 +33,16 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | `when every` / `when after` | yes | yes | yes | yes | no |
 | Event emission | yes | yes | yes | yes | no |
 | Affine material-flow checking in portable workflows | n/a | action ownership modes | yes | yes | no |
+| Dependencies from `Material<Plasmid>` dataflow | yes | resolved `realize` operands | yes | initial OT-2 target | generated plans and bundles |
+| OT-2 properties and operation sequence | yes | checked properties and actions | target validation | automation IR | generated protocols only |
+| Human instruction package | n/a | n/a | target-validated | Markdown plus manifest | operator review required |
 | Durable workflow runtime | no | no | no | no | no |
 
-The older executable artifact pipeline deliberately requires one directly specified plasmid. Complete modules use the separate portable-module boundary; requesting artifact-specific target IR, plans, or simulation for them still reports an explicit unsupported-feature diagnostic.
+All complete source modules use the portable-module boundary. A backend may reject checked properties or operations it cannot preserve, but it cannot select a narrower source frontend.
+
+The separate OT-2 specialization accepts plasmid properties (`backbone`, ordered `components`, `restriction_enzyme`, `host`, `selection`, and batch controls) as checked symbol references plus workflows composed from bundled standard-library effects. `std.bio.inventory` constructors give external inventory identities typed source names; strings are not used as component references. The source selects `realize`, provision, transformation, recovery, dilution, and plating operations. Dependencies are typed material inputs to `realize`; the generic language does not encode assembly levels. The specialization emits a deterministic Lab manifest, human instructions, and OT-2 scripts, and explicitly rejects properties or operation sequences it cannot lower.
+
+The target validates fixed reaction volumes and single-plate, rack, and tip capacity. It does not yet resolve SBOL, inventory lots, overhang compatibility, sequence redesign, concentration normalization, dependent-batch DNA preparation, or runtime acceptance evidence. Generated instructions and scripts require laboratory review and qualification before physical execution. The complete specialization boundary is documented separately in [`../integrations/opentrons-build.md`](../integrations/opentrons-build.md).
 
 ## Editor support
 
@@ -43,7 +53,7 @@ The older executable artifact pipeline deliberately requires one directly specif
 | Outline | top-level declarations plus data fields/cases and workflow inputs |
 | Completion and hover | keywords and open-document top-level declarations |
 | Definition, references, rename | open documents; name-based fallback pending symbol identities/scopes |
-| Semantic highlighting | comments, keywords, strings, numbers, types, functions, variables, operators |
+| Semantic highlighting | parsed declaration kinds before lexical fallback; comments, keywords, strings, numbers, types, functions, values, operators |
 | Formatting | trailing whitespace and final newline only |
 | Native editor transport | LSP over stdio |
 | Browser/embedded API | `wasm-bindgen` facade over the same `lab-ide` workspace |

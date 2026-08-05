@@ -70,10 +70,17 @@ pub struct PlasmidDecl {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PlasmidMember {
-    Binding(BindingStmt),
+    Property(PropertyDecl),
     Requirement(ClaimStmt),
     Acceptance(ClaimStmt),
     Section(Section),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PropertyDecl {
+    pub name: Identifier,
+    pub value: Expr,
+    pub span: Span,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,7 +122,7 @@ pub struct FieldDecl {
 pub struct WorkflowDecl {
     pub name: Identifier,
     pub inputs: Vec<FieldDecl>,
-    pub output: Option<TypeExpr>,
+    pub output: TypeExpr,
     pub body: Vec<Stmt>,
     pub span: Span,
 }

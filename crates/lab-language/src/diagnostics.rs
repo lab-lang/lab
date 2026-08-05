@@ -30,8 +30,6 @@ pub enum DiagnosticSeverity {
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticCode {
     Syntax,
-    Unsupported,
-    Specification,
     Semantic,
     MaterialFlow,
 }
@@ -99,16 +97,6 @@ pub fn analyze_module(source_id: SourceId, text: &str) -> Analysis {
 fn diagnostic_from_parse(source: SourceId, error: ParseError) -> Diagnostic {
     let (span, code, message) = match error {
         ParseError::Syntax { span, message } => (span, DiagnosticCode::Syntax, message),
-        ParseError::Unsupported { span, feature } => (
-            span,
-            DiagnosticCode::Unsupported,
-            format!("unsupported language feature: {feature}"),
-        ),
-        ParseError::Specification(error) => (
-            Span::at(0),
-            DiagnosticCode::Specification,
-            error.to_string(),
-        ),
     };
     Diagnostic {
         source,

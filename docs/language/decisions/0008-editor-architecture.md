@@ -20,7 +20,7 @@ The `lab-language-server` executable is editor infrastructure. It is not a secon
 
 `lab-ide` is deliberately separate from the language server. It owns semantic editor operations over in-memory source IDs and byte spans without filesystem, process, JSON-RPC, or LSP types. Native editors use it through `lab-language-server`; browser editors and desktop embeddings use it through `lab-ide-wasm` or the Rust API directly.
 
-The VS Code/Cursor extension remains thin. TextMate handles initial colorization and the extension launches the server for diagnostics, completion, hover, navigation, references, rename, document symbols, semantic tokens, and formatting.
+The VS Code/Cursor extension remains thin. TextMate handles initial colorization and the extension launches the server for diagnostics, completion, hover, navigation, references, rename, document symbols, semantic tokens, and formatting. Semantic highlighting consults parsed declarations before lexical fallback, so a declared value remains a value regardless of capitalization; biological naming conventions do not determine language type categories.
 
 ## Source and diagnostic contract
 

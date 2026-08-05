@@ -1,43 +1,18 @@
 use std::str::FromStr;
 
-use lab_compiler::{
-    AcceptanceCriterion, ArtifactSpec, Concentration, DnaSequence, LabProfile, PlasmidSpec,
-    Topology, Volume,
-};
-use lab_compiler::{Compiler, CompilerSession, IrStage, PassPipeline, SessionError};
+use lab_compiler::{CompilerSession, IrStage, PassPipeline, SessionError};
 
-fn specification() -> ArtifactSpec {
-    ArtifactSpec::plasmid(
-        "p_session",
-        PlasmidSpec::new(
-            DnaSequence::new("ATGCGTACGTTAGCTA").unwrap(),
-            Topology::Circular,
-        )
-        .unwrap(),
-        1,
-        vec![
-            AcceptanceCriterion::ExactSequence,
-            AcceptanceCriterion::MinimumConcentration {
-                concentration: Concentration::nanograms_per_microliter(100),
-            },
-            AcceptanceCriterion::MinimumVolume {
-                volume: Volume::microliters(20),
-            },
-        ],
-    )
-    .unwrap()
+fn protocol_ir() -> &'static str {
+    include_str!("fixtures/p_acceptance_protocol.ir")
 }
 
 #[test]
 fn compiled_ir_round_trips_through_a_fresh_session() {
-    let compilation = Compiler
-        .compile(&specification(), &LabProfile::reference())
-        .unwrap();
-    let ir = compilation.ir();
+    let ir = protocol_ir();
     assert!(ir.contains("outlined_attributes:"));
 
     let mut parsed = CompilerSession::default();
-    parsed.parse_ir(&ir).unwrap();
+    parsed.parse_ir(ir).unwrap();
     assert_eq!(
         parsed.detect_stage().unwrap(),
         IrStage::TargetSelectedProtocol
@@ -56,27 +31,24 @@ fn compiled_ir_round_trips_through_a_fresh_session() {
 
 #[test]
 fn parser_rejects_trailing_input_and_leaves_the_session_reusable() {
-    let compilation = Compiler
-        .compile(&specification(), &LabProfile::reference())
-        .unwrap();
     let mut session = CompilerSession::default();
     let error = session
-        .parse_ir(&format!("{} trailing-garbage", compilation.ir()))
+        .parse_ir(&format!("{} trailing-garbage", protocol_ir()))
         .unwrap_err();
     assert!(matches!(error, SessionError::ParseIr(_)));
 
-    session.import_specification(&specification()).unwrap();
-    session.verify_stage(IrStage::Design).unwrap();
+    session.parse_ir(protocol_ir()).unwrap();
+    session
+        .verify_stage(IrStage::TargetSelectedProtocol)
+        .unwrap();
 }
 
 #[test]
 fn parsing_and_biological_verification_are_distinct_failures() {
-    let compilation = Compiler
-        .compile(&specification(), &LabProfile::reference())
-        .unwrap();
-    let invalid = compilation
-        .ir()
-        .replace("ATGCGTACGTTAGCTA", "ATGCGTACGTTAGCTAN");
+    let invalid = protocol_ir().replace(
+        "GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT",
+        "GCTAGCN",
+    );
     let mut session = CompilerSession::default();
 
     session.parse_ir(&invalid).unwrap();
@@ -88,17 +60,4 @@ fn parsing_and_biological_verification_are_distinct_failures() {
         diagnostic
             .contains("design.plasmid sequence must be non-empty, uppercase, and unambiguous DNA")
     );
-}
-
-#[test]
-fn pass_stage_preconditions_reject_design_ir() {
-    let mut session = CompilerSession::default();
-    session.import_specification(&specification()).unwrap();
-    let pipeline = PassPipeline::from_str("protocol-check-material-linearity").unwrap();
-
-    let error = session.run_pass_pipeline(&pipeline).unwrap_err();
-    let SessionError::StageContract(diagnostic) = error else {
-        panic!("expected stage-contract failure");
-    };
-    assert!(diagnostic.contains("expected target-selected-protocol IR"));
 }

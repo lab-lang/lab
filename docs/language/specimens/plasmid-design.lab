@@ -15,8 +15,8 @@ circuit regulated_expression<I: Signal, O: Protein>:
 tet_reporter = regulated_expression(pTet, sfGFP)
 
 plasmid p_tet_reporter:
-  backbone = p15A_kan
-  cargo = tet_reporter
+  backbone: p15A_kan
+  cargo: tet_reporter
 
   require topology == circular
   require sites(BsaI) == 0

@@ -8,7 +8,7 @@
 # The sequence is synthetic example data. It is useful for demonstrating the
 # compiler and is not a qualified construct or laboratory protocol.
 plasmid p_acceptance:
-  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT")
+  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT")
   require topology == circular
 
   # These are acceptance obligations, not claims about the eventual artifact.

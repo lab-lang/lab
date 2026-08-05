@@ -93,3 +93,60 @@ fn plasmid_build_compiles_typed_effects_and_reactive_handlers() {
             .contains("workflow build_plasmid")
     );
 }
+
+#[test]
+fn inventory_specimen_preserves_properties_and_resolved_operations() {
+    let module = module_ir("inventory-plasmid.lab");
+    let declarations = module["declarations"].as_array().unwrap();
+    let reporter = declarations
+        .iter()
+        .find(|declaration| declaration["name"] == "reporter")
+        .unwrap();
+    assert_eq!(reporter["kind"], "plasmid");
+    assert!(reporter.get("bindings").is_none());
+    assert!(
+        reporter["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|property| property["name"] == "components"
+                && property["value"]["type"]["element"]["name"] == "Part")
+    );
+
+    let serialized = serde_json::to_string(&module).unwrap();
+    assert!(serialized.contains("std.bio.inventory.part"));
+    assert!(serialized.contains("std.bio.build.realize"));
+    assert!(serialized.contains("artifact_realization"));
+}
+
+#[test]
+fn dependency_specimen_preserves_typed_material_edges_without_levels() {
+    let module = module_ir("dependency-build.lab");
+    let declarations = module["declarations"].as_array().unwrap();
+    let reporter = declarations
+        .iter()
+        .find(|declaration| declaration["name"] == "reporter_region")
+        .unwrap();
+    let components = reporter["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|property| property["name"] == "components")
+        .unwrap();
+    let alternatives = components["value"]["type"]["element"]["alternatives"]
+        .as_array()
+        .unwrap();
+    assert_eq!(alternatives[0]["name"], "Plasmid");
+    assert_eq!(alternatives[1]["name"], "Part");
+
+    let workflow = declarations
+        .iter()
+        .find(|declaration| declaration["name"] == "realize_reporter_region")
+        .unwrap();
+    assert_eq!(workflow["inputs"][0]["name"], "promoter_carrier");
+    assert_eq!(workflow["inputs"][0]["type"]["name"], "Material");
+    let serialized = serde_json::to_string(workflow).unwrap();
+    assert!(serialized.contains("std.bio.build.realize"));
+    assert!(!serialized.contains("level1"));
+    assert!(!serialized.contains("level2"));
+}

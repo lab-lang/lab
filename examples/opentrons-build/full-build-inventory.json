@@ -1,0 +1,24 @@
+{
+  "available_materials": [
+    "B0015",
+    "B0034",
+    "BsaI",
+    "BsmBI",
+    "DH5alpha",
+    "GFP",
+    "J23101",
+    "J23106",
+    "T4_DNA_ligase",
+    "T4_DNA_ligase_buffer",
+    "TetR",
+    "ampicillin",
+    "chloramphenicol",
+    "final_receiver",
+    "kanamycin",
+    "nuclease_free_water",
+    "part_receiver",
+    "recovery_medium",
+    "region_receiver"
+  ],
+  "available_artifacts": []
+}

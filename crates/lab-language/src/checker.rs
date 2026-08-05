@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use super::action_contracts::{
-    ActionContractSpec, ContractType, PhrasePart, standard_action_contract,
-};
+use super::action_contracts::{ActionContractSpec, ContractType, PhrasePart};
 use super::ast::*;
 use super::checked::*;
 use super::semantic_error::SemanticError;
 use super::source::Span;
+use super::standard_library::{resolve_action, resolve_module, resolve_pure_function};
 
 pub(crate) fn check_module(module: &Module) -> Result<CheckedModule, SemanticError> {
     Checker::new(module).check(module)
@@ -210,38 +209,12 @@ impl Checker {
                 continue;
             };
             let path = path_text(&import.path);
-            match path.as_str() {
-                "std.bio.parts" => {
-                    self.insert_import(&path, import.span)?;
-                    self.insert_value(
-                        "pTet",
-                        named("Promoter", vec![Ty::named("Tetracycline")]),
-                        import.span,
-                    )?;
-                    self.insert_value(
-                        "sfGFP",
-                        named("CDS", vec![Ty::named("GreenFluorescentProtein")]),
-                        import.span,
-                    )?;
-                    self.insert_value("B0034", Ty::named("Part"), import.span)?;
-                    self.insert_value("B0015", Ty::named("Part"), import.span)?;
-                    self.insert_value("BsaI", Ty::named("RestrictionEnzyme"), import.span)?;
-                }
-                "std.bio.backbones" => {
-                    self.insert_import(&path, import.span)?;
-                    self.insert_value("p15A_kan", Ty::named("Backbone"), import.span)?;
-                }
-                "std.lab.plasmid_actions" => {
-                    self.insert_import(&path, import.span)?;
-                    self.insert_value("competent_ecoli", Ty::named("Strain"), import.span)?;
-                    self.insert_value("kanamycin", Ty::named("Antibiotic"), import.span)?;
-                }
-                _ => {
-                    return Err(SemanticError::new(
-                        import.span,
-                        format!("module '{path}' cannot be resolved"),
-                    ));
-                }
+            let standard = resolve_module(&path).ok_or_else(|| {
+                SemanticError::new(import.span, format!("module '{path}' cannot be resolved"))
+            })?;
+            self.insert_import(standard.path, import.span)?;
+            for (name, ty) in standard.values {
+                self.insert_value(name, ty, import.span)?;
             }
         }
         for (name, ty) in [
@@ -376,16 +349,17 @@ impl Checker {
                         .iter()
                         .map(|field| self.lower_type(&field.ty, &BTreeSet::new()))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let output = declaration.output.as_ref().ok_or_else(|| {
-                        SemanticError::new(declaration.span, "workflow requires an output type")
-                    })?;
-                    let output = self.lower_type(output, &BTreeSet::new())?;
+                    let output = self.lower_type(&declaration.output, &BTreeSet::new())?;
                     self.workflows.insert(
                         declaration.name.value.clone(),
                         WorkflowSignature { inputs, output },
                     );
                 }
-                Item::Use(_) | Item::Plasmid(_) | Item::Binding(_) => {}
+                Item::Plasmid(declaration) => {
+                    self.values
+                        .insert(declaration.name.value.clone(), Ty::named("Plasmid"));
+                }
+                Item::Use(_) | Item::Binding(_) => {}
             }
         }
         Ok(())
@@ -484,6 +458,9 @@ impl Checker {
         &self,
         declaration: &PlasmidDecl,
     ) -> Result<CheckedDeclaration, SemanticError> {
+        let has_direct_sequence = declaration.members.iter().any(|member| {
+            matches!(member, PlasmidMember::Property(property) if property.name.value == "sequence")
+        });
         let mut environment = self.values.clone();
         environment.extend([
             ("topology".to_owned(), Ty::named("Topology")),
@@ -493,13 +470,40 @@ impl Checker {
             ("volume".to_owned(), Ty::Quantity("uL".to_owned())),
             ("design".to_owned(), Ty::named("Plasmid")),
         ]);
-        let mut bindings = Vec::new();
+        let mut properties = Vec::new();
+        let mut property_names = BTreeSet::new();
         let mut requirements = Vec::new();
         let mut acceptance = Vec::new();
         for member in &declaration.members {
             match member {
-                PlasmidMember::Binding(binding) => {
-                    bindings.push(self.check_binding(binding, &mut environment)?.0);
+                PlasmidMember::Property(property) => {
+                    if !property_names.insert(property.name.value.clone()) {
+                        return Err(SemanticError::new(
+                            property.name.span,
+                            format!("duplicate plasmid property '{}'", property.name.value),
+                        ));
+                    }
+                    let inferred = self.infer_expr(&property.value, &environment)?;
+                    if let Some(expected) = environment.get(&property.name.value)
+                        && !compatible(&inferred, expected)
+                    {
+                        return Err(SemanticError::new(
+                            property.value.span(),
+                            format!(
+                                "plasmid property '{}' expects {expected}, found {inferred}",
+                                property.name.value
+                            ),
+                        ));
+                    }
+                    environment.insert(property.name.value.clone(), inferred.clone());
+                    properties.push(CheckedProperty {
+                        name: property.name.value.clone(),
+                        value: self.lower_checked_expr(
+                            &property.value,
+                            &environment,
+                            Some(&inferred),
+                        )?,
+                    });
                 }
                 PlasmidMember::Requirement(claim) => {
                     self.require_bool(&claim.predicate, &environment, "require")?;
@@ -528,18 +532,16 @@ impl Checker {
                 }
             }
         }
-        let has_direct_sequence = declaration.members.iter().any(|member| {
-            matches!(member, PlasmidMember::Binding(binding) if binding.names[0].value == "sequence")
-        });
         if !has_direct_sequence
             && (!environment.contains_key("backbone") || !environment.contains_key("cargo"))
         {
             return Err(SemanticError::new(
                 declaration.span,
-                "plasmid requires either a sequence binding or backbone and cargo bindings",
+                "plasmid requires either a sequence property or backbone and cargo properties",
             ));
         }
-        if let Some(backbone) = environment.get("backbone")
+        if !has_direct_sequence
+            && let Some(backbone) = environment.get("backbone")
             && !compatible(backbone, &Ty::named("Backbone"))
         {
             return Err(SemanticError::new(
@@ -557,7 +559,7 @@ impl Checker {
         }
         Ok(CheckedDeclaration::Plasmid {
             name: declaration.name.value.clone(),
-            bindings,
+            properties,
             requirements,
             acceptance,
         })
@@ -964,254 +966,47 @@ impl Checker {
             .first()
             .copied()
             .ok_or_else(|| SemanticError::new(effect.span, "empty effect action"))?;
-        if let Some(contract) = standard_action_contract(operation) {
-            if !self.imports.contains("std.lab.plasmid_actions") {
+        if let Some(contract) = resolve_action(operation) {
+            let required_module = contract
+                .operation
+                .rsplit_once('.')
+                .map_or(contract.operation, |(module, _)| module);
+            if !self.imports.contains(required_module) {
                 return Err(SemanticError::new(
                     effect.span,
-                    "durable plasmid actions require 'use std.lab.plasmid_actions'",
+                    format!(
+                        "operation '{}' requires 'use {required_module}'",
+                        contract.operation
+                    ),
                 ));
             }
             return self.check_standard_action_contract(effect, &words, environment, contract);
         }
-        if !self.workflows.contains_key(operation)
-            && !self.imports.contains("std.lab.plasmid_actions")
-        {
-            return Err(SemanticError::new(
-                effect.span,
-                "durable plasmid actions require 'use std.lab.plasmid_actions'",
-            ));
-        }
-        let lookup = |word: Option<&&str>| -> Result<Ty, SemanticError> {
-            let word = word.ok_or_else(|| SemanticError::new(effect.span, "incomplete action"))?;
-            self.resolve_action_operand(word, environment, effect.span)
-        };
-        let results = match operation {
-            "capture" => {
-                require_phrase(&words, 4, &[(1, "image"), (2, "of")], effect.span)?;
-                require_action_type(
-                    lookup(words.last())?,
-                    Ty::material(Ty::named("Plate")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::named("Image")]
-            }
-            "synthesize" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::named("Plasmid"),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::List(Box::new(Ty::named("Fragment")))]
-            }
-            "assemble" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::List(Box::new(Ty::named("Fragment"))),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Construct"))]
-            }
-            "provision" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::named("Strain"),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Strain"))]
-            }
-            "transform" => {
-                require_phrase(&words, 4, &[(2, "into")], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::material(Ty::named("Construct")),
-                    effect.span,
-                    operation,
-                )?;
-                require_action_type(
-                    lookup(words.last())?,
-                    Ty::material(Ty::named("Strain")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Culture"))]
-            }
-            "recover" => {
-                require_phrase(&words, 5, &[(2, "for")], effect.span)?;
-                require_unsigned(words[3], "recovery duration", effect.span)?;
-                require_one_of(words[4], &["min", "h"], "duration unit", effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::material(Ty::named("Culture")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Culture"))]
-            }
-            "plate" => {
-                require_phrase(&words, 4, &[(2, "on")], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::material(Ty::named("Culture")),
-                    effect.span,
-                    operation,
-                )?;
-                require_action_type(
-                    lookup(words.last())?,
-                    Ty::named("Antibiotic"),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Plate"))]
-            }
-            "pick" => {
-                require_phrase(
-                    &words,
-                    6,
-                    &[(2, "isolated"), (3, "colonies"), (4, "from")],
-                    effect.span,
-                )?;
-                require_unsigned(words[1], "colony count", effect.span)?;
-                require_action_type(
-                    lookup(words.last())?,
-                    Ty::material(Ty::named("Plate")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::List(Box::new(Ty::named("Clone")))]
-            }
-            "screen" => {
-                require_phrase(&words, 4, &[(2, "against")], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::List(Box::new(Ty::named("Clone"))),
-                    effect.span,
-                    operation,
-                )?;
-                require_action_type(
-                    lookup(words.last())?,
-                    Ty::named("Plasmid"),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::named("Screening")]
-            }
-            "grow" => {
-                require_phrase(
-                    &words,
-                    8,
-                    &[(2, "at"), (4, "C"), (5, "for"), (7, "h")],
-                    effect.span,
-                )?;
-                require_signed(words[3], "growth temperature", effect.span)?;
-                require_unsigned(words[6], "growth duration", effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::named("Clone"),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Culture"))]
-            }
-            "purify" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::material(Ty::named("Culture")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::material(Ty::named("Plasmid"))]
-            }
-            "split" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                let input = lookup(words.get(1))?;
-                require_action_type(
-                    input.clone(),
-                    Ty::material(Ty::named("Plasmid")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![input.clone(), input]
-            }
-            "sequence" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::material(Ty::named("Plasmid")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::named("SequenceCheck")]
-            }
-            "quantify" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                require_action_type(
-                    lookup(words.get(1))?,
-                    Ty::material(Ty::named("Plasmid")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![Ty::named("Evidence")]
-            }
-            "store" => {
-                require_phrase(&words, 5, &[(2, "at"), (4, "C")], effect.span)?;
-                require_signed(words[3], "storage temperature", effect.span)?;
-                let input = lookup(words.get(1))?;
-                require_action_type(
-                    input.clone(),
-                    Ty::material(Ty::named("Plasmid")),
-                    effect.span,
-                    operation,
-                )?;
-                vec![input]
-            }
-            "dispose" => {
-                require_phrase(&words, 2, &[], effect.span)?;
-                lookup(words.get(1))?;
-                Vec::new()
-            }
-            workflow if self.workflows.contains_key(workflow) => {
-                let signature = &self.workflows[workflow];
-                if words.len() - 1 != signature.inputs.len() {
-                    return Err(SemanticError::new(
-                        effect.span,
-                        format!(
-                            "workflow '{workflow}' expects {} argument(s)",
-                            signature.inputs.len()
-                        ),
-                    ));
-                }
-                for (word, expected) in words[1..].iter().zip(&signature.inputs) {
-                    let actual = self.resolve_action_operand(word, environment, effect.span)?;
-                    if !compatible(&actual, expected) {
-                        return Err(SemanticError::new(
-                            effect.span,
-                            format!("workflow '{workflow}' expects {expected}, found {actual}"),
-                        ));
-                    }
-                }
-                vec![signature.output.clone()]
-            }
-            _ => {
-                return Err(SemanticError::new(
-                    effect.span,
-                    format!("unknown durable operation '{operation}'"),
-                ));
-            }
-        };
         let signature = self.workflows.get(operation).ok_or_else(|| {
             SemanticError::new(
                 effect.span,
                 format!("unknown durable operation '{operation}'"),
             )
         })?;
+        if words.len() - 1 != signature.inputs.len() {
+            return Err(SemanticError::new(
+                effect.span,
+                format!(
+                    "workflow '{operation}' expects {} argument(s)",
+                    signature.inputs.len()
+                ),
+            ));
+        }
+        for (word, expected) in words[1..].iter().zip(&signature.inputs) {
+            let actual = self.resolve_action_operand(word, environment, effect.span)?;
+            if !compatible(&actual, expected) {
+                return Err(SemanticError::new(
+                    effect.span,
+                    format!("workflow '{operation}' expects {expected}, found {actual}"),
+                ));
+            }
+        }
+        let results = vec![signature.output.clone()];
         let arguments = words[1..]
             .iter()
             .zip(&signature.inputs)
@@ -1491,6 +1286,8 @@ impl Checker {
                 let name = path_text(path);
                 let operation = if self.circuits.contains_key(&name) {
                     format!("circuit.{name}")
+                } else if let Some(function) = resolve_pure_function(&name) {
+                    function.operation.to_owned()
                 } else {
                     match name.as_str() {
                         "dna" => "std.bio.dna".to_owned(),
@@ -1580,19 +1377,14 @@ impl Checker {
             Expr::Decimal { .. } => Ok(Ty::Decimal),
             Expr::String { .. } => Ok(Ty::String),
             Expr::Quantity { unit, .. } => Ok(Ty::Quantity(unit.clone())),
-            Expr::List { elements, span } => {
+            Expr::List { elements, .. } => {
                 let Some(first) = elements.first() else {
                     return Ok(Ty::EmptyList);
                 };
-                let element_type = self.infer_expr(first, environment)?;
+                let mut element_type = self.infer_expr(first, environment)?;
                 for element in &elements[1..] {
                     let found = self.infer_expr(element, environment)?;
-                    if !compatible(&found, &element_type) {
-                        return Err(SemanticError::new(
-                            *span,
-                            format!("list mixes {element_type} and {found}"),
-                        ));
-                    }
+                    element_type = common_type(element_type, found);
                 }
                 Ok(Ty::List(Box::new(element_type)))
             }
@@ -1742,6 +1534,35 @@ impl Checker {
                 }
             }
             return Ok(substitute(&signature.output, &substitutions));
+        }
+        if let Some(function) = resolve_pure_function(&name) {
+            let required_module = function
+                .operation
+                .rsplit_once('.')
+                .map_or(function.operation, |(module, _)| module);
+            if !self.imports.contains(required_module) {
+                return Err(SemanticError::new(
+                    span,
+                    format!(
+                        "operation '{}' requires 'use {required_module}'",
+                        function.operation
+                    ),
+                ));
+            }
+            let actual =
+                self.require_call_arguments(arguments, function.parameters.len(), environment)?;
+            for (actual, expected) in actual.iter().zip(&function.parameters) {
+                if !compatible(actual, expected) {
+                    return Err(SemanticError::new(
+                        span,
+                        format!(
+                            "operation '{}' expects {expected}, found {actual}",
+                            function.operation
+                        ),
+                    ));
+                }
+            }
+            return Ok(function.result);
         }
         match name.as_str() {
             "dna" => {
@@ -2252,6 +2073,28 @@ fn compatible(actual: &Ty, expected: &Ty) -> bool {
     }
 }
 
+fn common_type(left: Ty, right: Ty) -> Ty {
+    if compatible(&right, &left) {
+        return left;
+    }
+    if compatible(&left, &right) {
+        return right;
+    }
+    let mut alternatives = Vec::new();
+    for ty in [left, right] {
+        let candidates = match ty {
+            Ty::Union(alternatives) => alternatives,
+            other => vec![other],
+        };
+        for candidate in candidates {
+            if !alternatives.contains(&candidate) {
+                alternatives.push(candidate);
+            }
+        }
+    }
+    Ty::Union(alternatives)
+}
+
 fn comparable(left: &Ty, right: &Ty) -> bool {
     compatible(left, right)
         || compatible(right, left)
@@ -2270,58 +2113,6 @@ fn require_action_type(
         Err(SemanticError::new(
             span,
             format!("operation '{operation}' expects {expected}, found {actual}"),
-        ))
-    }
-}
-
-fn require_phrase(
-    words: &[&str],
-    length: usize,
-    fixed: &[(usize, &str)],
-    span: Span,
-) -> Result<(), SemanticError> {
-    let operation = words.first().copied().unwrap_or("action");
-    if words.len() != length
-        || fixed
-            .iter()
-            .any(|(index, expected)| words.get(*index) != Some(expected))
-    {
-        return Err(SemanticError::new(
-            span,
-            format!("malformed '{operation}' action phrase"),
-        ));
-    }
-    Ok(())
-}
-
-fn require_unsigned(value: &str, description: &str, span: Span) -> Result<(), SemanticError> {
-    value.parse::<u64>().map(|_| ()).map_err(|_| {
-        SemanticError::new(
-            span,
-            format!("{description} must be a non-negative integer"),
-        )
-    })
-}
-
-fn require_signed(value: &str, description: &str, span: Span) -> Result<(), SemanticError> {
-    value
-        .parse::<i64>()
-        .map(|_| ())
-        .map_err(|_| SemanticError::new(span, format!("{description} must be an integer")))
-}
-
-fn require_one_of(
-    value: &str,
-    choices: &[&str],
-    description: &str,
-    span: Span,
-) -> Result<(), SemanticError> {
-    if choices.contains(&value) {
-        Ok(())
-    } else {
-        Err(SemanticError::new(
-            span,
-            format!("{description} must be one of {choices:?}, found '{value}'"),
         ))
     }
 }
@@ -2468,6 +2259,73 @@ mod tests {
     }
 
     #[test]
+    fn compiles_opentrons_examples_with_symbolic_inventory_names() {
+        for source in [
+            include_str!("../../../examples/opentrons-build/reporter-library.lab"),
+            include_str!("../../../examples/opentrons-build/full-build.lab"),
+        ] {
+            let module = compile_module(source).unwrap();
+            assert!(
+                module
+                    .declarations
+                    .iter()
+                    .any(|declaration| matches!(declaration, CheckedDeclaration::Plasmid { .. }))
+            );
+            assert!(
+                module
+                    .declarations
+                    .iter()
+                    .any(|declaration| matches!(declaration, CheckedDeclaration::Workflow { .. }))
+            );
+        }
+
+        let module = compile_module(include_str!(
+            "../../../examples/opentrons-build/full-build.lab"
+        ))
+        .unwrap();
+        let components = module
+            .declarations
+            .iter()
+            .find_map(|declaration| {
+                let CheckedDeclaration::Plasmid {
+                    name, properties, ..
+                } = declaration
+                else {
+                    return None;
+                };
+                (name == "reporter_region").then(|| {
+                    properties
+                        .iter()
+                        .find(|property| property.name == "components")
+                        .unwrap()
+                })
+            })
+            .unwrap();
+        assert_eq!(
+            components.value.r#type.display_name(),
+            "List<Plasmid | Part>"
+        );
+        let CheckedExpression::List { elements } = &components.value.value else {
+            panic!("components must remain a structured checked list");
+        };
+        assert!(
+            elements
+                .iter()
+                .all(|element| matches!(&element.value, CheckedExpression::Reference { .. }))
+        );
+    }
+
+    #[test]
+    fn inventory_constructors_require_their_standard_module() {
+        let error = compile_module("J23101 = part(\"J23101\")\n").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("requires 'use std.bio.inventory'")
+        );
+    }
+
+    #[test]
     fn rejects_unknown_modules() {
         let error = compile_module("use mystery.catalog\n").unwrap_err();
         assert!(error.to_string().contains("cannot be resolved"));
@@ -2478,9 +2336,7 @@ mod tests {
         let error = compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow invalid:
-  input image: Image
-  output Evidence
+workflow invalid(image: Image) -> Evidence:
   evidence <- quantify image
   return evidence
 "#,
@@ -2498,9 +2354,7 @@ workflow invalid:
         let module = compile_module(
             r#"use std.lab.plasmid_actions
 
-workflow preserve:
-  input plasmid: Material<Plasmid>
-  output Material<Plasmid>
+workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
   plasmid <- store plasmid at -20 C
   return plasmid
 "#,
@@ -2523,8 +2377,7 @@ workflow preserve:
     #[test]
     fn lowers_explicit_state_and_state_updates() {
         let module = compile_module(
-            r#"workflow counter:
-  output Integer
+            r#"workflow counter() -> Integer:
   state count: Integer = 0
   count = count + 1
   return count
@@ -2546,8 +2399,7 @@ workflow preserve:
     #[test]
     fn rejects_reassigning_an_ordinary_binding() {
         let error = compile_module(
-            r#"workflow invalid:
-  output Integer
+            r#"workflow invalid() -> Integer:
   count = 0
   count = count + 1
   return count
@@ -2562,8 +2414,7 @@ workflow preserve:
     #[test]
     fn rejects_state_after_executable_statements() {
         let error = compile_module(
-            r#"workflow invalid:
-  output Integer
+            r#"workflow invalid() -> Integer:
   count = 0
   state remembered: Integer = count
   return remembered

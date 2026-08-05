@@ -30,7 +30,7 @@ pub(crate) fn new_project(path: PathBuf, name: Option<String>, output: &Output) 
     write_new(
         &programs.join("main.lab"),
         r#"plasmid starter:
-  sequence = dna("ATGCGTACGTTAGCTA")
+  sequence: dna("ATGCGTACGTTAGCTA")
   require topology == circular
   accept sequence == design.sequence
 "#,

@@ -55,6 +55,24 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
     let material = Ty::material;
 
     Some(match operation {
+        "realize" => ActionContractSpec {
+            operation: "std.bio.build.realize",
+            capability: "artifact_realization",
+            phrase: vec![
+                PhrasePart::Word("realize"),
+                operand("design", concrete(named("Plasmid")), copy),
+                PhrasePart::Word("from"),
+                operand(
+                    "dependencies",
+                    concrete(Ty::List(Box::new(material(named("Plasmid"))))),
+                    take,
+                ),
+            ],
+            results: vec![
+                result("product", concrete(material(named("Plasmid")))),
+                result("construct", concrete(material(named("Construct")))),
+            ],
+        },
         "capture" => ActionContractSpec {
             operation: "std.lab.plasmid_actions.capture",
             capability: "plate_imaging",
@@ -123,6 +141,15 @@ pub(super) fn standard_action_contract(operation: &str) -> Option<ActionContract
                     signed: false,
                     units: &["min", "h"],
                 },
+            ],
+            results: vec![result("culture", concrete(material(named("Culture"))))],
+        },
+        "dilute" => ActionContractSpec {
+            operation: "std.lab.plasmid_actions.dilute",
+            capability: "liquid_handling",
+            phrase: vec![
+                PhrasePart::Word("dilute"),
+                operand("culture", concrete(material(named("Culture"))), take),
             ],
             results: vec![result("culture", concrete(material(named("Culture"))))],
         },

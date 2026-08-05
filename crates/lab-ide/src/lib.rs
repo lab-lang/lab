@@ -263,7 +263,9 @@ impl Workspace {
     pub fn semantic_tokens(&self, source: &SourceId) -> Vec<SemanticToken> {
         self.documents
             .get(source)
-            .map_or_else(Vec::new, |document| scan_semantic_tokens(&document.text))
+            .map_or_else(Vec::new, |document| {
+                scan_semantic_tokens(&document.text, document.analysis.syntax.as_ref())
+            })
     }
 
     /// A deliberately conservative formatter: it only removes trailing space,
@@ -429,7 +431,57 @@ fn identifier_spans(text: &str) -> impl Iterator<Item = (&str, Span)> {
     })
 }
 
-fn scan_semantic_tokens(text: &str) -> Vec<SemanticToken> {
+#[derive(Default)]
+struct SemanticNames {
+    values: BTreeSet<String>,
+    types: BTreeSet<String>,
+    functions: BTreeSet<String>,
+}
+
+fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
+    let mut names = SemanticNames::default();
+    let Some(module) = module else {
+        return names;
+    };
+    for item in &module.items {
+        match item {
+            ast::Item::Use(_) => {}
+            ast::Item::Circuit(declaration) => {
+                names.functions.insert(declaration.name.value.clone());
+                names.types.extend(
+                    declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.name.value.clone()),
+                );
+            }
+            ast::Item::Plasmid(declaration) => {
+                names.values.insert(declaration.name.value.clone());
+            }
+            ast::Item::Data(declaration) => {
+                names.types.insert(declaration.name.value.clone());
+                names.types.extend(
+                    declaration
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.name.value.clone()),
+                );
+            }
+            ast::Item::Workflow(declaration) => {
+                names.functions.insert(declaration.name.value.clone());
+            }
+            ast::Item::Binding(binding) => {
+                names
+                    .values
+                    .extend(binding.names.iter().map(|name| name.value.clone()));
+            }
+        }
+    }
+    names
+}
+
+fn scan_semantic_tokens(text: &str, module: Option<&ast::Module>) -> Vec<SemanticToken> {
+    let names = semantic_names(module);
     let bytes = text.as_bytes();
     let mut tokens = Vec::new();
     let mut cursor = 0;
@@ -483,6 +535,12 @@ fn scan_semantic_tokens(text: &str) -> Vec<SemanticToken> {
                 let word = &text[start..cursor];
                 let kind = if KEYWORDS.contains(&word) {
                     SemanticTokenKind::Keyword
+                } else if names.values.contains(word) {
+                    SemanticTokenKind::Variable
+                } else if names.types.contains(word) {
+                    SemanticTokenKind::Type
+                } else if names.functions.contains(word) {
+                    SemanticTokenKind::Function
                 } else if word.as_bytes().first().is_some_and(u8::is_ascii_uppercase) {
                     SemanticTokenKind::Type
                 } else if text[cursor..].trim_start().starts_with('(') {
@@ -533,7 +591,7 @@ mod tests {
         workspace.set_document(
             source.clone(),
             1,
-            "plasmid reporter:\n  sequence = dna(\"ACGT\")\n".to_owned(),
+            "plasmid reporter:\n  sequence: dna(\"ACGT\")\n".to_owned(),
         );
         assert_eq!(workspace.document_symbols(&source)[0].name, "reporter");
         let offset = workspace.text(&source).unwrap().find("reporter").unwrap();
@@ -547,7 +605,7 @@ mod tests {
         workspace.set_document(
             source.clone(),
             1,
-            "workflow build:\n  # observe\n  return None\n".to_owned(),
+            "workflow build() -> None:\n  # observe\n  return None\n".to_owned(),
         );
         let tokens = workspace.semantic_tokens(&source);
         assert!(
@@ -560,6 +618,60 @@ mod tests {
                 .iter()
                 .any(|token| token.kind == SemanticTokenKind::Comment)
         );
+    }
+
+    #[test]
+    fn semantic_tokens_classify_inventory_symbols_as_values_not_types() {
+        let source = SourceId::new("memory:inventory.lab");
+        let text = r#"use std.bio.inventory
+
+J23101 = part("J23101")
+part_receiver = backbone("part_receiver")
+BsaI = restriction_enzyme("BsaI")
+DH5alpha = strain("DH5alpha")
+ampicillin = antibiotic("ampicillin")
+
+plasmid reporter:
+  sequence: dna("ACGT")
+  backbone: part_receiver
+  components: [J23101]
+  restriction_enzyme: BsaI
+  host: DH5alpha
+  selection: ampicillin
+  require topology == circular
+  accept sequence == design.sequence
+"#;
+        let mut workspace = Workspace::new();
+        workspace.set_document(source.clone(), 1, text.to_owned());
+
+        let tokens = workspace.semantic_tokens(&source);
+        for name in ["J23101", "part_receiver", "BsaI", "DH5alpha", "ampicillin"] {
+            let matching = tokens
+                .iter()
+                .filter(|token| &text[token.span.start..token.span.end] == name)
+                .collect::<Vec<_>>();
+            assert!(!matching.is_empty(), "expected semantic tokens for {name}");
+            assert!(
+                matching
+                    .iter()
+                    .all(|token| token.kind == SemanticTokenKind::Variable),
+                "{name} should be a value everywhere, found {matching:?}"
+            );
+        }
+
+        for constructor in [
+            "part",
+            "backbone",
+            "restriction_enzyme",
+            "strain",
+            "antibiotic",
+        ] {
+            let token = tokens
+                .iter()
+                .find(|token| &text[token.span.start..token.span.end] == constructor)
+                .unwrap();
+            assert_eq!(token.kind, SemanticTokenKind::Function);
+        }
     }
 
     #[test]

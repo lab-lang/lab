@@ -10,6 +10,14 @@
 - An **event** is an immutable occurrence stored in the durable workflow journal.
 - An **outcome** is a tagged result of a workflow or scientific decision.
 
+## Declarations, properties, and identities
+
+A biological declaration is immutable intent. Its `name: value` entries are typed declarative properties, not executable assignments. Portable module IR preserves them as named checked expressions without assigning target-specific meaning to every property name.
+
+A source value may stand for an external identity. For example, `J23101 = part("J23101")` creates a source symbol of type `Part` associated with the external identifier string. The symbol name and external identifier are distinct: renaming one does not silently rewrite the other. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Strain`, or `Antibiotic` is required is a type error.
+
+Typed identity is not availability. It does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require inventory resolution and runtime evidence.
+
 ## Commands and events
 
 An effect binding records a command and durably waits for the corresponding event. Dispatching a command does not establish that a physical action happened. Only the recorded completion event establishes the result observed by the workflow.
@@ -18,9 +26,19 @@ Workflow replay must not repeat completed physical actions. Time, randomness, in
 
 Every resolved action contract names the capability required to dispatch it, the type of each operand and result, and how each operand participates in physical ownership. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action.
 
+`=` and `<-` therefore have different replay laws. `=` evaluates a deterministic expression or commits an explicit state transition. `<-` creates a durable command boundary and obtains its value from a recorded completion event. The result may look like a local binding, but the physical action must not be repeated merely because a workflow is replayed.
+
 The portable material-flow verifier follows these modes through each workflow. It tracks material places, including projections such as `colony_result.plate`, and rejects copying, use after `take`, hidden loss at a terminating path, and incompatible ownership at control-flow joins. A returned, stored, transferred, or disposed material leaves the workflow's ownership; an action result establishes fresh ownership. `borrow` never changes ownership.
 
 Reactive handlers are checked from their shared captured state. A handler that does not terminate the workflow must preserve captured material ownership so a later event cannot observe a material consumed by an earlier invocation. Iteration over material collections remains unavailable until the language has an explicit consuming iterator contract.
+
+## Workflow interfaces and artifact dependencies
+
+A workflow's parameters and result are part of its declaration signature. A parameter of type `Material<T>` transfers an owned physical input into a workflow instance; it is not documentation attached to the first lines of the body.
+
+Artifact dependencies are expressed with these ordinary typed interfaces. When a realization workflow consumes `List<Material<Plasmid>>`, the checked operand values identify which artifacts must already exist. A later planner may derive edges, roots, build waves, cycles, and inventory blockers from that dataflow. The language does not encode biological assembly levels or infer dependencies by matching component-name strings.
+
+Heterogeneous reusable design values may acquire a union element type. A component list containing a plasmid symbol and part symbols is checked as `List<Plasmid | Part>`; this does not weaken either symbol into an untyped name.
 
 ## Acceptance
 
@@ -31,6 +49,12 @@ The compiler may establish that a workflow can produce the kinds of evidence req
 3. runtime evidence satisfies the predicates.
 
 Only the third judgment produces an accepted physical material.
+
+## Portable semantics and target specialization
+
+Portable module checking resolves module-provided contracts, types expressions, verifies workflow returns, and checks affine material ownership. It does not choose a robot, a deck, a reaction chemistry, or a laboratory schedule.
+
+A target specialization may interpret a documented set of checked properties and resolved operations. It must fail explicitly when required properties, capabilities, value shapes, capacities, or operation sequences are unsupported. Target diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
 
 ## Reactive execution
 

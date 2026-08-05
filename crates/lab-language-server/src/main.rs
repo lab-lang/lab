@@ -503,8 +503,6 @@ fn semantic_token_index(kind: SemanticTokenKind) -> u32 {
 fn diagnostic_code(code: DiagnosticCode) -> &'static str {
     match code {
         DiagnosticCode::Syntax => "syntax",
-        DiagnosticCode::Unsupported => "unsupported",
-        DiagnosticCode::Specification => "specification",
         DiagnosticCode::Semantic => "semantic",
         DiagnosticCode::MaterialFlow => "material-flow",
     }

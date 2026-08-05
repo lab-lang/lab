@@ -2,9 +2,7 @@
   "Workflow": {
     "prefix": "workflow",
     "body": [
-      "workflow ${1:name}:",
-      "  input ${2:design}: ${3:Plasmid}",
-      "  output ${4:Accepted<Plasmid> | Rejected<Plasmid>}",
+      "workflow ${1:name}(${2:design}: ${3:Plasmid}) -> ${4:Accepted<Plasmid> | Rejected<Plasmid>}:",
       "",
       "  ${0}"
     ],

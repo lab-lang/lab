@@ -1,31 +1,31 @@
 //! The Lab Compiler biological compilation pipeline.
 
-mod analyses;
-mod ir;
-mod output;
-mod passes;
-mod pipeline;
-mod plan;
-mod session;
-mod stages;
-mod translations;
+pub mod artifact;
+pub mod backend;
+mod compiler;
+pub mod execution;
+pub mod lair;
+pub mod planning;
+pub mod render;
+pub mod simulation;
 
+pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
+pub use compiler::{BackendCompilation, Compiler};
+pub use execution::{ExecutionDependency, ExecutionGraph, ExecutionOperation};
 pub use lab_language::{
-    Artifact, ArtifactSpec, AssemblyMethod, Capability, CheckedModule, Concentration, DnaSequence,
-    LabProfile, MaterialFlowError, ModuleError, ParseError, PlasmidSpec, SemanticError, SpecError,
-    Topology, Volume, compile_module, parse, parse_module,
+    CheckedModule, MaterialFlowError, ModuleError, ParseError, SemanticError, compile_module,
+    parse_module, render_checked_module,
 };
-pub use output::{
-    SimulationError, SimulationEvent, SimulationTrace, render_checked_module, render_human,
-    simulate,
-};
-pub use pipeline::{Compilation, Compiler, CompilerError};
-pub use plan::{
-    AcceptanceCriterion, AcceptanceObligation, ExecutablePlan, OperationKind, PlanError, PlanStep,
-    PlanValue, ValueKind,
-};
-pub use session::{
+pub use lair::session::{
     CompilerSession, PassInfo, PassPipeline, PassPipelineError, SessionError, SessionOptions,
     registered_passes,
 };
-pub use stages::{IrStage, StageContract};
+pub use lair::stage::{IrStage, StageContract};
+pub use planning::{
+    AcceptanceCriterion, AcceptanceObligation, OperationKind, PlanError, PlanStep, PlanValue,
+    ProtocolPlan, ValueKind,
+};
+pub use render::render_human;
+pub use simulation::{
+    LabState, SimulatedValue, SimulationError, SimulationEvent, SimulationTrace, simulate,
+};
