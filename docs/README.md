@@ -52,10 +52,10 @@ Decision records preserve the reasoning and status behind the language rather th
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
-- [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for the first manual and OT-2 end-to-end tutorial.
+- [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
 
 ## Examples versus specimens
 
 Files under `language/specimens/` are representative language programs used to drive syntax and semantic design. They are compiler-tested, but a specimen may describe runtime behavior that has not been built yet.
 
-Files under [`examples/`](../examples/README.md) exercise currently runnable toolchain paths. In particular, the [plasmid acceptance example](../examples/plasmid-acceptance/README.md) walks through the narrower executable artifact pipeline and its current limits.
+The [Golden Gate example](../examples/golden-gate/README.md) is the end-to-end one: a package that compiles through every currently runnable toolchain path, from designs and workflows to the OT-2 protocols a robot application can open.

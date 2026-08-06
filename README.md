@@ -40,5 +40,5 @@ The language and its intermediate representations are evolving, and the durable 
 
 - [Documentation](docs/README.md)
 - [Language design](docs/language/README.md)
-- [Examples](examples/README.md)
+- [Golden Gate example](examples/golden-gate/README.md)
 - [Compiler internals](crates/lab-compiler/README.md)

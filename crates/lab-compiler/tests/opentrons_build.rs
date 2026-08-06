@@ -3,17 +3,14 @@ use std::process::Command;
 
 use serde_json::Value;
 
-fn example() -> PathBuf {
+fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join("opentrons-build")
-        .join("reporter-library.lab")
+        .join("tests")
+        .join("fixtures")
 }
 
-fn examples_dir() -> PathBuf {
-    example().parent().unwrap().to_owned()
+fn fixture(name: &str) -> PathBuf {
+    fixtures_dir().join(name)
 }
 
 #[test]
@@ -26,7 +23,7 @@ fn writes_a_complete_multi_construct_automation_bundle() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_labc"))
         .args([
-            example().to_str().unwrap(),
+            fixture("reporter-library.lab").to_str().unwrap(),
             "--emit",
             "automation-bundle",
             "--output-dir",
@@ -94,14 +91,11 @@ fn derives_and_packages_a_dependency_driven_full_build() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_labc"))
         .args([
-            examples_dir().join("full-build.lab").to_str().unwrap(),
+            fixture("full-build.lab").to_str().unwrap(),
             "--emit",
             "full-build-bundle",
             "--inventory",
-            examples_dir()
-                .join("full-build-inventory.json")
-                .to_str()
-                .unwrap(),
+            fixture("full-build-inventory.json").to_str().unwrap(),
             "--output-dir",
             output_dir.to_str().unwrap(),
         ])

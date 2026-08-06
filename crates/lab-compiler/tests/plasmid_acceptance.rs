@@ -3,18 +3,16 @@ use std::process::{Command, Output};
 
 use serde_json::Value;
 
-fn example() -> PathBuf {
+fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("examples")
-        .join("plasmid-acceptance")
+        .join("tests")
+        .join("fixtures")
         .join("p_acceptance.lab")
 }
 
 fn emit(kind: &str) -> Output {
     Command::new(env!("CARGO_BIN_EXE_labc"))
-        .args([example().to_str().unwrap(), "--emit", kind])
+        .args([fixture().to_str().unwrap(), "--emit", kind])
         .output()
         .unwrap()
 }

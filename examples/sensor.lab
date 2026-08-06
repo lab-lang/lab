@@ -1,9 +1,0 @@
-# The source states what must exist and how it will be accepted.
-# The target lab profile selects the manufacturing details.
-plasmid p_sensor:
-  sequence: dna("ATGCGTACGTTAGCTA")
-  require topology == circular
-
-  accept sequence == design.sequence
-  accept concentration >= 100 ng/uL
-  accept volume >= 20 uL

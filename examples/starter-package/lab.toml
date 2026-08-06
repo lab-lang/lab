@@ -1,7 +1,0 @@
-[package]
-name = "starter-plasmid"
-version = "0.1.0"
-edition = "2026"
-
-[build]
-entry = "src/programs/main.lab"

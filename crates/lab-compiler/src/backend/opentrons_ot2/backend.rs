@@ -69,21 +69,14 @@ impl BackendEmitter<Ot2ExecutionPlan> for Ot2Backend {
 
 #[cfg(test)]
 mod tests {
-    use lab_language::compile_module;
-
-    use crate::PortableLairProgram;
     use crate::backend::{Backend, BackendEmitter};
+    use crate::test_support::golden_gate_lair;
 
     use super::*;
 
     #[test]
     fn compiles_only_verified_lair_through_the_backend_contract() {
-        let module = compile_module(include_str!(
-            "../../../../../examples/opentrons-build/reporter-library.lab"
-        ))
-        .unwrap();
-
-        let lair = PortableLairProgram::lower(&module).unwrap();
+        let lair = golden_gate_lair();
         assert!(lair.ir().contains("design.plasmid"));
         assert!(lair.ir().contains("design.strain"));
         assert!(lair.ir().contains("workflow.realize"));
@@ -95,7 +88,9 @@ mod tests {
         let program = backend.compile(&protocol).unwrap();
         assert_eq!(backend.descriptor().id, "opentrons");
         assert_eq!(program.assemblies.len(), 2);
-        assert_eq!(program.strains.len(), 2);
+        // One plasmid feeds two chassis, so four strains come from two
+        // assemblies rather than one strain per assembly.
+        assert_eq!(program.strains.len(), 4);
 
         let artifacts = backend.emit(&program).unwrap();
         assert_eq!(artifacts.len(), 5);

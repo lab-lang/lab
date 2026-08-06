@@ -126,19 +126,12 @@ fn replace_once(
 
 #[cfg(test)]
 mod tests {
-    use lab_language::compile_module;
-
     use crate::backend::opentrons_ot2::emit::python::*;
+    use crate::test_support::golden_gate_protocol;
 
     #[test]
     fn emitted_protocol_is_standalone_typed_python() {
-        let source =
-            include_str!("../../../../../../examples/opentrons-build/reporter-library.lab");
-        let checked = compile_module(source).unwrap();
-        let protocol = crate::PortableLairProgram::lower(&checked)
-            .unwrap()
-            .select_protocol()
-            .unwrap();
+        let protocol = golden_gate_protocol();
         let plan =
             crate::backend::opentrons_ot2::plan_build(&protocol, &Default::default()).unwrap();
         let protocol = render_assembly_protocol(&plan).unwrap();

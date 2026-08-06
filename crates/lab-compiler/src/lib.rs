@@ -6,6 +6,8 @@ pub mod lair;
 pub mod planning;
 pub mod render;
 pub mod simulation;
+#[cfg(test)]
+mod test_support;
 
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
 pub use lab_language::{

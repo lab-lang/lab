@@ -27,5 +27,13 @@ The OT-2 backend lives entirely under `src/backend/opentrons_ot2/` and accepts `
 
 `dependency-plan` and `full-build-bundle` first use the target-neutral resolver in `src/planning/dependencies/` to resolve source-declared artifact dependencies against a JSON inventory. The OT-2 package layer then compiles each successful graph node. A full-build bundle includes one consolidated human protocol in dependency-safe execution order, a separate dependency report, and standalone human/robot artifacts for each planning wave. Artifacts in one wave have no ordering constraint between them, so a wave is a single robot run over one deck. Backends return an `ArtifactBundle`; `labc` is responsible for writing it to disk.
 
-See the [plasmid acceptance example](../examples/plasmid-acceptance/README.md) for runnable commands and current limitations.
-See the [Opentrons build example](../../examples/opentrons-build/README.md) for the end-to-end Golden Gate, transformation, and plating bundle.
+`labc` compiles one source file, so the modules it accepts are self-contained; a multi-module package is `lab build`'s job. The single-module sources these commands are exercised against live in [`tests/fixtures/`](tests/fixtures/). For the end-to-end package — designs, target profile, and the OT-2 protocols a robot application can open — see the [Golden Gate example](../../examples/golden-gate/README.md).
+
+The end-to-end test runs every generated protocol through the official Opentrons simulator when `LAB_OPENTRONS_SIMULATOR` points at the executable. It stays optional so ordinary CI does not download the large robotics runtime:
+
+```sh
+uv venv .lab/opentrons-venv --python 3.12
+uv pip install --python .lab/opentrons-venv/bin/python 'opentrons>=8.4.1,<9'
+LAB_OPENTRONS_SIMULATOR=.lab/opentrons-venv/bin/opentrons_simulate \
+  cargo test -p lab-compiler --test opentrons_build
+```

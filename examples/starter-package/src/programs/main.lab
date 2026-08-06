@@ -1,4 +1,0 @@
-plasmid starter:
-  sequence: dna("ATGCGTACGTTAGCTA")
-  require topology == circular
-  accept sequence == design.sequence

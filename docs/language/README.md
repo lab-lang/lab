@@ -12,7 +12,7 @@ The documents have distinct jobs:
 - `decisions/` records design decisions and their status;
 - `specimens/` contains representative programs used to test the design.
 
-A specimen is not necessarily executable. Runnable examples remain under the repository-level `examples/` directory. The support matrix is the authoritative statement of what `labc` currently accepts, checks, lowers, and executes.
+A specimen is not necessarily executable. The runnable example is the [Golden Gate package](../../examples/golden-gate/README.md) under the repository-level `examples/` directory. The support matrix is the authoritative statement of what `labc` currently accepts, checks, lowers, and executes.
 
 The language is organized around three source-level concerns:
 

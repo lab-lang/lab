@@ -2145,32 +2145,132 @@ mod tests {
         )));
     }
 
+    /// The Golden Gate example package, in an order that puts each module's
+    /// imports in the environment before it compiles.
+    const GOLDEN_GATE: [(&str, &str); 6] = [
+        (
+            "golden_gate.designs.inventory",
+            include_str!("../../../examples/golden-gate/src/designs/inventory.lab"),
+        ),
+        (
+            "golden_gate.designs.plasmids",
+            include_str!("../../../examples/golden-gate/src/designs/plasmids.lab"),
+        ),
+        (
+            "golden_gate.designs.strains",
+            include_str!("../../../examples/golden-gate/src/designs/strains.lab"),
+        ),
+        (
+            "golden_gate.workflows.assemble",
+            include_str!("../../../examples/golden-gate/src/workflows/assemble.lab"),
+        ),
+        (
+            "golden_gate.workflows.build_strains",
+            include_str!("../../../examples/golden-gate/src/workflows/build_strains.lab"),
+        ),
+        (
+            "golden_gate.programs.reporter_panel",
+            include_str!("../../../examples/golden-gate/src/programs/reporter_panel.lab"),
+        ),
+    ];
+
     #[test]
-    fn compiles_opentrons_examples_with_symbolic_inventory_names() {
-        for source in [
-            include_str!("../../../examples/opentrons-build/reporter-library.lab"),
-            include_str!("../../../examples/opentrons-build/full-build.lab"),
-        ] {
-            let module = compile_module(source).unwrap();
-            assert!(module.declarations.iter().any(|declaration| matches!(
-                declaration,
-                CheckedDeclaration::Artifact {
-                    artifact: ArtifactKind::Plasmid,
-                    ..
-                }
-            )));
-            assert!(
-                module
-                    .declarations
-                    .iter()
-                    .any(|declaration| matches!(declaration, CheckedDeclaration::Workflow { .. }))
-            );
+    fn compiles_the_golden_gate_example_with_symbolic_inventory_names() {
+        let mut environment = SemanticEnvironment::default();
+        let mut modules = Vec::new();
+        for (name, source) in GOLDEN_GATE {
+            let module = compile_module_in_environment(ModuleId::new(name), source, &environment)
+                .unwrap_or_else(|error| panic!("{name} must compile: {error}"));
+            environment.insert(name, module.interface.clone());
+            modules.push(module);
         }
 
-        let module = compile_module(include_str!(
-            "../../../examples/opentrons-build/full-build.lab"
-        ))
+        let declarations = modules
+            .iter()
+            .flat_map(|module| module.declarations.iter())
+            .collect::<Vec<_>>();
+        assert!(declarations.iter().any(|declaration| matches!(
+            declaration,
+            CheckedDeclaration::Artifact {
+                artifact: ArtifactKind::Plasmid,
+                ..
+            }
+        )));
+        assert!(declarations.iter().any(|declaration| matches!(
+            declaration,
+            CheckedDeclaration::Artifact {
+                artifact: ArtifactKind::Strain,
+                ..
+            }
+        )));
+        assert!(
+            declarations
+                .iter()
+                .any(|declaration| matches!(declaration, CheckedDeclaration::Workflow { .. }))
+        );
+
+        // A component list names inventory identities imported from another
+        // module, and stays a structured list of references rather than
+        // collapsing into strings.
+        let components = declarations
+            .iter()
+            .find_map(|declaration| {
+                let CheckedDeclaration::Artifact {
+                    name, properties, ..
+                } = declaration
+                else {
+                    return None;
+                };
+                (name == "composite_plasmid_1").then(|| {
+                    properties
+                        .iter()
+                        .find(|property| property.name == "components")
+                        .unwrap()
+                })
+            })
+            .unwrap();
+        assert_eq!(components.value.r#type.display_name(), "List<Part>");
+        let CheckedExpression::List { elements } = &components.value.value else {
+            panic!("components must remain a structured checked list");
+        };
+        assert!(
+            elements
+                .iter()
+                .all(|element| matches!(&element.value, CheckedExpression::Reference { .. }))
+        );
+    }
+
+    /// A composite assembly can carry an already-assembled plasmid alongside
+    /// bare parts, which the Golden Gate example has no occasion to do.
+    #[test]
+    fn a_component_list_admits_both_plasmids_and_parts() {
+        let module = compile_module(
+            r#"use std.bio.inventory
+
+pSB1C3 = backbone("pSB1C3")
+BsaI = restriction_enzyme("BsaI")
+J23101 = part("J23101")
+GFP = part("GFP")
+
+plasmid promoter_carrier:
+  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone: pSB1C3
+  components: [J23101]
+  restriction_enzyme: BsaI
+  require topology == circular
+  accept sequence == design.sequence
+
+plasmid reporter_region:
+  sequence: dna("GATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTTGGCACT")
+  backbone: pSB1C3
+  components: [promoter_carrier, GFP]
+  restriction_enzyme: BsaI
+  require topology == circular
+  accept sequence == design.sequence
+"#,
+        )
         .unwrap();
+
         let components = module
             .declarations
             .iter()
