@@ -220,6 +220,18 @@ impl LabPackage {
         })
     }
 
+    /// The source the manifest names as this package's entry point, or
+    /// nothing for a package that declares none and is therefore a library.
+    /// Construction rejects an entry that names no discovered source, so a
+    /// declared entry always resolves here.
+    pub fn entry_source(&self) -> Option<&PackageSource> {
+        let entry = self.manifest.build.entry.as_ref()?;
+        let normalized_entry = normalize_relative(entry);
+        self.sources
+            .iter()
+            .find(|source| normalize_relative(&source.relative_path) == normalized_entry)
+    }
+
     pub fn module_graph(&self) -> Result<ModuleGraph, ModuleGraphError> {
         ModuleGraph::new(
             &self.manifest,

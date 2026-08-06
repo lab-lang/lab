@@ -123,6 +123,8 @@ local-policies = { path = "../policies" }
 
 Source modules are discovered recursively beneath `src`. Their names are the normalized package name followed by their relative path, so `src/workflows/build-plasmid.lab` becomes `tet_reporter.workflows.build_plasmid`.
 
+A declared entry module must itself declare `workflow main`. Naming an entry is what makes a package a program, and a program states the work it runs rather than only importing the modules that could run it. Build order still comes from material dataflow, so `main` is where that dataflow starts, not an ordering directive. A package that declares no entry is a library and owes no `main`.
+
 The manifest parser models version, path, and registry dependencies. Path dependencies resolve recursively into one deterministic compilation order, and a dependency's optional semver requirement is checked against its manifest. Each package compiles against the checked module interfaces of its dependencies, so a dependency's public symbols are available under its manifest alias: a `parts` dependency exposing `parts.designs.promoters` is imported as `use parts.designs.promoters`. Package and module cycles are diagnosed rather than resolved. `lab build` writes `lab.lock` alongside the manifest, recording each package's name, version, source, and dependency aliases.
 
 Registry dependencies fail closed. Acquisition, integrity verification, caching, and visibility rules are unimplemented, and a manifest that declares a registry dependency is rejected rather than silently ignored.

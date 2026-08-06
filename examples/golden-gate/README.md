@@ -90,7 +90,7 @@ src/designs/plasmids.lab          two composite plasmids
 src/designs/strains.lab           four engineered strains
 src/workflows/assemble.lab        stage 1
 src/workflows/build_strains.lab   stages 2 and 3
-src/programs/reporter_panel.lab   the runnable entry point
+src/programs/reporter_panel.lab   the runnable entry point: workflow main
 ```
 
 A program's modules are lowered together, so the designs in `src/designs/` and

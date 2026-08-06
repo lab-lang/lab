@@ -1,7 +1,7 @@
 //! WebAssembly host API for browser editors and embedded desktop surfaces.
 
 use lab_ide::Workspace;
-use lab_language::SourceId;
+use lab_language::{ModuleId, SourceId};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -23,6 +23,27 @@ impl LabWorkspace {
     pub fn set_document(&mut self, source: String, version: i64, text: String) {
         self.workspace
             .set_document(SourceId::new(source), version, text);
+    }
+
+    /// Register a document under a module name the host already knows,
+    /// rather than one guessed from the path. A file in a package takes its
+    /// name from that package's manifest, so a host that has read the
+    /// manifest supplies the name and keeps paths as the package lays them
+    /// out.
+    #[wasm_bindgen(js_name = setModuleDocument)]
+    pub fn set_module_document(
+        &mut self,
+        source: String,
+        version: i64,
+        text: String,
+        module: String,
+    ) {
+        self.workspace.set_module_document(
+            SourceId::new(source),
+            version,
+            text,
+            ModuleId::new(module),
+        );
     }
 
     #[wasm_bindgen(js_name = removeDocument)]

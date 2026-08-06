@@ -32,10 +32,16 @@ pub(crate) fn new_project(path: PathBuf, name: Option<String>, output: &Output) 
     write_new(&path.join("lab.toml"), &manifest)?;
     write_new(
         &programs.join("main.lab"),
-        r#"plasmid starter:
+        r#"use std.bio.build
+
+plasmid starter:
   sequence: dna("ATGCGTACGTTAGCTA")
   require topology == circular
   accept sequence == design.sequence
+
+workflow main() -> Material<Plasmid>:
+  product <- realize starter
+  return product
 "#,
     )?;
     write_new(&path.join(".gitignore"), ".lab/\n")?;

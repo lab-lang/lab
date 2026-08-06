@@ -8,7 +8,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use lab_language::{
-    CheckedModule, ModuleId, SemanticEnvironment, compile_module_in_environment, parse_module,
+    CheckedDeclaration, CheckedModule, ModuleId, SemanticEnvironment,
+    compile_module_in_environment, parse_module,
 };
 use lab_package::{
     DependencySpec, DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource,
@@ -57,6 +58,10 @@ pub enum ProjectError {
     Compile { module: String, message: String },
     #[error("module import cycle among {0}")]
     ModuleCycle(String),
+    #[error(
+        "entry module '{module}' of package '{package}' declares no 'workflow main'; an entry point must state the work it runs"
+    )]
+    MissingMainWorkflow { package: String, module: String },
 }
 
 #[derive(Clone, Debug)]
@@ -416,6 +421,28 @@ fn compile_package(
             });
         }
     }
+
+    // A package that names an entry point declares a program, and a program
+    // has to say what it runs. Build order still comes from material
+    // dataflow, so 'main' is where that dataflow starts rather than an
+    // ordering directive.
+    if let Some(entry) = package.entry_source() {
+        let declares_main = result
+            .iter()
+            .find(|compiled| compiled.source.module == entry.module)
+            .is_some_and(|compiled| {
+                compiled.module.declarations.iter().any(|declaration| {
+                    matches!(declaration, CheckedDeclaration::Workflow { name, .. } if name == "main")
+                })
+            });
+        if !declares_main {
+            return Err(ProjectError::MissingMainWorkflow {
+                package: package.manifest.package.name.clone(),
+                module: entry.module.clone(),
+            });
+        }
+    }
+
     Ok(result)
 }
 
@@ -646,5 +673,55 @@ default-member = "device"
             LabProject::discover(root),
             Err(ProjectError::UnsupportedDependency { dependency, .. }) if dependency == "shared"
         ));
+    }
+
+    const ENTRY_MANIFEST: &str =
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.lab\"\n";
+
+    #[test]
+    fn an_entry_module_must_declare_a_main_workflow() {
+        let fixture = TestProject::new();
+        let root = fixture.package("app", ENTRY_MANIFEST, &[("main.lab", DONOR)]);
+        let error = LabProject::discover(root).unwrap().compile().unwrap_err();
+        assert!(matches!(
+            error,
+            ProjectError::MissingMainWorkflow { ref module, .. } if module == "app.main"
+        ));
+    }
+
+    #[test]
+    fn an_entry_module_that_declares_main_compiles() {
+        let fixture = TestProject::new();
+        let root = fixture.package(
+            "app",
+            ENTRY_MANIFEST,
+            &[(
+                "main.lab",
+                &format!(
+                    r#"use std.bio.build
+
+{DONOR}
+workflow main() -> Material<Plasmid>:
+  product <- realize donor
+  return product
+"#
+                ),
+            )],
+        );
+        let compiled = LabProject::discover(root).unwrap().compile().unwrap();
+        assert_eq!(compiled.modules.len(), 1);
+    }
+
+    /// A package that names no entry point is a library, and a library owes
+    /// no `main`.
+    #[test]
+    fn a_package_without_an_entry_needs_no_main_workflow() {
+        let fixture = TestProject::new();
+        let root = fixture.package(
+            "app",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+            &[("main.lab", DONOR)],
+        );
+        assert!(LabProject::discover(root).unwrap().compile().is_ok());
     }
 }
