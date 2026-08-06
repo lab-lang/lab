@@ -19,23 +19,21 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
                 r#type: concrete(named("Plasmid")),
                 mode: OwnershipMode::Copy,
             },
-            PhrasePart::Word("from"),
-            PhrasePart::Operand {
-                name: "dependencies",
-                r#type: concrete(Ty::List(Box::new(material(named("Plasmid"))))),
-                mode: OwnershipMode::Take,
-            },
+            // A realization with no artifact inputs writes nothing, so leaving
+            // the clause out says the same thing as passing an empty list.
+            PhrasePart::Optional(vec![
+                PhrasePart::Word("from"),
+                PhrasePart::Operand {
+                    name: "dependencies",
+                    r#type: concrete(Ty::List(Box::new(material(named("Plasmid"))))),
+                    mode: OwnershipMode::Take,
+                },
+            ]),
         ],
-        results: vec![
-            ResultSpec {
-                name: "product",
-                r#type: concrete(material(named("Plasmid"))),
-            },
-            ResultSpec {
-                name: "construct",
-                r#type: concrete(material(named("Construct"))),
-            },
-        ],
+        results: vec![ResultSpec {
+            name: "product",
+            r#type: concrete(material(named("Plasmid"))),
+        }],
     };
     StandardModule::new("std.bio.build").with_actions([action])
 }

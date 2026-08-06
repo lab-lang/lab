@@ -5,68 +5,52 @@ use std::collections::{BTreeSet, HashMap};
 use pliron::attribute::AttrObj;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::OneRegionInterface;
+use pliron::context::Context;
 use pliron::linked_list::ContainsLinkedList;
 use pliron::operation::Operation;
 
 use super::Ot2PlanningError;
 use crate::ProtocolLairProgram;
-use crate::lair::dialect::attributes::u32_value;
-use crate::lair::dialect::design::DesignPlasmidOp;
+use crate::lair::dialect::attributes::{quantity_entry, u32_value};
+use crate::lair::dialect::design::{DesignPlasmidOp, DesignStrainOp};
 use crate::lair::dialect::protocol::{
     AssembleOp, DiluteOp, PlateOp, ProvisionOp, RecoverOp, SynthesizeOp, TransformOp,
 };
 
-/// A provenance trace through typed Protocol operations. This stores operation
-/// handles, not a copied recipe representation, so every planning decision is
-/// read from the verifier-valid Protocol module.
-pub(super) struct ProtocolTrace {
-    design: DesignPlasmidOp,
-    assemble: AssembleOp,
-    transform: Option<TransformOp>,
-    recover: Option<RecoverOp>,
-    dilute: Option<DiluteOp>,
-    plate: Option<PlateOp>,
+/// Provenance traces through typed Protocol operations, grouped by the artifact
+/// each one realizes. These store operation handles rather than a copied recipe,
+/// so every planning decision is read from the verifier-valid Protocol module.
+pub(super) struct ProtocolTraces {
+    pub(super) assemblies: Vec<AssemblyTrace>,
+    pub(super) strains: Vec<StrainTrace>,
 }
 
-impl ProtocolTrace {
-    fn incomplete(design: DesignPlasmidOp, assemble: AssembleOp) -> Self {
-        Self {
-            design,
-            assemble,
-            transform: None,
-            recover: None,
-            dilute: None,
-            plate: None,
-        }
+impl ProtocolTraces {
+    pub(super) fn is_empty(&self) -> bool {
+        self.assemblies.is_empty() && self.strains.is_empty()
     }
+}
 
-    fn require_complete(&self, context: &pliron::context::Context) -> Result<(), Ot2PlanningError> {
-        if self.transform.is_none()
-            || self.recover.is_none()
-            || self.dilute.is_none()
-            || self.plate.is_none()
-        {
-            return Err(Ot2PlanningError::InvalidProtocol(format!(
-                "artifact '{}' does not contain the complete assemble -> transform -> recover -> dilute -> plate material chain",
-                self.artifact(context)
-            )));
-        }
-        Ok(())
-    }
+/// A plasmid artifact and the assembly that produces it.
+pub(super) struct AssemblyTrace {
+    design: DesignPlasmidOp,
+    assemble: AssembleOp,
+}
 
-    pub(super) fn artifact(&self, context: &pliron::context::Context) -> String {
+impl AssemblyTrace {
+    pub(super) fn artifact(&self, context: &Context) -> String {
         required_string(self.assemble.get_attr_assembly_artifact(context).as_deref())
     }
 
-    pub(super) fn sequence(&self, context: &pliron::context::Context) -> String {
+    pub(super) fn sequence(&self, context: &Context) -> String {
         required_string(self.design.get_attr_sequence(context).as_deref())
     }
 
-    pub(super) fn backbone(&self, context: &pliron::context::Context) -> String {
+    pub(super) fn backbone(&self, context: &Context) -> String {
         required_string(self.assemble.get_attr_assembly_backbone(context).as_deref())
     }
 
-    pub(super) fn components(&self, context: &pliron::context::Context) -> Vec<String> {
+    pub(super) fn components(&self, context: &Context) -> Vec<String> {
         required_strings(
             self.assemble
                 .get_attr_assembly_components(context)
@@ -74,7 +58,7 @@ impl ProtocolTrace {
         )
     }
 
-    pub(super) fn dependencies(&self, context: &pliron::context::Context) -> Vec<String> {
+    pub(super) fn dependencies(&self, context: &Context) -> Vec<String> {
         required_strings(
             self.assemble
                 .get_attr_assembly_dependencies(context)
@@ -82,7 +66,7 @@ impl ProtocolTrace {
         )
     }
 
-    pub(super) fn restriction_enzyme(&self, context: &pliron::context::Context) -> String {
+    pub(super) fn restriction_enzyme(&self, context: &Context) -> String {
         required_string(
             self.assemble
                 .get_attr_assembly_restriction_enzyme(context)
@@ -90,17 +74,83 @@ impl ProtocolTrace {
         )
     }
 
-    pub(super) fn host(&self, context: &pliron::context::Context) -> String {
-        required_string(
-            self.transform
-                .as_ref()
-                .expect("complete Protocol trace has transformation")
-                .get_attr_host(context)
+    pub(super) fn assembly_replicates(&self, context: &Context) -> u8 {
+        required_count(
+            self.assemble
+                .get_attr_assembly_replicates(context)
                 .as_deref(),
         )
     }
 
-    pub(super) fn selection(&self, context: &pliron::context::Context) -> String {
+    /// One reaction parameter, read from the verified chemistry dictionary.
+    pub(super) fn chemistry(&self, context: &Context, key: &str) -> u16 {
+        chemistry_entry(
+            self.assemble
+                .get_attr_assembly_chemistry(context)
+                .as_deref(),
+            key,
+        )
+    }
+}
+
+/// A strain artifact and the transformation, recovery, dilution, and plating
+/// that produce it.
+pub(super) struct StrainTrace {
+    design: DesignStrainOp,
+    transform: TransformOp,
+    recover: Option<RecoverOp>,
+    dilute: Option<DiluteOp>,
+    plate: Option<PlateOp>,
+}
+
+impl StrainTrace {
+    fn incomplete(design: DesignStrainOp, transform: TransformOp) -> Self {
+        Self {
+            design,
+            transform,
+            recover: None,
+            dilute: None,
+            plate: None,
+        }
+    }
+
+    fn require_complete(&self, context: &Context) -> Result<(), Ot2PlanningError> {
+        if self.recover.is_none() || self.dilute.is_none() || self.plate.is_none() {
+            return Err(Ot2PlanningError::InvalidProtocol(format!(
+                "artifact '{}' does not contain the complete transform -> recover -> dilute -> plate material chain",
+                self.artifact(context)
+            )));
+        }
+        Ok(())
+    }
+
+    pub(super) fn artifact(&self, context: &Context) -> String {
+        required_string(
+            self.transform
+                .get_attr_transformation_artifact(context)
+                .as_deref(),
+        )
+    }
+
+    pub(super) fn host(&self, context: &Context) -> String {
+        required_string(self.transform.get_attr_host(context).as_deref())
+    }
+
+    /// Plasmid designs the strain carries.
+    pub(super) fn plasmids(&self, context: &Context) -> Vec<String> {
+        required_strings(self.design.get_attr_strain_plasmids(context).as_deref())
+    }
+
+    /// Artifacts whose materials the transformation consumes.
+    pub(super) fn dependencies(&self, context: &Context) -> Vec<String> {
+        required_strings(
+            self.transform
+                .get_attr_transformation_dependencies(context)
+                .as_deref(),
+        )
+    }
+
+    pub(super) fn selection(&self, context: &Context) -> String {
         required_string(
             self.plate
                 .as_ref()
@@ -110,25 +160,15 @@ impl ProtocolTrace {
         )
     }
 
-    pub(super) fn assembly_replicates(&self, context: &pliron::context::Context) -> u8 {
-        required_count(
-            self.assemble
-                .get_attr_assembly_replicates(context)
-                .as_deref(),
-        )
-    }
-
-    pub(super) fn transformation_replicates(&self, context: &pliron::context::Context) -> u8 {
+    pub(super) fn transformation_replicates(&self, context: &Context) -> u8 {
         required_count(
             self.transform
-                .as_ref()
-                .expect("complete Protocol trace has transformation")
                 .get_attr_transformation_replicates(context)
                 .as_deref(),
         )
     }
 
-    pub(super) fn plating_replicates(&self, context: &pliron::context::Context) -> u8 {
+    pub(super) fn plating_replicates(&self, context: &Context) -> u8 {
         required_count(
             self.plate
                 .as_ref()
@@ -138,7 +178,7 @@ impl ProtocolTrace {
         )
     }
 
-    pub(super) fn serial_dilutions(&self, context: &pliron::context::Context) -> u8 {
+    pub(super) fn serial_dilutions(&self, context: &Context) -> u8 {
         required_count(
             self.dilute
                 .as_ref()
@@ -147,12 +187,27 @@ impl ProtocolTrace {
                 .as_deref(),
         )
     }
+
+    /// One reaction parameter, read from the verified chemistry dictionary.
+    pub(super) fn chemistry(&self, context: &Context, key: &str) -> u16 {
+        chemistry_entry(
+            self.transform
+                .get_attr_transformation_chemistry(context)
+                .as_deref(),
+            key,
+        )
+    }
+}
+
+fn chemistry_entry(dict: Option<&pliron::builtin::attributes::DictAttr>, key: &str) -> u16 {
+    u16::try_from(quantity_entry(dict, key, 0))
+        .expect("chemistry originated from checked u16 source data")
 }
 
 pub(super) fn analyze_protocol(
     program: &ProtocolLairProgram,
     selected_artifacts: Option<&BTreeSet<String>>,
-) -> Result<Vec<ProtocolTrace>, Ot2PlanningError> {
+) -> Result<ProtocolTraces, Ot2PlanningError> {
     let context = program.context();
     let block = program
         .module()
@@ -160,11 +215,11 @@ pub(super) fn analyze_protocol(
         .deref(context)
         .get_head()
         .expect("verified builtin.module has an entry block");
-    let mut traces = Vec::<ProtocolTrace>::new();
-    let mut circular_to_construct = HashMap::new();
-    let mut transformed_to_construct = HashMap::new();
-    let mut recovered_to_construct = HashMap::new();
-    let mut diluted_to_construct = HashMap::new();
+    let mut assemblies = Vec::<AssemblyTrace>::new();
+    let mut strains = Vec::<StrainTrace>::new();
+    let mut transformed_to_strain = HashMap::new();
+    let mut recovered_to_strain = HashMap::new();
+    let mut diluted_to_strain = HashMap::new();
 
     for operation in block.deref(context).iter(context) {
         if let Some(assemble) = Operation::get_op::<AssembleOp>(operation, context) {
@@ -196,79 +251,98 @@ pub(super) fn analyze_protocol(
                     "protocol artifact '{artifact}' consumes design '{design_name}'"
                 )));
             }
-            let index = traces.len();
-            traces.push(ProtocolTrace::incomplete(design, assemble));
-            circular_to_construct.insert(assemble.get_result_construct(context), index);
+            assemblies.push(AssemblyTrace { design, assemble });
             continue;
         }
         if let Some(transform) = Operation::get_op::<TransformOp>(operation, context) {
-            let Some(index) = circular_to_construct
-                .get(&transform.get_operand_construct(context))
-                .copied()
-            else {
+            let artifact = required_string(
+                transform
+                    .get_attr_transformation_artifact(context)
+                    .as_deref(),
+            );
+            if selected_artifacts.is_some_and(|selected| !selected.contains(&artifact)) {
                 continue;
-            };
+            }
+            let design = transform
+                .get_operand_design(context)
+                .defining_op()
+                .and_then(|defining| Operation::get_op::<DesignStrainOp>(defining, context))
+                .ok_or_else(|| {
+                    Ot2PlanningError::InvalidProtocol(format!(
+                        "transformation for artifact '{artifact}' cannot be traced to design.strain"
+                    ))
+                })?;
+            let design_name =
+                required_string(design.get_attr_strain_artifact_name(context).as_deref());
+            if design_name != artifact {
+                return Err(Ot2PlanningError::InvalidProtocol(format!(
+                    "protocol artifact '{artifact}' consumes design '{design_name}'"
+                )));
+            }
             let provision = transform
                 .get_operand_cells(context)
                 .defining_op()
                 .and_then(|defining| Operation::get_op::<ProvisionOp>(defining, context))
                 .ok_or_else(|| {
                     Ot2PlanningError::InvalidProtocol(format!(
-                        "transformation for artifact '{}' does not consume provisioned cells",
-                        traces[index].artifact(context)
+                        "transformation for artifact '{artifact}' does not consume provisioned cells"
                     ))
                 })?;
             let provisioned_host = required_string(provision.get_attr_item(context).as_deref());
             let selected_host = required_string(transform.get_attr_host(context).as_deref());
             if provisioned_host != selected_host {
                 return Err(Ot2PlanningError::InvalidProtocol(format!(
-                    "transformation for artifact '{}' selects host '{selected_host}' but consumes '{provisioned_host}'",
-                    traces[index].artifact(context)
+                    "transformation for artifact '{artifact}' selects host '{selected_host}' but consumes '{provisioned_host}'"
                 )));
             }
-            traces[index].transform = Some(transform);
-            transformed_to_construct.insert(transform.get_result_culture(context), index);
+            let index = strains.len();
+            strains.push(StrainTrace::incomplete(design, transform));
+            transformed_to_strain.insert(transform.get_result_culture(context), index);
             continue;
         }
         if let Some(recover) = Operation::get_op::<RecoverOp>(operation, context) {
-            let Some(index) = transformed_to_construct
+            let Some(index) = transformed_to_strain
                 .get(&recover.get_operand_culture(context))
                 .copied()
             else {
                 continue;
             };
-            traces[index].recover = Some(recover);
-            recovered_to_construct.insert(recover.get_result_recovered(context), index);
+            strains[index].recover = Some(recover);
+            recovered_to_strain.insert(recover.get_result_recovered(context), index);
             continue;
         }
         if let Some(dilute) = Operation::get_op::<DiluteOp>(operation, context) {
-            let Some(index) = recovered_to_construct
+            let Some(index) = recovered_to_strain
                 .get(&dilute.get_operand_culture(context))
                 .copied()
             else {
                 continue;
             };
-            traces[index].dilute = Some(dilute);
-            diluted_to_construct.insert(dilute.get_result_diluted(context), index);
+            strains[index].dilute = Some(dilute);
+            diluted_to_strain.insert(dilute.get_result_diluted(context), index);
             continue;
         }
         if let Some(plate) = Operation::get_op::<PlateOp>(operation, context) {
-            let Some(index) = diluted_to_construct
+            let Some(index) = diluted_to_strain
                 .get(&plate.get_operand_culture(context))
                 .copied()
             else {
                 continue;
             };
-            traces[index].plate = Some(plate);
+            strains[index].plate = Some(plate);
         }
     }
 
+    let traces = ProtocolTraces {
+        assemblies,
+        strains,
+    };
     if traces.is_empty() {
         return Err(Ot2PlanningError::InvalidProtocol(
             "the selected Protocol module contains no build artifacts".into(),
         ));
     }
-    for trace in &traces {
+    for trace in &traces.strains {
         trace.require_complete(context)?;
     }
     Ok(traces)

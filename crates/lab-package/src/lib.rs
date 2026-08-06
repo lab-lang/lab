@@ -6,8 +6,9 @@ mod package;
 
 pub use graph::{ImportResolution, ModuleGraph, ModuleGraphError, ModuleNode};
 pub use manifest::{
-    BuildMetadata, DependencyDetail, DependencySpec, PackageManifest, PackageMetadata,
+    BuildMetadata, DependencyDetail, DependencySpec, LabManifest, PackageManifest, PackageMetadata,
+    WorkspaceManifest, WorkspaceMetadata,
 };
-pub use package::{LabPackage, PackageError, PackageSource};
+pub use package::{DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource};
 
 pub const MANIFEST_FILE: &str = "lab.toml";

@@ -7,14 +7,11 @@ Status: accepted, initial target lowering implemented
 Lab source expresses an artifact dependency as a typed material input to a workflow and as an operand of a resolved realization action. It does not assign artifacts to compiler-defined biological levels.
 
 ```lab
-workflow realize_reporter(
+workflow assemble_reporter(
   carrier: Material<Plasmid>,
-) -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
+) -> Material<Plasmid>:
   dependencies = [carrier]
-  product, construct <- realize reporter from dependencies
+  product <- realize reporter from dependencies
 ```
 
 The workflow signature states what must already exist. The `Material<Plasmid>` value is affine, and the `realize` contract takes the dependency list. Checked IR therefore preserves both dependency identity and ownership transfer without target-specific graph annotations in the core language.

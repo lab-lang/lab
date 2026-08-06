@@ -9,11 +9,13 @@ mod backend;
 mod emit;
 mod package;
 mod plan;
+mod profile;
 
 pub use backend::{Ot2Backend, Ot2CompileError};
 pub use package::{DependencyBuildBundle, DependencyBuildError, compile_dependency_build};
 pub use plan::{
-    Ot2BuildError, Ot2Bundle, Ot2ConstructPlan, Ot2EmissionError, Ot2ExecutionPlan,
-    Ot2PlanningError, Ot2PlatingPlan, Ot2TransformationPlan, compile_build, emit_program,
-    plan_build,
+    Ot2AssemblyChemistry, Ot2AssemblyPlan, Ot2BuildError, Ot2Bundle, Ot2EmissionError,
+    Ot2ExecutionPlan, Ot2PlanningError, Ot2PlatingPlan, Ot2StrainChemistry, Ot2StrainPlan,
+    Ot2TransformationPlan, compile_build, emit_program, plan_build,
 };
+pub use profile::{Ot2ProfileError, Ot2TargetProfile};

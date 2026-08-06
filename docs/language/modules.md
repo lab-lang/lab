@@ -23,7 +23,7 @@ The current frontend resolves a small bundled registry through the same conceptu
 | `std.prelude` | implicitly imported foundational types, values, and pure operations used by every module |
 | `std.bio.parts` | fixed demonstration part values used by the design specimen |
 | `std.bio.backbones` | fixed demonstration backbone values used by the design specimen |
-| `std.bio.inventory` | pure constructors for typed external part, backbone, enzyme, strain, and antibiotic identities |
+| `std.bio.inventory` | pure constructors for typed external part, backbone, enzyme, chassis, and antibiotic identities |
 | `std.bio.build` | typed artifact-realization effects |
 | `std.lab.plasmid_actions` | typed laboratory action contracts used by the workflow specimens |
 
@@ -39,6 +39,8 @@ An idiomatic project separates reusable intent from the runnable composition:
 
 ```text
 lab.toml
+targets/
+  bench-ot2.toml
 src/
   designs/
     parts.lab
@@ -54,6 +56,7 @@ src/
 tests/
   build_plasmid.lab
 .lab/
+  build/
   runs/
 ```
 
@@ -61,9 +64,41 @@ tests/
 - `policies` holds site- or project-specific scientific acceptance decisions.
 - `workflows` holds reusable durable orchestration.
 - `programs` wires designs, policies, parameters, and workflows into runnable entry points.
-- `.lab/runs` is generated runtime state and provenance, never hand-authored source.
+- `targets` holds site configuration: one file per bench a project compiles for.
+- `.lab/` is generated output and runtime state, never hand-authored source.
 
-These names are conventions rather than keywords. The module system should not give a directory magical semantics merely because it is called `workflows`.
+These names are conventions rather than keywords, except `targets`, which `lab build --target <name>` resolves by path. The module system should not give a directory magical semantics merely because it is called `workflows`.
+
+A program's modules are lowered together, so an artifact declared in `designs` may be realized by a workflow in `workflows`, and either may come from a dependency package.
+
+## Workspaces
+
+A `lab.toml` is either a package manifest or a workspace manifest, never both. A workspace root owns membership and nothing else, so every member stays an ordinary self-contained package:
+
+```toml
+[workspace]
+members = ["packages/catalog", "packages/golden-gate"]
+default-member = "packages/golden-gate"
+```
+
+`default-member` names the package a command acting on one package operates on, and is required once a workspace has more than one member. Generated artifacts and `lab.lock` live at the workspace root; each member keeps its own `src/`, dependencies, and version.
+
+## Target profiles
+
+A target profile describes one bench. `lab build --target bench-ot2` reads `targets/bench-ot2.toml` and hands it to the backend the profile names:
+
+```toml
+[target]
+name = "bench-ot2"
+backend = "opentrons.ot2"
+api_level = "2.21"
+
+[stages.plating.agar_plate]
+labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+slots = ["5", "6"]
+```
+
+Every field has a default, so a profile states only what differs from the backend's reference bench. Unknown keys are rejected rather than ignored: a misspelled slot that silently fell back to a default is how a protocol ends up aspirating from the wrong place.
 
 Within a module, examples conventionally put providers before consumers: imports first, then shared data types, inventory values, biological declarations, and finally workflows. Dependency correctness still comes from resolved symbols and typed dataflow rather than textual order, filenames, or names such as “level 1” and “level 2.”
 
@@ -79,6 +114,7 @@ edition = "2026"
 
 [build]
 entry = "src/programs/main.lab"
+inventory = "inventory.json"
 
 [dependencies]
 parts = "1.2"

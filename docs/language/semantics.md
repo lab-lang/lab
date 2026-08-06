@@ -14,7 +14,9 @@
 
 A biological declaration is immutable intent. Its `name: value` entries are typed declarative properties, not executable assignments. Portable module IR preserves them as named checked expressions without assigning target-specific meaning to every property name.
 
-A source value may stand for an external identity. For example, `J23101 = part("J23101")` creates a source symbol of type `Part` associated with the external identifier string. The symbol name and external identifier are distinct: renaming one does not silently rewrite the other. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Strain`, or `Antibiotic` is required is a type error.
+A source value may stand for an external identity. For example, `J23101 = part("J23101")` creates a source symbol of type `Part` associated with the external identifier string. The symbol name and external identifier are distinct: renaming one does not silently rewrite the other. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Chassis`, or `Antibiotic` is required is a type error.
+
+`Chassis` and `Strain` are different kinds of thing. A chassis is a catalogued host organism, reached through an inventory constructor. A strain is a declared artifact: a chassis together with the plasmid designs it carries. One chassis appears in many strains, and one plasmid design may appear in strains built on different chassis.
 
 Typed identity is not availability. It does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require inventory resolution and runtime evidence.
 
@@ -41,6 +43,12 @@ A workflow may declare one result type or an ordered parenthesized list of named
 Artifact dependencies are expressed with these ordinary typed interfaces. When a realization workflow consumes `List<Material<Plasmid>>`, the checked operand values identify which artifacts must already exist. A later planner may derive edges, roots, build waves, cycles, and inventory blockers from that dataflow. The language does not encode biological assembly levels or infer dependencies by matching component-name strings.
 
 Heterogeneous reusable design values may acquire a union element type. A component list containing a plasmid symbol and part symbols is checked as `List<Plasmid | Part>`; this does not weaken either symbol into an untyped name.
+
+## Chemistry and site configuration
+
+A declaration's quantity-valued properties state reaction chemistry: reagent volumes, cycle counts, and thermal holds. These are claims about the science, so they belong to the artifact and travel with it into every target.
+
+Which labware sits in which deck slot, which pipette is on which mount, and how many plates a bench holds are claims about a laboratory. A target specialization reads them from its own configuration, not from source. The same program compiled against two benches produces two different robot plans and one unchanged set of designs.
 
 ## Acceptance
 

@@ -7,11 +7,11 @@
     { "include": "#imports" },
     { "include": "#declarations" },
     { "include": "#effects" },
+    { "comment": "Before #types, so a < inside a string cannot open a type-argument span.", "include": "#strings" },
+    { "comment": "Before #keywords, so `case Ready` scopes the variant as well as the keyword.", "include": "#types" },
     { "include": "#keywords" },
-    { "include": "#types" },
     { "include": "#quantities" },
     { "include": "#numbers" },
-    { "include": "#strings" },
     { "include": "#calls" },
     { "include": "#fields" },
     { "include": "#operators" }
@@ -90,10 +90,39 @@
       ]
     },
     "types": {
+      "comment": "Types are recognised by position, not by an initial capital. Part names are arbitrary biological identifiers, so pTet, B0034, sfGFP and BsaI are values that happen to disagree about case, and colouring them by first letter splits one list of parts into two colours over a distinction the language does not make.",
       "patterns": [
         {
+          "comment": "The head of a generic application, as in Material<Plasmid>.",
           "name": "support.type.lab",
-          "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=<[A-Za-z_])"
+        },
+        {
+          "comment": "Type arguments, brackets included. Ends at the line as well as at the closing bracket, so an unmatched < cannot run away down the file.",
+          "name": "support.type.lab",
+          "begin": "(?<=[A-Za-z0-9_])<(?=[A-Za-z_])",
+          "end": ">|$"
+        },
+        {
+          "comment": "A workflow result type.",
+          "match": "(->)\\s*([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.operator.lab" },
+            "2": { "name": "support.type.lab" }
+          }
+        },
+        {
+          "comment": "The variant a match arm names.",
+          "match": "\\b(case)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.lab" },
+            "2": { "name": "support.type.lab" }
+          }
+        },
+        {
+          "comment": "The head of a constructor literal, as in Accepted{material: purified}.",
+          "name": "support.type.lab",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\{)"
         }
       ]
     },

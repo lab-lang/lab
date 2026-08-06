@@ -40,7 +40,7 @@ Configuration may therefore be explicit typed input data:
 
 ```lab
 record RealizationPolicy:
-  host: Strain
+  host: Chassis
   selection: Antibiotic
   recovery: Duration
 

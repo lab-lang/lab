@@ -18,7 +18,7 @@ pub struct Module {
 pub enum Item {
     Use(UseDecl),
     Circuit(CircuitDecl),
-    Plasmid(PlasmidDecl),
+    Artifact(ArtifactDecl),
     Data(DataDecl),
     Workflow(WorkflowDecl),
     Binding(BindingStmt),
@@ -29,7 +29,7 @@ impl Item {
         match self {
             Self::Use(item) => item.span,
             Self::Circuit(item) => item.span,
-            Self::Plasmid(item) => item.span,
+            Self::Artifact(item) => item.span,
             Self::Data(item) => item.span,
             Self::Workflow(item) => item.span,
             Self::Binding(item) => item.span,
@@ -60,16 +60,46 @@ pub struct TypeParameter {
     pub span: Span,
 }
 
+/// A named physical artifact a laboratory can build. Every artifact kind shares
+/// one declaration shape: typed declarative properties, pre-construction
+/// requirements, and acceptance claims. The kind selects which nominal type the
+/// declaration's properties are checked against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    Plasmid,
+    Strain,
+}
+
+impl ArtifactKind {
+    /// The source word introducing the declaration, which is also the nominal
+    /// type of the value it declares.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Plasmid => "plasmid",
+            Self::Strain => "strain",
+        }
+    }
+
+    pub fn type_name(self) -> &'static str {
+        match self {
+            Self::Plasmid => "Plasmid",
+            Self::Strain => "Strain",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PlasmidDecl {
+pub struct ArtifactDecl {
+    pub kind: ArtifactKind,
     pub name: Identifier,
-    pub members: Vec<PlasmidMember>,
+    pub members: Vec<ArtifactMember>,
     pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum PlasmidMember {
+pub enum ArtifactMember {
     Property(PropertyDecl),
     Requirement(ClaimStmt),
     Acceptance(ClaimStmt),

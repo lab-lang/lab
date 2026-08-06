@@ -11,7 +11,7 @@ GFP = part("GFP")
 B0015 = part("B0015")
 pSB1C3 = backbone("pSB1C3")
 BsaI = restriction_enzyme("BsaI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
 plasmid reporter:
@@ -19,25 +19,33 @@ plasmid reporter:
   backbone: pSB1C3
   components: [J23101, B0034, GFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
 
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_reporter() -> (
-  product: Material<Plasmid>,
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [reporter]
+  selection: chloramphenicol
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+
+workflow assemble_reporter() -> Material<Plasmid>:
+  product <- realize reporter
+  return product
+
+workflow build_reporter_host(
+  reporter: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = []
-  product, construct <- realize reporter from dependencies
+  dependencies = [reporter]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return product, plate
+  return strain, plate

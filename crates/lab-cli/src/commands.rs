@@ -2,9 +2,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::compile_module;
+use lab_compiler::backend::opentrons_ot2::{Ot2TargetProfile, compile_dependency_build};
+use lab_compiler::planning::BuildInventory;
+use lab_compiler::{PortableLairProgram, compile_module};
 use lab_package::{LabPackage, PackageManifest};
-use lab_project::{LOCK_FILE, LabProject};
+use lab_project::{CompiledProject, LOCK_FILE, LabProject};
 use serde::Serialize;
 
 use crate::Output;
@@ -70,12 +72,13 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     let compiled = project.compile()?;
-    let package = project.root_package();
+    let package = project.default_package();
     output.success(
         "checked",
         PackageChecked {
             package: package.manifest.package.name.clone(),
             version: package.manifest.package.version.clone(),
+            members: compiled.members.clone(),
             modules: compiled.modules.len(),
         },
         format!(
@@ -87,15 +90,21 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
     )
 }
 
-pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
+pub(crate) fn build(
+    path: PathBuf,
+    out_dir: Option<PathBuf>,
+    target: Option<String>,
+    output: &Output,
+) -> Result<()> {
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     let compiled = project.compile()?;
-    let package = project.root_package();
+    let package = project.default_package();
+    let project_root = project.root().to_path_buf();
     let output_root = match out_dir {
         Some(path) if path.is_absolute() => path,
-        Some(path) => package.root.join(path),
-        None => package.root.join(".lab").join("build"),
+        Some(path) => project_root.join(path),
+        None => project_root.join(".lab").join("build"),
     };
     fs::create_dir_all(&output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
@@ -125,11 +134,12 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
     }
 
     let index = BuildIndex {
-        schema_version: 1,
+        schema_version: 2,
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         edition: package.manifest.package.edition.clone(),
         entry: package.manifest.build.entry.clone(),
+        members: compiled.members.clone(),
         modules: artifacts,
     };
     let index_path = output_root.join("package.json");
@@ -137,11 +147,48 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
     json.push('\n');
     fs::write(&index_path, json)
         .with_context(|| format!("failed to write {}", index_path.display()))?;
-    let lock_path = package.root.join(LOCK_FILE);
+    let lock_path = project_root.join(LOCK_FILE);
     let lock = compiled.lock.to_toml()?;
     fs::write(&lock_path, lock)
         .with_context(|| format!("failed to write {}", lock_path.display()))?;
 
+    let built = match &target {
+        Some(target) => Some(build_for_target(
+            &project,
+            &compiled,
+            &project_root,
+            &output_root,
+            target,
+        )?),
+        None => None,
+    };
+
+    let mut human = format!(
+        "Built {} {} ({} modules)\n  Artifacts: {}",
+        index.package,
+        index.version,
+        index.modules.len(),
+        output_root.display()
+    );
+    if let Some(built) = &built {
+        human.push_str(&format!(
+            "\n  Target {}: {}",
+            target.as_deref().unwrap_or_default(),
+            built.directory.display()
+        ));
+        // Name every runnable protocol, so the path can go straight into a
+        // robot application without hunting through the output directory.
+        if !built.protocols.is_empty() {
+            human.push_str("\n\nRobot protocols:");
+            for protocol in &built.protocols {
+                human.push_str(&format!("\n  {}", protocol.display()));
+            }
+        }
+    }
+    let (target_output, protocols) = match built {
+        Some(built) => (Some(built.directory), built.protocols),
+        None => (None, Vec::new()),
+    };
     output.success(
         "built",
         BuildCompleted {
@@ -149,15 +196,89 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
             version: index.version.clone(),
             modules: index.modules.len(),
             output: output_root.clone(),
+            target,
+            target_output,
+            protocols,
         },
-        format!(
-            "Built {} {} ({} modules)\n  Artifacts: {}",
-            index.package,
-            index.version,
-            index.modules.len(),
-            output_root.display()
-        ),
+        human,
     )
+}
+
+/// What a target build produced: its package directory and every protocol a
+/// robot application can open.
+struct TargetBuild {
+    directory: PathBuf,
+    protocols: Vec<PathBuf>,
+}
+
+/// Lower the program the default member forms, together with everything it
+/// depends on, and hand the verified Protocol to the named target's backend.
+fn build_for_target(
+    project: &LabProject,
+    compiled: &CompiledProject,
+    project_root: &Path,
+    output_root: &Path,
+    target: &str,
+) -> Result<TargetBuild> {
+    let profile_path = project_root.join("targets").join(format!("{target}.toml"));
+    let profile = if profile_path.is_file() {
+        let contents = fs::read_to_string(&profile_path)
+            .with_context(|| format!("failed to read {}", profile_path.display()))?;
+        Ot2TargetProfile::parse(&contents)
+            .with_context(|| format!("failed to load target profile {}", profile_path.display()))?
+    } else {
+        bail!(
+            "no target profile at {}; a target is a TOML file under 'targets/'",
+            profile_path.display()
+        )
+    };
+
+    let program_packages = project.program_packages();
+    let modules = compiled
+        .modules
+        .iter()
+        .filter(|module| program_packages.contains(&module.package))
+        .map(|module| &module.module)
+        .collect::<Vec<_>>();
+    let lair = PortableLairProgram::lower_program(&modules)
+        .context("failed to lower the program for a target build")?;
+    let protocol = lair
+        .select_protocol()
+        .context("failed to select a concrete protocol for a target build")?;
+
+    let package = project.default_package();
+    let inventory = match &package.manifest.build.inventory {
+        Some(relative) => {
+            let path = package.root.join(relative);
+            let contents = fs::read_to_string(&path)
+                .with_context(|| format!("failed to read inventory {}", path.display()))?;
+            serde_json::from_str::<BuildInventory>(&contents)
+                .with_context(|| format!("failed to parse inventory {}", path.display()))?
+        }
+        None => BuildInventory::default(),
+    };
+
+    let bundle = compile_dependency_build(&protocol, &profile, &inventory)
+        .with_context(|| format!("failed to compile the {target} build"))?;
+    let target_root = output_root.join(target);
+    let mut protocols = Vec::new();
+    for artifact in bundle.artifacts().iter() {
+        let path = target_root.join(artifact.path());
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        fs::write(&path, artifact.contents())
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        if path.extension().is_some_and(|extension| extension == "py") {
+            protocols.push(path);
+        }
+    }
+    protocols.sort();
+    Ok(TargetBuild {
+        directory: target_root,
+        protocols,
+    })
 }
 
 pub(crate) fn metadata(path: PathBuf, output: &Output) -> Result<()> {
@@ -235,6 +356,7 @@ struct FileChecked {
 struct PackageChecked {
     package: String,
     version: String,
+    members: Vec<String>,
     modules: usize,
 }
 
@@ -244,6 +366,9 @@ struct BuildCompleted {
     version: String,
     modules: usize,
     output: PathBuf,
+    target: Option<String>,
+    target_output: Option<PathBuf>,
+    protocols: Vec<PathBuf>,
 }
 
 #[derive(Serialize)]
@@ -266,6 +391,7 @@ struct BuildIndex {
     version: String,
     edition: String,
     entry: Option<PathBuf>,
+    members: Vec<String>,
     modules: Vec<BuildModule>,
 }
 

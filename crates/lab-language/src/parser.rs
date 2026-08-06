@@ -32,8 +32,8 @@ impl<'a> Parser<'a> {
                 Item::Use(self.parse_use()?)
             } else if self.check_word("circuit") {
                 Item::Circuit(self.parse_circuit()?)
-            } else if self.check_word("plasmid") {
-                Item::Plasmid(self.parse_plasmid()?)
+            } else if let Some(kind) = self.artifact_kind() {
+                Item::Artifact(self.parse_artifact(kind)?)
             } else if let Some(kind) = self.data_kind() {
                 Item::Data(self.parse_data(kind)?)
             } else if self.check_word("workflow") {
@@ -95,9 +95,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_plasmid(&mut self) -> Result<PlasmidDecl, ParseError> {
-        let start = self.expect_word("plasmid")?.span;
-        let name = self.take_identifier("a plasmid name")?;
+    fn parse_artifact(&mut self, kind: ArtifactKind) -> Result<ArtifactDecl, ParseError> {
+        let start = self.expect_word(kind.keyword())?.span;
+        let name = self.take_identifier("an artifact name")?;
         self.open_block()?;
         let mut members = Vec::new();
         while !self.check(&TokenKind::Dedent) {
@@ -111,20 +111,21 @@ impl<'a> Parser<'a> {
                     span: keyword.span.join(end),
                 };
                 members.push(if acceptance {
-                    PlasmidMember::Acceptance(claim)
+                    ArtifactMember::Acceptance(claim)
                 } else {
-                    PlasmidMember::Requirement(claim)
+                    ArtifactMember::Requirement(claim)
                 });
             } else if self.peek_kind(1) == Some(&TokenKind::Colon)
                 && self.peek_kind(2) != Some(&TokenKind::Newline)
             {
-                members.push(PlasmidMember::Property(self.parse_property()?));
+                members.push(ArtifactMember::Property(self.parse_property()?));
             } else {
-                members.push(PlasmidMember::Section(self.parse_section()?));
+                members.push(ArtifactMember::Section(self.parse_section()?));
             }
         }
         let end = self.expect(TokenKind::Dedent)?.span;
-        Ok(PlasmidDecl {
+        Ok(ArtifactDecl {
+            kind,
             name,
             members,
             span: start.join(end),
@@ -813,6 +814,14 @@ impl<'a> Parser<'a> {
             TokenKind::Minus => Some((BinaryOp::Subtract, 5)),
             TokenKind::Star => Some((BinaryOp::Multiply, 6)),
             TokenKind::Slash => Some((BinaryOp::Divide, 6)),
+            _ => None,
+        }
+    }
+
+    fn artifact_kind(&self) -> Option<ArtifactKind> {
+        match self.peek_identifier()? {
+            "plasmid" => Some(ArtifactKind::Plasmid),
+            "strain" => Some(ArtifactKind::Strain),
             _ => None,
         }
     }

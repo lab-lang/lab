@@ -3,7 +3,10 @@ use std::path::{Component, Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::{MANIFEST_FILE, ModuleGraph, ModuleGraphError, ModuleNode, PackageManifest};
+use crate::{
+    LabManifest, MANIFEST_FILE, ModuleGraph, ModuleGraphError, ModuleNode, PackageManifest,
+    WorkspaceManifest,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageSource {
@@ -17,6 +20,55 @@ pub struct LabPackage {
     pub root: PathBuf,
     pub manifest: PackageManifest,
     pub sources: Vec<PackageSource>,
+}
+
+/// A workspace root: membership only. It owns no source modules of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LabWorkspace {
+    pub root: PathBuf,
+    pub manifest: WorkspaceManifest,
+}
+
+impl LabWorkspace {
+    /// Absolute member directories in declaration order.
+    pub fn member_roots(&self) -> Vec<PathBuf> {
+        self.manifest
+            .workspace
+            .members
+            .iter()
+            .map(|member| self.root.join(member))
+            .collect()
+    }
+
+    pub fn default_member_root(&self) -> PathBuf {
+        self.root.join(self.manifest.default_member())
+    }
+}
+
+/// What a `lab.toml` found by an upward search turned out to be.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DiscoveredRoot {
+    Package(LabPackage),
+    Workspace(LabWorkspace),
+}
+
+impl DiscoveredRoot {
+    pub fn discover(start: impl AsRef<Path>) -> Result<Self, PackageError> {
+        let root = find_manifest_directory(start.as_ref())?;
+        match read_manifest(&root)? {
+            LabManifest::Package(_) => Ok(Self::Package(LabPackage::load(root)?)),
+            LabManifest::Workspace(manifest) => {
+                Ok(Self::Workspace(LabWorkspace { root, manifest }))
+            }
+        }
+    }
+
+    pub fn root(&self) -> &Path {
+        match self {
+            Self::Package(package) => &package.root,
+            Self::Workspace(workspace) => &workspace.root,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -60,41 +112,69 @@ pub enum PackageError {
         #[source]
         source: std::io::Error,
     },
+    #[error("workspace declares no members")]
+    EmptyWorkspace,
+    #[error("invalid workspace member '{member}': {message}")]
+    InvalidWorkspaceMember { member: PathBuf, message: String },
+    #[error(
+        "workspace has several members; declare 'default-member' to select the one a single-package command acts on"
+    )]
+    AmbiguousDefaultMember,
+    #[error("{path} is a workspace root, not a package")]
+    NotAPackage { path: PathBuf },
+}
+
+fn find_manifest_directory(start: &Path) -> Result<PathBuf, PackageError> {
+    let mut directory = if start.is_file() {
+        start
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+    loop {
+        if directory.join(MANIFEST_FILE).is_file() {
+            return Ok(directory);
+        }
+        if !directory.pop() {
+            return Err(PackageError::ManifestNotFound(start.to_path_buf()));
+        }
+    }
+}
+
+fn read_manifest(root: &Path) -> Result<LabManifest, PackageError> {
+    let manifest_path = root.join(MANIFEST_FILE);
+    let text = fs::read_to_string(&manifest_path).map_err(|source| PackageError::Read {
+        path: manifest_path.clone(),
+        source,
+    })?;
+    let manifest = LabManifest::parse(&text).map_err(|source| PackageError::Manifest {
+        path: manifest_path,
+        source,
+    })?;
+    manifest.validate()?;
+    Ok(manifest)
 }
 
 impl LabPackage {
     pub fn discover(start: impl AsRef<Path>) -> Result<Self, PackageError> {
-        let start = start.as_ref();
-        let mut directory = if start.is_file() {
-            start
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .to_path_buf()
-        } else {
-            start.to_path_buf()
-        };
-        loop {
-            if directory.join(MANIFEST_FILE).is_file() {
-                return Self::load(directory);
-            }
-            if !directory.pop() {
-                return Err(PackageError::ManifestNotFound(start.to_path_buf()));
-            }
+        match DiscoveredRoot::discover(start)? {
+            DiscoveredRoot::Package(package) => Ok(package),
+            DiscoveredRoot::Workspace(workspace) => Err(PackageError::NotAPackage {
+                path: workspace.root,
+            }),
         }
     }
 
     pub fn load(root: impl AsRef<Path>) -> Result<Self, PackageError> {
         let root = root.as_ref().to_path_buf();
-        let manifest_path = root.join(MANIFEST_FILE);
-        let text = fs::read_to_string(&manifest_path).map_err(|source| PackageError::Read {
-            path: manifest_path.clone(),
-            source,
-        })?;
-        let manifest = PackageManifest::parse(&text).map_err(|source| PackageError::Manifest {
-            path: manifest_path,
-            source,
-        })?;
-        manifest.validate()?;
+        let manifest = match read_manifest(&root)? {
+            LabManifest::Package(manifest) => manifest,
+            LabManifest::Workspace(_) => {
+                return Err(PackageError::NotAPackage { path: root });
+            }
+        };
 
         let source_root = root.join("src");
         let mut files = Vec::new();

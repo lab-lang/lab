@@ -7,6 +7,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ast::ArtifactKind;
 use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 
 pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v1";
@@ -36,7 +37,8 @@ pub enum CheckedDeclaration {
         output: CheckedType,
         sections: Vec<CheckedSection>,
     },
-    Plasmid {
+    Artifact {
+        artifact: ArtifactKind,
         name: String,
         properties: Vec<CheckedProperty>,
         requirements: Vec<TypedExpression>,

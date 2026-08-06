@@ -52,9 +52,9 @@ pub(super) fn build_interface(
                 }),
                 BTreeMap::new(),
             ),
-            CheckedDeclaration::Plasmid { name, .. } => {
+            CheckedDeclaration::Artifact { artifact, name, .. } => {
                 let ty = CheckedType::Named {
-                    name: "Plasmid".to_owned(),
+                    name: artifact.type_name().to_owned(),
                     arguments: Vec::new(),
                 };
                 insert(

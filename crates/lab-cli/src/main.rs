@@ -37,14 +37,18 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Build a package into verified portable module artifacts.
+    /// Build a package into verified portable module artifacts, and into robot
+    /// protocols when a target is named.
     Build {
         /// Package directory or any path inside a package.
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Artifact directory, relative to the package root unless absolute.
+        /// Artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        /// Target profile to compile for, named by a file under `targets/`.
+        #[arg(long)]
+        target: Option<String>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -95,7 +99,11 @@ fn run() -> Result<()> {
     match cli.command {
         Command::New { path, name } => commands::new_project(path, name, &output),
         Command::Check { path } => commands::check(path, &output),
-        Command::Build { path, out_dir } => commands::build(path, out_dir, &output),
+        Command::Build {
+            path,
+            out_dir,
+            target,
+        } => commands::build(path, out_dir, target, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
     }
 }
@@ -106,12 +114,22 @@ mod tests {
 
     #[test]
     fn parses_package_build_options() {
-        let cli = Cli::try_parse_from(["lab", "build", "project", "--out-dir", "dist"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "lab",
+            "build",
+            "project",
+            "--out-dir",
+            "dist",
+            "--target",
+            "bench-ot2",
+        ])
+        .unwrap();
         assert!(matches!(
             cli.command,
-            Command::Build { path, out_dir }
+            Command::Build { path, out_dir, target }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
+                    && target.as_deref() == Some("bench-ot2")
         ));
     }
 

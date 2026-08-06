@@ -21,53 +21,86 @@ PLAN = cast(Ot2ExecutionPlan, json.loads(PLAN_JSON))
 
 
 def run(protocol: protocol_api.ProtocolContext) -> None:
+    profile = PLAN["deck"]
+    deck = profile["deck"]
+    stage = profile["stages"]["transformation"]
+
     temperature = cast(
         protocol_api.TemperatureModuleContext,
-        protocol.load_module("temperature module gen2", "1"),
+        protocol.load_module(
+            deck["temperature_module"]["model"], deck["temperature_module"]["slot"]
+        ),
     )
-    sources = temperature.load_labware("opentrons_24_aluminumblock_nest_1.5ml_snapcap")
+    sources = temperature.load_labware(deck["temperature_module"]["labware"])
     thermocycler = cast(
         protocol_api.ThermocyclerContext,
-        protocol.load_module("thermocycler module gen2"),
+        protocol.load_module(deck["thermocycler"]["model"]),
     )
-    reaction_plate = thermocycler.load_labware("nest_96_wellplate_100ul_pcr_full_skirt")
-    tips20 = protocol.load_labware("opentrons_96_tiprack_20ul", "2")
-    tips200 = protocol.load_labware("opentrons_96_filtertiprack_200ul", "3")
-    p20 = protocol.load_instrument("p20_single_gen2", "left", tip_racks=[tips20])
-    p300 = protocol.load_instrument("p300_single_gen2", "right", tip_racks=[tips200])
+    reaction_plate = thermocycler.load_labware(deck["thermocycler"]["labware"])
+    dna_plates = [
+        protocol.load_labware(stage["dna_plate"]["labware"], slot)
+        for slot in stage["dna_plate"]["slots"]
+    ]
+    small_tips = [
+        protocol.load_labware(stage["small_tips"]["labware"], slot)
+        for slot in stage["small_tips"]["slots"]
+    ]
+    large_tips = [
+        protocol.load_labware(stage["large_tips"]["labware"], slot)
+        for slot in stage["large_tips"]["slots"]
+    ]
+    p20 = protocol.load_instrument(
+        profile["instruments"]["small"]["model"],
+        profile["instruments"]["small"]["mount"],
+        tip_racks=small_tips,
+    )
+    p300 = protocol.load_instrument(
+        profile["instruments"]["large"]["model"],
+        profile["instruments"]["large"]["mount"],
+        tip_racks=large_tips,
+    )
     source_wells = PLAN["transformation_source_wells"]
     temperature.set_temperature(4)
     thermocycler.open_lid()
 
-    for construct in PLAN["constructs"]:
+    for construct in PLAN["strains"]:
+        chemistry = construct["chemistry"]
         cells = sources[source_wells["cells:" + construct["host"]]]
         for reaction in construct["transformations"]:
             destination = reaction_plate[reaction["culture_well"]]
-            p20.transfer(20, cells, destination, new_tip="always")
-            p20.transfer(
-                2,
-                reaction_plate[reaction["assembly_well"]],
-                destination,
-                new_tip="always",
-                mix_after=(3, 15),
-            )
+            p20.transfer(chemistry["cell_volume_ul"], cells, destination, new_tip="always")
+            for source in reaction["source_wells"]:
+                p20.transfer(
+                    chemistry["dna_volume_ul"],
+                    dna_plates[source["plate"]][source["well"]],
+                    destination,
+                    new_tip="always",
+                    mix_after=(3, 15),
+                )
 
+    # Every strain in a batch shares one heat-shock profile.
+    shock = PLAN["strains"][0]["chemistry"]
     thermocycler.close_lid()
-    thermocycler.set_block_temperature(4, hold_time_minutes=30)
-    thermocycler.set_block_temperature(42, hold_time_minutes=1)
+    thermocycler.set_block_temperature(4, hold_time_minutes=shock["cold_minutes"])
+    thermocycler.set_block_temperature(
+        shock["heat_shock_temperature_c"],
+        hold_time_minutes=shock["heat_shock_minutes"],
+    )
     thermocycler.set_block_temperature(4, hold_time_minutes=2)
     thermocycler.open_lid()
     recovery = sources[source_wells["reagent:recovery_medium"]]
-    for construct in PLAN["constructs"]:
+    for construct in PLAN["strains"]:
         for reaction in construct["transformations"]:
             p300.transfer(
-                60,
+                construct["chemistry"]["recovery_volume_ul"],
                 recovery,
                 reaction_plate[reaction["culture_well"]],
                 new_tip="always",
             )
     thermocycler.close_lid()
-    thermocycler.set_block_temperature(37, hold_time_minutes=60)
+    thermocycler.set_block_temperature(
+        shock["recovery_temperature_c"], hold_time_minutes=shock["recovery_minutes"]
+    )
     thermocycler.set_block_temperature(4)
     thermocycler.open_lid()
     protocol.comment(

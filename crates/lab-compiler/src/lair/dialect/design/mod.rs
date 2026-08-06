@@ -2,7 +2,7 @@
 // independently of the compiler's source frontend.
 #![allow(dead_code)]
 
-use pliron::builtin::attributes::{BoolAttr, IntegerAttr, StringAttr};
+use pliron::builtin::attributes::{BoolAttr, IntegerAttr, StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::NOpdsInterface;
 use pliron::common_traits::Verify;
 use pliron::context::Context;
@@ -12,7 +12,9 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::verify_err;
 
-use crate::lair::dialect::attributes::{u32_attr, u32_value, verify_u32_attr};
+use crate::lair::dialect::attributes::{
+    require_string, require_string_vec, string_vec, u32_attr, u32_value, verify_u32_attr,
+};
 
 /// The topology requested by a biological design.
 #[pliron_attr(name = "design.topology", format, verifier = "succ")]
@@ -147,6 +149,94 @@ impl Verify for DesignPlasmidOp {
             if let Some(attribute) = attribute {
                 verify_u32_attr(&attribute, name, self.loc(ctx), ctx)?;
             }
+        }
+        Ok(())
+    }
+}
+
+#[pliron_op(
+    name = "design.strain",
+    format,
+    attributes = (
+        strain_artifact_name: StringAttr,
+        strain_chassis: StringAttr,
+        strain_plasmids: VecAttr,
+        strain_selection: StringAttr
+    ),
+    interfaces = [NOpdsInterface<0>],
+    results = (design: DesignType)
+)]
+/// Declare a target-neutral engineered organism: a chassis and the plasmid
+/// designs it carries. A strain has no sequence of its own; its identity is the
+/// pairing of a host with a defined set of designs.
+pub struct DesignStrainOp;
+
+impl DesignStrainOp {
+    pub fn new(
+        ctx: &mut Context,
+        artifact_name: impl Into<String>,
+        chassis: impl Into<String>,
+        plasmids: Vec<String>,
+        selection: impl Into<String>,
+    ) -> Self {
+        let op = Operation::new(
+            ctx,
+            Self::get_concrete_op_info(),
+            vec![DesignType::get(ctx).into()],
+            vec![],
+            vec![],
+            0,
+        );
+        let result = Self { op };
+        result.set_attr_strain_artifact_name(ctx, StringAttr::new(artifact_name.into()));
+        result.set_attr_strain_chassis(ctx, StringAttr::new(chassis.into()));
+        result.set_attr_strain_plasmids(ctx, string_vec(plasmids));
+        result.set_attr_strain_selection(ctx, StringAttr::new(selection.into()));
+        result
+    }
+}
+
+impl Verify for DesignStrainOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        require_string(
+            self.get_attr_strain_artifact_name(ctx).as_deref(),
+            "design.strain artifact_name",
+            self.loc(ctx),
+        )?;
+        require_string(
+            self.get_attr_strain_chassis(ctx).as_deref(),
+            "design.strain chassis",
+            self.loc(ctx),
+        )?;
+        require_string(
+            self.get_attr_strain_selection(ctx).as_deref(),
+            "design.strain selection",
+            self.loc(ctx),
+        )?;
+        require_string_vec(
+            self.get_attr_strain_plasmids(ctx).as_deref(),
+            "design.strain plasmids",
+            self.loc(ctx),
+        )?;
+        let artifact_name = self
+            .get_attr_strain_artifact_name(ctx)
+            .expect("presence checked above");
+        if pliron::identifier::Identifier::try_from(artifact_name.as_str()).is_err() {
+            return verify_err!(
+                self.loc(ctx),
+                "design.strain artifact_name must be an identifier"
+            );
+        }
+        if self
+            .get_attr_strain_plasmids(ctx)
+            .expect("presence checked above")
+            .0
+            .is_empty()
+        {
+            return verify_err!(
+                self.loc(ctx),
+                "design.strain must carry at least one plasmid"
+            );
         }
         Ok(())
     }

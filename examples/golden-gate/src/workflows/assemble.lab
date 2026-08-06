@@ -1,0 +1,17 @@
+use std.bio.build
+use golden_gate.designs.plasmids
+
+# Stage 1 of the Golden Gate workflow: parts and backbone are cut and ligated
+# into a circular product.
+#
+# Each workflow takes the artifacts its assembly consumes as typed material
+# inputs and returns the plasmid it produces. Neither declares a build order;
+# the compiler derives one from this dataflow.
+
+workflow assemble_composite_plasmid_1() -> Material<Plasmid>:
+  product <- realize composite_plasmid_1
+  return product
+
+workflow assemble_composite_plasmid_2() -> Material<Plasmid>:
+  product <- realize composite_plasmid_2
+  return product

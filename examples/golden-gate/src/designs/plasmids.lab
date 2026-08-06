@@ -1,0 +1,51 @@
+use golden_gate.designs.inventory
+
+# Two composite transcription units, each a promoter driving a fluorescent
+# reporter through a shared RBS and terminator. Both are built by Golden Gate
+# assembly into the same backbone with the same type IIS enzyme.
+#
+# Sequences are synthetic compiler fixtures, not qualified biological designs.
+# The reaction chemistry below is scientific intent and travels with the
+# design; where the reaction physically happens is a target profile's concern.
+
+plasmid composite_plasmid_1:
+  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone: pSB1C3
+  components: [J23101, B0034, GFP, B0015]
+  restriction_enzyme: BsaI
+  assembly_replicates: 1
+
+  reaction_volume: 20 uL
+  part_volume: 2 uL
+  enzyme_volume: 2 uL
+  ligase_volume: 4 uL
+  buffer_volume: 2 uL
+  assembly_cycles: 75
+  digest_temperature: 37 C
+  digest_duration: 2 min
+  ligate_temperature: 16 C
+  ligate_duration: 5 min
+
+  require topology == circular
+  accept sequence == design.sequence
+
+plasmid composite_plasmid_2:
+  sequence: dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
+  backbone: pSB1C3
+  components: [J23106, B0034, RFP, B0015]
+  restriction_enzyme: BsaI
+  assembly_replicates: 1
+
+  reaction_volume: 20 uL
+  part_volume: 2 uL
+  enzyme_volume: 2 uL
+  ligase_volume: 4 uL
+  buffer_volume: 2 uL
+  assembly_cycles: 75
+  digest_temperature: 37 C
+  digest_duration: 2 min
+  ligate_temperature: 16 C
+  ligate_duration: 5 min
+
+  require topology == circular
+  accept sequence == design.sequence

@@ -13,11 +13,14 @@ use pliron::pass::{Analysis, AnalysisManager};
 use pliron::printable::Printable;
 use thiserror::Error;
 
-use crate::lair::dialect::design::DesignPlasmidOp;
+use crate::lair::dialect::attributes::quantity_dict;
+use crate::lair::dialect::design::{DesignPlasmidOp, DesignStrainOp};
 use crate::lair::dialect::workflow::{
     DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp,
 };
-use crate::lair::source_lowering::{SourceLoweringError, WorkflowActionIntent, lower_build_intent};
+use crate::lair::source_lowering::{
+    BuildArtifactIntent, SourceLoweringError, WorkflowActionIntent, lower_build_intent,
+};
 use crate::lair::stage::{IrStage, detect_stage};
 
 #[derive(Debug, Error)]
@@ -50,11 +53,21 @@ pub struct PortableLairProgram {
 }
 
 impl PortableLairProgram {
+    /// Lower one checked module into verified Design and Workflow LAIR.
+    pub fn lower(module: &CheckedModule) -> Result<Self, PortableLairError> {
+        Self::lower_program(&[module])
+    }
+
     /// Lower checked, backend-neutral frontend IR into verified Design and
     /// Workflow LAIR. Protocol selection consumes this type; neither selection
-    /// nor a robot backend can accept the checked module directly.
-    pub fn lower(module: &CheckedModule) -> Result<Self, PortableLairError> {
-        let artifacts = lower_build_intent(module)?;
+    /// nor a robot backend can accept checked modules directly.
+    ///
+    /// The modules form one program. An artifact declared in one module may be
+    /// realized by a workflow in another, so a package can separate designs,
+    /// policies, and workflows into their own modules. The caller supplies the
+    /// modules in its own deterministic compilation order.
+    pub fn lower_program(modules: &[&CheckedModule]) -> Result<Self, PortableLairError> {
+        let artifacts = lower_build_intent(modules)?;
         let mut context = Context::new();
         let root = ModuleOp::new(
             &mut context,
@@ -62,17 +75,35 @@ impl PortableLairProgram {
         );
         let mut designs = BTreeMap::new();
         for artifact in &artifacts {
-            let operation = DesignPlasmidOp::new(
-                &mut context,
-                artifact.name.clone(),
-                artifact.sequence.clone(),
-                1,
-                true,
-                None,
-                None,
-            );
-            designs.insert(artifact.name.clone(), operation.get_result_design(&context));
-            root.append_operation(&mut context, operation.get_operation(), 0);
+            let design = match artifact {
+                BuildArtifactIntent::Plasmid(intent) => {
+                    let operation = DesignPlasmidOp::new(
+                        &mut context,
+                        intent.name.clone(),
+                        intent.sequence.clone(),
+                        1,
+                        true,
+                        None,
+                        None,
+                    );
+                    let design = operation.get_result_design(&context);
+                    root.append_operation(&mut context, operation.get_operation(), 0);
+                    design
+                }
+                BuildArtifactIntent::Strain(intent) => {
+                    let operation = DesignStrainOp::new(
+                        &mut context,
+                        intent.name.clone(),
+                        intent.chassis.clone(),
+                        intent.plasmids.clone(),
+                        intent.selection.clone(),
+                    );
+                    let design = operation.get_result_design(&context);
+                    root.append_operation(&mut context, operation.get_operation(), 0);
+                    design
+                }
+            };
+            designs.insert(artifact.name().to_owned(), design);
         }
         for artifact in artifacts {
             append_workflow(&mut context, root, &designs, artifact)?;
@@ -152,46 +183,59 @@ fn append_workflow(
     context: &mut Context,
     root: ModuleOp,
     designs: &BTreeMap<String, pliron::value::Value>,
-    artifact: crate::lair::source_lowering::BuildArtifactIntent,
+    artifact: BuildArtifactIntent,
 ) -> Result<(), PortableLairError> {
-    let recipe = artifact.recipe;
-    let design = designs[&artifact.name];
+    let name = artifact.name().to_owned();
+    let design = designs[&name];
+    let dependencies = artifact.dependencies().to_vec();
     let mut values = BTreeMap::new();
 
-    for action in artifact.actions {
+    for action in artifact.actions() {
         match action {
-            WorkflowActionIntent::Realize { product, construct } => {
+            WorkflowActionIntent::Realize { product } => {
+                let BuildArtifactIntent::Plasmid(intent) = &artifact else {
+                    return Err(unsupported_realization(&name, "realize", "plasmid"));
+                };
                 let operation = RealizeOp::new(
                     context,
                     design,
-                    artifact.name.clone(),
-                    recipe.backbone.clone(),
-                    recipe.components.clone(),
-                    artifact.dependencies.clone(),
-                    recipe.restriction_enzyme.clone(),
-                    recipe.assembly_replicates,
+                    name.clone(),
+                    intent.recipe.backbone.clone(),
+                    intent.recipe.components.clone(),
+                    dependencies.clone(),
+                    intent.recipe.restriction_enzyme.clone(),
+                    intent.recipe.assembly_replicates,
+                    assembly_chemistry(&intent.recipe.chemistry, context),
                 );
-                values.insert(product, operation.get_result_product(context));
-                values.insert(construct, operation.get_result_construct(context));
+                values.insert(product.clone(), operation.get_result_product(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
             WorkflowActionIntent::Provision { cells, item } => {
-                let operation = ProvisionOp::competent_cells(context, item);
-                values.insert(cells, operation.get_result_material(context));
+                let operation = ProvisionOp::competent_cells(context, item.clone());
+                values.insert(cells.clone(), operation.get_result_material(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
             WorkflowActionIntent::Transform {
+                strain,
                 culture,
-                construct,
                 cells,
             } => {
+                let BuildArtifactIntent::Strain(intent) = &artifact else {
+                    return Err(unsupported_realization(&name, "transform", "strain"));
+                };
                 let operation = TransformOp::new(
                     context,
-                    workflow_value(&values, &construct, &artifact.name)?,
-                    workflow_value(&values, &cells, &artifact.name)?,
-                    recipe.transformation_replicates,
+                    design,
+                    workflow_value(&values, cells, &name)?,
+                    name.clone(),
+                    intent.chassis.clone(),
+                    intent.plasmids.clone(),
+                    dependencies.clone(),
+                    intent.transformation_replicates,
+                    strain_chemistry(&intent.chemistry, context),
                 );
-                values.insert(culture, operation.get_result_culture(context));
+                values.insert(strain.clone(), operation.get_result_strain(context));
+                values.insert(culture.clone(), operation.get_result_culture(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
             WorkflowActionIntent::Recover {
@@ -202,20 +246,23 @@ fn append_workflow(
             } => {
                 let operation = RecoverOp::new(
                     context,
-                    workflow_value(&values, &input, &artifact.name)?,
-                    duration_magnitude,
-                    duration_unit,
+                    workflow_value(&values, input, &name)?,
+                    duration_magnitude.clone(),
+                    duration_unit.clone(),
                 );
-                values.insert(culture, operation.get_result_recovered(context));
+                values.insert(culture.clone(), operation.get_result_recovered(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
             WorkflowActionIntent::Dilute { culture, input } => {
+                let BuildArtifactIntent::Strain(intent) = &artifact else {
+                    return Err(unsupported_realization(&name, "dilute", "strain"));
+                };
                 let operation = DiluteOp::new(
                     context,
-                    workflow_value(&values, &input, &artifact.name)?,
-                    recipe.serial_dilutions,
+                    workflow_value(&values, input, &name)?,
+                    intent.serial_dilutions,
                 );
-                values.insert(culture, operation.get_result_diluted(context));
+                values.insert(culture.clone(), operation.get_result_diluted(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
             WorkflowActionIntent::Plate {
@@ -223,18 +270,82 @@ fn append_workflow(
                 culture,
                 selection,
             } => {
+                let BuildArtifactIntent::Strain(intent) = &artifact else {
+                    return Err(unsupported_realization(&name, "plate", "strain"));
+                };
                 let operation = PlateOp::new(
                     context,
-                    workflow_value(&values, &culture, &artifact.name)?,
-                    selection,
-                    recipe.plating_replicates,
+                    workflow_value(&values, culture, &name)?,
+                    selection.clone(),
+                    intent.plating_replicates,
                 );
-                values.insert(plate, operation.get_result_plate(context));
+                values.insert(plate.clone(), operation.get_result_plate(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
         }
     }
     Ok(())
+}
+
+fn assembly_chemistry(
+    chemistry: &crate::lair::source_lowering::AssemblyChemistryIntent,
+    context: &Context,
+) -> pliron::builtin::attributes::DictAttr {
+    quantity_dict(
+        &[
+            ("reaction_volume_ul", chemistry.reaction_volume_ul.into()),
+            ("part_volume_ul", chemistry.part_volume_ul.into()),
+            ("enzyme_volume_ul", chemistry.enzyme_volume_ul.into()),
+            ("ligase_volume_ul", chemistry.ligase_volume_ul.into()),
+            ("buffer_volume_ul", chemistry.buffer_volume_ul.into()),
+            ("cycles", chemistry.cycles.into()),
+            (
+                "digest_temperature_c",
+                chemistry.digest_temperature_c.into(),
+            ),
+            ("digest_minutes", chemistry.digest_minutes.into()),
+            (
+                "ligate_temperature_c",
+                chemistry.ligate_temperature_c.into(),
+            ),
+            ("ligate_minutes", chemistry.ligate_minutes.into()),
+        ],
+        context,
+    )
+}
+
+fn strain_chemistry(
+    chemistry: &crate::lair::source_lowering::StrainChemistryIntent,
+    context: &Context,
+) -> pliron::builtin::attributes::DictAttr {
+    quantity_dict(
+        &[
+            ("cell_volume_ul", chemistry.cell_volume_ul.into()),
+            ("dna_volume_ul", chemistry.dna_volume_ul.into()),
+            ("recovery_volume_ul", chemistry.recovery_volume_ul.into()),
+            ("cold_minutes", chemistry.cold_minutes.into()),
+            (
+                "heat_shock_temperature_c",
+                chemistry.heat_shock_temperature_c.into(),
+            ),
+            ("heat_shock_minutes", chemistry.heat_shock_minutes.into()),
+            (
+                "recovery_temperature_c",
+                chemistry.recovery_temperature_c.into(),
+            ),
+            ("recovery_minutes", chemistry.recovery_minutes.into()),
+            ("medium_volume_ul", chemistry.medium_volume_ul.into()),
+            ("culture_volume_ul", chemistry.culture_volume_ul.into()),
+            ("colony_volume_ul", chemistry.colony_volume_ul.into()),
+        ],
+        context,
+    )
+}
+
+fn unsupported_realization(artifact: &str, operation: &str, expected: &str) -> PortableLairError {
+    PortableLairError::Stage(format!(
+        "workflow for artifact '{artifact}' uses '{operation}', which realizes a {expected}"
+    ))
 }
 
 fn workflow_value(
@@ -247,4 +358,113 @@ fn workflow_value(
             "workflow for artifact '{artifact}' uses material '{name}' before it is defined"
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use lab_language::{
+        ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
+    };
+
+    use super::PortableLairProgram;
+
+    const DESIGNS: &str = r#"
+use std.bio.inventory
+
+J23101 = part("J23101")
+B0034 = part("B0034")
+GFP = part("GFP")
+B0015 = part("B0015")
+pSB1C3 = backbone("pSB1C3")
+BsaI = restriction_enzyme("BsaI")
+DH5alpha = chassis("DH5alpha")
+chloramphenicol = antibiotic("chloramphenicol")
+
+plasmid p_gfp:
+  sequence: dna("ACGT")
+  backbone: pSB1C3
+  components: [J23101, B0034, GFP, B0015]
+  restriction_enzyme: BsaI
+  assembly_replicates: 1
+  require topology == circular
+  accept sequence == design.sequence
+
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
+"#;
+
+    const WORKFLOWS: &str = r#"
+use std.bio.build
+use std.lab.plasmid_actions
+use demo.designs
+
+workflow assemble_p_gfp() -> Material<Plasmid>:
+  dependencies = []
+  product <- realize p_gfp from dependencies
+  return product
+
+workflow build_reporter_host(
+  p_gfp: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [p_gfp]
+  cells <- provision DH5alpha
+  strain, culture <- transform reporter_host from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate
+"#;
+
+    #[test]
+    fn lowers_an_artifact_and_its_workflow_from_separate_modules() {
+        let designs = compile_module_in_environment(
+            ModuleId::new("demo.designs"),
+            DESIGNS,
+            &SemanticEnvironment::default(),
+        )
+        .expect("design module checks");
+        let mut environment = SemanticEnvironment::default();
+        environment.insert("demo.designs", designs.interface.clone());
+        let workflows =
+            compile_module_in_environment(ModuleId::new("demo.workflows"), WORKFLOWS, &environment)
+                .expect("workflow module checks");
+
+        let program =
+            PortableLairProgram::lower_program(&[&designs, &workflows]).expect("program lowers");
+        let split = program.ir();
+
+        let combined =
+            compile_module(&format!("{DESIGNS}{WORKFLOWS}").replace("use demo.designs\n", ""))
+                .expect("single module checks");
+        let single = PortableLairProgram::lower(&combined)
+            .expect("single module lowers")
+            .ir();
+
+        assert_eq!(split, single);
+    }
+
+    #[test]
+    fn a_module_without_a_realizing_workflow_is_not_a_program_on_its_own() {
+        let designs = compile_module_in_environment(
+            ModuleId::new("demo.designs"),
+            DESIGNS,
+            &SemanticEnvironment::default(),
+        )
+        .expect("design module checks");
+        let error = PortableLairProgram::lower_program(&[&designs])
+            .err()
+            .expect("an artifact with no realization cannot lower");
+        assert!(
+            error.to_string().contains("std.bio.build.realize"),
+            "{error}"
+        );
+    }
 }

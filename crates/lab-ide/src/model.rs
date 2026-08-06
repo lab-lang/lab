@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum SymbolKind {
     Module,
     Circuit,
-    Plasmid,
+    Artifact,
     Data,
     Workflow,
     Variable,

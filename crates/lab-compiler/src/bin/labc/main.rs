@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use lab_compiler::backend::Backend;
-use lab_compiler::backend::opentrons_ot2::{Ot2Backend, compile_dependency_build, emit_program};
+use lab_compiler::backend::opentrons_ot2::{
+    Ot2Backend, Ot2TargetProfile, compile_dependency_build, emit_program,
+};
 use lab_compiler::planning::BuildInventory;
 use lab_compiler::{PortableLairProgram, compile_module, parse_module, render_checked_module};
 
@@ -25,6 +27,9 @@ struct Cli {
     /// JSON inventory used by dependency-plan and full-build-bundle.
     #[arg(long)]
     inventory: Option<PathBuf>,
+    /// TOML target profile describing the bench to compile for.
+    #[arg(long)]
+    target_profile: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -40,6 +45,14 @@ enum Emit {
     AutomationBundle,
     DependencyPlan,
     FullBuildBundle,
+}
+
+/// A build emits a stage protocol only when it realizes an artifact that
+/// reaches that stage.
+fn print_stage(stage: &str, protocol: Option<&str>) -> Result<()> {
+    let protocol = protocol.with_context(|| format!("this build has no {stage} stage"))?;
+    print!("{protocol}");
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -85,6 +98,15 @@ fn main() -> Result<()> {
                 cli.source.display()
             )
         })?;
+        let profile = match &cli.target_profile {
+            Some(path) => {
+                let contents = std::fs::read_to_string(path)
+                    .with_context(|| format!("failed to read target profile {}", path.display()))?;
+                Ot2TargetProfile::parse(&contents)
+                    .with_context(|| format!("failed to load target profile {}", path.display()))?
+            }
+            None => Ot2TargetProfile::default(),
+        };
         if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {
             let inventory = if let Some(path) = &cli.inventory {
                 let contents = std::fs::read_to_string(path)
@@ -94,12 +116,13 @@ fn main() -> Result<()> {
             } else {
                 BuildInventory::default()
             };
-            let bundle = compile_dependency_build(&protocol, &inventory).with_context(|| {
-                format!(
-                    "failed to compile dependency build {}",
-                    cli.source.display()
-                )
-            })?;
+            let bundle =
+                compile_dependency_build(&protocol, &profile, &inventory).with_context(|| {
+                    format!(
+                        "failed to compile dependency build {}",
+                        cli.source.display()
+                    )
+                })?;
             match cli.emit {
                 Emit::DependencyPlan => print!("{}", bundle.manifest_json()?),
                 Emit::FullBuildBundle => {
@@ -130,7 +153,8 @@ fn main() -> Result<()> {
             return Ok(());
         }
 
-        let program = Ot2Backend
+        let backend = Ot2Backend::new(profile);
+        let program = backend
             .compile(&protocol)
             .with_context(|| format!("failed to compile OT-2 build {}", cli.source.display()))?;
         let bundle = emit_program(&program).with_context(|| {
@@ -139,9 +163,11 @@ fn main() -> Result<()> {
         match cli.emit {
             Emit::AutomationJson => print!("{}", bundle.manifest_json()?),
             Emit::ManualProtocol => print!("{}", bundle.manual_protocol()),
-            Emit::OpentronsAssembly => print!("{}", bundle.assembly_protocol()),
-            Emit::OpentronsTransformation => print!("{}", bundle.transformation_protocol()),
-            Emit::OpentronsPlating => print!("{}", bundle.plating_protocol()),
+            Emit::OpentronsAssembly => print_stage("assembly", bundle.assembly_protocol())?,
+            Emit::OpentronsTransformation => {
+                print_stage("transformation", bundle.transformation_protocol())?
+            }
+            Emit::OpentronsPlating => print_stage("plating", bundle.plating_protocol())?,
             Emit::AutomationBundle => {
                 let output_dir = cli
                     .output_dir

@@ -1,0 +1,6 @@
+use golden_gate.workflows.assemble
+use golden_gate.workflows.build_strains
+
+# The runnable entry point. It names the workflows that make up the panel; the
+# compiler derives the build order from their material dataflow rather than
+# from the order written here.

@@ -13,10 +13,13 @@ pub use build::plan_build;
 pub(in crate::backend::opentrons_ot2) use build::plan_selected_build;
 pub use bundle::{Ot2Bundle, compile_build, emit_program};
 pub use error::{Ot2BuildError, Ot2EmissionError, Ot2PlanningError};
-pub use execution::{Ot2ConstructPlan, Ot2ExecutionPlan, Ot2PlatingPlan, Ot2TransformationPlan};
+pub use execution::{
+    Ot2AssemblyChemistry, Ot2AssemblyPlan, Ot2ExecutionPlan, Ot2PlatingPlan, Ot2StrainChemistry,
+    Ot2StrainPlan, Ot2TransformationPlan, Ot2Well,
+};
 pub(in crate::backend::opentrons_ot2) use graph::protocol_build_graph;
 
-const API_LEVEL: &str = "2.21";
-const REACTION_VOLUME_UL: u16 = 20;
-const SUPPORTED_STEPS: [&str; 5] = ["assemble", "transform", "recover", "dilute", "plate"];
+/// Laboratory steps each artifact kind contributes to a build graph node.
+const ASSEMBLY_STEPS: [&str; 1] = ["assemble"];
+const STRAIN_STEPS: [&str; 4] = ["transform", "recover", "dilute", "plate"];
 const TARGET: &str = "opentrons_ot2";

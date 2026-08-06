@@ -50,27 +50,36 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     take,
                 ),
             ],
-            results: vec![result("construct", concrete(material(named("Construct"))))],
+            results: vec![result("construct", concrete(material(named("Plasmid"))))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid_actions.provision",
             capability: "inventory",
             phrase: vec![
                 PhrasePart::Word("provision"),
-                operand("strain", concrete(named("Strain")), copy),
+                operand("chassis", concrete(named("Chassis")), copy),
             ],
-            results: vec![result("cells", concrete(material(named("Strain"))))],
+            results: vec![result("cells", concrete(material(named("Chassis"))))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid_actions.transform",
             capability: "chemical_transformation",
             phrase: vec![
                 PhrasePart::Word("transform"),
-                operand("construct", concrete(material(named("Construct"))), take),
+                operand("design", concrete(named("Strain")), copy),
+                PhrasePart::Word("from"),
+                operand(
+                    "plasmids",
+                    concrete(Ty::List(Box::new(material(named("Plasmid"))))),
+                    take,
+                ),
                 PhrasePart::Word("into"),
-                operand("cells", concrete(material(named("Strain"))), take),
+                operand("cells", concrete(material(named("Chassis"))), take),
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            results: vec![
+                result("strain", concrete(material(named("Strain")))),
+                result("culture", concrete(material(named("Culture")))),
+            ],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid_actions.recover",

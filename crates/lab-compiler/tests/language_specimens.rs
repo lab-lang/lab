@@ -43,7 +43,8 @@ fn plasmid_design_compiles_through_the_portable_module_boundary() {
                 == "GreenFluorescentProtein"
     }));
     assert!(declarations.iter().any(|declaration| {
-        declaration["kind"] == "plasmid"
+        declaration["kind"] == "artifact"
+            && declaration["artifact"] == "plasmid"
             && declaration["name"] == "p_tet_reporter"
             && declaration["requirements"].as_array().unwrap().len() == 3
             && declaration["acceptance"].as_array().unwrap().len() == 3
@@ -109,7 +110,8 @@ fn inventory_specimen_preserves_properties_and_resolved_operations() {
         .iter()
         .find(|declaration| declaration["name"] == "reporter")
         .unwrap();
-    assert_eq!(reporter["kind"], "plasmid");
+    assert_eq!(reporter["kind"], "artifact");
+    assert_eq!(reporter["artifact"], "plasmid");
     assert!(reporter.get("bindings").is_none());
     assert!(
         reporter["properties"]
@@ -146,16 +148,27 @@ fn dependency_specimen_preserves_typed_material_edges_without_levels() {
     assert_eq!(alternatives[0]["name"], "Plasmid");
     assert_eq!(alternatives[1]["name"], "Part");
 
-    let workflow = declarations
+    let assembly = declarations
         .iter()
-        .find(|declaration| declaration["name"] == "realize_reporter_region")
+        .find(|declaration| declaration["name"] == "assemble_reporter_region")
         .unwrap();
-    assert_eq!(workflow["inputs"][0]["name"], "promoter_carrier");
-    assert_eq!(workflow["inputs"][0]["type"]["name"], "Material");
-    assert_eq!(workflow["outputs"][0]["name"], "product");
-    assert_eq!(workflow["outputs"][1]["name"], "plate");
-    let serialized = serde_json::to_string(workflow).unwrap();
+    assert_eq!(assembly["inputs"][0]["name"], "promoter_carrier");
+    assert_eq!(assembly["inputs"][0]["type"]["name"], "Material");
+    assert_eq!(assembly["outputs"][0]["name"], "outcome");
+    let serialized = serde_json::to_string(assembly).unwrap();
     assert!(serialized.contains("std.bio.build.realize"));
     assert!(!serialized.contains("level1"));
     assert!(!serialized.contains("level2"));
+
+    let host = declarations
+        .iter()
+        .find(|declaration| declaration["name"] == "build_reporter_host")
+        .unwrap();
+    assert_eq!(host["outputs"][0]["name"], "strain");
+    assert_eq!(host["outputs"][1]["name"], "plate");
+    assert!(
+        serde_json::to_string(host)
+            .unwrap()
+            .contains("std.lab.plasmid_actions.transform")
+    );
 }

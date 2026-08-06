@@ -4,8 +4,7 @@
 //! and build policy. They deliberately describe neither a concrete laboratory
 //! procedure nor robot resources; protocol selection owns that transition.
 
-use pliron::attribute::AttrObj;
-use pliron::builtin::attributes::{IntegerAttr, StringAttr, VecAttr};
+use pliron::builtin::attributes::{DictAttr, IntegerAttr, StringAttr, VecAttr};
 use pliron::common_traits::Verify;
 use pliron::context::Context;
 use pliron::derive::{pliron_op, pliron_type};
@@ -17,7 +16,11 @@ use pliron::r#type::{Type, TypeHandle, Typed};
 use pliron::value::Value;
 use pliron::verify_err;
 
-use crate::lair::dialect::attributes::{u32_attr, u32_value, verify_u32_attr};
+use crate::lair::dialect::attributes::{
+    require_quantity_dict, require_string, require_string_vec, string_vec, u32_attr, u32_value,
+    verify_u32_attr,
+};
+use crate::lair::dialect::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 use crate::lair::dialect::design::DesignType;
 
 /// Abstract material states visible in a source-level build workflow.
@@ -25,7 +28,7 @@ use crate::lair::dialect::design::DesignType;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MaterialType {
     PlasmidProduct,
-    CircularConstruct,
+    StrainProduct,
     CompetentCells,
     TransformedCulture,
     RecoveredCulture,
@@ -48,10 +51,11 @@ impl MaterialType {
         realize_components: VecAttr,
         realize_dependencies: VecAttr,
         realize_restriction_enzyme: StringAttr,
-        realize_assembly_replicates: IntegerAttr
+        realize_assembly_replicates: IntegerAttr,
+        realize_chemistry: DictAttr
     ),
     operands = (design: DesignType),
-    results = (product: MaterialType, construct: MaterialType)
+    results = (product: MaterialType)
 )]
 /// Request realization of a design using abstract assembly inputs and policy.
 pub struct RealizeOp;
@@ -67,15 +71,13 @@ impl RealizeOp {
         dependencies: Vec<String>,
         restriction_enzyme: impl Into<String>,
         assembly_replicates: u8,
+        chemistry: DictAttr,
     ) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![
-                    MaterialType::PlasmidProduct.get(ctx),
-                    MaterialType::CircularConstruct.get(ctx),
-                ],
+                vec![MaterialType::PlasmidProduct.get(ctx)],
                 vec![design],
                 vec![],
                 0,
@@ -87,6 +89,7 @@ impl RealizeOp {
         result.set_attr_realize_dependencies(ctx, string_vec(dependencies));
         result.set_attr_realize_restriction_enzyme(ctx, StringAttr::new(restriction_enzyme.into()));
         result.set_attr_realize_assembly_replicates(ctx, u32_attr(ctx, assembly_replicates.into()));
+        result.set_attr_realize_chemistry(ctx, chemistry);
         result
     }
 }
@@ -124,15 +127,15 @@ impl Verify for RealizeOp {
             self.loc(ctx),
             ctx,
         )?;
+        require_quantity_dict(
+            self.get_attr_realize_chemistry(ctx).as_deref(),
+            "realize_chemistry",
+            ASSEMBLY_CHEMISTRY_KEYS,
+            self.loc(ctx),
+        )?;
         require_material(
             self.get_result_product(ctx),
             MaterialType::PlasmidProduct,
-            self.loc(ctx),
-            ctx,
-        )?;
-        require_material(
-            self.get_result_construct(ctx),
-            MaterialType::CircularConstruct,
             self.loc(ctx),
             ctx,
         )
@@ -184,47 +187,102 @@ impl Verify for ProvisionOp {
 #[pliron_op(
     name = "workflow.transform",
     format,
-    attributes = (transform_replicates: IntegerAttr),
-    operands = (construct: MaterialType, cells: MaterialType),
-    results = (culture: MaterialType)
+    attributes = (
+        transform_artifact: StringAttr,
+        transform_chassis: StringAttr,
+        transform_plasmids: VecAttr,
+        transform_dependencies: VecAttr,
+        transform_replicates: IntegerAttr,
+        transform_chemistry: DictAttr
+    ),
+    operands = (design: DesignType, cells: MaterialType),
+    results = (strain: MaterialType, culture: MaterialType)
 )]
-/// Request transformation while preserving construct and cell ownership edges.
+/// Realize a strain design by introducing its plasmids into competent cells.
+/// The transformation both produces the named artifact and leaves a culture to
+/// recover, dilute, and plate, so the strain's identity is established by the
+/// same operation that creates the physical material.
 pub struct TransformOp;
 
 impl TransformOp {
-    pub fn new(ctx: &mut Context, construct: Value, cells: Value, replicates: u8) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ctx: &mut Context,
+        design: Value,
+        cells: Value,
+        artifact_name: impl Into<String>,
+        chassis: impl Into<String>,
+        plasmids: Vec<String>,
+        dependencies: Vec<String>,
+        replicates: u8,
+        chemistry: DictAttr,
+    ) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::TransformedCulture.get(ctx)],
-                vec![construct, cells],
+                vec![
+                    MaterialType::StrainProduct.get(ctx),
+                    MaterialType::TransformedCulture.get(ctx),
+                ],
+                vec![design, cells],
                 vec![],
                 0,
             ),
         };
+        result.set_attr_transform_artifact(ctx, StringAttr::new(artifact_name.into()));
+        result.set_attr_transform_chassis(ctx, StringAttr::new(chassis.into()));
+        result.set_attr_transform_plasmids(ctx, string_vec(plasmids));
+        result.set_attr_transform_dependencies(ctx, string_vec(dependencies));
         result.set_attr_transform_replicates(ctx, u32_attr(ctx, replicates.into()));
+        result.set_attr_transform_chemistry(ctx, chemistry);
         result
     }
 }
 
 impl Verify for TransformOp {
     fn verify(&self, ctx: &Context) -> Result<()> {
+        require_string(
+            self.get_attr_transform_artifact(ctx).as_deref(),
+            "transform_artifact",
+            self.loc(ctx),
+        )?;
+        require_string(
+            self.get_attr_transform_chassis(ctx).as_deref(),
+            "transform_chassis",
+            self.loc(ctx),
+        )?;
+        require_string_vec(
+            self.get_attr_transform_plasmids(ctx).as_deref(),
+            "transform_plasmids",
+            self.loc(ctx),
+        )?;
+        require_string_vec(
+            self.get_attr_transform_dependencies(ctx).as_deref(),
+            "transform_dependencies",
+            self.loc(ctx),
+        )?;
         require_count(
             self.get_attr_transform_replicates(ctx).as_deref(),
             "transform_replicates",
             self.loc(ctx),
             ctx,
         )?;
-        require_material(
-            self.get_operand_construct(ctx),
-            MaterialType::CircularConstruct,
+        require_quantity_dict(
+            self.get_attr_transform_chemistry(ctx).as_deref(),
+            "transform_chemistry",
+            STRAIN_CHEMISTRY_KEYS,
             self.loc(ctx),
-            ctx,
         )?;
         require_material(
             self.get_operand_cells(ctx),
             MaterialType::CompetentCells,
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_material(
+            self.get_result_strain(ctx),
+            MaterialType::StrainProduct,
             self.loc(ctx),
             ctx,
         )?;
@@ -406,41 +464,6 @@ impl Verify for PlateOp {
             ctx,
         )
     }
-}
-
-fn string_vec(values: Vec<String>) -> VecAttr {
-    VecAttr::new(
-        values
-            .into_iter()
-            .map(|value| StringAttr::new(value).into())
-            .collect(),
-    )
-}
-
-fn require_string(value: Option<&StringAttr>, name: &str, location: Location) -> Result<()> {
-    if value.is_none_or(|value| value.as_str().is_empty()) {
-        return verify_err!(
-            location,
-            "workflow operation requires non-empty attribute {name}"
-        );
-    }
-    Ok(())
-}
-
-fn require_string_vec(value: Option<&VecAttr>, name: &str, location: Location) -> Result<()> {
-    let Some(value) = value else {
-        return verify_err!(location, "workflow operation is missing attribute {name}");
-    };
-    if value.0.iter().any(|item: &AttrObj| {
-        item.downcast_ref::<StringAttr>()
-            .is_none_or(|value| value.as_str().is_empty())
-    }) {
-        return verify_err!(
-            location,
-            "workflow attribute {name} must contain only non-empty strings"
-        );
-    }
-    Ok(())
 }
 
 fn require_count(

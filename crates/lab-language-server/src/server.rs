@@ -1,8 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
+use std::path::{Path, PathBuf};
 
 use lab_ide::{SemanticTokenKind, SymbolKind, Workspace};
-use lab_language::{DiagnosticCode, DiagnosticSeverity, SourceId, Span};
+use lab_language::{DiagnosticCode, DiagnosticSeverity, ModuleId, SourceId, Span};
+use lab_package::LabPackage;
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types as lsp;
 use serde::de::DeserializeOwned;
@@ -51,6 +53,9 @@ pub(crate) fn capabilities() -> lsp::ServerCapabilities {
 pub(crate) struct Server {
     connection: Connection,
     workspace: Workspace,
+    /// Package roots whose source modules have already been loaded, so opening
+    /// a second file in the same package does not re-read it.
+    loaded_packages: BTreeSet<PathBuf>,
 }
 
 impl Server {
@@ -58,6 +63,46 @@ impl Server {
         Self {
             connection,
             workspace: Workspace::new(),
+            loaded_packages: BTreeSet::new(),
+        }
+    }
+
+    /// The module name a package's manifest gives this file. A file outside any
+    /// package has none, and the workspace falls back to its path.
+    fn module_id(&self, uri: &lsp::Uri) -> Option<ModuleId> {
+        let path = uri_to_path(uri)?;
+        let package = LabPackage::discover(&path).ok()?;
+        package_module_id(&package, &path)
+    }
+
+    /// Read every source module of the package holding this file, so a `use` of
+    /// a sibling resolves whether or not that sibling happens to be open. A
+    /// file outside a package, or one whose package fails to load, is left to
+    /// the ordinary open-document path.
+    fn load_package_for(&mut self, uri: &lsp::Uri) {
+        let Some(path) = uri_to_path(uri) else {
+            return;
+        };
+        let Ok(package) = LabPackage::discover(&path) else {
+            return;
+        };
+        if !self.loaded_packages.insert(package.root.clone()) {
+            return;
+        }
+        let documents = package
+            .sources
+            .iter()
+            .filter_map(|source| {
+                let source_id = path_to_source_id(&source.path);
+                if self.workspace.contains(&source_id) {
+                    return None;
+                }
+                let text = std::fs::read_to_string(&source.path).ok()?;
+                Some((source_id, 0, text, ModuleId::new(source.module.clone())))
+            })
+            .collect::<Vec<_>>();
+        if !documents.is_empty() {
+            self.workspace.set_module_documents(documents);
         }
     }
 
@@ -85,22 +130,39 @@ impl Server {
             "textDocument/didOpen" => {
                 let params: lsp::DidOpenTextDocumentParams = params(notification.params)?;
                 let source = source_id(&params.text_document.uri);
-                self.workspace.set_document(
-                    source.clone(),
-                    i64::from(params.text_document.version),
-                    params.text_document.text,
-                );
+                self.load_package_for(&params.text_document.uri);
+                let version = i64::from(params.text_document.version);
+                match self.module_id(&params.text_document.uri) {
+                    Some(module) => self.workspace.set_module_document(
+                        source.clone(),
+                        version,
+                        params.text_document.text,
+                        module,
+                    ),
+                    None => self.workspace.set_document(
+                        source.clone(),
+                        version,
+                        params.text_document.text,
+                    ),
+                }
                 self.publish_diagnostics(&params.text_document.uri, &source)?;
             }
             "textDocument/didChange" => {
                 let params: lsp::DidChangeTextDocumentParams = params(notification.params)?;
                 if let Some(change) = params.content_changes.into_iter().last() {
                     let source = source_id(&params.text_document.uri);
-                    self.workspace.set_document(
-                        source.clone(),
-                        i64::from(params.text_document.version),
-                        change.text,
-                    );
+                    let version = i64::from(params.text_document.version);
+                    match self.module_id(&params.text_document.uri) {
+                        Some(module) => self.workspace.set_module_document(
+                            source.clone(),
+                            version,
+                            change.text,
+                            module,
+                        ),
+                        None => self
+                            .workspace
+                            .set_document(source.clone(), version, change.text),
+                    }
                     self.publish_diagnostics(&params.text_document.uri, &source)?;
                 }
             }
@@ -441,6 +503,49 @@ fn source_id(uri: &lsp::Uri) -> SourceId {
     SourceId::new(uri.as_str())
 }
 
+/// A `file:` URI as a filesystem path, with percent escapes decoded. Any other
+/// scheme names something that is not on disk and has no package.
+fn uri_to_path(uri: &lsp::Uri) -> Option<PathBuf> {
+    let text = uri.as_str();
+    let encoded = text.strip_prefix("file://")?;
+    let encoded = encoded.strip_prefix("localhost").unwrap_or(encoded);
+    let mut decoded = String::with_capacity(encoded.len());
+    let mut bytes = encoded.bytes().enumerate();
+    while let Some((index, byte)) = bytes.next() {
+        if byte != b'%' {
+            decoded.push(char::from(byte));
+            continue;
+        }
+        let hex = encoded.get(index + 1..index + 3)?;
+        let value = u8::from_str_radix(hex, 16).ok()?;
+        decoded.push(char::from(value));
+        bytes.next();
+        bytes.next();
+    }
+    Some(PathBuf::from(decoded))
+}
+
+/// The same `file:` URI a client would send for this path, so a document loaded
+/// from disk and the same document opened in the editor share one identity.
+fn path_to_source_id(path: &Path) -> SourceId {
+    SourceId::new(format!("file://{}", path.display()))
+}
+
+/// The manifest-derived module name for one file of a package.
+fn package_module_id(package: &LabPackage, path: &Path) -> Option<ModuleId> {
+    let canonical = path.canonicalize().ok();
+    package
+        .sources
+        .iter()
+        .find(|source| {
+            source.path == path
+                || canonical
+                    .as_ref()
+                    .is_some_and(|canonical| &source.path == canonical)
+        })
+        .map(|source| ModuleId::new(source.module.clone()))
+}
+
 fn offset_to_position(text: &str, requested: usize) -> lsp::Position {
     let offset = requested.min(text.len());
     let prefix = &text[..text.floor_char_boundary(offset)];
@@ -471,7 +576,7 @@ fn symbol_kind(kind: SymbolKind) -> lsp::SymbolKind {
     match kind {
         SymbolKind::Module => lsp::SymbolKind::MODULE,
         SymbolKind::Circuit | SymbolKind::Workflow => lsp::SymbolKind::FUNCTION,
-        SymbolKind::Plasmid | SymbolKind::Data => lsp::SymbolKind::STRUCT,
+        SymbolKind::Artifact | SymbolKind::Data => lsp::SymbolKind::STRUCT,
         SymbolKind::Variable => lsp::SymbolKind::VARIABLE,
         SymbolKind::Field => lsp::SymbolKind::FIELD,
         SymbolKind::Case => lsp::SymbolKind::ENUM_MEMBER,
@@ -518,5 +623,85 @@ mod tests {
         assert_eq!(offset_to_position(text, 5), lsp::Position::new(0, 3));
         assert_eq!(position_to_offset(text, lsp::Position::new(0, 3)), 5);
         assert_eq!(position_to_offset(text, lsp::Position::new(1, 2)), 9);
+    }
+}
+
+#[cfg(test)]
+mod package_tests {
+    use super::*;
+
+    fn uri(path: &str) -> lsp::Uri {
+        format!("file://{path}").parse().unwrap()
+    }
+
+    fn example(relative: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/golden-gate")
+            .join(relative)
+            .canonicalize()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_file_in_a_package_takes_its_module_name_from_the_manifest() {
+        let path = example("src/designs/inventory.lab");
+        let package = LabPackage::discover(&path).unwrap();
+
+        assert_eq!(
+            package_module_id(&package, &path).unwrap().as_str(),
+            "golden_gate.designs.inventory",
+            "the manifest's package name namespaces the module, not the path on disk"
+        );
+    }
+
+    #[test]
+    fn opening_one_file_resolves_a_use_of_an_unopened_sibling() {
+        let path = example("src/designs/plasmids.lab");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let package = LabPackage::discover(&path).unwrap();
+        let module = package_module_id(&package, &path).unwrap();
+
+        // What the server does on didOpen: seed every package source, then set
+        // the opened document under its manifest-derived name.
+        let mut workspace = Workspace::new();
+        workspace.set_module_documents(package.sources.iter().filter_map(|source| {
+            let text = std::fs::read_to_string(&source.path).ok()?;
+            Some((
+                path_to_source_id(&source.path),
+                0,
+                text,
+                ModuleId::new(source.module.clone()),
+            ))
+        }));
+        let source = path_to_source_id(&path);
+        workspace.set_module_document(source.clone(), 1, text, module);
+
+        assert!(
+            workspace.diagnostics(&source).is_empty(),
+            "{:?}",
+            workspace.diagnostics(&source)
+        );
+    }
+
+    #[test]
+    fn a_file_outside_any_package_keeps_its_synthesized_name() {
+        let mut workspace = Workspace::new();
+        let source = SourceId::new("file:///tmp/scratch.lab");
+        workspace.set_document(
+            source.clone(),
+            1,
+            "plasmid p:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n".to_owned(),
+        );
+
+        assert!(workspace.diagnostics(&source).is_empty());
+    }
+
+    #[test]
+    fn decodes_percent_escapes_in_file_uris() {
+        assert_eq!(
+            uri_to_path(&uri("/tmp/a%20b/c.lab")).unwrap(),
+            PathBuf::from("/tmp/a b/c.lab")
+        );
+        assert_eq!(uri_to_path(&"memory:test.lab".parse().unwrap()), None);
     }
 }

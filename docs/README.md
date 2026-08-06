@@ -40,6 +40,8 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0010: Standard-library and inventory contracts](language/decisions/0010-standard-library-contracts-and-inventory-identities.md) | module-provided operations and typed external identities rather than domain grammar |
 | [0011: Dependencies from material dataflow](language/decisions/0011-dependencies-from-material-dataflow.md) | build graphs derived from checked workflow values rather than biological level labels |
 | [0012: Named workflow results](language/decisions/0012-named-workflow-results.md) | explicit named result fields and direct comma-separated returns without synthetic wrapper records |
+| [0013: Strain artifacts](language/decisions/0013-strain-artifacts.md) | engineered organisms as first-class artifacts rather than a host property on a plasmid |
+| [0014: Target profiles and workspaces](language/decisions/0014-target-profiles-and-workspaces.md) | benches configured by target profile, science stated in source, packages grouped by workspace |
 
 ## Implementation and embedding
 

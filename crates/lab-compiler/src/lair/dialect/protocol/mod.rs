@@ -23,6 +23,7 @@ pub enum MaterialType {
     CompetentCells,
     LinearDna,
     CircularDna,
+    EngineeredStrain,
     TransformedCulture,
     RecoveredCulture,
     DilutedCulture,

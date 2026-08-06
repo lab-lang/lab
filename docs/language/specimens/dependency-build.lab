@@ -13,8 +13,7 @@ part_receiver = backbone("part_receiver")
 region_receiver = backbone("region_receiver")
 BsaI = restriction_enzyme("BsaI")
 BsmBI = restriction_enzyme("BsmBI")
-DH5alpha = strain("DH5alpha")
-ampicillin = antibiotic("ampicillin")
+DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
 plasmid promoter_carrier:
@@ -22,12 +21,7 @@ plasmid promoter_carrier:
   backbone: part_receiver
   components: [J23101]
   restriction_enzyme: BsmBI
-  host: DH5alpha
-  selection: ampicillin
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
 
   require topology == circular
   accept sequence == design.sequence
@@ -37,40 +31,40 @@ plasmid reporter_region:
   backbone: region_receiver
   components: [promoter_carrier, B0034, GFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
 
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_promoter_carrier() -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
-  dependencies = []
-  product, construct <- realize promoter_carrier from dependencies
-  cells <- provision DH5alpha
-  culture <- transform construct into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on ampicillin
-  return product, plate
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [reporter_region]
+  selection: chloramphenicol
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
 
-workflow realize_reporter_region(
+workflow assemble_promoter_carrier() -> Material<Plasmid>:
+  product <- realize promoter_carrier
+  return product
+
+workflow assemble_reporter_region(
   promoter_carrier: Material<Plasmid>,
+) -> Material<Plasmid>:
+  dependencies = [promoter_carrier]
+  product <- realize reporter_region from dependencies
+  return product
+
+workflow build_reporter_host(
+  reporter_region: Material<Plasmid>,
 ) -> (
-  product: Material<Plasmid>,
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = [promoter_carrier]
-  product, construct <- realize reporter_region from dependencies
+  dependencies = [reporter_region]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return product, plate
+  return strain, plate

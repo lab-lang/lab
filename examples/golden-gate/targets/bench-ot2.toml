@@ -1,0 +1,83 @@
+# The bench this workspace compiles for.
+#
+# Everything here describes the laboratory, not the science: which modules are
+# installed, what labware sits in which deck slot, and which pipette is on
+# which mount. Another laboratory running the same programs supplies its own
+# profile and changes no Lab source.
+#
+# Every field has a default matching the reference bench, so a profile states
+# only what differs. This one is written out in full because it is the
+# example's subject.
+
+[target]
+name = "bench-ot2"
+backend = "opentrons.ot2"
+api_level = "2.21"
+
+[instruments.small]
+model = "p20_single_gen2"
+mount = "left"
+
+[instruments.large]
+model = "p300_single_gen2"
+mount = "right"
+
+[deck.temperature_module]
+model = "temperature module gen2"
+slot = "1"
+labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
+capacity = 24
+
+# The Thermocycler Module GEN2 occupies slots 7, 8, 10, and 11, so it declares
+# no slot of its own and nothing else may claim those.
+[deck.thermocycler]
+model = "thermocycler module gen2"
+labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+capacity = 96
+
+[stages.assembly.small_tips]
+labware = "opentrons_96_tiprack_20ul"
+slots = ["2"]
+capacity = 96
+
+[stages.transformation.dna_plate]
+labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+slots = ["2"]
+capacity = 96
+
+[stages.transformation.small_tips]
+labware = "opentrons_96_tiprack_20ul"
+slots = ["3"]
+capacity = 96
+
+[stages.transformation.large_tips]
+labware = "opentrons_96_filtertiprack_200ul"
+slots = ["6"]
+capacity = 96
+
+# Two dilution and two agar plates. Declaring a second slot raises the batch
+# size this bench can hold without editing a single program.
+[stages.plating.dilution_plate]
+labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+slots = ["2", "3"]
+capacity = 96
+
+[stages.plating.agar_plate]
+labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+slots = ["5", "6"]
+capacity = 96
+
+[stages.plating.media_rack]
+labware = "opentrons_15_tuberack_falcon_15ml_conical"
+slot = "4"
+medium_well = "A1"
+
+[stages.plating.small_tips]
+labware = "opentrons_96_filtertiprack_20ul"
+slots = ["9"]
+capacity = 96
+
+[stages.plating.large_tips]
+labware = "opentrons_96_filtertiprack_200ul"
+slots = ["1"]
+capacity = 96

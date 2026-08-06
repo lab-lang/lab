@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 lab-ide.workspace = true
 lab-language.workspace = true
+lab-package.workspace = true
 lsp-server.workspace = true
 lsp-types.workspace = true
 serde.workspace = true

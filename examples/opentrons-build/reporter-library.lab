@@ -10,7 +10,7 @@ RFP = part("RFP")
 B0015 = part("B0015")
 pSB1C3 = backbone("pSB1C3")
 BsaI = restriction_enzyme("BsaI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
 # End-to-end Lab automation fixture for the OT-2 specialization.
@@ -22,12 +22,7 @@ plasmid p_gfp:
   backbone: pSB1C3
   components: [J23101, B0034, GFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
 
   require topology == circular
   accept sequence == design.sequence
@@ -37,38 +32,59 @@ plasmid p_rfp:
   backbone: pSB1C3
   components: [J23106, B0034, RFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
 
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_p_gfp() -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
-  dependencies = []
-  product, construct <- realize p_gfp from dependencies
-  cells <- provision DH5alpha
-  culture <- transform construct into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return product, plate
+strain reporter_gfp:
+  chassis: DH5alpha
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
 
-workflow realize_p_rfp() -> (
-  product: Material<Plasmid>,
+strain reporter_rfp:
+  chassis: DH5alpha
+  plasmids: [p_rfp]
+  selection: chloramphenicol
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
+
+workflow assemble_p_gfp() -> Material<Plasmid>:
+  product <- realize p_gfp
+  return product
+
+workflow assemble_p_rfp() -> Material<Plasmid>:
+  product <- realize p_rfp
+  return product
+
+workflow build_reporter_gfp(
+  p_gfp: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = []
-  product, construct <- realize p_rfp from dependencies
+  dependencies = [p_gfp]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_gfp from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return product, plate
+  return strain, plate
+
+workflow build_reporter_rfp(
+  p_rfp: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [p_rfp]
+  cells <- provision DH5alpha
+  strain, culture <- transform reporter_rfp from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate

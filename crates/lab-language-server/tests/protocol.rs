@@ -269,3 +269,42 @@ fn supports_advertised_editor_features_over_stdio() {
     assert!(formatted.contains("image: Image\n"));
     assert!(formatted.ends_with('\n'));
 }
+
+#[test]
+fn resolves_a_package_sibling_import_without_opening_it() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate/src/designs/plasmids.lab")
+        .canonicalize()
+        .unwrap();
+    let uri = format!("file://{}", path.display());
+    let text = std::fs::read_to_string(&path).unwrap();
+
+    let messages = run_server([
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"capabilities": {}}}),
+        json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}),
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": uri,
+                    "languageId": "lab",
+                    "version": 1,
+                    "text": text,
+                }
+            }
+        }),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": null}),
+        json!({"jsonrpc": "2.0", "method": "exit", "params": null}),
+    ]);
+
+    let diagnostics = messages
+        .iter()
+        .find(|message| message["method"] == "textDocument/publishDiagnostics")
+        .expect("the server publishes diagnostics for an opened document");
+    assert_eq!(
+        diagnostics["params"]["diagnostics"],
+        json!([]),
+        "a `use` of an unopened package sibling resolves through the manifest"
+    );
+}

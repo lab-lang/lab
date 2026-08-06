@@ -54,5 +54,7 @@ The latest accepted design records are:
 
 - [`0009`](decisions/0009-declaration-properties-and-workflow-signatures.md): declaration properties and callable workflow signatures;
 - [`0010`](decisions/0010-standard-library-contracts-and-inventory-identities.md): module-provided contracts and typed external identities; and
-- [`0011`](decisions/0011-dependencies-from-material-dataflow.md): dependency graphs derived from checked material dataflow; and
-- [`0012`](decisions/0012-named-workflow-results.md): named typed workflow results and direct multi-value returns.
+- [`0011`](decisions/0011-dependencies-from-material-dataflow.md): dependency graphs derived from checked material dataflow;
+- [`0012`](decisions/0012-named-workflow-results.md): named typed workflow results and direct multi-value returns;
+- [`0013`](decisions/0013-strain-artifacts.md): engineered organisms as first-class artifacts; and
+- [`0014`](decisions/0014-target-profiles-and-workspaces.md): target profiles for benches and workspaces for packages.

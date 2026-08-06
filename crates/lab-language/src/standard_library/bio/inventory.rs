@@ -25,10 +25,10 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
             named("RestrictionEnzyme"),
         ),
         PureFunctionSpec::new(
-            "strain",
-            "std.bio.inventory.strain",
+            "chassis",
+            "std.bio.inventory.chassis",
             vec![Ty::String],
-            named("Strain"),
+            named("Chassis"),
         ),
         PureFunctionSpec::new(
             "antibiotic",

@@ -84,3 +84,112 @@ fn registry_dependencies_fail_closed_without_being_ignored() {
 
     std::fs::remove_dir_all(&project).unwrap();
 }
+
+#[test]
+fn a_target_build_emits_robot_protocols_for_every_wave() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-target-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "bench-ot2",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "target build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "built");
+    assert_eq!(result["result"]["target"], "bench-ot2");
+    assert_eq!(
+        result["result"]["modules"], 6,
+        "designs, workflows, and the program lower as one program"
+    );
+    // The build names every runnable protocol, so a path can go straight into
+    // a robot application.
+    let protocols = result["result"]["protocols"].as_array().unwrap();
+    assert_eq!(protocols.len(), 3);
+    assert!(
+        protocols
+            .iter()
+            .all(|path| path.as_str().unwrap().ends_with("_protocol.py")),
+        "{protocols:?}"
+    );
+    let human = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "bench-ot2",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    let printed = String::from_utf8(human.stdout).unwrap();
+    assert!(printed.contains("Robot protocols:"), "{printed}");
+    assert!(
+        printed.contains("wave-001/assembly_protocol.py"),
+        "{printed}"
+    );
+
+    let target_root = out_dir.join("bench-ot2");
+    // Assembly precedes transformation, and every artifact in a wave shares
+    // one robot run.
+    assert!(target_root.join("wave-001/assembly_protocol.py").is_file());
+    assert!(
+        target_root
+            .join("wave-002/transformation_protocol.py")
+            .is_file()
+    );
+    assert!(target_root.join("wave-002/plating_protocol.py").is_file());
+    assert!(!target_root.join("wave-001/plating_protocol.py").exists());
+
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(target_root.join("wave-002/automation_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["strains"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
+        serde_json::json!(["5", "6"]),
+        "the emitted plan carries the deck the target profile declared"
+    );
+
+    std::fs::remove_dir_all(out_dir).unwrap();
+}
+
+#[test]
+fn a_target_build_rejects_a_profile_that_does_not_exist() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["build", example.to_str().unwrap(), "--target", "no-such"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("no target profile at"), "{stderr}");
+}

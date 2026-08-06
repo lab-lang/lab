@@ -1,6 +1,6 @@
 //! Dependency-aware OT-2 package composition.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use serde::Serialize;
@@ -8,6 +8,7 @@ use thiserror::Error;
 
 use crate::{ArtifactBundle, ArtifactError, ProtocolLairProgram};
 
+use crate::backend::opentrons_ot2::profile::Ot2TargetProfile;
 use crate::planning::{ArtifactResolution, BuildInventory, DependencyBuildManifest};
 use crate::planning::{DependencyGraphError, resolve_dependency_graph};
 
@@ -56,6 +57,7 @@ pub enum DependencyBuildError {
 /// owned by this module.
 pub fn compile_dependency_build(
     protocol: &ProtocolLairProgram,
+    profile: &Ot2TargetProfile,
     inventory: &BuildInventory,
 ) -> Result<DependencyBuildBundle, DependencyBuildError> {
     let graph = protocol_build_graph(protocol).map_err(|source| DependencyBuildError::Backend {
@@ -63,19 +65,19 @@ pub fn compile_dependency_build(
         source: Ot2BuildError::Planning(source),
     })?;
     let manifest = resolve_dependency_graph(&graph, inventory)?;
-    let mut scheduled = manifest
-        .nodes
-        .iter()
-        .filter_map(|node| {
-            node.generated_in_iteration
-                .map(|iteration| (node.artifact.clone(), iteration))
-        })
-        .collect::<Vec<_>>();
-    scheduled.sort_by(
-        |(left_name, left_iteration), (right_name, right_iteration)| {
-            (left_iteration, left_name).cmp(&(right_iteration, right_name))
-        },
-    );
+    // Artifacts generated in the same iteration have no ordering constraint
+    // between them, so they share one robot run: one deck, one plate, one pass
+    // per stage. Dependencies still force a wave boundary, and the operator
+    // must finish a wave before starting the next.
+    let mut waves = BTreeMap::<usize, BTreeSet<String>>::new();
+    for node in &manifest.nodes {
+        if let Some(iteration) = node.generated_in_iteration {
+            waves
+                .entry(iteration)
+                .or_default()
+                .insert(node.artifact.clone());
+        }
+    }
 
     let mut artifacts = ArtifactBundle::new();
     artifacts.insert_text(
@@ -89,24 +91,24 @@ pub fn compile_dependency_build(
         render_report(&manifest),
     )?;
     let mut instruction_batches = Vec::new();
-    for (index, (artifact_name, iteration)) in scheduled.into_iter().enumerate() {
-        let selected = BTreeSet::from([artifact_name.clone()]);
-        let plan = plan_selected_build(protocol, Some(&selected)).map_err(|source| {
+    for (index, (iteration, selected)) in waves.into_iter().enumerate() {
+        let label = selected.iter().cloned().collect::<Vec<_>>().join(", ");
+        let plan = plan_selected_build(protocol, profile, Some(&selected)).map_err(|source| {
             DependencyBuildError::Backend {
-                artifact: artifact_name.clone(),
+                artifact: label.clone(),
                 source: Ot2BuildError::Planning(source),
             }
         })?;
         let automation =
             Ot2Bundle::from_plan(plan).map_err(|source| DependencyBuildError::Backend {
-                artifact: artifact_name.clone(),
+                artifact: label.clone(),
                 source: Ot2BuildError::Emission(source),
             })?;
-        let directory = format!("batch-{:03}-{}", index + 1, artifact_name);
+        let directory = format!("wave-{:03}", index + 1);
         instruction_batches.push((
             index + 1,
             iteration,
-            artifact_name.clone(),
+            label,
             directory.clone(),
             automation.manual_protocol().to_owned(),
         ));
@@ -140,11 +142,11 @@ fn render_full_build_instructions(
         "# Lab dependency-driven build — human instructions\n"
     )
     .unwrap();
-    writeln!(output, "> Generated concept protocol. Review and qualify every batch for the actual laboratory before execution. Planning success is not physical-build or acceptance evidence.\n").unwrap();
+    writeln!(output, "> Generated concept protocol. Review and qualify every run for the actual laboratory before execution. Planning success is not physical-build or acceptance evidence.\n").unwrap();
     writeln!(output, "## Build overview\n").unwrap();
     writeln!(output, "- Planning status: `{:?}`", manifest.status).unwrap();
     writeln!(output, "- Root artifacts: {}", manifest.roots.join(", ")).unwrap();
-    writeln!(output, "- Generated batches: {}", batches.len()).unwrap();
+    writeln!(output, "- Robot runs: {}", batches.len()).unwrap();
     writeln!(
         output,
         "- Existing artifacts reused: {}\n",
@@ -155,16 +157,16 @@ fn render_full_build_instructions(
         }
     )
     .unwrap();
-    writeln!(output, "Consult `dependency_manifest.json` for the machine-readable plan and `dependency_report.md` for dependency and blocker details. Do not begin a batch until all of its declared artifact dependencies have been physically produced or retrieved and accepted as suitable inputs. Batches in the same planning wave are dependency-independent, although actual parallel execution still depends on qualified laboratory capacity.\n").unwrap();
-    writeln!(output, "This package does not automate DNA recovery or preparation between batches. Before a generated artifact is used downstream, prepare it in the form and concentration required by the later batch and record the corresponding acceptance evidence.\n").unwrap();
+    writeln!(output, "Consult `dependency_manifest.json` for the machine-readable plan and `dependency_report.md` for dependency and blocker details. Every artifact in one wave is dependency-independent of the others, so a wave is a single robot run over a single deck. Do not begin a wave until every artifact the previous waves produce has been physically made or retrieved and accepted as a suitable input.\n").unwrap();
+    writeln!(output, "This package does not automate DNA recovery or preparation between waves. Before a generated artifact is used downstream, prepare it in the form and concentration required by the later wave and record the corresponding acceptance evidence.\n").unwrap();
 
     writeln!(output, "## Execution order\n").unwrap();
     if batches.is_empty() {
-        writeln!(output, "No generated batch is scheduled. The requested roots are either already available or unresolved; inspect the dependency report before proceeding.\n").unwrap();
+        writeln!(output, "No robot run is scheduled. The requested roots are either already available or unresolved; inspect the dependency report before proceeding.\n").unwrap();
     } else {
         writeln!(
             output,
-            "| Batch | Planning wave | Artifact | Package directory |"
+            "| Run | Planning wave | Artifacts | Package directory |"
         )
         .unwrap();
         writeln!(output, "| ---: | ---: | --- | --- |").unwrap();
@@ -179,18 +181,19 @@ fn render_full_build_instructions(
     }
 
     for (batch, iteration, artifact, directory, manual) in batches {
-        writeln!(output, "## Batch {batch:03} — `{artifact}`\n").unwrap();
-        writeln!(output, "Planning wave: {iteration}. Robot protocols, the Lab automation manifest, and the standalone batch manual are in `{directory}/`.\n").unwrap();
-        if let Some(node) = manifest
+        writeln!(output, "## Run {batch:03} — `{artifact}`\n").unwrap();
+        writeln!(output, "Planning wave: {iteration}. Robot protocols, the Lab automation manifest, and the standalone run manual are in `{directory}/`.\n").unwrap();
+        let inputs = manifest
             .nodes
             .iter()
-            .find(|node| node.artifact == *artifact)
-            && !node.dependencies.is_empty()
-        {
+            .filter(|node| artifact.split(", ").any(|name| node.artifact == name))
+            .flat_map(|node| node.dependencies.iter())
+            .collect::<BTreeSet<_>>();
+        if !inputs.is_empty() {
             writeln!(
                 output,
                 "Required generated or retrieved artifact inputs: {}.\n",
-                node.dependencies
+                inputs
                     .iter()
                     .map(|dependency| format!("`{dependency}`"))
                     .collect::<Vec<_>>()
@@ -198,27 +201,28 @@ fn render_full_build_instructions(
             )
             .unwrap();
         }
-        let node = manifest
+        let steps = manifest
             .nodes
             .iter()
-            .find(|node| node.artifact == *artifact)
-            .expect("scheduled artifact has a dependency node");
+            .filter(|node| artifact.split(", ").any(|name| node.artifact == name))
+            .flat_map(|node| node.steps.iter())
+            .collect::<BTreeSet<_>>();
         writeln!(
             output,
             "Requested abstract steps: {}.\n",
-            node.steps
+            steps
                 .iter()
                 .map(|step| format!("`{step}`"))
                 .collect::<Vec<_>>()
-                .join(" → ")
+                .join(", ")
         )
         .unwrap();
         if manifest
             .edges
             .iter()
-            .any(|edge| edge.depends_on == *artifact)
+            .any(|edge| artifact.split(", ").any(|name| edge.depends_on == name))
         {
-            writeln!(output, "After completing this batch, retain, prepare, and verify material for `{artifact}` before treating it as an input to a later batch.\n").unwrap();
+            writeln!(output, "After completing this run, retain, prepare, and verify the material it produced before treating it as an input to a later run.\n").unwrap();
         } else {
             writeln!(output, "After completing this batch, retain and verify the requested root artifact `{artifact}` and record its acceptance evidence.\n").unwrap();
         }
@@ -317,7 +321,7 @@ receiver = backbone("receiver")
 carrier = backbone("carrier")
 BsaI = restriction_enzyme("BsaI")
 BsmBI = restriction_enzyme("BsmBI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
 plasmid intermediate:
@@ -325,8 +329,6 @@ plasmid intermediate:
   backbone: carrier
   components: [source_part]
   restriction_enzyme: BsmBI
-  host: DH5alpha
-  selection: chloramphenicol
   require topology == circular
   accept sequence == design.sequence
 
@@ -335,38 +337,39 @@ plasmid final_artifact:
   backbone: receiver
   components: [intermediate, terminal_part]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_intermediate() -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
-  dependencies = []
-  product, construct <- realize intermediate from dependencies
-  cells <- provision DH5alpha
-  culture <- transform construct into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return product, plate
+strain final_host:
+  chassis: DH5alpha
+  plasmids: [final_artifact]
+  selection: chloramphenicol
 
-workflow realize_final_artifact(
+workflow assemble_intermediate() -> Material<Plasmid>:
+  dependencies = []
+  product <- realize intermediate from dependencies
+  return product
+
+workflow assemble_final_artifact(
   intermediate: Material<Plasmid>,
+) -> Material<Plasmid>:
+  dependencies = [intermediate]
+  product <- realize final_artifact from dependencies
+  return product
+
+workflow build_final_host(
+  final_artifact: Material<Plasmid>,
 ) -> (
-  product: Material<Plasmid>,
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = [intermediate]
-  product, construct <- realize final_artifact from dependencies
+  dependencies = [final_artifact]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform final_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return product, plate
+  return strain, plate
 "#;
 
     fn inventory() -> BuildInventory {
@@ -399,12 +402,14 @@ workflow realize_final_artifact(
             .unwrap()
             .select_protocol()
             .unwrap();
-        let bundle = compile_dependency_build(&protocol, &inventory()).unwrap();
+        let bundle =
+            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory())
+                .unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
-        assert_eq!(bundle.manifest.roots, ["final_artifact"]);
+        assert_eq!(bundle.manifest.roots, ["final_host"]);
         assert_eq!(
             bundle.manifest.generated_artifacts,
-            ["intermediate", "final_artifact"]
+            ["intermediate", "final_artifact", "final_host"]
         );
         let intermediate = bundle
             .manifest
@@ -423,13 +428,19 @@ workflow realize_final_artifact(
         assert!(
             bundle
                 .artifacts()
-                .get("batch-001-intermediate/assembly_protocol.py")
+                .get("wave-001/assembly_protocol.py")
                 .is_some()
         );
         assert!(
             bundle
                 .artifacts()
-                .get("batch-002-final_artifact/assembly_protocol.py")
+                .get("wave-002/assembly_protocol.py")
+                .is_some()
+        );
+        assert!(
+            bundle
+                .artifacts()
+                .get("wave-003/transformation_protocol.py")
                 .is_some()
         );
         assert!(bundle.artifacts().get("dependency_report.md").is_some());
@@ -440,7 +451,7 @@ workflow realize_final_artifact(
             .text_contents()
             .unwrap();
         assert!(instructions.contains("## Execution order"));
-        assert!(instructions.contains("## Batch 001 — `intermediate`"));
+        assert!(instructions.contains("## Run 001 — `intermediate`"));
         assert!(instructions.contains("### Stage 1 — Golden Gate assembly"));
     }
 
@@ -451,7 +462,12 @@ workflow realize_final_artifact(
             .unwrap()
             .select_protocol()
             .unwrap();
-        let bundle = compile_dependency_build(&protocol, &BuildInventory::default()).unwrap();
+        let bundle = compile_dependency_build(
+            &protocol,
+            &Ot2TargetProfile::default(),
+            &BuildInventory::default(),
+        )
+        .unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Partial);
         assert!(bundle.manifest.generated_artifacts.is_empty());
         assert!(bundle.manifest.nodes.iter().any(|node| {
@@ -471,7 +487,8 @@ workflow realize_final_artifact(
         inventory.available_artifacts.insert("intermediate".into());
         inventory.available_materials.remove("source_part");
         inventory.available_materials.remove("carrier");
-        let bundle = compile_dependency_build(&protocol, &inventory).unwrap();
+        let bundle =
+            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         let intermediate = bundle
             .manifest
@@ -493,21 +510,24 @@ workflow realize_final_artifact(
     #[test]
     fn detects_cycles_from_source_references() {
         let source = SOURCE.replace(
-            "workflow realize_intermediate() -> (\n  product: Material<Plasmid>,\n  plate: Material<Plate>,\n):\n  dependencies = []",
-            "workflow realize_intermediate(\n  final_artifact: Material<Plasmid>,\n) -> (\n  product: Material<Plasmid>,\n  plate: Material<Plate>,\n):\n  dependencies = [final_artifact]",
+            "workflow assemble_intermediate() -> Material<Plasmid>:\n  dependencies = []",
+            "workflow assemble_intermediate(\n  final_artifact: Material<Plasmid>,\n) -> Material<Plasmid>:\n  dependencies = [final_artifact]",
         );
         let checked = compile_module(&source).unwrap();
         let protocol = crate::PortableLairProgram::lower(&checked)
             .unwrap()
             .select_protocol()
             .unwrap();
-        let bundle = compile_dependency_build(&protocol, &inventory()).unwrap();
+        let bundle =
+            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory())
+                .unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Partial);
         assert!(
             bundle
                 .manifest
                 .nodes
                 .iter()
+                .filter(|node| node.artifact != "final_host")
                 .all(|node| node.resolution == ArtifactResolution::Cyclic)
         );
 
@@ -515,7 +535,8 @@ workflow realize_final_artifact(
         inventory
             .available_artifacts
             .insert("final_artifact".into());
-        let bundle = compile_dependency_build(&protocol, &inventory).unwrap();
+        let bundle =
+            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         assert_eq!(
             bundle

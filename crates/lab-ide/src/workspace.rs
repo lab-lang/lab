@@ -36,6 +36,42 @@ impl Workspace {
 
     pub fn set_document(&mut self, source: SourceId, version: i64, text: String) {
         let module = synthesize_module_id(&source);
+        self.insert_document(source, version, text, module);
+        self.reanalyze_all();
+    }
+
+    /// Register a document whose module name the host already knows. A file
+    /// inside a package takes its name from that package's manifest, which no
+    /// path alone can reveal, so a host that has read the manifest supplies the
+    /// name rather than letting it be guessed.
+    pub fn set_module_document(
+        &mut self,
+        source: SourceId,
+        version: i64,
+        text: String,
+        module: ModuleId,
+    ) {
+        self.insert_document(source, version, text, module);
+        self.reanalyze_all();
+    }
+
+    /// Register several documents and analyze once, so opening one file in a
+    /// package does not re-check the package once per sibling.
+    pub fn set_module_documents(
+        &mut self,
+        documents: impl IntoIterator<Item = (SourceId, i64, String, ModuleId)>,
+    ) {
+        for (source, version, text, module) in documents {
+            self.insert_document(source, version, text, module);
+        }
+        self.reanalyze_all();
+    }
+
+    pub fn contains(&self, source: &SourceId) -> bool {
+        self.documents.contains_key(source)
+    }
+
+    fn insert_document(&mut self, source: SourceId, version: i64, text: String, module: ModuleId) {
         self.documents.insert(
             source,
             Document {
@@ -49,7 +85,6 @@ impl Workspace {
                 },
             },
         );
-        self.reanalyze_all();
     }
 
     pub fn remove_document(&mut self, source: &SourceId) {
@@ -82,7 +117,11 @@ impl Workspace {
             .map(|(source, document)| {
                 let names = parsed_use_paths(&document.text)
                     .into_iter()
-                    .filter(|name| by_name.get(name).is_some_and(|dependency| dependency != source))
+                    .filter(|name| {
+                        by_name
+                            .get(name)
+                            .is_some_and(|dependency| dependency != source)
+                    })
                     .collect();
                 (source.clone(), names)
             })
@@ -181,7 +220,7 @@ impl Workspace {
                     label: name,
                     kind: match kind {
                         SymbolKind::Circuit | SymbolKind::Workflow => CompletionKind::Function,
-                        SymbolKind::Data | SymbolKind::Plasmid => CompletionKind::Type,
+                        SymbolKind::Data | SymbolKind::Artifact => CompletionKind::Type,
                         _ => CompletionKind::Value,
                     },
                     detail: Some(format!("Lab {kind:?}").to_lowercase()),
@@ -404,7 +443,7 @@ mod tests {
 J23101 = part("J23101")
 part_receiver = backbone("part_receiver")
 BsaI = restriction_enzyme("BsaI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 ampicillin = antibiotic("ampicillin")
 
 plasmid reporter:
@@ -412,8 +451,6 @@ plasmid reporter:
   backbone: part_receiver
   components: [J23101]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: ampicillin
   require topology == circular
   accept sequence == design.sequence
 "#;
@@ -439,7 +476,7 @@ plasmid reporter:
             "part",
             "backbone",
             "restriction_enzyme",
-            "strain",
+            "chassis",
             "antibiotic",
         ] {
             let token = tokens

@@ -5,6 +5,51 @@ use serde::{Deserialize, Serialize};
 
 use crate::PackageError;
 
+/// One `lab.toml`. A manifest describes either a package or a workspace of
+/// member packages, never both: a workspace root owns membership and nothing
+/// else, so member packages stay ordinary self-contained packages.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LabManifest {
+    Package(PackageManifest),
+    Workspace(WorkspaceManifest),
+}
+
+impl LabManifest {
+    pub fn parse(text: &str) -> Result<Self, toml::de::Error> {
+        let table = text.parse::<toml::Table>()?;
+        if table.contains_key("workspace") {
+            Ok(Self::Workspace(WorkspaceManifest::parse(text)?))
+        } else {
+            Ok(Self::Package(PackageManifest::parse(text)?))
+        }
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), PackageError> {
+        match self {
+            Self::Package(manifest) => manifest.validate(),
+            Self::Workspace(manifest) => manifest.validate(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceManifest {
+    pub workspace: WorkspaceMetadata,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceMetadata {
+    /// Member package directories, relative to the workspace root.
+    #[serde(default)]
+    pub members: Vec<PathBuf>,
+    /// Member selected when a command that acts on one package is given the
+    /// workspace root. Required once a workspace has more than one member.
+    #[serde(default, rename = "default-member")]
+    pub default_member: Option<PathBuf>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PackageManifest {
@@ -28,6 +73,9 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
+    /// Inventory of materials and already-realized artifacts available to a
+    /// target build, relative to the package root.
+    pub inventory: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,6 +91,47 @@ pub struct DependencyDetail {
     pub version: Option<String>,
     pub path: Option<PathBuf>,
     pub registry: Option<String>,
+}
+
+impl WorkspaceManifest {
+    pub fn parse(text: &str) -> Result<Self, toml::de::Error> {
+        toml::from_str(text)
+    }
+
+    pub(crate) fn validate(&self) -> Result<(), PackageError> {
+        if self.workspace.members.is_empty() {
+            return Err(PackageError::EmptyWorkspace);
+        }
+        for member in &self.workspace.members {
+            if member.is_absolute() {
+                return Err(PackageError::InvalidWorkspaceMember {
+                    member: member.clone(),
+                    message: "member paths are relative to the workspace root".to_owned(),
+                });
+            }
+        }
+        if let Some(default) = &self.workspace.default_member
+            && !self.workspace.members.contains(default)
+        {
+            return Err(PackageError::InvalidWorkspaceMember {
+                member: default.clone(),
+                message: "default-member is not one of the declared members".to_owned(),
+            });
+        }
+        if self.workspace.members.len() > 1 && self.workspace.default_member.is_none() {
+            return Err(PackageError::AmbiguousDefaultMember);
+        }
+        Ok(())
+    }
+
+    /// The member a single-package command acts on.
+    pub fn default_member(&self) -> &PathBuf {
+        self.workspace
+            .default_member
+            .as_ref()
+            .or_else(|| self.workspace.members.first())
+            .expect("workspace validation rejects an empty member list")
+    }
 }
 
 impl PackageManifest {
@@ -155,6 +244,43 @@ policies = { path = "../policies" }
             DependencySpec::Version(_)
         ));
         manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn distinguishes_a_workspace_root_from_a_package() {
+        let workspace = LabManifest::parse(
+            r#"[workspace]
+members = ["packages/catalog", "packages/device"]
+default-member = "packages/device"
+"#,
+        )
+        .unwrap();
+        let LabManifest::Workspace(workspace) = workspace else {
+            panic!("a manifest with a [workspace] table is a workspace root");
+        };
+        assert_eq!(workspace.workspace.members.len(), 2);
+        assert_eq!(
+            workspace.default_member(),
+            &PathBuf::from("packages/device")
+        );
+        workspace.validate().unwrap();
+
+        let package =
+            LabManifest::parse("[package]\nname = \"device\"\nversion = \"0.1.0\"\n").unwrap();
+        assert!(matches!(package, LabManifest::Package(_)));
+    }
+
+    #[test]
+    fn rejects_a_default_member_that_is_not_a_member() {
+        let manifest = WorkspaceManifest::parse(
+            "[workspace]\nmembers = [\"packages/catalog\"]\ndefault-member = \"packages/device\"\n",
+        )
+        .unwrap();
+
+        assert!(matches!(
+            manifest.validate(),
+            Err(PackageError::InvalidWorkspaceMember { .. })
+        ));
     }
 
     #[test]

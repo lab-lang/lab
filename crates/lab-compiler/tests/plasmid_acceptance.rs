@@ -32,11 +32,13 @@ fn successful_stdout(kind: &str) -> String {
 #[test]
 fn plasmid_acceptance_uses_the_canonical_frontend_boundary() {
     let source_ast: Value = serde_json::from_str(&successful_stdout("source-ast")).unwrap();
-    assert_eq!(source_ast["items"][0]["item"], "plasmid");
+    assert_eq!(source_ast["items"][0]["item"], "artifact");
+    assert_eq!(source_ast["items"][0]["kind"], "plasmid");
     assert_eq!(source_ast["items"][0]["name"]["value"], "p_acceptance");
 
     let module: Value = serde_json::from_str(&successful_stdout("module-ir")).unwrap();
-    assert_eq!(module["declarations"][0]["kind"], "plasmid");
+    assert_eq!(module["declarations"][0]["kind"], "artifact");
+    assert_eq!(module["declarations"][0]["artifact"], "plasmid");
     assert_eq!(module["declarations"][0]["name"], "p_acceptance");
     assert_eq!(
         module["declarations"][0]["acceptance"]

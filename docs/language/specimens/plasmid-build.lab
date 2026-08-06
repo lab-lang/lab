@@ -1,8 +1,25 @@
 use std.bio.inventory
 use std.lab.plasmid_actions
 
-competent_ecoli = strain("competent_ecoli")
+competent_ecoli = chassis("competent_ecoli")
 kanamycin = antibiotic("kanamycin")
+BsaI = restriction_enzyme("BsaI")
+p15A_kan = backbone("p15A_kan")
+GFP = part("GFP")
+
+plasmid p_reporter:
+  sequence: dna("ACGTACGT")
+  backbone: p15A_kan
+  components: [GFP]
+  restriction_enzyme: BsaI
+
+  require topology == circular
+  accept sequence == design.sequence
+
+strain reporter_host:
+  chassis: competent_ecoli
+  plasmids: [p_reporter]
+  selection: kanamycin
 
 observation PlateObservation:
   image: Image
@@ -53,14 +70,18 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
       observations: observations,
     }
 
-workflow build_plasmid(design: Plasmid) -> Accepted<Plasmid> | Rejected<Plasmid>:
+workflow build_plasmid() -> Accepted<Plasmid> | Rejected<Plasmid>:
 
+  design = p_reporter
   fragments <- synthesize design
   construct <- assemble fragments
+  plasmids = [construct]
   cells <- provision competent_ecoli
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_host from plasmids into cells
   culture <- recover culture for 1 h
+  culture <- dilute culture
   plate <- plate culture on kanamycin
+  <- dispose strain
 
   colony_result <- await_colonies plate
 

@@ -7,6 +7,8 @@ use crate::backend::opentrons_ot2::emit::{
     render_transformation_protocol,
 };
 
+use crate::backend::opentrons_ot2::profile::Ot2TargetProfile;
+
 use super::{Ot2BuildError, Ot2EmissionError, Ot2ExecutionPlan, plan_build};
 
 /// Planned OT-2 program together with its emitted artifact package.
@@ -31,21 +33,29 @@ impl Ot2Bundle {
             "text/markdown",
             render_manual_protocol(&manifest),
         )?;
-        artifacts.insert_text(
-            "assembly_protocol.py",
-            "text/x-python",
-            render_assembly_protocol(&manifest)?,
-        )?;
-        artifacts.insert_text(
-            "transformation_protocol.py",
-            "text/x-python",
-            render_transformation_protocol(&manifest)?,
-        )?;
-        artifacts.insert_text(
-            "plating_protocol.py",
-            "text/x-python",
-            render_plating_protocol(&manifest)?,
-        )?;
+        // A batch emits a robot protocol only for the stages its artifacts
+        // actually reach. A batch that assembles plasmids and transforms none
+        // has nothing to plate, and a protocol over an empty plan would fail on
+        // the robot rather than at compile time.
+        if !manifest.assemblies.is_empty() {
+            artifacts.insert_text(
+                "assembly_protocol.py",
+                "text/x-python",
+                render_assembly_protocol(&manifest)?,
+            )?;
+        }
+        if !manifest.strains.is_empty() {
+            artifacts.insert_text(
+                "transformation_protocol.py",
+                "text/x-python",
+                render_transformation_protocol(&manifest)?,
+            )?;
+            artifacts.insert_text(
+                "plating_protocol.py",
+                "text/x-python",
+                render_plating_protocol(&manifest)?,
+            )?;
+        }
         Ok(Self {
             manifest,
             artifacts,
@@ -64,16 +74,18 @@ impl Ot2Bundle {
         self.artifact_text("manual_protocol.md")
     }
 
-    pub fn assembly_protocol(&self) -> &str {
-        self.artifact_text("assembly_protocol.py")
+    /// The stage protocols a batch reaches. A batch that realizes no artifact
+    /// of the corresponding kind does not emit one.
+    pub fn assembly_protocol(&self) -> Option<&str> {
+        self.optional_artifact_text("assembly_protocol.py")
     }
 
-    pub fn transformation_protocol(&self) -> &str {
-        self.artifact_text("transformation_protocol.py")
+    pub fn transformation_protocol(&self) -> Option<&str> {
+        self.optional_artifact_text("transformation_protocol.py")
     }
 
-    pub fn plating_protocol(&self) -> &str {
-        self.artifact_text("plating_protocol.py")
+    pub fn plating_protocol(&self) -> Option<&str> {
+        self.optional_artifact_text("plating_protocol.py")
     }
 
     pub fn artifacts(&self) -> &ArtifactBundle {
@@ -81,16 +93,24 @@ impl Ot2Bundle {
     }
 
     fn artifact_text(&self, path: &str) -> &str {
+        self.optional_artifact_text(path)
+            .expect("OT-2 bundle contains every unconditional artifact")
+    }
+
+    fn optional_artifact_text(&self, path: &str) -> Option<&str> {
         self.artifacts
-            .get(path)
-            .expect("OT-2 bundle contains every declared artifact")
+            .get(path)?
             .text_contents()
             .expect("OT-2 source artifacts are UTF-8")
+            .into()
     }
 }
 
-pub fn compile_build(protocol: &ProtocolLairProgram) -> Result<Ot2Bundle, Ot2BuildError> {
-    Ok(Ot2Bundle::from_plan(plan_build(protocol)?)?)
+pub fn compile_build(
+    protocol: &ProtocolLairProgram,
+    profile: &Ot2TargetProfile,
+) -> Result<Ot2Bundle, Ot2BuildError> {
+    Ok(Ot2Bundle::from_plan(plan_build(protocol, profile)?)?)
 }
 
 pub fn emit_program(program: &Ot2ExecutionPlan) -> Result<Ot2Bundle, Ot2EmissionError> {

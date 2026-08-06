@@ -100,6 +100,7 @@ mod tests {
             vec![],
             "enzyme",
             1,
+            crate::lair::dialect::attributes::quantity_dict(&[], ctx),
         );
         inserter.append_op(ctx, &first_assembly);
         let second_assembly = AssembleOp::new(
@@ -112,6 +113,7 @@ mod tests {
             vec![],
             "enzyme",
             1,
+            crate::lair::dialect::attributes::quantity_dict(&[], ctx),
         );
         inserter.append_op(ctx, &second_assembly);
 

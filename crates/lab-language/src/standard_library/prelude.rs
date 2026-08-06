@@ -12,13 +12,13 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("Antibiotic"),
         TypeSpec::nominal("Backbone"),
         TypeSpec::nominal("CDS").parameters(1),
+        TypeSpec::nominal("Chassis").documented("A host organism that carries engineered DNA."),
         TypeSpec::nominal("Circuit").parameters(2),
         TypeSpec::nominal("Clone"),
         TypeSpec::nominal("CloneSet")
             .with_fields([("highest_confidence", Ty::material(named("Clone")))]),
         TypeSpec::nominal("Colonies").with_fields([("count", Ty::Integer)]),
         TypeSpec::nominal("ColonyMap").with_fields([("isolated", named("Colonies"))]),
-        TypeSpec::nominal("Construct"),
         TypeSpec::nominal("Culture"),
         TypeSpec::nominal("DNA"),
         TypeSpec::nominal("Duration"),
@@ -46,7 +46,13 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("RestrictionEnzyme"),
         TypeSpec::nominal("Screening").with_fields([("clones", named("CloneSet"))]),
         TypeSpec::nominal("Signal"),
-        TypeSpec::nominal("Strain"),
+        TypeSpec::nominal("Strain")
+            .with_fields([
+                ("chassis", named("Chassis")),
+                ("plasmids", Ty::List(Box::new(named("Plasmid")))),
+                ("selection", named("Antibiotic")),
+            ])
+            .documented("A chassis carrying a defined set of plasmid designs."),
         TypeSpec::nominal("Topology"),
         TypeSpec::nominal("WorkflowContext").with_fields([("elapsed", named("Duration"))]),
     ];

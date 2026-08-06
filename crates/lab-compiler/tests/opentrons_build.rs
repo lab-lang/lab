@@ -55,15 +55,21 @@ fn writes_a_complete_multi_construct_automation_bundle() {
         &std::fs::read_to_string(output_dir.join("automation_manifest.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(manifest["constructs"].as_array().unwrap().len(), 2);
-    assert_eq!(manifest["constructs"][0]["artifact"], "p_gfp");
-    assert_eq!(manifest["constructs"][0]["backbone"], "pSB1C3");
+    assert_eq!(manifest["assemblies"].as_array().unwrap().len(), 2);
+    assert_eq!(manifest["assemblies"][0]["artifact"], "p_gfp");
+    assert_eq!(manifest["assemblies"][0]["backbone"], "pSB1C3");
     assert_eq!(
-        manifest["constructs"][0]["components"],
+        manifest["assemblies"][0]["components"],
         serde_json::json!(["J23101", "B0034", "GFP", "B0015"])
     );
+    assert_eq!(manifest["strains"].as_array().unwrap().len(), 2);
+    assert_eq!(manifest["strains"][0]["artifact"], "reporter_gfp");
     assert_eq!(
-        manifest["constructs"][1]["transformations"]
+        manifest["strains"][0]["plasmids"],
+        serde_json::json!(["p_gfp"])
+    );
+    assert_eq!(
+        manifest["strains"][1]["transformations"]
             .as_array()
             .unwrap()
             .len(),
@@ -112,10 +118,10 @@ fn derives_and_packages_a_dependency_driven_full_build() {
     )
     .unwrap();
     assert_eq!(manifest["status"], "complete");
-    assert_eq!(manifest["roots"], serde_json::json!(["final_device"]));
+    assert_eq!(manifest["roots"], serde_json::json!(["reporter_host"]));
     assert_eq!(
         manifest["nodes"][0]["steps"],
-        serde_json::json!(["assemble", "transform", "recover", "dilute", "plate"])
+        serde_json::json!(["assemble"])
     );
     let iterations = manifest["nodes"]
         .as_array()
@@ -132,21 +138,32 @@ fn derives_and_packages_a_dependency_driven_full_build() {
     assert_eq!(iterations["reporter_region"], 2);
     assert_eq!(iterations["regulator_region"], 1);
     assert_eq!(iterations["final_device"], 3);
+    assert_eq!(iterations["reporter_host"], 4);
 
+    // Artifacts sharing a wave share one robot run, so the two independent
+    // leaves are assembled together rather than in two separate visits.
     let assembly_protocols = [
-        "batch-001-promoter_carrier/assembly_protocol.py",
-        "batch-002-regulator_region/assembly_protocol.py",
-        "batch-003-reporter_region/assembly_protocol.py",
-        "batch-004-final_device/assembly_protocol.py",
+        "wave-001/assembly_protocol.py",
+        "wave-002/assembly_protocol.py",
+        "wave-003/assembly_protocol.py",
     ];
     for protocol in assembly_protocols {
         assert!(output_dir.join(protocol).is_file(), "missing {protocol}");
     }
+    assert!(
+        output_dir
+            .join("wave-004/transformation_protocol.py")
+            .is_file()
+    );
+    assert!(
+        !output_dir.join("wave-001/plating_protocol.py").exists(),
+        "an assembly-only wave emits no plating protocol"
+    );
     assert!(output_dir.join("dependency_report.md").is_file());
     let instructions = std::fs::read_to_string(output_dir.join("manual_protocol.md")).unwrap();
     assert!(instructions.contains("## Execution order"));
-    assert!(instructions.contains("## Batch 001 — `promoter_carrier`"));
-    assert!(instructions.contains("## Batch 004 — `final_device`"));
+    assert!(instructions.contains("## Run 001 — `promoter_carrier, regulator_region`"));
+    assert!(instructions.contains("## Run 004 — `reporter_host`"));
     assert!(instructions.contains("Required generated or retrieved artifact inputs"));
     assert!(instructions.contains("### Stage 3 — Serial dilution and plating"));
 
@@ -162,7 +179,7 @@ fn derives_and_packages_a_dependency_driven_full_build() {
         for entry in std::fs::read_dir(&output_dir).unwrap() {
             let entry = entry.unwrap();
             if !entry.file_type().unwrap().is_dir()
-                || !entry.file_name().to_string_lossy().starts_with("batch-")
+                || !entry.file_name().to_string_lossy().starts_with("wave-")
             {
                 continue;
             }
@@ -172,6 +189,9 @@ fn derives_and_packages_a_dependency_driven_full_build() {
                 "plating_protocol.py",
             ] {
                 let path = entry.path().join(protocol);
+                if !path.is_file() {
+                    continue;
+                }
                 let simulation = Command::new(&simulator)
                     .env("OT_API_CONFIG_DIR", output_dir.join(".opentrons-config"))
                     .args(["-o", "nothing", path.to_str().unwrap()])

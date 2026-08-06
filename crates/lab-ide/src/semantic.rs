@@ -8,6 +8,7 @@ pub(crate) const KEYWORDS: &[&str] = &[
     "use",
     "circuit",
     "plasmid",
+    "strain",
     "record",
     "material",
     "observation",
@@ -40,7 +41,7 @@ pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> 
     match item {
         ast::Item::Use(_) => None,
         ast::Item::Circuit(item) => Some((&item.name.value, SymbolKind::Circuit, item.name.span)),
-        ast::Item::Plasmid(item) => Some((&item.name.value, SymbolKind::Plasmid, item.name.span)),
+        ast::Item::Artifact(item) => Some((&item.name.value, SymbolKind::Artifact, item.name.span)),
         ast::Item::Data(item) => Some((&item.name.value, SymbolKind::Data, item.name.span)),
         ast::Item::Workflow(item) => Some((&item.name.value, SymbolKind::Workflow, item.name.span)),
         ast::Item::Binding(item) => item
@@ -186,7 +187,7 @@ fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
                         .map(|parameter| parameter.name.value.clone()),
                 );
             }
-            ast::Item::Plasmid(declaration) => {
+            ast::Item::Artifact(declaration) => {
                 names.values.insert(declaration.name.value.clone());
             }
             ast::Item::Data(declaration) => {

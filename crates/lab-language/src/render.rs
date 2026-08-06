@@ -19,13 +19,15 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
             } => {
                 output.push_str(&format!("  - circuit {name} -> {ty}\n"));
             }
-            CheckedDeclaration::Plasmid {
+            CheckedDeclaration::Artifact {
+                artifact,
                 name,
                 requirements,
                 acceptance,
                 ..
             } => output.push_str(&format!(
-                "  - plasmid {name} ({} requirements, {} acceptance claims)\n",
+                "  - {} {name} ({} requirements, {} acceptance claims)\n",
+                artifact.keyword(),
                 requirements.len(),
                 acceptance.len()
             )),

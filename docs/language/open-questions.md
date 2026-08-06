@@ -20,11 +20,19 @@ Sequential effects and independent `when` handlers are represented. Syntax for s
 
 ## Parts and biological catalogs
 
-`std.bio.inventory` now provides typed constructors for external part, backbone, enzyme, strain, and antibiotic identities. This is not yet authoring syntax for declaring a part's biological kind, sequence, provenance, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
+`std.bio.inventory` now provides typed constructors for external part, backbone, enzyme, chassis, and antibiotic identities. This is not yet authoring syntax for declaring a part's biological kind, sequence, provenance, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
 
 ## Property schemas and target contracts
 
-Plasmid properties are backend-neutral typed expressions, while the initial OT-2 specialization requires a documented property set. Packages still need a way to declare reusable property schemas, defaults, refinements, and target capability contracts. This should allow a target to state what it consumes without adding experiment-specific property names or diagnostics to the core checker.
+Artifact properties are backend-neutral typed expressions, while the initial OT-2 specialization requires a documented property set. Packages still need a way to declare reusable property schemas, defaults, refinements, and target capability contracts. This should allow a target to state what it consumes without adding experiment-specific property names or diagnostics to the core checker.
+
+Reaction chemistry is the sharpest case. A design states `reaction_volume: 20 uL`, and the OT-2 target interprets it, but nothing in the language says which properties a Golden Gate assembly requires or what their units must be. The unit check lives in the target's lowering rather than in a declared schema, so a target that wanted the same parameters would restate them.
+
+## Target profiles and backend selection
+
+A target profile configures one backend for one bench, and `lab build --target` resolves it by filename under `targets/`. The profile's `backend` field is validated but not dispatched on: there is one backend, and it is named concretely. A second backend needs a registry, a way for a profile to select among installed backends, and a rule for what a program may assume about a target it has not been compiled for.
+
+Profile composition is also unresolved. Sites that share most of a layout have no way to express one profile in terms of another, and nothing distinguishes a capability a bench has from a choice its operator made.
 
 ## Inventory identity, availability, and provenance
 

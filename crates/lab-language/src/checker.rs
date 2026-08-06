@@ -61,8 +61,8 @@ impl Checker {
                 Item::Circuit(declaration) => {
                     declarations.push(self.check_circuit(declaration)?);
                 }
-                Item::Plasmid(declaration) => {
-                    declarations.push(self.check_plasmid(declaration)?);
+                Item::Artifact(declaration) => {
+                    declarations.push(self.check_artifact(declaration)?);
                 }
                 Item::Data(declaration) => {
                     declarations.push(self.checked_data(declaration)?);
@@ -137,7 +137,7 @@ impl Checker {
             let (name, span) = match item {
                 Item::Use(_) => continue,
                 Item::Circuit(value) => (&value.name.value, value.name.span),
-                Item::Plasmid(value) => (&value.name.value, value.name.span),
+                Item::Artifact(value) => (&value.name.value, value.name.span),
                 Item::Data(value) => (&value.name.value, value.name.span),
                 Item::Workflow(value) => (&value.name.value, value.name.span),
                 Item::Binding(value) => (&value.names[0].value, value.names[0].span),
@@ -242,9 +242,11 @@ impl Checker {
                         WorkflowSignature { inputs, outputs },
                     );
                 }
-                Item::Plasmid(declaration) => {
-                    self.values
-                        .insert(declaration.name.value.clone(), Ty::named("Plasmid"));
+                Item::Artifact(declaration) => {
+                    self.values.insert(
+                        declaration.name.value.clone(),
+                        Ty::named(declaration.kind.type_name()),
+                    );
                 }
                 Item::Use(_) | Item::Binding(_) => {}
             }
@@ -371,18 +373,17 @@ impl Checker {
         })
     }
 
-    fn check_plasmid(
+    fn check_artifact(
         &self,
-        declaration: &PlasmidDecl,
+        declaration: &ArtifactDecl,
     ) -> Result<CheckedDeclaration, SemanticError> {
-        let has_direct_sequence = declaration.members.iter().any(|member| {
-            matches!(member, PlasmidMember::Property(property) if property.name.value == "sequence")
-        });
+        let kind = declaration.kind;
+        let keyword = kind.keyword();
         let mut environment = self.values.clone();
         environment.extend(
             self.standard_types
-                .get("Plasmid")
-                .expect("the bundled prelude defines Plasmid")
+                .get(kind.type_name())
+                .expect("the bundled prelude defines every artifact type")
                 .fields
                 .iter()
                 .map(|(name, ty)| ((*name).to_owned(), ty.clone())),
@@ -393,11 +394,11 @@ impl Checker {
         let mut acceptance = Vec::new();
         for member in &declaration.members {
             match member {
-                PlasmidMember::Property(property) => {
+                ArtifactMember::Property(property) => {
                     if !property_names.insert(property.name.value.clone()) {
                         return Err(SemanticError::new(
                             property.name.span,
-                            format!("duplicate plasmid property '{}'", property.name.value),
+                            format!("duplicate {keyword} property '{}'", property.name.value),
                         ));
                     }
                     let inferred = self.infer_expr(&property.value, &environment)?;
@@ -407,7 +408,7 @@ impl Checker {
                         return Err(SemanticError::new(
                             property.value.span(),
                             format!(
-                                "plasmid property '{}' expects {expected}, found {inferred}",
+                                "{keyword} property '{}' expects {expected}, found {inferred}",
                                 property.name.value
                             ),
                         ));
@@ -422,7 +423,7 @@ impl Checker {
                         )?,
                     });
                 }
-                PlasmidMember::Requirement(claim) => {
+                ArtifactMember::Requirement(claim) => {
                     self.require_bool(&claim.predicate, &environment, "require")?;
                     requirements.push(self.lower_checked_expr(
                         &claim.predicate,
@@ -430,7 +431,7 @@ impl Checker {
                         None,
                     )?);
                 }
-                PlasmidMember::Acceptance(claim) => {
+                ArtifactMember::Acceptance(claim) => {
                     self.require_bool(&claim.predicate, &environment, "accept")?;
                     acceptance.push(self.lower_checked_expr(
                         &claim.predicate,
@@ -438,17 +439,41 @@ impl Checker {
                         None,
                     )?);
                 }
-                PlasmidMember::Section(section) => {
+                ArtifactMember::Section(section) => {
                     return Err(SemanticError::new(
                         section.span,
                         format!(
-                            "plasmid section '{}' has no semantics yet",
+                            "{keyword} section '{}' has no semantics yet",
                             section.name.value
                         ),
                     ));
                 }
             }
         }
+        match kind {
+            ArtifactKind::Plasmid => {
+                self.check_plasmid_shape(declaration, &property_names, &environment)?
+            }
+            ArtifactKind::Strain => self.check_strain_shape(declaration, &property_names)?,
+        }
+        Ok(CheckedDeclaration::Artifact {
+            artifact: kind,
+            name: declaration.name.value.clone(),
+            properties,
+            requirements,
+            acceptance,
+        })
+    }
+
+    /// A plasmid states its sequence directly, or states the backbone and cargo
+    /// a sequence can be derived from.
+    fn check_plasmid_shape(
+        &self,
+        declaration: &ArtifactDecl,
+        property_names: &BTreeSet<String>,
+        environment: &HashMap<String, Ty>,
+    ) -> Result<(), SemanticError> {
+        let has_direct_sequence = property_names.contains("sequence");
         if !has_direct_sequence
             && (!environment.contains_key("backbone") || !environment.contains_key("cargo"))
         {
@@ -474,12 +499,26 @@ impl Checker {
                 format!("plasmid cargo must be Circuit, found {cargo}"),
             ));
         }
-        Ok(CheckedDeclaration::Plasmid {
-            name: declaration.name.value.clone(),
-            properties,
-            requirements,
-            acceptance,
-        })
+        Ok(())
+    }
+
+    /// A strain names the chassis it is built in and the plasmid designs it
+    /// carries. Both are properties rather than derived facts, because a strain
+    /// carrying no plasmid is a different artifact from one that does.
+    fn check_strain_shape(
+        &self,
+        declaration: &ArtifactDecl,
+        property_names: &BTreeSet<String>,
+    ) -> Result<(), SemanticError> {
+        for required in ["chassis", "plasmids"] {
+            if !property_names.contains(required) {
+                return Err(SemanticError::new(
+                    declaration.span,
+                    format!("strain requires a '{required}' property"),
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn check_workflow(
@@ -985,126 +1024,57 @@ impl Checker {
         let mut operands = HashMap::new();
         let mut arguments = Vec::new();
         for part in &contract.phrase {
-            match part {
-                PhrasePart::Word(expected) => {
-                    if words.get(cursor) != Some(expected) {
-                        return Err(SemanticError::new(
-                            effect.span,
-                            format!("malformed '{}' action phrase", contract.operation),
-                        ));
-                    }
-                    cursor += 1;
-                }
-                PhrasePart::Operand { name, r#type, mode } => {
-                    let word = words.get(cursor).ok_or_else(|| {
-                        SemanticError::new(
-                            effect.span,
-                            format!(
-                                "action '{}' is missing operand '{name}'",
-                                contract.operation
-                            ),
-                        )
-                    })?;
-                    let actual = self.resolve_action_operand(word, environment, effect.span)?;
-                    if matches!(r#type, ContractType::AnyMaterial) {
-                        if !matches!(&actual, Ty::Named(name, arguments) if name == "Material" && arguments.len() == 1)
-                        {
-                            return Err(SemanticError::new(
-                                effect.span,
-                                format!(
-                                    "operation '{}' expects physical Material<T>, found {actual}",
-                                    contract.operation
-                                ),
-                            ));
-                        }
-                    } else {
-                        let expected = resolve_contract_type(r#type, &operands, effect.span)?;
-                        require_action_type(
-                            actual.clone(),
-                            expected,
-                            effect.span,
-                            contract.operation,
+            if let PhrasePart::Optional(clause) = part {
+                // A clause is present exactly when the word introducing it is,
+                // so an omitted one is not mistaken for a malformed phrase.
+                let introducer = match clause.first() {
+                    Some(PhrasePart::Word(word)) => *word,
+                    _ => unreachable!("contract validation requires a leading word"),
+                };
+                if words.get(cursor) == Some(&introducer) {
+                    for nested in clause {
+                        self.match_phrase_part(
+                            nested,
+                            effect,
+                            words,
+                            environment,
+                            &contract,
+                            &mut cursor,
+                            &mut operands,
+                            &mut arguments,
                         )?;
                     }
-                    operands.insert((*name).to_owned(), actual.clone());
-                    arguments.push(CheckedActionArgument {
-                        name: (*name).to_owned(),
-                        mode: *mode,
-                        value: action_reference(
-                            self.definition_for_action_word(word),
-                            word,
-                            &actual,
-                        ),
-                    });
-                    cursor += 1;
-                }
-                PhrasePart::Integer { name, signed } => {
-                    let word = words.get(cursor).ok_or_else(|| {
-                        SemanticError::new(
-                            effect.span,
-                            format!(
-                                "action '{}' is missing integer '{name}'",
-                                contract.operation
-                            ),
-                        )
-                    })?;
-                    let value = checked_integer_literal(word, *signed, effect.span)?;
-                    arguments.push(CheckedActionArgument {
-                        name: (*name).to_owned(),
-                        mode: OwnershipMode::Copy,
-                        value,
-                    });
-                    cursor += 1;
-                }
-                PhrasePart::Quantity {
-                    name,
-                    signed,
-                    units,
-                } => {
-                    let magnitude = words.get(cursor).ok_or_else(|| {
-                        SemanticError::new(
-                            effect.span,
-                            format!(
-                                "action '{}' is missing quantity '{name}'",
-                                contract.operation
-                            ),
-                        )
-                    })?;
-                    checked_integer_literal(magnitude, *signed, effect.span)?;
-                    let unit = words.get(cursor + 1).ok_or_else(|| {
-                        SemanticError::new(
-                            effect.span,
-                            format!(
-                                "action '{}' is missing a unit for '{name}'",
-                                contract.operation
-                            ),
-                        )
-                    })?;
-                    if !units.contains(unit) {
-                        return Err(SemanticError::new(
-                            effect.span,
-                            format!(
-                                "action '{}' expects unit {units:?} for '{name}', found '{unit}'",
-                                contract.operation
-                            ),
-                        ));
+                } else {
+                    for nested in clause {
+                        let PhrasePart::Operand { name, r#type, mode } = nested else {
+                            continue;
+                        };
+                        let ty = resolve_contract_type(r#type, &operands, effect.span)?;
+                        operands.insert((*name).to_owned(), ty.clone());
+                        arguments.push(CheckedActionArgument {
+                            name: (*name).to_owned(),
+                            mode: *mode,
+                            value: TypedExpression {
+                                r#type: to_checked_type(&ty),
+                                value: CheckedExpression::List {
+                                    elements: Vec::new(),
+                                },
+                            },
+                        });
                     }
-                    arguments.push(CheckedActionArgument {
-                        name: (*name).to_owned(),
-                        mode: OwnershipMode::Copy,
-                        value: TypedExpression {
-                            r#type: CheckedType::Quantity {
-                                unit: (*unit).to_owned(),
-                            },
-                            value: CheckedExpression::Quantity {
-                                magnitude: (*magnitude).to_owned(),
-                                unit: (*unit).to_owned(),
-                            },
-                        },
-                    });
-                    cursor += 2;
                 }
+                continue;
             }
+            self.match_phrase_part(
+                part,
+                effect,
+                words,
+                environment,
+                &contract,
+                &mut cursor,
+                &mut operands,
+                &mut arguments,
+            )?;
         }
         if cursor != words.len() {
             return Err(SemanticError::new(
@@ -1112,6 +1082,144 @@ impl Checker {
                 format!("malformed '{}' action phrase", contract.operation),
             ));
         }
+        Self::finish_action_contract(effect, contract, operands, arguments)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn match_phrase_part(
+        &self,
+        part: &PhrasePart,
+        effect: &EffectStmt,
+        words: &[&str],
+        environment: &HashMap<String, Ty>,
+        contract: &ActionContractSpec,
+        cursor: &mut usize,
+        operands: &mut HashMap<String, Ty>,
+        arguments: &mut Vec<CheckedActionArgument>,
+    ) -> Result<(), SemanticError> {
+        match part {
+            PhrasePart::Optional(_) => {
+                unreachable!("contract validation rejects a nested optional clause")
+            }
+            PhrasePart::Word(expected) => {
+                if words.get(*cursor) != Some(expected) {
+                    return Err(SemanticError::new(
+                        effect.span,
+                        format!("malformed '{}' action phrase", contract.operation),
+                    ));
+                }
+                *cursor += 1;
+            }
+            PhrasePart::Operand { name, r#type, mode } => {
+                let word = words.get(*cursor).ok_or_else(|| {
+                    SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' is missing operand '{name}'",
+                            contract.operation
+                        ),
+                    )
+                })?;
+                let actual = self.resolve_action_operand(word, environment, effect.span)?;
+                if matches!(r#type, ContractType::AnyMaterial) {
+                    if !matches!(&actual, Ty::Named(name, arguments) if name == "Material" && arguments.len() == 1)
+                    {
+                        return Err(SemanticError::new(
+                            effect.span,
+                            format!(
+                                "operation '{}' expects physical Material<T>, found {actual}",
+                                contract.operation
+                            ),
+                        ));
+                    }
+                } else {
+                    let expected = resolve_contract_type(r#type, operands, effect.span)?;
+                    require_action_type(actual.clone(), expected, effect.span, contract.operation)?;
+                }
+                operands.insert((*name).to_owned(), actual.clone());
+                arguments.push(CheckedActionArgument {
+                    name: (*name).to_owned(),
+                    mode: *mode,
+                    value: action_reference(self.definition_for_action_word(word), word, &actual),
+                });
+                *cursor += 1;
+            }
+            PhrasePart::Integer { name, signed } => {
+                let word = words.get(*cursor).ok_or_else(|| {
+                    SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' is missing integer '{name}'",
+                            contract.operation
+                        ),
+                    )
+                })?;
+                let value = checked_integer_literal(word, *signed, effect.span)?;
+                arguments.push(CheckedActionArgument {
+                    name: (*name).to_owned(),
+                    mode: OwnershipMode::Copy,
+                    value,
+                });
+                *cursor += 1;
+            }
+            PhrasePart::Quantity {
+                name,
+                signed,
+                units,
+            } => {
+                let magnitude = words.get(*cursor).ok_or_else(|| {
+                    SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' is missing quantity '{name}'",
+                            contract.operation
+                        ),
+                    )
+                })?;
+                checked_integer_literal(magnitude, *signed, effect.span)?;
+                let unit = words.get(*cursor + 1).ok_or_else(|| {
+                    SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' is missing a unit for '{name}'",
+                            contract.operation
+                        ),
+                    )
+                })?;
+                if !units.contains(unit) {
+                    return Err(SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' expects unit {units:?} for '{name}', found '{unit}'",
+                            contract.operation
+                        ),
+                    ));
+                }
+                arguments.push(CheckedActionArgument {
+                    name: (*name).to_owned(),
+                    mode: OwnershipMode::Copy,
+                    value: TypedExpression {
+                        r#type: CheckedType::Quantity {
+                            unit: (*unit).to_owned(),
+                        },
+                        value: CheckedExpression::Quantity {
+                            magnitude: (*magnitude).to_owned(),
+                            unit: (*unit).to_owned(),
+                        },
+                    },
+                });
+                *cursor += 2;
+            }
+        }
+        Ok(())
+    }
+
+    fn finish_action_contract(
+        effect: &EffectStmt,
+        contract: ActionContractSpec,
+        operands: HashMap<String, Ty>,
+        arguments: Vec<CheckedActionArgument>,
+    ) -> Result<(ResolvedAction, Vec<Ty>), SemanticError> {
         let result_contracts = contract
             .results
             .iter()
@@ -1992,12 +2100,13 @@ mod tests {
             "../../../docs/language/specimens/plasmid-design.lab"
         ))
         .unwrap();
-        assert!(
-            module
-                .declarations
-                .iter()
-                .any(|declaration| matches!(declaration, CheckedDeclaration::Plasmid { .. }))
-        );
+        assert!(module.declarations.iter().any(|declaration| matches!(
+            declaration,
+            CheckedDeclaration::Artifact {
+                artifact: ArtifactKind::Plasmid,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -2043,12 +2152,13 @@ mod tests {
             include_str!("../../../examples/opentrons-build/full-build.lab"),
         ] {
             let module = compile_module(source).unwrap();
-            assert!(
-                module
-                    .declarations
-                    .iter()
-                    .any(|declaration| matches!(declaration, CheckedDeclaration::Plasmid { .. }))
-            );
+            assert!(module.declarations.iter().any(|declaration| matches!(
+                declaration,
+                CheckedDeclaration::Artifact {
+                    artifact: ArtifactKind::Plasmid,
+                    ..
+                }
+            )));
             assert!(
                 module
                     .declarations
@@ -2065,7 +2175,7 @@ mod tests {
             .declarations
             .iter()
             .find_map(|declaration| {
-                let CheckedDeclaration::Plasmid {
+                let CheckedDeclaration::Artifact {
                     name, properties, ..
                 } = declaration
                 else {
@@ -2270,6 +2380,104 @@ workflow forward(left: Integer, right: String) -> (
     fn rejects_unknown_modules() {
         let error = compile_module("use mystery.catalog\n").unwrap_err();
         assert!(error.to_string().contains("cannot be resolved"));
+    }
+
+    const OPTIONAL_CLAUSE: &str = r#"
+use std.bio.build
+use std.bio.inventory
+
+J23101 = part("J23101")
+pSB1C3 = backbone("pSB1C3")
+BsaI = restriction_enzyme("BsaI")
+
+plasmid p_gfp:
+  sequence: dna("ACGT")
+  backbone: pSB1C3
+  components: [J23101]
+  restriction_enzyme: BsaI
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow assemble() -> Material<Plasmid>:
+  product <- realize p_gfp
+  return product
+"#;
+
+    #[test]
+    fn an_omitted_optional_clause_binds_its_operand_to_the_empty_list() {
+        let module = compile_module(OPTIONAL_CLAUSE).unwrap();
+        let CheckedDeclaration::Workflow { body, .. } = module
+            .declarations
+            .iter()
+            .find(|declaration| matches!(declaration, CheckedDeclaration::Workflow { .. }))
+            .unwrap()
+        else {
+            unreachable!()
+        };
+        let CheckedStatement::Effect { action, .. } = &body[0] else {
+            panic!("expected the realization effect");
+        };
+        let dependencies = action
+            .arguments
+            .iter()
+            .find(|argument| argument.name == "dependencies")
+            .expect("an omitted clause still supplies its operand");
+        assert!(
+            matches!(
+                &dependencies.value.value,
+                CheckedExpression::List { elements } if elements.is_empty()
+            ),
+            "{:?}",
+            dependencies.value.value
+        );
+    }
+
+    #[test]
+    fn stating_an_optional_clause_is_equivalent_to_omitting_it() {
+        let stated = OPTIONAL_CLAUSE.replace(
+            "  product <- realize p_gfp\n",
+            "  dependencies = []\n  product <- realize p_gfp from dependencies\n",
+        );
+        let omitted = compile_module(OPTIONAL_CLAUSE).unwrap();
+        let stated = compile_module(&stated).unwrap();
+
+        let arguments = |module: &CheckedModule| {
+            let CheckedDeclaration::Workflow { body, .. } = module
+                .declarations
+                .iter()
+                .find(|declaration| matches!(declaration, CheckedDeclaration::Workflow { .. }))
+                .unwrap()
+            else {
+                unreachable!()
+            };
+            body.iter()
+                .find_map(|statement| match statement {
+                    CheckedStatement::Effect { action, .. } => Some(action.arguments.clone()),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(arguments(&omitted).len(), arguments(&stated).len());
+    }
+
+    #[test]
+    fn a_partly_written_optional_clause_is_still_malformed() {
+        let error = compile_module(&OPTIONAL_CLAUSE.replace(
+            "  product <- realize p_gfp\n",
+            "  product <- realize p_gfp from\n",
+        ))
+        .expect_err("naming the clause commits to its operand");
+        assert!(error.to_string().contains("dependencies"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_trailing_word_is_not_mistaken_for_an_omitted_clause() {
+        let error = compile_module(&OPTIONAL_CLAUSE.replace(
+            "  product <- realize p_gfp\n",
+            "  product <- realize p_gfp onto bench\n",
+        ))
+        .expect_err("a phrase the contract does not describe stays an error");
+        assert!(error.to_string().contains("malformed"), "{error}");
     }
 
     #[test]

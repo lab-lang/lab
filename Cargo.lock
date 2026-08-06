@@ -425,6 +425,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -460,6 +461,7 @@ version = "0.1.0"
 dependencies = [
  "lab-ide",
  "lab-language",
+ "lab-package",
  "lsp-server",
  "lsp-types",
  "serde",

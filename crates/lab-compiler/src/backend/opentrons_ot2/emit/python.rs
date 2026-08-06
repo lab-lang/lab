@@ -139,7 +139,8 @@ mod tests {
             .unwrap()
             .select_protocol()
             .unwrap();
-        let plan = crate::backend::opentrons_ot2::plan_build(&protocol).unwrap();
+        let plan =
+            crate::backend::opentrons_ot2::plan_build(&protocol, &Default::default()).unwrap();
         let protocol = render_assembly_protocol(&plan).unwrap();
 
         assert!(!protocol.contains("from lab_opentrons_ot2"));

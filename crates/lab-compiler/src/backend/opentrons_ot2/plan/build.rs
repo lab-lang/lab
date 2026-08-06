@@ -1,181 +1,288 @@
 //! Construction of the validated, resource-allocated OT-2 execution plan.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ProtocolLairProgram;
+use crate::backend::opentrons_ot2::profile::Ot2TargetProfile;
 
 use super::constraints::{
-    require_plate_capacity, require_tip_capacity, validate_target_constraints,
+    require_tip_capacity, validate_assembly_constraints, validate_strain_constraints,
     validate_uniform_batch_settings,
 };
 use super::resources::{
-    assembly_source_keys, assign_source_wells, plate_wells, transformation_source_keys,
+    PlateAllocator, assembly_source_keys, assign_source_wells, require_known_geometry,
+    transformation_source_keys,
 };
 use super::trace::analyze_protocol;
 use super::{
-    API_LEVEL, Ot2ConstructPlan, Ot2ExecutionPlan, Ot2PlanningError, Ot2PlatingPlan,
-    Ot2TransformationPlan, REACTION_VOLUME_UL, SUPPORTED_STEPS, TARGET,
+    Ot2AssemblyChemistry, Ot2AssemblyPlan, Ot2ExecutionPlan, Ot2PlanningError, Ot2PlatingPlan,
+    Ot2StrainChemistry, Ot2StrainPlan, Ot2TransformationPlan, TARGET,
 };
 
-/// Validate and allocate an OT-2 build without rendering any output files.
+/// Validate and allocate an OT-2 build against one bench without rendering any
+/// output files.
 ///
 /// The returned execution plan is the single input shared by the Python,
 /// Markdown, and JSON emitters.
-pub fn plan_build(protocol: &ProtocolLairProgram) -> Result<Ot2ExecutionPlan, Ot2PlanningError> {
-    plan_selected_build(protocol, None)
+pub fn plan_build(
+    protocol: &ProtocolLairProgram,
+    profile: &Ot2TargetProfile,
+) -> Result<Ot2ExecutionPlan, Ot2PlanningError> {
+    plan_selected_build(protocol, profile, None)
 }
 
 pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
     protocol: &ProtocolLairProgram,
+    profile: &Ot2TargetProfile,
     selected_artifacts: Option<&BTreeSet<String>>,
 ) -> Result<Ot2ExecutionPlan, Ot2PlanningError> {
     let context = protocol.context();
     let traces = analyze_protocol(protocol, selected_artifacts)?;
-    for trace in &traces {
-        validate_target_constraints(trace, context)?;
+    for trace in &traces.assemblies {
+        validate_assembly_constraints(trace, context)?;
     }
-    validate_uniform_batch_settings(&traces, context)?;
+    for trace in &traces.strains {
+        validate_strain_constraints(trace, context)?;
+    }
+    validate_uniform_batch_settings(&traces.strains, context)?;
 
-    let assembly_well_count = traces
-        .iter()
-        .map(|trace| usize::from(trace.assembly_replicates(context)))
-        .sum::<usize>();
-    let transformation_count = traces
-        .iter()
-        .map(|trace| {
-            usize::from(trace.assembly_replicates(context))
-                * usize::from(trace.transformation_replicates(context))
-        })
-        .sum::<usize>();
-    require_plate_capacity(
-        "assembly and transformation",
-        assembly_well_count + transformation_count,
-    )?;
+    let deck = &profile.deck;
+    let stages = &profile.stages;
+    require_known_geometry("the source rack", deck.temperature_module.capacity)?;
+    require_known_geometry("the reaction plate", deck.thermocycler.capacity)?;
+    require_known_geometry("the DNA plate", stages.transformation.dna_plate.capacity)?;
+    require_known_geometry("the dilution plate", stages.plating.dilution_plate.capacity)?;
+    require_known_geometry("the agar plate", stages.plating.agar_plate.capacity)?;
+
+    // The thermocycler holds one plate, so assembly and transformation each
+    // address it as a single plate rather than a spillable stage resource.
+    let reaction_plate = super::resources::plate_wells(deck.thermocycler.capacity);
+
     let assembly_tip_count = traces
+        .assemblies
         .iter()
         .map(|trace| {
             usize::from(trace.assembly_replicates(context)) * (trace.components(context).len() + 6)
         })
         .sum();
-    require_tip_capacity("assembly", "p20", assembly_tip_count)?;
-    require_tip_capacity("transformation", "p20", transformation_count * 2)?;
-    require_tip_capacity("transformation", "p300", transformation_count)?;
+    require_tip_capacity(
+        "assembly",
+        "small",
+        assembly_tip_count,
+        stages.assembly.small_tips.total_capacity(),
+    )?;
 
-    let dilution_count = traces
+    let mut assembly_cursor = 0;
+    let mut assemblies = Vec::new();
+    for trace in &traces.assemblies {
+        let assembly_replicates = trace.assembly_replicates(context);
+        let end = assembly_cursor + usize::from(assembly_replicates);
+        if end > reaction_plate.len() {
+            return Err(super::constraints::plate_capacity_error(
+                "assembly",
+                "reaction_plate",
+                end,
+                reaction_plate.len(),
+            ));
+        }
+        let assembly_wells = reaction_plate[assembly_cursor..end].to_vec();
+        assembly_cursor = end;
+        let components = trace.components(context);
+        let chemistry = Ot2AssemblyChemistry {
+            reaction_volume_ul: trace.chemistry(context, "reaction_volume_ul"),
+            part_volume_ul: trace.chemistry(context, "part_volume_ul"),
+            enzyme_volume_ul: trace.chemistry(context, "enzyme_volume_ul"),
+            ligase_volume_ul: trace.chemistry(context, "ligase_volume_ul"),
+            buffer_volume_ul: trace.chemistry(context, "buffer_volume_ul"),
+            cycles: trace.chemistry(context, "cycles"),
+            digest_temperature_c: trace.chemistry(context, "digest_temperature_c"),
+            digest_minutes: trace.chemistry(context, "digest_minutes"),
+            ligate_temperature_c: trace.chemistry(context, "ligate_temperature_c"),
+            ligate_minutes: trace.chemistry(context, "ligate_minutes"),
+        };
+        // The backbone enters the reaction alongside every component.
+        let dna_pieces = (1 + components.len()) as u16;
+        let consumed = chemistry.buffer_volume_ul
+            + chemistry.ligase_volume_ul
+            + chemistry.enzyme_volume_ul
+            + chemistry.part_volume_ul * dna_pieces;
+        let water_volume_ul = chemistry
+            .reaction_volume_ul
+            .checked_sub(consumed)
+            .expect("source lowering rejected an over-subscribed reaction");
+        assemblies.push(Ot2AssemblyPlan {
+            artifact: trace.artifact(context),
+            sequence: trace.sequence(context),
+            backbone: trace.backbone(context),
+            components,
+            dependencies: trace.dependencies(context),
+            restriction_enzyme: trace.restriction_enzyme(context),
+            assembly_replicates,
+            water_volume_ul,
+            assembly_wells,
+            chemistry,
+        });
+    }
+
+    // Every distinct plasmid any strain carries occupies one DNA-plate well,
+    // whether this batch assembled it or the operator retrieved it.
+    let carried = traces
+        .strains
+        .iter()
+        .flat_map(|trace| trace.plasmids(context))
+        .collect::<BTreeSet<_>>();
+    let mut dna_allocator = PlateAllocator::new(
+        "transformation",
+        "dna_plate",
+        &stages.transformation.dna_plate,
+    );
+    let dna_wells = dna_allocator.take(carried.len())?;
+    let dna_source_wells = carried
+        .into_iter()
+        .zip(dna_wells)
+        .collect::<BTreeMap<_, _>>();
+
+    let transformation_count = traces
+        .strains
+        .iter()
+        .map(|trace| usize::from(trace.transformation_replicates(context)))
+        .sum::<usize>();
+    let transformation_tip_count = traces
+        .strains
         .iter()
         .map(|trace| {
-            usize::from(trace.assembly_replicates(context))
-                * usize::from(trace.transformation_replicates(context))
-                * usize::from(trace.serial_dilutions(context))
+            usize::from(trace.transformation_replicates(context))
+                * (1 + trace.plasmids(context).len())
         })
-        .sum::<usize>();
-    require_plate_capacity("serial dilution", dilution_count)?;
-    let agar_count = traces
-        .iter()
-        .map(|trace| {
-            usize::from(trace.assembly_replicates(context))
-                * usize::from(trace.transformation_replicates(context))
-                * usize::from(trace.serial_dilutions(context))
-                * usize::from(trace.plating_replicates(context))
-        })
-        .sum::<usize>();
-    require_plate_capacity("plating", agar_count)?;
+        .sum();
+    require_tip_capacity(
+        "transformation",
+        "small",
+        transformation_tip_count,
+        stages.transformation.small_tips.total_capacity(),
+    )?;
+    require_tip_capacity(
+        "transformation",
+        "large",
+        transformation_count,
+        stages.transformation.large_tips.total_capacity(),
+    )?;
+
     let plating_tip_count = traces
+        .strains
         .iter()
         .map(|trace| {
-            usize::from(trace.assembly_replicates(context))
-                * usize::from(trace.transformation_replicates(context))
+            usize::from(trace.transformation_replicates(context))
                 * usize::from(trace.serial_dilutions(context))
                 * (1 + usize::from(trace.plating_replicates(context)))
         })
         .sum();
-    require_tip_capacity("plating", "p20", plating_tip_count)?;
+    require_tip_capacity(
+        "plating",
+        "small",
+        plating_tip_count,
+        stages.plating.small_tips.total_capacity(),
+    )?;
 
-    let assembly_sources = assembly_source_keys(&traces, context);
-    let transformation_sources = transformation_source_keys(&traces, context);
-    let assembly_source_wells = assign_source_wells("assembly", assembly_sources)?;
-    let transformation_source_wells =
-        assign_source_wells("transformation", transformation_sources)?;
-
-    let wells = plate_wells();
-    let mut assembly_cursor = 0;
-    let mut transformation_cursor = assembly_well_count;
-    let mut dilution_cursor = 0;
-    let mut agar_cursor = 0;
-    let mut constructs = Vec::new();
-    for trace in traces {
-        let artifact = trace.artifact(context);
-        let sequence = trace.sequence(context);
-        let backbone = trace.backbone(context);
-        let components = trace.components(context);
-        let restriction_enzyme = trace.restriction_enzyme(context);
-        let host = trace.host(context);
-        let selection = trace.selection(context);
-        let assembly_replicates = trace.assembly_replicates(context);
+    let mut culture_cursor = 0;
+    let mut dilutions =
+        PlateAllocator::new("plating", "dilution_plate", &stages.plating.dilution_plate);
+    let mut agar = PlateAllocator::new("plating", "agar_plate", &stages.plating.agar_plate);
+    let mut strains = Vec::new();
+    for trace in &traces.strains {
+        let plasmids = trace.plasmids(context);
+        let source_wells = plasmids
+            .iter()
+            .map(|plasmid| {
+                dna_source_wells
+                    .get(plasmid)
+                    .cloned()
+                    .expect("every carried plasmid was allocated a DNA-plate well")
+            })
+            .collect::<Vec<_>>();
         let transformation_replicates = trace.transformation_replicates(context);
         let plating_replicates = trace.plating_replicates(context);
         let serial_dilutions = trace.serial_dilutions(context);
-        let assembly_wells =
-            wells[assembly_cursor..assembly_cursor + usize::from(assembly_replicates)].to_vec();
-        assembly_cursor += assembly_wells.len();
 
         let mut transformations = Vec::new();
         let mut plating = Vec::new();
-        for assembly_well in &assembly_wells {
-            for _ in 0..transformation_replicates {
-                let culture_well = wells[transformation_cursor].clone();
-                transformation_cursor += 1;
-                transformations.push(Ot2TransformationPlan {
-                    assembly_well: assembly_well.clone(),
-                    culture_well: culture_well.clone(),
-                });
-
-                let dilution_end = dilution_cursor + usize::from(serial_dilutions);
-                let dilution_wells = wells[dilution_cursor..dilution_end].to_vec();
-                dilution_cursor = dilution_end;
-                let mut agar_wells = Vec::new();
-                for _ in 0..serial_dilutions {
-                    let agar_end = agar_cursor + usize::from(plating_replicates);
-                    agar_wells.push(wells[agar_cursor..agar_end].to_vec());
-                    agar_cursor = agar_end;
-                }
-                plating.push(Ot2PlatingPlan {
-                    culture_well,
-                    dilution_wells,
-                    agar_wells,
-                });
+        for _ in 0..transformation_replicates {
+            if culture_cursor >= reaction_plate.len() {
+                return Err(super::constraints::plate_capacity_error(
+                    "transformation",
+                    "reaction_plate",
+                    culture_cursor + 1,
+                    reaction_plate.len(),
+                ));
             }
+            let culture_well = reaction_plate[culture_cursor].clone();
+            culture_cursor += 1;
+            transformations.push(Ot2TransformationPlan {
+                culture_well: culture_well.clone(),
+                source_wells: source_wells.clone(),
+            });
+
+            let dilution_wells = dilutions.take(usize::from(serial_dilutions))?;
+            let mut agar_wells = Vec::new();
+            for _ in 0..serial_dilutions {
+                agar_wells.push(agar.take(usize::from(plating_replicates))?);
+            }
+            plating.push(Ot2PlatingPlan {
+                culture_well,
+                dilution_wells,
+                agar_wells,
+            });
         }
 
-        let dna_components = 1 + components.len();
-        let required_ul = dna_components as u16 * 2 + 8;
-        constructs.push(Ot2ConstructPlan {
-            artifact,
-            sequence,
-            backbone,
-            components,
-            steps: SUPPORTED_STEPS.into_iter().map(str::to_owned).collect(),
-            restriction_enzyme,
-            host,
-            selection,
-            assembly_replicates,
+        strains.push(Ot2StrainPlan {
+            artifact: trace.artifact(context),
+            host: trace.host(context),
+            plasmids,
+            dependencies: trace.dependencies(context),
+            selection: trace.selection(context),
             transformation_replicates,
             plating_replicates,
             serial_dilutions,
-            water_volume_ul: REACTION_VOLUME_UL - required_ul,
-            assembly_wells,
             transformations,
             plating,
+            chemistry: Ot2StrainChemistry {
+                cell_volume_ul: trace.chemistry(context, "cell_volume_ul"),
+                dna_volume_ul: trace.chemistry(context, "dna_volume_ul"),
+                recovery_volume_ul: trace.chemistry(context, "recovery_volume_ul"),
+                cold_minutes: trace.chemistry(context, "cold_minutes"),
+                heat_shock_temperature_c: trace.chemistry(context, "heat_shock_temperature_c"),
+                heat_shock_minutes: trace.chemistry(context, "heat_shock_minutes"),
+                recovery_temperature_c: trace.chemistry(context, "recovery_temperature_c"),
+                recovery_minutes: trace.chemistry(context, "recovery_minutes"),
+                medium_volume_ul: trace.chemistry(context, "medium_volume_ul"),
+                culture_volume_ul: trace.chemistry(context, "culture_volume_ul"),
+                colony_volume_ul: trace.chemistry(context, "colony_volume_ul"),
+            },
         });
     }
+
+    let rack_capacity = deck.temperature_module.capacity;
+    let assembly_source_wells = assign_source_wells(
+        "assembly",
+        assembly_source_keys(&traces.assemblies, context),
+        rack_capacity,
+    )?;
+    let transformation_source_wells = assign_source_wells(
+        "transformation",
+        transformation_source_keys(&traces.strains, context),
+        rack_capacity,
+    )?;
 
     Ok(Ot2ExecutionPlan {
         schema_version: "lab.automation.v0".into(),
         target: TARGET.into(),
-        api_level: API_LEVEL.into(),
+        api_level: profile.target.api_level.clone(),
+        deck: profile.clone(),
         assembly_source_wells,
         transformation_source_wells,
-        constructs,
+        dna_source_wells,
+        assemblies,
+        strains,
     })
 }
 
@@ -183,9 +290,8 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
 mod tests {
     use lab_language::compile_module;
 
-    use crate::PortableLairProgram;
-
     use super::*;
+    use crate::PortableLairProgram;
     use crate::backend::opentrons_ot2::compile_build;
 
     const SOURCE: &str = r#"
@@ -199,7 +305,7 @@ GFP = part("GFP")
 B0015 = part("B0015")
 pSB1C3 = backbone("pSB1C3")
 BsaI = restriction_enzyme("BsaI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
 plasmid p_gfp:
@@ -207,93 +313,153 @@ plasmid p_gfp:
   backbone: pSB1C3
   components: [J23101, B0034, GFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_p_gfp() -> (
-  product: Material<Plasmid>,
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
+
+workflow assemble_p_gfp() -> Material<Plasmid>:
+  dependencies = []
+  product <- realize p_gfp from dependencies
+  return product
+
+workflow build_reporter_host(
+  p_gfp: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = []
-  product, construct <- realize p_gfp from dependencies
+  dependencies = [p_gfp]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return product, plate
+  return strain, plate
 "#;
 
-    #[test]
-    fn compiles_all_three_protocol_stages() {
-        let checked = compile_module(SOURCE).unwrap();
-        let protocol = PortableLairProgram::lower(&checked)
+    fn protocol(source: &str) -> crate::ProtocolLairProgram {
+        let checked = compile_module(source).unwrap();
+        PortableLairProgram::lower(&checked)
             .unwrap()
             .select_protocol()
-            .unwrap();
-        let plan = plan_build(&protocol).unwrap();
-        let bundle = compile_build(&protocol).unwrap();
+            .unwrap()
+    }
+
+    #[test]
+    fn allocates_both_stages_against_the_reference_bench() {
+        let protocol = protocol(SOURCE);
+        let profile = Ot2TargetProfile::default();
+        let plan = plan_build(&protocol, &profile).unwrap();
+        let bundle = compile_build(&protocol, &profile).unwrap();
 
         assert_eq!(bundle.manifest(), &plan);
-        assert_eq!(bundle.manifest().constructs[0].assembly_wells, ["A1"]);
+        assert_eq!(plan.assemblies[0].assembly_wells, ["A1"]);
         assert_eq!(
-            bundle.manifest().constructs[0]
+            plan.strains[0]
                 .transformations
                 .iter()
                 .map(|reaction| reaction.culture_well.as_str())
                 .collect::<Vec<_>>(),
-            ["B1", "C1"]
+            ["A1", "B1"],
+            "transformation addresses its own thermocycler plate"
         );
         assert!(
             bundle
                 .manual_protocol()
                 .contains("Stage 3 — Serial dilution and plating")
         );
-        assert!(bundle.assembly_protocol().contains("repetitions=75"));
-        assert!(
-            bundle
-                .transformation_protocol()
-                .contains("hold_time_minutes=30")
-        );
-        assert!(bundle.plating_protocol().contains("p300.distribute("));
         assert_eq!(bundle.artifacts().len(), 5);
-        assert!(bundle.artifacts().get("automation_manifest.json").is_some());
-        assert!(bundle.artifacts().get("manual_protocol.md").is_some());
     }
 
     #[test]
-    fn rejects_an_invalid_material_chain_before_target_planning() {
-        let source = SOURCE.replace(
-            "  culture <- recover culture for 1 h\n  culture <- dilute culture\n",
-            "",
+    fn source_chemistry_reaches_the_plan_and_rebalances_the_reaction() {
+        let tuned = SOURCE.replace(
+            "  assembly_replicates: 1\n",
+            "  assembly_replicates: 1\n  reaction_volume: 30 uL\n  part_volume: 3 uL\n  assembly_cycles: 40\n",
         );
-        let checked = compile_module(&source).unwrap();
+        let plan = plan_build(&protocol(&tuned), &Ot2TargetProfile::default()).unwrap();
+        let chemistry = &plan.assemblies[0].chemistry;
+
+        assert_eq!(chemistry.reaction_volume_ul, 30);
+        assert_eq!(chemistry.cycles, 40);
+        assert_eq!(
+            plan.assemblies[0].water_volume_ul, 7,
+            "water makes the reaction up to its stated volume"
+        );
+    }
+
+    #[test]
+    fn rejects_a_reaction_whose_reagents_exceed_its_volume() {
+        let over = SOURCE.replace(
+            "  assembly_replicates: 1\n",
+            "  assembly_replicates: 1\n  reaction_volume: 10 uL\n",
+        );
+        let checked = compile_module(&over).unwrap();
         let error = PortableLairProgram::lower(&checked)
             .err()
-            .expect("an invalid Workflow material chain must fail LAIR verification");
-        assert!(
-            error.to_string().contains("Workflow material type"),
-            "{error}"
-        );
+            .expect("an over-subscribed reaction cannot lower");
+        assert!(error.to_string().contains("reaction volume"), "{error}");
     }
 
     #[test]
-    fn target_metadata_requires_resolved_symbols_of_the_right_kind() {
-        for source in [
-            SOURCE.replace("  backbone: pSB1C3\n", "  backbone: \"pSB1C3\"\n"),
-            SOURCE.replace("  backbone: pSB1C3\n", "  backbone: J23101\n"),
-        ] {
-            let checked = compile_module(&source).unwrap();
-            let error = PortableLairProgram::lower(&checked)
-                .err()
-                .expect("invalid backbone must fail source-to-LAIR lowering");
-            assert!(error.to_string().contains("backbone"), "{error}");
-        }
+    fn rejects_a_chemistry_quantity_in_the_wrong_unit() {
+        let wrong = SOURCE.replace(
+            "  assembly_replicates: 1\n",
+            "  assembly_replicates: 1\n  reaction_volume: 20 mL\n",
+        );
+        let checked = compile_module(&wrong).unwrap();
+        let error = PortableLairProgram::lower(&checked)
+            .err()
+            .expect("a millilitre reaction volume is not a microlitre one");
+        assert!(error.to_string().contains("expects unit 'uL'"), "{error}");
+    }
+
+    #[test]
+    fn a_second_agar_plate_raises_capacity_without_touching_the_program() {
+        let crowded = SOURCE.replace("  plating_replicates: 2", "  plating_replicates: 8");
+        let protocol = protocol(&crowded);
+
+        let mut single = Ot2TargetProfile::default();
+        single.stages.plating.agar_plate.slots = vec!["5".to_owned()];
+        single.stages.plating.small_tips.slots = vec!["9".to_owned(), "10".to_owned()];
+        let plan = plan_build(&protocol, &single).unwrap();
+        assert!(
+            plan.strains[0]
+                .plating
+                .iter()
+                .flat_map(|layout| layout.agar_wells.iter().flatten())
+                .all(|well| well.plate == 0),
+            "one declared plate holds this batch"
+        );
+
+        let mut narrow = single.clone();
+        narrow.stages.plating.agar_plate.capacity = 24;
+        let error =
+            plan_build(&protocol, &narrow).expect_err("a 24-well agar plate cannot hold 32 spots");
+        assert!(error.to_string().contains("agar_plate"), "{error}");
+
+        let mut spread = narrow.clone();
+        spread.stages.plating.agar_plate.slots = vec!["5".to_owned(), "6".to_owned()];
+        let plan = plan_build(&protocol, &spread)
+            .expect("declaring a second plate accommodates the same program");
+        let plates = plan.strains[0]
+            .plating
+            .iter()
+            .flat_map(|layout| layout.agar_wells.iter().flatten())
+            .map(|well| well.plate)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            plates,
+            BTreeSet::from([0, 1]),
+            "allocation spills onto the second plate once the first is full"
+        );
     }
 }

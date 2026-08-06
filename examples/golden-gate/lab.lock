@@ -1,0 +1,11 @@
+schema_version = 2
+members = ["golden-gate"]
+
+[[packages]]
+name = "golden-gate"
+version = "0.1.0"
+
+[packages.source]
+kind = "root"
+
+[packages.dependencies]

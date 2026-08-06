@@ -10,13 +10,15 @@ use std::path::{Path, PathBuf};
 use lab_language::{
     CheckedModule, ModuleId, SemanticEnvironment, compile_module_in_environment, parse_module,
 };
-use lab_package::{DependencySpec, LabPackage, PackageError, PackageSource};
+use lab_package::{
+    DependencySpec, DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource,
+};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const LOCK_FILE: &str = "lab.lock";
-pub const LOCK_SCHEMA_VERSION: u32 = 1;
+pub const LOCK_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Error)]
 pub enum ProjectError {
@@ -66,13 +68,18 @@ struct ResolvedPackage {
 #[derive(Clone, Debug)]
 pub struct LabProject {
     root: PathBuf,
+    /// Package roots the project itself owns: one for a package project, the
+    /// declared members for a workspace.
+    members: Vec<PathBuf>,
+    default_member: PathBuf,
     packages: BTreeMap<PathBuf, ResolvedPackage>,
     order: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
 pub struct CompiledProject {
-    pub root_package: String,
+    /// Member package names in declaration order.
+    pub members: Vec<String>,
     pub modules: Vec<CompiledModule>,
     pub lock: ProjectLock,
 }
@@ -87,7 +94,7 @@ pub struct CompiledModule {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectLock {
     pub schema_version: u32,
-    pub root: String,
+    pub members: Vec<String>,
     pub packages: Vec<LockedPackage>,
 }
 
@@ -102,7 +109,11 @@ pub struct LockedPackage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LockedSource {
+    /// The project root, when the root is itself a package.
     Root,
+    /// A member of a workspace root.
+    Member { path: PathBuf },
+    /// A package reached through a path dependency.
     Path { path: PathBuf },
 }
 
@@ -114,20 +125,80 @@ impl ProjectLock {
 
 impl LabProject {
     pub fn discover(path: impl AsRef<Path>) -> Result<Self, ProjectError> {
-        let root_package = LabPackage::discover(path)?;
-        let root = canonicalize(&root_package.root)?;
+        let (root, members, default_member) = match DiscoveredRoot::discover(path)? {
+            DiscoveredRoot::Package(package) => {
+                let root = canonicalize(&package.root)?;
+                (root.clone(), vec![root.clone()], root)
+            }
+            DiscoveredRoot::Workspace(workspace) => Self::resolve_workspace(&workspace)?,
+        };
         let mut project = Self {
-            root: root.clone(),
+            root,
+            members: members.clone(),
+            default_member,
             packages: BTreeMap::new(),
             order: Vec::new(),
         };
         let mut visiting = Vec::new();
-        project.load_recursive(root, &mut visiting)?;
+        for member in members {
+            project.load_recursive(member, &mut visiting)?;
+        }
         Ok(project)
     }
 
-    pub fn root_package(&self) -> &LabPackage {
-        &self.packages[&self.root].package
+    fn resolve_workspace(
+        workspace: &LabWorkspace,
+    ) -> Result<(PathBuf, Vec<PathBuf>, PathBuf), ProjectError> {
+        let root = canonicalize(&workspace.root)?;
+        let members = workspace
+            .member_roots()
+            .iter()
+            .map(|member| canonicalize(member))
+            .collect::<Result<Vec<_>, _>>()?;
+        let default_member = canonicalize(&workspace.default_member_root())?;
+        Ok((root, members, default_member))
+    }
+
+    /// The directory holding the project's own `lab.toml`: a package root, or
+    /// a workspace root. Generated artifacts and the lockfile live here.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The package a command that acts on exactly one package operates on.
+    pub fn default_package(&self) -> &LabPackage {
+        &self.packages[&self.default_member].package
+    }
+
+    /// Every package the project itself owns, in declaration order.
+    pub fn member_packages(&self) -> Vec<&LabPackage> {
+        self.members
+            .iter()
+            .map(|member| &self.packages[member].package)
+            .collect()
+    }
+
+    /// The packages that make up one runnable program: the default member and
+    /// everything it depends on, in dependency-first compilation order. A
+    /// target build lowers exactly these packages' modules together, so an
+    /// artifact declared in a dependency reaches the backend.
+    pub fn program_packages(&self) -> Vec<String> {
+        let mut reachable = BTreeSet::new();
+        self.collect_reachable(&self.default_member, &mut reachable);
+        self.order
+            .iter()
+            .filter(|root| reachable.contains(*root))
+            .map(|root| self.packages[root].package.manifest.package.name.clone())
+            .collect()
+    }
+
+    fn collect_reachable(&self, root: &PathBuf, reachable: &mut BTreeSet<PathBuf>) {
+        if !reachable.insert(root.clone()) {
+            return;
+        }
+        for dependency in self.packages[root].dependencies.values() {
+            self.collect_reachable(dependency, reachable);
+        }
     }
 
     pub fn compile(&self) -> Result<CompiledProject, ProjectError> {
@@ -159,7 +230,11 @@ impl LabProject {
             .flat_map(|root| compiled_by_package[root].clone())
             .collect();
         Ok(CompiledProject {
-            root_package: self.root_package().manifest.package.name.clone(),
+            members: self
+                .member_packages()
+                .iter()
+                .map(|package| package.manifest.package.name.clone())
+                .collect(),
             modules,
             lock: self.lock(),
         })
@@ -168,7 +243,11 @@ impl LabProject {
     pub fn lock(&self) -> ProjectLock {
         ProjectLock {
             schema_version: LOCK_SCHEMA_VERSION,
-            root: self.root_package().manifest.package.name.clone(),
+            members: self
+                .member_packages()
+                .iter()
+                .map(|package| package.manifest.package.name.clone())
+                .collect(),
             packages: self
                 .order
                 .iter()
@@ -179,6 +258,10 @@ impl LabProject {
                         version: resolved.package.manifest.package.version.clone(),
                         source: if *root == self.root {
                             LockedSource::Root
+                        } else if self.members.contains(root) {
+                            LockedSource::Member {
+                                path: relative_path(&self.root, root),
+                            }
                         } else {
                             LockedSource::Path {
                                 path: relative_path(&self.root, root),
@@ -394,6 +477,11 @@ mod tests {
             }
             root
         }
+
+        fn workspace(&self, manifest: &str) -> PathBuf {
+            fs::write(self.0.join("lab.toml"), manifest).unwrap();
+            self.0.clone()
+        }
     }
 
     impl Drop for TestProject {
@@ -467,8 +555,83 @@ plasmid derived:
         assert_eq!(compiled.modules.len(), 2);
         assert_eq!(compiled.lock.packages[0].name, "shared");
         assert_eq!(compiled.lock.packages[1].dependencies["shared"], "shared");
+        assert_eq!(compiled.members, ["app"]);
         let lock = compiled.lock.to_toml().unwrap();
-        assert!(lock.contains("schema_version = 1"));
+        assert!(lock.contains(&format!("schema_version = {LOCK_SCHEMA_VERSION}")));
+        assert!(lock.contains("members = [\"app\"]"));
+    }
+
+    #[test]
+    fn compiles_every_workspace_member_and_locks_them_together() {
+        let fixture = TestProject::new();
+        fixture.package(
+            "catalog",
+            "[package]\nname = \"catalog\"\nversion = \"0.1.0\"\n",
+            &[("values.lab", DONOR)],
+        );
+        fixture.package(
+            "device",
+            r#"[package]
+name = "device"
+version = "0.1.0"
+
+[dependencies]
+catalog = { path = "../catalog" }
+"#,
+            &[(
+                "main.lab",
+                r#"use catalog.values
+
+plasmid derived:
+  sequence: donor.sequence
+  require topology == circular
+  accept sequence == design.sequence
+"#,
+            )],
+        );
+        let root = fixture.workspace(
+            r#"[workspace]
+members = ["catalog", "device"]
+default-member = "device"
+"#,
+        );
+
+        let project = LabProject::discover(&root).unwrap();
+        assert_eq!(
+            project.default_package().manifest.package.name,
+            "device",
+            "default-member selects the package a single-package command acts on"
+        );
+        assert_eq!(project.program_packages(), ["catalog", "device"]);
+
+        let compiled = project.compile().unwrap();
+        assert_eq!(compiled.members, ["catalog", "device"]);
+        assert_eq!(compiled.modules.len(), 2);
+        assert!(matches!(
+            compiled.lock.packages[0].source,
+            LockedSource::Member { .. }
+        ));
+    }
+
+    #[test]
+    fn rejects_a_workspace_that_does_not_select_a_default_member() {
+        let fixture = TestProject::new();
+        fixture.package(
+            "catalog",
+            "[package]\nname = \"catalog\"\nversion = \"0.1.0\"\n",
+            &[("values.lab", DONOR)],
+        );
+        fixture.package(
+            "device",
+            "[package]\nname = \"device\"\nversion = \"0.1.0\"\n",
+            &[("main.lab", DONOR)],
+        );
+        let root = fixture.workspace("[workspace]\nmembers = [\"catalog\", \"device\"]\n");
+
+        let Err(error) = LabProject::discover(&root) else {
+            panic!("an ambiguous workspace default member is rejected");
+        };
+        assert!(error.to_string().contains("default-member"), "{error}");
     }
 
     #[test]

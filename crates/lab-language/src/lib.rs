@@ -16,6 +16,7 @@ mod standard_library;
 mod token;
 mod type_system;
 
+pub use ast::ArtifactKind;
 pub use checked::{
     CheckedActionArgument, CheckedArgument, CheckedBinding, CheckedCase, CheckedDeclaration,
     CheckedExpression, CheckedField, CheckedFieldValue, CheckedMatchCase, CheckedModule,

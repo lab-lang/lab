@@ -8,9 +8,24 @@ use crate::backend::{Backend, BackendDescriptor, BackendEmitter, BackendTarget};
 use crate::{ArtifactBundle, ProtocolLairProgram};
 
 use super::plan::{Ot2EmissionError, Ot2ExecutionPlan, Ot2PlanningError, emit_program, plan_build};
+use super::profile::Ot2TargetProfile;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Ot2Backend;
+/// The OT-2 backend bound to one bench. Planning reads every deck, labware, and
+/// instrument decision from the profile it carries.
+#[derive(Clone, Debug, Default)]
+pub struct Ot2Backend {
+    profile: Ot2TargetProfile,
+}
+
+impl Ot2Backend {
+    pub fn new(profile: Ot2TargetProfile) -> Self {
+        Self { profile }
+    }
+
+    pub fn profile(&self) -> &Ot2TargetProfile {
+        &self.profile
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum Ot2CompileError {
@@ -40,7 +55,7 @@ impl Backend<ProtocolLairProgram> for Ot2Backend {
     }
 
     fn compile(&self, protocol: &ProtocolLairProgram) -> Result<Self::Program, Self::Error> {
-        Ok(plan_build(protocol)?)
+        Ok(plan_build(protocol, &self.profile)?)
     }
 }
 
@@ -70,16 +85,19 @@ mod tests {
 
         let lair = PortableLairProgram::lower(&module).unwrap();
         assert!(lair.ir().contains("design.plasmid"));
+        assert!(lair.ir().contains("design.strain"));
         assert!(lair.ir().contains("workflow.realize"));
         assert!(lair.ir().contains("workflow.transform"));
         let protocol = lair.select_protocol().unwrap();
         assert!(protocol.ir().contains("protocol.assemble"));
         assert!(!protocol.ir().contains("workflow."));
-        let program = Ot2Backend.compile(&protocol).unwrap();
-        assert_eq!(Ot2Backend.descriptor().id, "opentrons");
-        assert_eq!(program.constructs.len(), 2);
+        let backend = Ot2Backend::default();
+        let program = backend.compile(&protocol).unwrap();
+        assert_eq!(backend.descriptor().id, "opentrons");
+        assert_eq!(program.assemblies.len(), 2);
+        assert_eq!(program.strains.len(), 2);
 
-        let artifacts = Ot2Backend.emit(&program).unwrap();
+        let artifacts = backend.emit(&program).unwrap();
         assert_eq!(artifacts.len(), 5);
         assert!(artifacts.get("assembly_protocol.py").is_some());
     }

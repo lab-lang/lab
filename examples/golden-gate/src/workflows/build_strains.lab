@@ -1,0 +1,68 @@
+use std.lab.plasmid_actions
+use golden_gate.designs.inventory
+use golden_gate.designs.strains
+
+# Stages 2 and 3: assembled plasmids are introduced into competent cells by
+# heat shock, the recovered culture is serially diluted, and each dilution is
+# spotted onto selective agar.
+#
+# Each workflow consumes the plasmid material it transforms, so the compiler
+# knows a strain cannot be built before its plasmid exists. Two strains
+# consuming the same plasmid are two independent builds of two artifacts, not
+# one build with a shared step.
+
+workflow build_composite_strain_1(
+  composite_plasmid_1: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [composite_plasmid_1]
+  cells <- provision DH5alpha
+  strain, culture <- transform composite_strain_1 from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate
+
+workflow build_composite_strain_2(
+  composite_plasmid_2: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [composite_plasmid_2]
+  cells <- provision DH5alpha
+  strain, culture <- transform composite_strain_2 from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate
+
+workflow build_composite_strain_3(
+  composite_plasmid_1: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [composite_plasmid_1]
+  cells <- provision BL21
+  strain, culture <- transform composite_strain_3 from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate
+
+workflow build_composite_strain_4(
+  composite_plasmid_2: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [composite_plasmid_2]
+  cells <- provision BL21
+  strain, culture <- transform composite_strain_4 from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate

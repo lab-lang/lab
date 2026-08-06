@@ -64,9 +64,15 @@ impl DialectConversion for PlasmidBuildSelection {
                 required_string(realize.get_attr_realize_restriction_enzyme(ctx).as_deref());
             let replicates =
                 required_count(realize.get_attr_realize_assembly_replicates(ctx).as_deref());
+            let chemistry = realize
+                .get_attr_realize_chemistry(ctx)
+                .as_deref()
+                .cloned()
+                .expect("verified Workflow realize carries its chemistry");
+            let input = synthesize.get_result_material(ctx);
             let assemble = ProtocolAssembleOp::new(
                 ctx,
-                synthesize.get_result_material(ctx),
+                input,
                 AssemblyMethodAttr::GoldenGate,
                 artifact_name,
                 backbone,
@@ -74,11 +80,12 @@ impl DialectConversion for PlasmidBuildSelection {
                 dependencies,
                 restriction_enzyme,
                 replicates,
+                chemistry,
             );
             rewriter.insert_operation(ctx, assemble.get_operation());
             rewriter.replace_value_uses_with(
                 ctx,
-                realize.get_result_construct(ctx),
+                realize.get_result_product(ctx),
                 assemble.get_result_construct(ctx),
             );
             rewriter.erase_operation(ctx, op);
@@ -100,21 +107,36 @@ impl DialectConversion for PlasmidBuildSelection {
 
         if let Some(transform) = Operation::get_op::<TransformOp>(op, ctx) {
             let cells = transform.get_operand_cells(ctx);
-            let provision = cells
-                .defining_op()
-                .and_then(|defining| Operation::get_op::<ProtocolProvisionOp>(defining, ctx))
-                .expect("verified Workflow provision converts before its transform use");
-            let host = required_string(provision.get_attr_item(ctx).as_deref());
+            let artifact = required_string(transform.get_attr_transform_artifact(ctx).as_deref());
+            let host = required_string(transform.get_attr_transform_chassis(ctx).as_deref());
+            let plasmids = required_strings(transform.get_attr_transform_plasmids(ctx).as_deref());
+            let dependencies =
+                required_strings(transform.get_attr_transform_dependencies(ctx).as_deref());
             let replicates =
                 required_count(transform.get_attr_transform_replicates(ctx).as_deref());
+            let chemistry = transform
+                .get_attr_transform_chemistry(ctx)
+                .as_deref()
+                .cloned()
+                .expect("verified Workflow transform carries its chemistry");
+            let design = transform.get_operand_design(ctx);
             let selected = ProtocolTransformOp::new(
                 ctx,
-                transform.get_operand_construct(ctx),
+                design,
                 cells,
+                artifact,
                 host,
+                plasmids,
+                dependencies,
                 replicates,
+                chemistry,
             );
             rewriter.insert_operation(ctx, selected.get_operation());
+            rewriter.replace_value_uses_with(
+                ctx,
+                transform.get_result_strain(ctx),
+                selected.get_result_strain(ctx),
+            );
             rewriter.replace_value_uses_with(
                 ctx,
                 transform.get_result_culture(ctx),

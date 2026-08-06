@@ -22,7 +22,7 @@ use std.bio.inventory
 J23101 = part("J23101")
 pSB1C3 = backbone("pSB1C3")
 BsaI = restriction_enzyme("BsaI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 kanamycin = antibiotic("kanamycin")
 ```
 

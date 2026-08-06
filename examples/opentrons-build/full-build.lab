@@ -13,9 +13,7 @@ region_receiver = backbone("region_receiver")
 final_receiver = backbone("final_receiver")
 BsaI = restriction_enzyme("BsaI")
 BsmBI = restriction_enzyme("BsmBI")
-DH5alpha = strain("DH5alpha")
-ampicillin = antibiotic("ampicillin")
-chloramphenicol = antibiotic("chloramphenicol")
+DH5alpha = chassis("DH5alpha")
 kanamycin = antibiotic("kanamycin")
 
 # A three-wave build expressed through typed workflow material dependencies.
@@ -28,12 +26,7 @@ plasmid promoter_carrier:
   backbone: part_receiver
   components: [J23101]
   restriction_enzyme: BsmBI
-  host: DH5alpha
-  selection: ampicillin
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
   require topology == circular
   accept sequence == design.sequence
 
@@ -42,12 +35,7 @@ plasmid regulator_region:
   backbone: region_receiver
   components: [J23106, B0034, TetR, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
   require topology == circular
   accept sequence == design.sequence
 
@@ -56,12 +44,7 @@ plasmid reporter_region:
   backbone: region_receiver
   components: [promoter_carrier, B0034, GFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
   require topology == circular
   accept sequence == design.sequence
 
@@ -70,68 +53,51 @@ plasmid final_device:
   backbone: final_receiver
   components: [reporter_region, regulator_region]
   restriction_enzyme: BsmBI
-  host: DH5alpha
-  selection: kanamycin
   assembly_replicates: 1
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
   require topology == circular
   accept sequence == design.sequence
 
-workflow realize_promoter_carrier() -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
-  dependencies = []
-  product, construct <- realize promoter_carrier from dependencies
-  cells <- provision DH5alpha
-  culture <- transform construct into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on ampicillin
-  return product, plate
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [final_device]
+  selection: kanamycin
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
 
-workflow realize_regulator_region() -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
-  dependencies = []
-  product, construct <- realize regulator_region from dependencies
-  cells <- provision DH5alpha
-  culture <- transform construct into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return product, plate
+workflow assemble_promoter_carrier() -> Material<Plasmid>:
+  product <- realize promoter_carrier
+  return product
 
-workflow realize_reporter_region(
+workflow assemble_regulator_region() -> Material<Plasmid>:
+  product <- realize regulator_region
+  return product
+
+workflow assemble_reporter_region(
   promoter_carrier: Material<Plasmid>,
-) -> (
-  product: Material<Plasmid>,
-  plate: Material<Plate>,
-):
+) -> Material<Plasmid>:
   dependencies = [promoter_carrier]
-  product, construct <- realize reporter_region from dependencies
-  cells <- provision DH5alpha
-  culture <- transform construct into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return product, plate
+  product <- realize reporter_region from dependencies
+  return product
 
-workflow realize_final_device(
+workflow assemble_final_device(
   reporter_region: Material<Plasmid>,
   regulator_region: Material<Plasmid>,
+) -> Material<Plasmid>:
+  dependencies = [reporter_region, regulator_region]
+  product <- realize final_device from dependencies
+  return product
+
+workflow build_reporter_host(
+  final_device: Material<Plasmid>,
 ) -> (
-  product: Material<Plasmid>,
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = [reporter_region, regulator_region]
-  product, construct <- realize final_device from dependencies
+  dependencies = [final_device]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on kanamycin
-  return product, plate
+  return strain, plate

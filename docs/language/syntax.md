@@ -15,7 +15,7 @@ The kernel keeps orchestration mechanics distinct from domain operations:
 | Role | Words or forms |
 | --- | --- |
 | Modules | `use` |
-| Biological declarations | `part`, `circuit`, `plasmid` |
+| Biological declarations | `part`, `circuit`, `plasmid`, `strain` |
 | Laboratory data declarations | `record`, `material`, `observation`, `evidence`, `event`, `outcome` |
 | Orchestration declarations | `workflow`, `state` |
 | Signatures and contracts | `input`, `output`, `require`, `accept` |
@@ -55,7 +55,7 @@ An ordinary `=` binding is immutable. `state` declares durable workflow memory, 
 An effect may return more than one result:
 
 ```lab
-product, construct <- realize reporter from dependencies
+strain, culture <- transform reporter_host from plasmids into cells
 ```
 
 The phrase after `<-` is resolved through an imported action contract. The contract—not a verb-specific parser rule—determines operand slots, ownership, result types, and required capability.
@@ -93,6 +93,7 @@ Parentheses are required for workflow parameters, including for a zero-input wor
 part         reusable biological part
 circuit      reusable biological organization
 plasmid      physical artifact design
+strain       engineered organism: a chassis carrying named plasmids
 record       ordinary immutable structured data
 observation  recorded measurement or inspection
 evidence     information evaluated against a claim
@@ -145,7 +146,7 @@ GFP = part("GFP")
 B0015 = part("B0015")
 pSB1C3 = backbone("pSB1C3")
 BsaI = restriction_enzyme("BsaI")
-DH5alpha = strain("DH5alpha")
+DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
 plasmid p_gfp:
@@ -153,15 +154,18 @@ plasmid p_gfp:
   backbone: pSB1C3
   components: [J23101, B0034, GFP, B0015]
   restriction_enzyme: BsaI
-  host: DH5alpha
-  selection: chloramphenicol
   assembly_replicates: 1
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
 
   require topology == circular
   accept sequence == design.sequence
+
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+  transformation_replicates: 2
+  plating_replicates: 2
+  serial_dilutions: 2
 ```
 
 The string passed to an inventory constructor is an external inventory identity. Downstream declarations use the checked symbol, so renaming a source binding and changing an external identifier are distinct operations. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
@@ -176,7 +180,40 @@ components: [promoter_carrier, B0034, GFP, B0015]
 
 The union preserves the nominal alternatives; it does not convert the symbols to strings or a universal metadata value.
 
-Multiple property-bearing plasmids and their realization workflows may be compiled by a compatible target. Replicate and dilution settings are currently interpreted by the initial OT-2 specialization, not by the core language.
+Multiple property-bearing artifacts and their realization workflows may be compiled by a compatible target. Replicate and dilution settings are currently interpreted by the initial OT-2 specialization, not by the core language.
+
+## Artifact kinds
+
+A `plasmid` and a `strain` share one declaration shape and differ in what they name. A plasmid is a DNA design: a sequence, or the backbone and components a sequence is built from. A strain is an organism: a chassis together with the plasmid designs it carries.
+
+The distinction matters because the same plasmid in two hosts is two artifacts, each with its own acceptance criteria and its own place in a build order:
+
+```lab
+strain reporter_dh5alpha:
+  chassis: DH5alpha
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+
+strain reporter_bl21:
+  chassis: BL21
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+```
+
+## Reaction chemistry
+
+Quantity-valued properties state the chemistry a design is built with. These are scientific choices, so they travel with the artifact rather than with the laboratory that runs it:
+
+```lab
+plasmid p_gfp:
+  reaction_volume: 20 uL
+  part_volume: 2 uL
+  assembly_cycles: 75
+  digest_temperature: 37 C
+  ligate_duration: 5 min
+```
+
+Units are checked rather than assumed: `20 mL` where microlitres are expected is a diagnostic, not a thousandfold error on the bench. Water makes each reaction up to its stated volume, and reagents that over-subscribe that volume are rejected before any target sees the design.
 
 ## Dependencies through workflow dataflow
 
@@ -184,22 +221,41 @@ Dependencies are expressed through workflow dataflow rather than string matching
 
 ```lab
 use std.bio.build
+use std.lab.plasmid_actions
 
-workflow realize_reporter_region(
+workflow assemble_promoter_carrier() -> Material<Plasmid>:
+  product <- realize promoter_carrier
+  return product
+
+workflow assemble_reporter_region(
   promoter_carrier: Material<Plasmid>,
+) -> Material<Plasmid>:
+  dependencies = [promoter_carrier]
+  product <- realize reporter_region from dependencies
+  return product
+
+workflow build_reporter_host(
+  reporter_region: Material<Plasmid>,
 ) -> (
-  product: Material<Plasmid>,
+  strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = [promoter_carrier]
-  product, construct <- realize reporter_region from dependencies
+  dependencies = [reporter_region]
   cells <- provision DH5alpha
-  culture <- transform construct into cells
+  strain, culture <- transform reporter_host from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
   plate <- plate culture on chloramphenicol
-  return product, plate
+  return strain, plate
 ```
 
-`realize` is a bundled standard-library operation. The checker resolves its typed inputs, ownership, results, and capability. Target lowering reads that structured checked operation; it does not reinterpret the source phrase. Build ordering, graph depth, fixed-point retries, and roots derive from material flow rather than declaration names or compiler-defined assembly levels.
+`realize` assembles a plasmid and `transform` realizes a strain; both are bundled standard-library operations.
+
+A contract may end with an optional clause. `realize`'s `from` clause is one, so a realization that consumes no artifact leaves it out and means the same thing as passing an empty list. Naming the clause commits to its operand: `realize x from` with nothing after it is an error, not an omission.
+
+An optional clause may only carry collections. A list has an empty value to fall back to; a material does not, and silently conjuring one would be a lie about a physical thing.
+
+For either operation the checker resolves its typed inputs, ownership, results, and capability. Target lowering reads that structured checked operation; it does not reinterpret the source phrase. Build ordering, graph depth, fixed-point retries, and roots derive from material flow rather than declaration names or compiler-defined assembly levels.
 
 ## Data construction
 
