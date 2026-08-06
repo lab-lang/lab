@@ -1,6 +1,13 @@
-# Lab 🧪
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/wordmark-full-dark.svg">
+    <img alt="The Lab Programming Language" src="docs/assets/brand/wordmark-full-light.svg" width="620">
+  </picture>
+</p>
 
-Lab is a programming language and compiler toolchain for describing biology and orchestrating work in the laboratory.
+<p align="center">
+  <em>Lab is a programming language and compiler toolchain for describing biology and orchestrating work in the laboratory.</em>
+</p>
 
 It lets scientists describe the biological result they want, the constraints that must hold, and the evidence needed to accept it without binding that intent to a particular laboratory, instrument, or protocol implementation.
 

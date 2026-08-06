@@ -13,9 +13,10 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Bundled `std` module imports | yes | five modules | module values and contracts | yes | no runtime dispatch |
 | Typed inventory constructors | yes | `std.bio.inventory` | nominal values | structured calls | no live inventory lookup |
 | Heterogeneous list union inference | yes | symbols | e.g. `List<Plasmid | Part>` | yes | target-dependent |
-| Project/package import graph | yes | module paths | no imported symbols | no | no |
+| Project/package import graph | yes | module paths | imported module interfaces | yes | no |
 | `lab.toml` manifest and source discovery | n/a | yes | n/a | yes | no |
-| External dependency resolution and lockfile | n/a | no | no | no | no |
+| Path dependency resolution and lockfile | n/a | recursive path packages | imported module interfaces | `.lab/build/` index plus `lab.lock` | no |
+| Registry dependency acquisition | n/a | rejected | no | no | no |
 | Circuit declarations and applications | yes | yes | yes | yes | no |
 | Top-level pure bindings | yes | yes | yes | yes | no |
 | `record`, `material`, `observation`, `evidence`, and `event` | yes | yes | yes | yes | no |
@@ -39,6 +40,8 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Durable workflow runtime | no | no | no | no | no |
 
 All complete source modules use the portable-module boundary. A backend may reject checked properties or operations it cannot preserve, but it cannot select a narrower source frontend.
+
+`lab` resolves same-package modules and recursive path dependencies into one deterministic compilation order, detects package and module cycles, and checks an optional semver requirement against each path dependency's manifest. Each package compiles against the checked `ModuleInterface` values of its dependencies, so imported public symbols resolve and type-check across package boundaries. `lab build` writes portable module IR plus a package index under `.lab/build/` and a `lab.lock` recording each package's name, version, source, and dependency aliases. Registry dependencies fail closed: acquisition, integrity, caching, and visibility rules are unimplemented, and a manifest that declares one is rejected rather than silently ignored.
 
 The separate OT-2 specialization accepts plasmid properties (`backbone`, ordered `components`, `restriction_enzyme`, `host`, `selection`, and batch controls) as checked symbol references plus workflows composed from bundled standard-library effects. `std.bio.inventory` constructors give external inventory identities typed source names; strings are not used as component references. The source selects `realize`, provision, transformation, recovery, dilution, and plating operations. Dependencies are typed material inputs to `realize`; the generic language does not encode assembly levels. The specialization emits a deterministic Lab manifest, human instructions, and OT-2 scripts, and explicitly rejects properties or operation sequences it cannot lower.
 

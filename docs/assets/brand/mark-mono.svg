@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Lab mark, single color</title>
+  <rect x="17" y="17.5" width="31" height="5.5" rx="2.75" fill="#2b1c11"/>
+  <rect x="22" y="36" width="26" height="5.5" rx="2.75" fill="#2b1c11"/>
+  <path d="M27 33.25 20 38.75 27 44.25" fill="none" stroke="#2b1c11" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

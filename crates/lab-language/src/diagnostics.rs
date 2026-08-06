@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CheckedModule, ModuleError, ParseError, Span, ast, compile_parsed_module, parse_module,
+    CheckedModule, ModuleError, ModuleId, ParseError, SemanticEnvironment, Span, ast,
+    compile_parsed_module, parse_module,
 };
 
 /// An opaque source identity chosen by the host (URI, virtual path, or handle).
@@ -73,17 +74,30 @@ impl Analysis {
 /// The result is deliberately diagnostic-oriented. Parser recovery can add more
 /// syntax diagnostics later without changing this host-facing contract.
 pub fn analyze_module(source_id: SourceId, text: &str) -> Analysis {
+    analyze_module_in_environment(
+        source_id,
+        ModuleId::standalone(),
+        text,
+        &SemanticEnvironment::default(),
+    )
+}
+
+/// Analyze a module against a caller-supplied module identity and import
+/// environment, for hosts that resolve imports across several modules held
+/// in memory together (an editor's open documents, a package's sources).
+pub fn analyze_module_in_environment(
+    source_id: SourceId,
+    module_id: ModuleId,
+    text: &str,
+    environment: &SemanticEnvironment,
+) -> Analysis {
     match parse_module(text) {
         Err(error) => Analysis {
             syntax: None,
             checked: None,
             diagnostics: vec![diagnostic_from_parse(source_id, error)],
         },
-        Ok(syntax) => match compile_parsed_module(
-            crate::ModuleId::standalone(),
-            &crate::SemanticEnvironment::default(),
-            &syntax,
-        ) {
+        Ok(syntax) => match compile_parsed_module(module_id, environment, &syntax) {
             Ok(checked) => Analysis {
                 syntax: Some(syntax),
                 checked: Some(checked),

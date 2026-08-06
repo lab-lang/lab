@@ -25,7 +25,7 @@ pub use checked::{
 };
 pub use diagnostics::{
     Analysis, Diagnostic, DiagnosticCode, DiagnosticRelatedInformation, DiagnosticSeverity,
-    SourceId, analyze_module,
+    SourceId, analyze_module, analyze_module_in_environment,
 };
 pub use error::ParseError;
 pub use material_flow::MaterialFlowError;

@@ -32,4 +32,6 @@ Inventory constructors currently associate a typed source symbol with an externa
 
 ## Package resolution
 
-Whole-module `use` syntax and five bundled `std` modules now resolve. Package manifests and filesystem discovery exist, but dependency acquisition, versions, aliases, visibility, cyclic imports, lockfiles, integrity, imported public symbols, and the exact boundary between `std` and versioned biological catalogs remain to be specified and implemented.
+Whole-module `use` syntax and five bundled `std` modules resolve. Path dependencies resolve recursively, import their public symbols through checked module interfaces, diagnose cycles, honor a semver requirement, and produce a lockfile.
+
+What remains unspecified is everything a registry implies: dependency acquisition, integrity verification, caches, version selection across a graph with conflicting requirements, and symbol visibility rules that let a package export less than everything it declares. The boundary between `std` and versioned biological catalogs is also unsettled, and it constrains the rest: a catalog that ships as an ordinary package needs the same visibility and versioning answers.
