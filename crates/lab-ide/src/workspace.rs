@@ -21,6 +21,10 @@ struct Document {
     /// Synthesized from the source path so an open document can stand in
     /// for a module another open document `use`s (see `synthesize_module_id`).
     module: ModuleId,
+    /// Dotted paths named by this document's own `use` items, cached at the
+    /// same time as `text` so the dependency graph can be rebuilt without
+    /// re-parsing every open document on every edit.
+    imports: BTreeSet<String>,
     analysis: Analysis,
 }
 
@@ -36,8 +40,9 @@ impl Workspace {
 
     pub fn set_document(&mut self, source: SourceId, version: i64, text: String) {
         let module = synthesize_module_id(&source);
+        let touched = [source.clone()].into_iter().collect();
         self.insert_document(source, version, text, module);
-        self.reanalyze_all();
+        self.reanalyze_from(touched);
     }
 
     /// Register a document whose module name the host already knows. A file
@@ -51,8 +56,9 @@ impl Workspace {
         text: String,
         module: ModuleId,
     ) {
+        let touched = [source.clone()].into_iter().collect();
         self.insert_document(source, version, text, module);
-        self.reanalyze_all();
+        self.reanalyze_from(touched);
     }
 
     /// Register several documents and analyze once, so opening one file in a
@@ -61,10 +67,12 @@ impl Workspace {
         &mut self,
         documents: impl IntoIterator<Item = (SourceId, i64, String, ModuleId)>,
     ) {
+        let mut touched = BTreeSet::new();
         for (source, version, text, module) in documents {
+            touched.insert(source.clone());
             self.insert_document(source, version, text, module);
         }
-        self.reanalyze_all();
+        self.reanalyze_from(touched);
     }
 
     pub fn contains(&self, source: &SourceId) -> bool {
@@ -72,12 +80,14 @@ impl Workspace {
     }
 
     fn insert_document(&mut self, source: SourceId, version: i64, text: String, module: ModuleId) {
+        let imports = parsed_use_paths(&text).into_iter().collect();
         self.documents.insert(
             source,
             Document {
                 version,
                 text,
                 module,
+                imports,
                 analysis: Analysis {
                     syntax: None,
                     checked: None,
@@ -88,13 +98,23 @@ impl Workspace {
     }
 
     pub fn remove_document(&mut self, source: &SourceId) {
-        self.documents.remove(source);
-        self.reanalyze_all();
+        let removed_module = self.documents.remove(source).map(|document| document.module);
+        // Anyone who imported the now-gone document needs to be re-checked,
+        // since a `use` that resolved before now dangles.
+        let touched = removed_module.map_or_else(BTreeSet::new, |module| {
+            self.documents
+                .iter()
+                .filter(|(_, document)| document.imports.contains(module.as_str()))
+                .map(|(source, _)| source.clone())
+                .collect()
+        });
+        self.reanalyze_from(touched);
     }
 
-    /// Re-checks every open document together so a `use` of another open
-    /// document's synthesized module name resolves, instead of every
-    /// document being checked as if it were alone in the workspace.
+    /// Re-checks `touched` and every open document that transitively depends
+    /// on it (directly or through a chain of `use`s), reusing the cached
+    /// analysis of everything else instead of re-parsing and re-checking the
+    /// whole workspace on every edit.
     ///
     /// This mirrors `lab-project`'s package compiler (topological
     /// compile-and-insert into a shared `SemanticEnvironment`), adapted for
@@ -104,24 +124,50 @@ impl Workspace {
     /// back to compiling whatever's left against the partial environment,
     /// since a cycle can be a normal transient state while someone is
     /// mid-edit, not necessarily something to stop analyzing over.
-    fn reanalyze_all(&mut self) {
+    fn reanalyze_from(&mut self, touched: BTreeSet<SourceId>) {
         let by_name: BTreeMap<String, SourceId> = self
             .documents
             .iter()
             .map(|(source, document)| (document.module.as_str().to_owned(), source.clone()))
             .collect();
 
+        let mut dependents: BTreeMap<String, Vec<SourceId>> = BTreeMap::new();
+        for (source, document) in &self.documents {
+            for name in &document.imports {
+                dependents.entry(name.clone()).or_default().push(source.clone());
+            }
+        }
+
+        // A document whose text just changed is dirty, and so is anyone that
+        // (directly or transitively) `use`s it — their checked interface may
+        // depend on exports that just moved or disappeared.
+        let mut dirty: BTreeSet<SourceId> = BTreeSet::new();
+        let mut frontier: Vec<SourceId> = touched.into_iter().collect();
+        while let Some(source) = frontier.pop() {
+            if !dirty.insert(source.clone()) {
+                continue;
+            }
+            let Some(document) = self.documents.get(&source) else {
+                continue;
+            };
+            if let Some(importers) = dependents.get(document.module.as_str()) {
+                frontier.extend(importers.iter().cloned());
+            }
+        }
+
         let local_imports: BTreeMap<SourceId, BTreeSet<String>> = self
             .documents
             .iter()
             .map(|(source, document)| {
-                let names = parsed_use_paths(&document.text)
-                    .into_iter()
+                let names = document
+                    .imports
+                    .iter()
                     .filter(|name| {
                         by_name
-                            .get(name)
+                            .get(*name)
                             .is_some_and(|dependency| dependency != source)
                     })
+                    .cloned()
                     .collect();
                 (source.clone(), names)
             })
@@ -153,16 +199,31 @@ impl Workspace {
 
             for source in &ready {
                 let document = &self.documents[source];
-                let analysis = analyze_module_in_environment(
-                    source.clone(),
-                    document.module.clone(),
-                    &document.text,
-                    &environment,
-                );
-                if let Some(checked) = &analysis.checked {
-                    environment.insert(document.module.as_str(), checked.interface.clone());
+                let interface = if dirty.contains(source) {
+                    let analysis = analyze_module_in_environment(
+                        source.clone(),
+                        document.module.clone(),
+                        &document.text,
+                        &environment,
+                    );
+                    let interface = analysis
+                        .checked
+                        .as_ref()
+                        .map(|checked| checked.interface.clone());
+                    analyses.insert(source.clone(), analysis);
+                    interface
+                } else {
+                    // Unaffected by this edit — reuse the interface computed
+                    // last time instead of re-parsing and re-checking.
+                    document
+                        .analysis
+                        .checked
+                        .as_ref()
+                        .map(|checked| checked.interface.clone())
+                };
+                if let Some(interface) = interface {
+                    environment.insert(document.module.as_str(), interface);
                 }
-                analyses.insert(source.clone(), analysis);
                 compiled.insert(source.clone());
             }
             for source in &ready {
@@ -555,6 +616,45 @@ plasmid reporter:
             "plasmid renamed:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n"
                 .to_owned(),
         );
+        assert!(!workspace.diagnostics(&program).is_empty());
+    }
+
+    #[test]
+    fn editing_a_document_reanalyzes_transitive_dependents_two_hops_away() {
+        let design = SourceId::new("designs/a.lab");
+        let middle = SourceId::new("designs/b.lab");
+        let program = SourceId::new("programs/main.lab");
+        let mut workspace = Workspace::new();
+        workspace.set_document(
+            design.clone(),
+            1,
+            "plasmid donor:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n"
+                .to_owned(),
+        );
+        workspace.set_document(
+            middle.clone(),
+            1,
+            "use designs.a\n\nselected = donor\n".to_owned(),
+        );
+        workspace.set_document(
+            program.clone(),
+            1,
+            "use designs.b\n\npicked = selected\n".to_owned(),
+        );
+        assert!(workspace.diagnostics(&middle).is_empty());
+        assert!(workspace.diagnostics(&program).is_empty());
+
+        // Renaming the plasmid two hops upstream, without touching `middle`
+        // or `program` directly, should still make `program` see an error:
+        // `middle` fails to resolve `donor`, which makes `program`'s `use`
+        // of `middle` unresolved in turn.
+        workspace.set_document(
+            design,
+            2,
+            "plasmid renamed:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n"
+                .to_owned(),
+        );
+        assert!(!workspace.diagnostics(&middle).is_empty());
         assert!(!workspace.diagnostics(&program).is_empty());
     }
 
