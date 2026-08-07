@@ -1,4 +1,5 @@
 mod commands;
+mod update;
 
 use std::path::PathBuf;
 
@@ -56,6 +57,12 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Check for and install a newer lab/labc/lab-opt release.
+    Update {
+        /// Only report whether an update is available; don't install it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 struct Output {
@@ -105,6 +112,7 @@ fn run() -> Result<()> {
             target,
         } => commands::build(path, out_dir, target, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
+        Command::Update { check } => update::update(check, &output),
     }
 }
 
@@ -137,5 +145,14 @@ mod tests {
     fn accepts_global_json_after_the_subcommand() {
         let cli = Cli::try_parse_from(["lab", "check", "--json"]).unwrap();
         assert!(cli.json);
+    }
+
+    #[test]
+    fn parses_update_check_flag() {
+        let cli = Cli::try_parse_from(["lab", "update", "--check"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { check: true }));
+
+        let cli = Cli::try_parse_from(["lab", "update"]).unwrap();
+        assert!(matches!(cli.command, Command::Update { check: false }));
     }
 }
