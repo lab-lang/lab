@@ -7,7 +7,9 @@ use crate::checked::{CheckedArgument, CheckedExpression, CheckedFieldValue, Type
 use crate::semantic_error::SemanticError;
 use crate::source::Span;
 use crate::standard_library::ConstructorSpec;
-use crate::type_system::{Ty, comparable, common_type, compatible, substitute, to_checked_type, unify};
+use crate::type_system::{
+    Ty, common_type, comparable, compatible, substitute, to_checked_type, unify,
+};
 
 use super::Checker;
 

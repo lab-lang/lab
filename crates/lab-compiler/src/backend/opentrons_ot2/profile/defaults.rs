@@ -1,7 +1,7 @@
 //! Reference-bench default values for every profile field.
 
 use super::schema::{
-    AssemblyStage, MediaRack, Pipette, PlatingStage, Plates, TemperatureModule, Thermocycler,
+    AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TemperatureModule, Thermocycler,
     TipRacks, TransformationStage,
 };
 

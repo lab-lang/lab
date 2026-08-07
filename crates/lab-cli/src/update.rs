@@ -41,13 +41,14 @@ pub(crate) fn update(check: bool, output: &Output) -> Result<()> {
                 latest: latest.to_string(),
                 updated: Vec::new(),
             },
-            format!("lab {latest} is available (running {current}); run `lab update` to install it"),
+            format!(
+                "lab {latest} is available (running {current}); run `lab update` to install it"
+            ),
         );
     }
 
-    let target = target_triple().context(
-        "no published lab release covers this platform; build from source instead",
-    )?;
+    let target = target_triple()
+        .context("no published lab release covers this platform; build from source instead")?;
     let install_dir = env::current_exe()
         .context("failed to locate the running lab executable")?
         .parent()
@@ -57,8 +58,8 @@ pub(crate) fn update(check: bool, output: &Output) -> Result<()> {
     let asset_name = format!("lab-{target}.tar.gz");
     let asset_bytes = download_bytes(&release.tag_name, &asset_name)
         .with_context(|| format!("failed to download {asset_name}"))?;
-    let checksums = download_text(&release.tag_name, "SHA256SUMS")
-        .context("failed to download SHA256SUMS")?;
+    let checksums =
+        download_text(&release.tag_name, "SHA256SUMS").context("failed to download SHA256SUMS")?;
     verify_checksum(&checksums, &asset_name, &asset_bytes)?;
 
     let extract_dir = tempfile::tempdir().context("failed to create a temporary directory")?;
@@ -213,12 +214,21 @@ fn replace_sibling(installed: &Path, new_binary: &Path) -> Result<()> {
         .with_context(|| format!("failed to create a temporary file in {}", parent.display()))?;
     let mut source = fs::File::open(new_binary)
         .with_context(|| format!("failed to open {}", new_binary.display()))?;
-    io::copy(&mut source, staged.as_file_mut())
-        .with_context(|| format!("failed to stage the replacement for {}", installed.display()))?;
+    io::copy(&mut source, staged.as_file_mut()).with_context(|| {
+        format!(
+            "failed to stage the replacement for {}",
+            installed.display()
+        )
+    })?;
     staged
         .as_file()
         .set_permissions(permissions)
-        .with_context(|| format!("failed to set permissions on the replacement for {}", installed.display()))?;
+        .with_context(|| {
+            format!(
+                "failed to set permissions on the replacement for {}",
+                installed.display()
+            )
+        })?;
 
     let (_, staged_path) = staged
         .keep()

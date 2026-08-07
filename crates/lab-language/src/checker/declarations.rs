@@ -263,7 +263,10 @@ impl Checker {
         })
     }
 
-    pub fn checked_data(&self, declaration: &DataDecl) -> Result<CheckedDeclaration, SemanticError> {
+    pub fn checked_data(
+        &self,
+        declaration: &DataDecl,
+    ) -> Result<CheckedDeclaration, SemanticError> {
         let signature = self
             .data
             .get(&declaration.name.value)

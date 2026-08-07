@@ -29,5 +29,10 @@ serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["user-hooks"]
+
 [lints]
 workspace = true

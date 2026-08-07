@@ -6,9 +6,8 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::ast::{BindingStmt, EffectStmt, Pattern, Stmt, Trigger, WorkflowDecl};
 use crate::checked::{
-    CheckedActionArgument, CheckedBinding, CheckedDeclaration, CheckedFieldValue,
-    CheckedMatchCase, CheckedState, CheckedStatement, CheckedTrigger, OwnershipMode,
-    ResolvedAction,
+    CheckedActionArgument, CheckedBinding, CheckedDeclaration, CheckedFieldValue, CheckedMatchCase,
+    CheckedState, CheckedStatement, CheckedTrigger, OwnershipMode, ResolvedAction,
 };
 use crate::semantic_error::SemanticError;
 use crate::type_system::{Ty, compatible, to_checked_type};

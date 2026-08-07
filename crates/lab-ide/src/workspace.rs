@@ -98,7 +98,10 @@ impl Workspace {
     }
 
     pub fn remove_document(&mut self, source: &SourceId) {
-        let removed_module = self.documents.remove(source).map(|document| document.module);
+        let removed_module = self
+            .documents
+            .remove(source)
+            .map(|document| document.module);
         // Anyone who imported the now-gone document needs to be re-checked,
         // since a `use` that resolved before now dangles.
         let touched = removed_module.map_or_else(BTreeSet::new, |module| {
@@ -134,7 +137,10 @@ impl Workspace {
         let mut dependents: BTreeMap<String, Vec<SourceId>> = BTreeMap::new();
         for (source, document) in &self.documents {
             for name in &document.imports {
-                dependents.entry(name.clone()).or_default().push(source.clone());
+                dependents
+                    .entry(name.clone())
+                    .or_default()
+                    .push(source.clone());
             }
         }
 
