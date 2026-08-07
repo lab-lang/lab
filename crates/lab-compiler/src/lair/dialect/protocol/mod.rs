@@ -37,7 +37,6 @@ pub enum MaterialType {
 }
 
 impl MaterialType {
-    #[allow(dead_code)]
     pub fn get(self, ctx: &Context) -> TypeHandle {
         Self::instantiate(self, ctx).into()
     }
@@ -53,7 +52,6 @@ pub enum EvidenceType {
 }
 
 impl EvidenceType {
-    #[allow(dead_code)]
     pub fn get(self, ctx: &Context) -> TypeHandle {
         Self::instantiate(self, ctx).into()
     }

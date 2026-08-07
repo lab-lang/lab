@@ -2,8 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use pliron::context::Context;
+
 use crate::ProtocolLairProgram;
-use crate::backend::opentrons_ot2::profile::Ot2TargetProfile;
+use crate::backend::opentrons_ot2::profile::{Ot2TargetProfile, Plates, Stages};
 
 use super::constraints::{
     require_tip_capacity, validate_assembly_constraints, validate_strain_constraints,
@@ -13,10 +15,10 @@ use super::resources::{
     PlateAllocator, assembly_source_keys, assign_source_wells, require_known_geometry,
     transformation_source_keys,
 };
-use super::trace::analyze_protocol;
+use super::trace::{AssemblyTrace, ProtocolTraces, StrainTrace, analyze_protocol};
 use super::{
     Ot2AssemblyChemistry, Ot2AssemblyPlan, Ot2ExecutionPlan, Ot2PlanningError, Ot2PlatingPlan,
-    Ot2StrainChemistry, Ot2StrainPlan, Ot2TransformationPlan, TARGET,
+    Ot2StrainChemistry, Ot2StrainPlan, Ot2TransformationPlan, Ot2Well, TARGET,
 };
 
 /// Validate and allocate an OT-2 build against one bench without rendering any
@@ -38,26 +40,82 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
 ) -> Result<Ot2ExecutionPlan, Ot2PlanningError> {
     let context = protocol.context();
     let traces = analyze_protocol(protocol, selected_artifacts)?;
+    validate_traces(&traces, context)?;
+
+    let deck = &profile.deck;
+    let stages = &profile.stages;
+    require_deck_geometry(profile)?;
+    require_stage_tip_capacities(&traces, context, stages)?;
+
+    // The thermocycler holds one plate, so assembly and transformation each
+    // address it as a single plate rather than a spillable stage resource.
+    let reaction_plate = super::resources::plate_wells(deck.thermocycler.capacity);
+
+    let assemblies = build_assembly_plans(&traces.assemblies, context, &reaction_plate)?;
+
+    // Every distinct plasmid any strain carries occupies one DNA-plate well,
+    // whether this batch assembled it or the operator retrieved it.
+    let dna_source_wells =
+        allocate_dna_wells(&traces.strains, context, &stages.transformation.dna_plate)?;
+
+    // The thermocycler plate is cleared and reused for transformation, so
+    // this stage addresses it with its own cursor, independent of assembly's.
+    let strains = build_strain_plans(
+        &traces.strains,
+        context,
+        &reaction_plate,
+        &dna_source_wells,
+        stages,
+    )?;
+
+    let rack_capacity = deck.temperature_module.capacity;
+    let (assembly_source_wells, transformation_source_wells) =
+        assign_all_source_wells(&traces, context, rack_capacity)?;
+
+    Ok(Ot2ExecutionPlan {
+        schema_version: "lab.automation.v0".into(),
+        target: TARGET.into(),
+        api_level: profile.target.api_level.clone(),
+        deck: profile.clone(),
+        assembly_source_wells,
+        transformation_source_wells,
+        dna_source_wells,
+        assemblies,
+        strains,
+    })
+}
+
+/// Checks each artifact's own assembly/transformation chemistry, then the
+/// settings that must agree across every strain in the batch.
+fn validate_traces(traces: &ProtocolTraces, context: &Context) -> Result<(), Ot2PlanningError> {
     for trace in &traces.assemblies {
         validate_assembly_constraints(trace, context)?;
     }
     for trace in &traces.strains {
         validate_strain_constraints(trace, context)?;
     }
-    validate_uniform_batch_settings(&traces.strains, context)?;
+    validate_uniform_batch_settings(&traces.strains, context)
+}
 
+/// Rejects a target profile that declares labware in a well count this
+/// backend has no row/column layout for.
+fn require_deck_geometry(profile: &Ot2TargetProfile) -> Result<(), Ot2PlanningError> {
     let deck = &profile.deck;
     let stages = &profile.stages;
     require_known_geometry("the source rack", deck.temperature_module.capacity)?;
     require_known_geometry("the reaction plate", deck.thermocycler.capacity)?;
     require_known_geometry("the DNA plate", stages.transformation.dna_plate.capacity)?;
     require_known_geometry("the dilution plate", stages.plating.dilution_plate.capacity)?;
-    require_known_geometry("the agar plate", stages.plating.agar_plate.capacity)?;
+    require_known_geometry("the agar plate", stages.plating.agar_plate.capacity)
+}
 
-    // The thermocycler holds one plate, so assembly and transformation each
-    // address it as a single plate rather than a spillable stage resource.
-    let reaction_plate = super::resources::plate_wells(deck.thermocycler.capacity);
-
+/// Checks the small/large tip racks declared for each stage against the tip
+/// count that stage's reactions will consume.
+fn require_stage_tip_capacities(
+    traces: &ProtocolTraces,
+    context: &Context,
+    stages: &Stages,
+) -> Result<(), Ot2PlanningError> {
     let assembly_tip_count = traces
         .assemblies
         .iter()
@@ -72,9 +130,59 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
         stages.assembly.small_tips.total_capacity(),
     )?;
 
+    let transformation_count = traces
+        .strains
+        .iter()
+        .map(|trace| usize::from(trace.transformation_replicates(context)))
+        .sum::<usize>();
+    let transformation_tip_count = traces
+        .strains
+        .iter()
+        .map(|trace| {
+            usize::from(trace.transformation_replicates(context))
+                * (1 + trace.plasmids(context).len())
+        })
+        .sum();
+    require_tip_capacity(
+        "transformation",
+        "small",
+        transformation_tip_count,
+        stages.transformation.small_tips.total_capacity(),
+    )?;
+    require_tip_capacity(
+        "transformation",
+        "large",
+        transformation_count,
+        stages.transformation.large_tips.total_capacity(),
+    )?;
+
+    let plating_tip_count = traces
+        .strains
+        .iter()
+        .map(|trace| {
+            usize::from(trace.transformation_replicates(context))
+                * usize::from(trace.serial_dilutions(context))
+                * (1 + usize::from(trace.plating_replicates(context)))
+        })
+        .sum();
+    require_tip_capacity(
+        "plating",
+        "small",
+        plating_tip_count,
+        stages.plating.small_tips.total_capacity(),
+    )
+}
+
+/// Allocates each assembly its reaction wells and computes the chemistry
+/// (including the water top-up volume) for every plasmid the batch builds.
+fn build_assembly_plans(
+    traces: &[AssemblyTrace],
+    context: &Context,
+    reaction_plate: &[String],
+) -> Result<Vec<Ot2AssemblyPlan>, Ot2PlanningError> {
     let mut assembly_cursor = 0;
     let mut assemblies = Vec::new();
-    for trace in &traces.assemblies {
+    for trace in traces {
         let assembly_replicates = trace.assembly_replicates(context);
         let end = assembly_cursor + usize::from(assembly_replicates);
         if end > reaction_plate.len() {
@@ -123,73 +231,40 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
             chemistry,
         });
     }
+    Ok(assemblies)
+}
 
-    // Every distinct plasmid any strain carries occupies one DNA-plate well,
-    // whether this batch assembled it or the operator retrieved it.
+/// Gives every distinct plasmid carried by any strain in the batch one
+/// DNA-plate well.
+fn allocate_dna_wells(
+    traces: &[StrainTrace],
+    context: &Context,
+    dna_plate: &Plates,
+) -> Result<BTreeMap<String, Ot2Well>, Ot2PlanningError> {
     let carried = traces
-        .strains
         .iter()
         .flat_map(|trace| trace.plasmids(context))
         .collect::<BTreeSet<_>>();
-    let mut dna_allocator = PlateAllocator::new(
-        "transformation",
-        "dna_plate",
-        &stages.transformation.dna_plate,
-    );
+    let mut dna_allocator = PlateAllocator::new("transformation", "dna_plate", dna_plate);
     let dna_wells = dna_allocator.take(carried.len())?;
-    let dna_source_wells = carried
-        .into_iter()
-        .zip(dna_wells)
-        .collect::<BTreeMap<_, _>>();
+    Ok(carried.into_iter().zip(dna_wells).collect())
+}
 
-    let transformation_count = traces
-        .strains
-        .iter()
-        .map(|trace| usize::from(trace.transformation_replicates(context)))
-        .sum::<usize>();
-    let transformation_tip_count = traces
-        .strains
-        .iter()
-        .map(|trace| {
-            usize::from(trace.transformation_replicates(context))
-                * (1 + trace.plasmids(context).len())
-        })
-        .sum();
-    require_tip_capacity(
-        "transformation",
-        "small",
-        transformation_tip_count,
-        stages.transformation.small_tips.total_capacity(),
-    )?;
-    require_tip_capacity(
-        "transformation",
-        "large",
-        transformation_count,
-        stages.transformation.large_tips.total_capacity(),
-    )?;
-
-    let plating_tip_count = traces
-        .strains
-        .iter()
-        .map(|trace| {
-            usize::from(trace.transformation_replicates(context))
-                * usize::from(trace.serial_dilutions(context))
-                * (1 + usize::from(trace.plating_replicates(context)))
-        })
-        .sum();
-    require_tip_capacity(
-        "plating",
-        "small",
-        plating_tip_count,
-        stages.plating.small_tips.total_capacity(),
-    )?;
-
+/// Builds each strain's transformation and serial-dilution/plating layout,
+/// drawing culture wells from the shared reaction plate.
+fn build_strain_plans(
+    traces: &[StrainTrace],
+    context: &Context,
+    reaction_plate: &[String],
+    dna_source_wells: &BTreeMap<String, Ot2Well>,
+    stages: &Stages,
+) -> Result<Vec<Ot2StrainPlan>, Ot2PlanningError> {
     let mut culture_cursor = 0;
     let mut dilutions =
         PlateAllocator::new("plating", "dilution_plate", &stages.plating.dilution_plate);
     let mut agar = PlateAllocator::new("plating", "agar_plate", &stages.plating.agar_plate);
     let mut strains = Vec::new();
-    for trace in &traces.strains {
+    for trace in traces {
         let plasmids = trace.plasmids(context);
         let source_wells = plasmids
             .iter()
@@ -260,8 +335,18 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
             },
         });
     }
+    Ok(strains)
+}
 
-    let rack_capacity = deck.temperature_module.capacity;
+type SourceWells = BTreeMap<String, String>;
+
+/// Assigns source-rack wells for the assembly stage's reagents/DNA/enzymes
+/// and the transformation stage's cells/media, sharing one rack.
+fn assign_all_source_wells(
+    traces: &ProtocolTraces,
+    context: &Context,
+    rack_capacity: usize,
+) -> Result<(SourceWells, SourceWells), Ot2PlanningError> {
     let assembly_source_wells = assign_source_wells(
         "assembly",
         assembly_source_keys(&traces.assemblies, context),
@@ -272,18 +357,7 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
         transformation_source_keys(&traces.strains, context),
         rack_capacity,
     )?;
-
-    Ok(Ot2ExecutionPlan {
-        schema_version: "lab.automation.v0".into(),
-        target: TARGET.into(),
-        api_level: profile.target.api_level.clone(),
-        deck: profile.clone(),
-        assembly_source_wells,
-        transformation_source_wells,
-        dna_source_wells,
-        assemblies,
-        strains,
-    })
+    Ok((assembly_source_wells, transformation_source_wells))
 }
 
 #[cfg(test)]

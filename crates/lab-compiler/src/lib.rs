@@ -4,8 +4,6 @@ pub mod artifact;
 pub mod backend;
 pub mod lair;
 pub mod planning;
-pub mod render;
-pub mod simulation;
 #[cfg(test)]
 mod test_support;
 
@@ -20,12 +18,3 @@ pub use lair::program::{
 };
 pub use lair::session::{CompilerSession, SessionError, SessionOptions};
 pub use lair::stage::{IrStage, StageContract};
-pub use planning::{
-    AcceptanceCriterion, AcceptanceObligation, OperationKind, PlanError, PlanStep, PlanValue,
-    ProtocolPlan, ValueKind,
-};
-pub use render::render_human;
-pub use simulation::{
-    ExecutionDependency, ExecutionGraph, ExecutionOperation, LabState, SimulatedValue,
-    SimulationError, SimulationEvent, SimulationTrace, simulate,
-};

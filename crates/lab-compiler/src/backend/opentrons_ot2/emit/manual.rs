@@ -72,21 +72,78 @@ pub(in crate::backend::opentrons_ot2) fn render_manual_protocol(
             assembly.water_volume_ul
         )
         .unwrap();
-        writeln!(output, "| T4 DNA ligase buffer | 2 µL |").unwrap();
-        writeln!(output, "| T4 DNA ligase | 4 µL |").unwrap();
-        writeln!(output, "| {} | 2 µL |", assembly.restriction_enzyme).unwrap();
-        writeln!(output, "| {} backbone | 2 µL |", assembly.backbone).unwrap();
+        writeln!(
+            output,
+            "| T4 DNA ligase buffer | {} µL |",
+            assembly.chemistry.buffer_volume_ul
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "| T4 DNA ligase | {} µL |",
+            assembly.chemistry.ligase_volume_ul
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "| {} | {} µL |",
+            assembly.restriction_enzyme, assembly.chemistry.enzyme_volume_ul
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "| {} backbone | {} µL |",
+            assembly.backbone, assembly.chemistry.part_volume_ul
+        )
+        .unwrap();
         for component in &assembly.components {
-            writeln!(output, "| {component} | 2 µL |").unwrap();
+            writeln!(
+                output,
+                "| {component} | {} µL |",
+                assembly.chemistry.part_volume_ul
+            )
+            .unwrap();
         }
-        writeln!(output, "| **Total** | **20 µL** |\n").unwrap();
+        writeln!(
+            output,
+            "| **Total** | **{} µL** |\n",
+            assembly.chemistry.reaction_volume_ul
+        )
+        .unwrap();
     }
-    if !manifest.assemblies.is_empty() {
-        writeln!(output, "Run 75 cycles of 37 °C for 2 min and 16 °C for 5 min; then 50 °C for 5 min, 80 °C for 10 min, and hold at 4 °C.\n").unwrap();
+    // Every assembly in a batch shares one thermal profile, driven by the
+    // first construct — see assembly.py.
+    if let Some(assembly) = manifest.assemblies.first() {
+        let chemistry = &assembly.chemistry;
+        writeln!(
+            output,
+            "Run {} cycles of {} °C for {} min and {} °C for {} min; then 50 °C for 5 min, 80 °C for 10 min, and hold at 4 °C.\n",
+            chemistry.cycles,
+            chemistry.digest_temperature_c,
+            chemistry.digest_minutes,
+            chemistry.ligate_temperature_c,
+            chemistry.ligate_minutes,
+        )
+        .unwrap();
     }
 
     writeln!(output, "## Stage 2 — Heat-shock transformation\n").unwrap();
-    writeln!(output, "Load the DNA plate as shown, then for each reaction combine 20 µL competent cells with 2 µL of each plasmid. Incubate at 4 °C for 30 min, heat shock at 42 °C for 1 min, return to 4 °C for 2 min, add 60 µL recovery medium, then recover at 37 °C for 60 min.\n").unwrap();
+    writeln!(output, "Load the DNA plate as shown, then for each reaction combine that strain's cells and plasmid DNA in the volumes listed below.\n").unwrap();
+    // Every strain in a batch shares one heat-shock profile, driven by the
+    // first strain — see transformation.py.
+    if let Some(strain) = manifest.strains.first() {
+        let chemistry = &strain.chemistry;
+        writeln!(
+            output,
+            "Incubate at 4 °C for {} min, heat shock at {} °C for {} min, return to 4 °C for 2 min, add recovery medium in the volume listed below, then recover at {} °C for {} min.\n",
+            chemistry.cold_minutes,
+            chemistry.heat_shock_temperature_c,
+            chemistry.heat_shock_minutes,
+            chemistry.recovery_temperature_c,
+            chemistry.recovery_minutes,
+        )
+        .unwrap();
+    }
     if !manifest.dna_source_wells.is_empty() {
         writeln!(output, "| Plasmid | DNA plate well |").unwrap();
         writeln!(output, "| --- | --- |").unwrap();
@@ -102,20 +159,27 @@ pub(in crate::backend::opentrons_ot2) fn render_manual_protocol(
     }
     writeln!(
         output,
-        "| Strain | Host | Plasmids | DNA wells | Culture destination |"
+        "| Strain | Host | Plasmids | DNA wells | Culture destination | Cells (µL) | DNA per plasmid (µL) | Recovery medium (µL) |"
     )
     .unwrap();
-    writeln!(output, "| --- | --- | --- | --- | --- |").unwrap();
+    writeln!(
+        output,
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: |"
+    )
+    .unwrap();
     for strain in &manifest.strains {
         for reaction in &strain.transformations {
             writeln!(
                 output,
-                "| {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} | {} | {} |",
                 strain.artifact,
                 strain.host,
                 strain.plasmids.join(", "),
                 well_list(&reaction.source_wells),
-                reaction.culture_well
+                reaction.culture_well,
+                strain.chemistry.cell_volume_ul,
+                strain.chemistry.dna_volume_ul,
+                strain.chemistry.recovery_volume_ul,
             )
             .unwrap();
         }
@@ -123,13 +187,22 @@ pub(in crate::backend::opentrons_ot2) fn render_manual_protocol(
     writeln!(output).unwrap();
 
     writeln!(output, "## Stage 3 — Serial dilution and plating\n").unwrap();
-    writeln!(output, "Pre-load every dilution well with 18 µL recovery medium. Transfer 2 µL culture into dilution 1 and mix. For dilution 2, transfer 2 µL from dilution 1 into 18 µL fresh medium and mix. Plate 4 µL per replicate onto agar containing the listed selection.\n").unwrap();
+    // The dilution-well pre-load happens once for the whole batch, driven by
+    // the first strain — see plating.py.
+    if let Some(strain) = manifest.strains.first() {
+        writeln!(
+            output,
+            "Pre-load every dilution well with {} µL recovery medium. For each serial dilution, transfer culture from the previous well (or the transformation culture, for the first dilution) and mix, then plate onto agar containing the listed selection, using the volumes listed below.\n",
+            strain.chemistry.medium_volume_ul
+        )
+        .unwrap();
+    }
     writeln!(
         output,
-        "| Strain | Selection | Culture | Dilution wells | Agar wells by dilution |"
+        "| Strain | Selection | Culture | Dilution wells | Agar wells by dilution | Culture transfer (µL) | Colony transfer (µL) |"
     )
     .unwrap();
-    writeln!(output, "| --- | --- | --- | --- | --- |").unwrap();
+    writeln!(output, "| --- | --- | --- | --- | --- | ---: | ---: |").unwrap();
     for strain in &manifest.strains {
         for layout in &strain.plating {
             let agar = layout
@@ -140,12 +213,14 @@ pub(in crate::backend::opentrons_ot2) fn render_manual_protocol(
                 .join("; ");
             writeln!(
                 output,
-                "| {} | {} | {} | {} | {} |",
+                "| {} | {} | {} | {} | {} | {} | {} |",
                 strain.artifact,
                 strain.selection,
                 layout.culture_well,
                 well_list(&layout.dilution_wells),
-                agar
+                agar,
+                strain.chemistry.culture_volume_ul,
+                strain.chemistry.colony_volume_ul,
             )
             .unwrap();
         }
@@ -153,4 +228,100 @@ pub(in crate::backend::opentrons_ot2) fn render_manual_protocol(
     writeln!(output, "\n## Execution boundary\n").unwrap();
     writeln!(output, "This concept spike allocates one 96-well reaction plate, one DNA plate, one dilution plate, one agar plate, and 24-well source racks. It does not resolve inventory lots, verify DNA concentrations, design overhangs, domesticate internal restriction sites, or qualify the protocol for a specific lab.").unwrap();
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use lab_language::compile_module;
+
+    use super::*;
+    use crate::PortableLairProgram;
+    use crate::backend::opentrons_ot2::plan_build;
+    use crate::backend::opentrons_ot2::profile::Ot2TargetProfile;
+
+    const SOURCE: &str = r#"
+use std.bio.build
+use std.bio.inventory
+use std.lab.plasmid_actions
+
+J23101 = part("J23101")
+B0034 = part("B0034")
+GFP = part("GFP")
+B0015 = part("B0015")
+pSB1C3 = backbone("pSB1C3")
+BsaI = restriction_enzyme("BsaI")
+DH5alpha = chassis("DH5alpha")
+chloramphenicol = antibiotic("chloramphenicol")
+
+plasmid p_gfp:
+  sequence: dna("ACGT")
+  backbone: pSB1C3
+  components: [J23101, B0034, GFP, B0015]
+  restriction_enzyme: BsaI
+  assembly_replicates: 1
+  reaction_volume: 30 uL
+  part_volume: 3 uL
+  assembly_cycles: 40
+  require topology == circular
+  accept sequence == design.sequence
+
+strain reporter_host:
+  chassis: DH5alpha
+  plasmids: [p_gfp]
+  selection: chloramphenicol
+  transformation_replicates: 1
+  plating_replicates: 1
+  serial_dilutions: 1
+  heat_shock_temperature: 45 C
+  colony_volume: 6 uL
+
+workflow assemble_p_gfp() -> Material<Plasmid>:
+  dependencies = []
+  product <- realize p_gfp from dependencies
+  return product
+
+workflow build_reporter_host(
+  p_gfp: Material<Plasmid>,
+) -> (
+  strain: Material<Strain>,
+  plate: Material<Plate>,
+):
+  dependencies = [p_gfp]
+  cells <- provision DH5alpha
+  strain, culture <- transform reporter_host from dependencies into cells
+  culture <- recover culture for 1 h
+  culture <- dilute culture
+  plate <- plate culture on chloramphenicol
+  return strain, plate
+"#;
+
+    #[test]
+    fn manual_protocol_reflects_overridden_chemistry_instead_of_reference_defaults() {
+        let checked = compile_module(SOURCE).unwrap();
+        let protocol = PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
+        let plan = plan_build(&protocol, &Ot2TargetProfile::default()).unwrap();
+        let manual = render_manual_protocol(&plan);
+
+        assert!(
+            manual.contains("Run 40 cycles"),
+            "overridden assembly_cycles must reach the manual instead of the reference default of 75"
+        );
+        assert!(!manual.contains("Run 75 cycles"));
+        assert!(
+            manual.contains("**30 µL**"),
+            "overridden reaction_volume must reach the manual instead of the reference default of 20 µL"
+        );
+        assert!(
+            manual.contains("heat shock at 45 °C"),
+            "overridden heat_shock_temperature must reach the manual instead of the reference default of 42 °C"
+        );
+        assert!(!manual.contains("heat shock at 42 °C"));
+        assert!(
+            manual.contains("| 6 |"),
+            "overridden colony_volume must reach the plating table instead of the reference default of 4"
+        );
+    }
 }

@@ -105,7 +105,6 @@ pub(crate) mod attributes {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn u32_attr(context: &Context, value: u32) -> IntegerAttr {
         IntegerAttr::new(
             IntegerType::get(context, 32, Signedness::Unsigned),
