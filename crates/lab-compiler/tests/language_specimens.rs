@@ -59,6 +59,80 @@ fn plasmid_design_compiles_through_the_portable_module_boundary() {
     );
 }
 
+/// The specimen that carries the type system's whole argument: a circuit
+/// generic over its trigger, a panel that forgets which trigger, and a
+/// characterization that refuses to.
+#[test]
+fn sensor_panel_compiles_roles_generics_and_forgotten_arguments() {
+    let module = module_ir("sensor-panel.lab");
+    let declarations = module["declarations"].as_array().unwrap();
+
+    // The circuit introduces its parameters inside its own signature.
+    let circuit = declarations
+        .iter()
+        .find(|declaration| declaration["kind"] == "circuit")
+        .unwrap();
+    assert_eq!(circuit["parameters"][0], "Trigger");
+    assert_eq!(circuit["parameters"][1], "Product");
+    assert_eq!(circuit["bounds"]["Trigger"]["name"], "Signal");
+    assert_eq!(circuit["bounds"]["Product"]["name"], "Protein");
+
+    // Two circuits with different triggers and the same product.
+    for (name, trigger) in [
+        ("tet_reporter", "Tetracycline"),
+        ("ara_reporter", "Arabinose"),
+    ] {
+        let binding = declarations
+            .iter()
+            .find(|declaration| {
+                declaration["kind"] == "binding" && declaration["targets"][0]["name"] == name
+            })
+            .unwrap_or_else(|| panic!("missing {name}"));
+        let ty = &binding["targets"][0]["type"];
+        assert_eq!(ty["name"], "Circuit");
+        assert_eq!(ty["arguments"][0]["name"], trigger);
+        assert_eq!(ty["arguments"][1]["name"], "GreenFluorescentProtein");
+    }
+
+    // The panel forgets the trigger and pins the product.
+    let panel = declarations
+        .iter()
+        .find(|declaration| {
+            declaration["kind"] == "binding" && declaration["targets"][0]["name"] == "panel"
+        })
+        .unwrap();
+    let element = &panel["targets"][0]["type"]["element"];
+    assert_eq!(element["arguments"][0]["kind"], "any");
+    assert_eq!(element["arguments"][0]["role"], "Signal");
+    assert_eq!(element["arguments"][1]["name"], "GreenFluorescentProtein");
+
+    // Characterization keeps the signal named, which is what links its operands.
+    let characterize = declarations
+        .iter()
+        .find(|declaration| declaration["name"] == "characterize")
+        .unwrap();
+    assert_eq!(characterize["parameters"][0], "S");
+    assert_eq!(characterize["bounds"]["S"]["name"], "Signal");
+
+    // A role declared by a standard module written in Lab bounds a type the
+    // specimen declares itself.
+    let reading = declarations
+        .iter()
+        .find(|declaration| declaration["name"] == "Reading")
+        .unwrap();
+    assert_eq!(reading["category"], "observation");
+    assert_eq!(reading["bounds"]["Of"]["name"], "Reporter");
+    assert!(
+        module["imports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|import| import["module"] == "std.bio.reporters"),
+        "{:?}",
+        module["imports"]
+    );
+}
+
 #[test]
 fn plasmid_build_compiles_typed_effects_and_reactive_handlers() {
     let module = module_ir("plasmid-build.lab");

@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use lab_compiler::backend::opentrons_ot2::{Ot2TargetProfile, compile_dependency_build};
 use lab_compiler::planning::BuildInventory;
-use lab_compiler::{PortableLairProgram, compile_module};
+use lab_compiler::{
+    DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
+};
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{CompiledProject, LOCK_FILE, LabProject};
 use serde::Serialize;
@@ -65,7 +67,26 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
     if path.is_file() && path.extension().is_some_and(|extension| extension == "lab") {
         let text = fs::read_to_string(&path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        compile_module(&text).with_context(|| format!("failed to check {}", path.display()))?;
+        // A single file is analyzed rather than compiled, so a failure arrives
+        // as a diagnostic with source ranges instead of a byte offset in a
+        // message. Each one is rendered against the source; the returned error
+        // is only the summary, so the excerpts are not printed inside it.
+        let analysis = analyze_module(SourceId::new(path.display().to_string()), &text);
+        if !analysis.is_valid() {
+            for diagnostic in &analysis.diagnostics {
+                eprintln!("{}\n", render_diagnostic(&text, diagnostic));
+            }
+            let errors = analysis
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+                .count();
+            bail!(
+                "could not check {} ({errors} error{})",
+                path.display(),
+                if errors == 1 { "" } else { "s" }
+            );
+        }
         return output.success(
             "checked",
             FileChecked {

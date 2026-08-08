@@ -9,6 +9,7 @@ use crate::checked::{CheckedField, CheckedType};
 #[serde(rename_all = "snake_case")]
 pub enum ExportKind {
     Type,
+    Role,
     Value,
     Function,
     Action,
@@ -23,7 +24,34 @@ pub struct ModuleExport {
     pub r#type: Option<CheckedType>,
     pub callable: Option<CallableSignature>,
     pub fields: BTreeMap<String, CheckedType>,
+    /// For a type export, the roles it plays. Membership is part of a type's
+    /// public surface: an importer cannot satisfy a bound without it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<String>,
+    /// Type parameters and their bounds, for a type or a callable alike.
+    ///
+    /// Without these an importer cannot tell a parameter apart from a nominal
+    /// type that happens to share its name, so anything generic would only be
+    /// generic inside the module that declared it.
+    #[serde(default, skip_serializing_if = "TypeParameters::is_empty")]
+    pub parameters: TypeParameters,
     pub documentation: String,
+}
+
+/// The type parameters a declaration takes, in declaration order, with whatever
+/// each is bounded by.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeParameters {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub names: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub bounds: BTreeMap<String, CheckedType>,
+}
+
+impl TypeParameters {
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty() && self.bounds.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

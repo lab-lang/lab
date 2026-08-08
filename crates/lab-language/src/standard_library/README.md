@@ -16,6 +16,27 @@ checker special cases.
   standard module.
 - `lab/` mirrors the `std.lab.*` namespace, with one registration file per
   standard module.
+- `authored/` holds standard modules written in Lab rather than in Rust.
+
+## Modules written in Lab
+
+A standard module whose whole surface is expressible in Lab lives in
+`authored/` as ordinary source. `AUTHORED_SOURCES` lists them in the order they
+compile: each may import the ones before it and nothing after, so the bootstrap
+is a straight line rather than a graph to resolve. They compile once for the
+life of the process behind a `OnceLock`, against a `StandardLibrary` holding
+only the Rust modules and their already-compiled predecessors — which is what
+keeps building a checker from re-entering the bootstrap. Every later
+`StandardLibrary::bundled()` pays one atomic refcount for them.
+
+An importer resolves such a module through its `ModuleInterface`, exactly as it
+resolves a module from a package, so nothing in the checker distinguishes them.
+
+What a module must stay in Rust for: pure functions, durable action contracts,
+and inventory constructors have no source declaration form. That is why
+`std.bio.parts` has not moved — three of its five values are expressible as
+`part("B0034")`, but `pTet: Promoter<Tetracycline>` needs a typed constructor
+Lab cannot yet declare.
 
 A `StandardModule` owns all of its exported type specifications, values, pure
 functions, constructors, and durable actions. Type specifications carry

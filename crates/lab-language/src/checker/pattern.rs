@@ -3,7 +3,7 @@
 use crate::ast::Pattern;
 use crate::checked::{CheckedPattern, CheckedPatternField};
 use crate::semantic_error::SemanticError;
-use crate::type_system::{Ty, compatible};
+use crate::type_system::Ty;
 
 use super::Checker;
 
@@ -16,7 +16,7 @@ impl Checker {
         let expected_parent = self.cases.get(&case).ok_or_else(|| {
             SemanticError::new(path.span, format!("unknown outcome case '{case}'"))
         })?;
-        if !compatible(&Ty::named(expected_parent), matched) {
+        if !self.compatible(&Ty::named(expected_parent), matched) {
             return Err(SemanticError::new(
                 path.span,
                 format!("case '{case}' does not belong to {matched}"),

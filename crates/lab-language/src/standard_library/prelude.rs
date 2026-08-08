@@ -40,12 +40,12 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
             ])
             .documented("A backend-neutral plasmid design."),
         TypeSpec::nominal("Promoter").parameters(1),
-        TypeSpec::nominal("Protein"),
+        TypeSpec::role("Protein").documented("A gene product a coding sequence expresses."),
         TypeSpec::nominal("Reason"),
         TypeSpec::nominal("Rejected").parameters(1),
         TypeSpec::nominal("RestrictionEnzyme"),
         TypeSpec::nominal("Screening").with_fields([("clones", named("CloneSet"))]),
-        TypeSpec::nominal("Signal"),
+        TypeSpec::role("Signal").documented("A molecule or condition a circuit responds to."),
         TypeSpec::nominal("Strain")
             .with_fields([
                 ("chassis", named("Chassis")),

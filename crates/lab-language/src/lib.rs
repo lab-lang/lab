@@ -26,18 +26,18 @@ pub use checked::{
 };
 pub use diagnostics::{
     Analysis, Diagnostic, DiagnosticCode, DiagnosticRelatedInformation, DiagnosticSeverity,
-    SourceId, analyze_module, analyze_module_in_environment,
+    SourceId, analyze_module, analyze_module_in_environment, render_diagnostic,
 };
 pub use error::ParseError;
 pub use material_flow::MaterialFlowError;
 pub use parser::parse_module;
 pub use render::render_checked_module;
-pub use semantic_error::{ModuleError, SemanticError};
+pub use semantic_error::{ModuleError, RelatedSpan, SemanticError};
 pub use semantics::{
     CallableSignature, DefinitionId, ExportKind, ModuleExport, ModuleId, ModuleInterface,
-    SemanticEnvironment,
+    SemanticEnvironment, TypeParameters,
 };
-pub use source::{Identifier, Span, Spanned};
+pub use source::{Identifier, LineIndex, Span, Spanned};
 
 /// Generate reference documentation from the same Rust specifications used by
 /// name resolution and type checking.
@@ -67,6 +67,27 @@ pub fn compile_module_in_environment(
 ) -> Result<CheckedModule, ModuleError> {
     let module = parse_module(source)?;
     compile_parsed_module(module_id, environment, &module)
+}
+
+/// Compile against an explicitly supplied standard library.
+///
+/// Only the standard library's own bootstrap needs this: a module written in
+/// Lab must compile against the modules that precede it, not against a library
+/// that is still being built.
+pub(crate) fn compile_module_with_library(
+    module_id: ModuleId,
+    source: &str,
+    library: standard_library::StandardLibrary,
+) -> Result<CheckedModule, ModuleError> {
+    let module = parse_module(source)?;
+    let checked = checker::check_module_with_library(
+        module_id,
+        &SemanticEnvironment::default(),
+        &module,
+        library,
+    )?;
+    material_flow::verify_module(&checked)?;
+    Ok(checked)
 }
 
 fn compile_parsed_module(

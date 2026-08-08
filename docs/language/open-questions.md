@@ -18,9 +18,15 @@ The explicit `<-` boundary currently makes durable external work visible and kee
 
 Sequential effects and independent `when` handlers are represented. Syntax for starting several physical actions together, joining them, races, timeouts, and explicit cancellation is not settled. Cancellation must distinguish stopping a subscription from attempting to cancel an already-dispatched physical action.
 
+## Declaring pure functions and typed identities in source
+
+A standard module written in Lab can declare roles, membership, and data types; `std.bio.reporters` is written that way. Three things have no source declaration form, and a module needing any of them stays in Rust: pure functions such as `dna` and `sites`, durable action contracts, and typed external identities.
+
+The third is the sharpest, because it is what blocks the biological catalog from moving. `part("pTet")` returns `Part`, so a catalogue entry of type `Promoter<Tetracycline>` cannot be written at all. Three of `std.bio.parts`' five values are ordinary constructor calls; the two typed promoters and coding sequences are not. Resolving this needs either generic pure functions, a type-directed reading of a constructor's result, or a declaration form for an external identity that carries its own type.
+
 ## Parts and biological catalogs
 
-`std.bio.inventory` now provides typed constructors for external part, backbone, enzyme, chassis, and antibiotic identities. This is not yet authoring syntax for declaring a part's biological kind, sequence, provenance, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
+`std.bio.inventory` now provides typed constructors for external part, backbone, enzyme, chassis, and antibiotic identities, and roles give a source form for the biological relationships a part participates in. This is not yet authoring syntax for declaring a part's sequence, provenance, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
 
 ## Property schemas and target contracts
 

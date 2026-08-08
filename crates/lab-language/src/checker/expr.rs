@@ -7,11 +7,10 @@ use crate::checked::{CheckedArgument, CheckedExpression, CheckedFieldValue, Type
 use crate::semantic_error::SemanticError;
 use crate::source::Span;
 use crate::standard_library::ConstructorSpec;
-use crate::type_system::{
-    Ty, common_type, comparable, compatible, substitute, to_checked_type, unify,
-};
+use crate::type_system::{Substitutions, Ty, substitute, to_checked_type};
 
 use super::Checker;
+use super::context::Generics;
 
 impl Checker {
     pub fn lower_checked_expr(
@@ -154,7 +153,7 @@ impl Checker {
                 let mut element_type = self.infer_expr(first, environment)?;
                 for element in &elements[1..] {
                     let found = self.infer_expr(element, environment)?;
-                    element_type = common_type(element_type, found);
+                    element_type = self.common_type(element_type, found);
                 }
                 Ok(Ty::List(Box::new(element_type)))
             }
@@ -215,7 +214,7 @@ impl Checker {
                     | BinaryOp::LessEqual
                     | BinaryOp::Greater
                     | BinaryOp::GreaterEqual => {
-                        if comparable(&left, &right) {
+                        if self.comparable(&left, &right) {
                             Ok(Ty::Bool)
                         } else {
                             Err(SemanticError::new(
@@ -225,19 +224,19 @@ impl Checker {
                         }
                     }
                     BinaryOp::Add => match (&left, &right) {
-                        (Ty::List(left), Ty::List(right)) if compatible(left, right) => {
+                        (Ty::List(left), Ty::List(right)) if self.compatible(left, right) => {
                             Ok(Ty::List(left.clone()))
                         }
                         (Ty::List(left), Ty::EmptyList) => Ok(Ty::List(left.clone())),
                         (Ty::EmptyList, Ty::List(right)) => Ok(Ty::List(right.clone())),
-                        _ if comparable(&left, &right) => Ok(left),
+                        _ if self.comparable(&left, &right) => Ok(left),
                         _ => Err(SemanticError::new(
                             *span,
                             format!("cannot add {left} and {right}"),
                         )),
                     },
                     BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
-                        if comparable(&left, &right) {
+                        if self.comparable(&left, &right) {
                             Ok(left)
                         } else {
                             Err(SemanticError::new(
@@ -276,40 +275,20 @@ impl Checker {
                     ),
                 ));
             }
-            let mut substitutions = HashMap::new();
+            let mut operands = Vec::new();
             for (argument, parameter) in arguments.iter().zip(&signature.inputs) {
                 let actual = self.infer_expr(&argument.value, environment)?;
-                unify(
-                    parameter,
-                    &actual,
-                    &signature.parameters,
-                    &mut substitutions,
-                    span,
-                )?;
+                operands.push((parameter.clone(), actual, argument.value.span()));
             }
-            for (parameter, bound) in &signature.bounds {
-                let inferred = substitutions.get(parameter).ok_or_else(|| {
-                    SemanticError::new(
-                        span,
-                        format!("could not infer circuit type parameter '{parameter}'"),
-                    )
-                })?;
-                if !self.satisfies_bound(inferred, bound) {
-                    return Err(SemanticError::new(
-                        span,
-                        format!(
-                            "circuit type parameter '{parameter}' requires {bound}, found {inferred}"
-                        ),
-                    ));
-                }
-            }
+            let substitutions =
+                self.infer_type_arguments(&signature.generics, &operands, "circuit", &name, span)?;
             return Ok(substitute(&signature.output, &substitutions));
         }
         if let Some(function) = self.pure_functions.get(&name) {
             let actual =
                 self.require_call_arguments(arguments, function.parameters.len(), environment)?;
             for (actual, expected) in actual.iter().zip(&function.parameters) {
-                if !compatible(actual, expected) {
+                if !self.compatible(actual, expected) {
                     return Err(SemanticError::new(
                         span,
                         format!(
@@ -439,7 +418,7 @@ impl Checker {
                 ));
             }
             let actual = self.infer_expr(&field.value, environment)?;
-            if !compatible(&actual, expected_type) {
+            if !self.compatible(&actual, expected_type) {
                 return Err(SemanticError::new(
                     field.value.span(),
                     format!(
@@ -535,8 +514,98 @@ impl Checker {
         }
     }
 
+    /// Infer a callable's type arguments from its operands and check each
+    /// against its bound.
+    ///
+    /// Circuits and workflows are called through different syntax but are
+    /// generic in the same way, so they share this rather than each carrying
+    /// their own copy of the rule.
+    pub fn infer_type_arguments(
+        &self,
+        generics: &Generics,
+        operands: &[(Ty, Ty, Span)],
+        kind: &str,
+        name: &str,
+        span: Span,
+    ) -> Result<Substitutions, SemanticError> {
+        let mut substitutions = Substitutions::new();
+        for (expected, actual, operand) in operands {
+            self.unify(
+                expected,
+                actual,
+                &generics.parameters,
+                &mut substitutions,
+                *operand,
+            )
+            .map_err(|error| {
+                error.help(format!(
+                    "{kind} '{name}' declares this operand as {expected}"
+                ))
+            })?;
+        }
+        for parameter in &generics.parameters {
+            let Some(bound) = generics.bounds.get(parameter) else {
+                continue;
+            };
+            let Some((inferred, operand)) = substitutions.get(parameter) else {
+                return Err(SemanticError::new(
+                    span,
+                    format!("could not infer '{parameter}' for {kind} '{name}'"),
+                ));
+            };
+            if !self.satisfies_bound(inferred, bound) {
+                return Err(self.unsatisfied_bound(
+                    inferred,
+                    bound,
+                    &format!("{kind} '{name}' requires its '{parameter}'"),
+                    *operand,
+                ));
+            }
+        }
+        Ok(substitutions)
+    }
+
+    /// The innermost pair of types that actually disagree.
+    ///
+    /// A mismatch deep inside two large types otherwise prints both and leaves
+    /// the reader to diff them; naming the part that failed is the difference
+    /// between a report and an explanation.
+    pub fn first_mismatch(&self, actual: &Ty, expected: &Ty) -> Option<(Ty, Ty)> {
+        if self.compatible(actual, expected) {
+            return None;
+        }
+        let inner = match (actual, expected) {
+            (Ty::List(actual), Ty::List(expected)) => self.first_mismatch(actual, expected),
+            // One bad alternative is what sinks a union, so report that one.
+            (Ty::Union(alternatives), expected) if !matches!(expected, Ty::Union(_)) => {
+                alternatives
+                    .iter()
+                    .find(|alternative| !self.compatible(alternative, expected))
+                    .and_then(|alternative| self.first_mismatch(alternative, expected))
+            }
+            (
+                Ty::Named(actual_name, actual_arguments),
+                Ty::Named(expected_name, expected_arguments),
+            ) if actual_name == expected_name
+                && actual_arguments.len() == expected_arguments.len() =>
+            {
+                actual_arguments
+                    .iter()
+                    .zip(expected_arguments)
+                    .find_map(|(actual, expected)| self.first_mismatch(actual, expected))
+            }
+            _ => None,
+        };
+        Some(inner.unwrap_or_else(|| (actual.clone(), expected.clone())))
+    }
+
+    /// Whether a type may stand for a parameter bounded by `bound`.
+    ///
+    /// A bound is satisfied by being the type itself or by playing it as a
+    /// role. Membership declared in source and membership built into the
+    /// standard library are the same relation, so both are read from one map.
     pub fn satisfies_bound(&self, actual: &Ty, bound: &Ty) -> bool {
-        if compatible(actual, bound) {
+        if self.compatible(actual, bound) {
             return true;
         }
         let (Ty::Named(actual, actual_arguments), Ty::Named(bound, bound_arguments)) =
@@ -547,9 +616,9 @@ impl Checker {
         actual_arguments.is_empty()
             && bound_arguments.is_empty()
             && self
-                .standard_types
+                .type_roles
                 .get(actual)
-                .is_some_and(|spec| spec.implements.contains(&bound.as_str()))
+                .is_some_and(|roles| roles.contains(bound))
     }
 
     pub fn resolve_action_operand(
@@ -573,6 +642,10 @@ impl Checker {
     pub fn type_contains_material(&self, ty: &Ty, visiting: &mut BTreeSet<String>) -> bool {
         match ty {
             Ty::Named(name, _) if name == "Material" => true,
+            // A forgotten argument is a role tag, never a material. Packing
+            // `Material<Tetracycline>` into `Material<any Signal>` leaves the
+            // `Material` wrapper in place, so ownership is unaffected.
+            Ty::Any(_) => false,
             Ty::List(element) => self.type_contains_material(element, visiting),
             Ty::Union(alternatives) => alternatives
                 .iter()

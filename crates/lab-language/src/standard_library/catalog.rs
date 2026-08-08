@@ -1,8 +1,11 @@
 //! Immutable catalog and validation for bundled standard-library modules.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
+
+use crate::semantics::{ExportKind, ModuleId, ModuleInterface};
 
 use crate::standard_library::contract::ActionContractSpec;
 use crate::type_system::Ty;
@@ -13,6 +16,9 @@ pub(crate) struct TypeSpec {
     pub parameters: usize,
     pub fields: BTreeMap<&'static str, Ty>,
     pub implements: Vec<&'static str>,
+    /// Whether this name classifies types rather than describing values. A role
+    /// may bound a type parameter and may not be the type of anything.
+    pub role: bool,
     pub documentation: &'static str,
 }
 
@@ -23,7 +29,16 @@ impl TypeSpec {
             parameters: 0,
             fields: BTreeMap::new(),
             implements: Vec::new(),
+            role: false,
             documentation: "",
+        }
+    }
+
+    /// A part types can play, such as `Signal`.
+    pub(crate) fn role(name: &'static str) -> Self {
+        Self {
+            role: true,
+            ..Self::nominal(name)
         }
     }
 
@@ -277,18 +292,62 @@ impl StandardModule {
     }
 }
 
+/// Standard modules written in Lab, in the order they compile. Each may import
+/// the ones before it and nothing after, so the bootstrap is a straight line
+/// rather than a graph to resolve.
+const AUTHORED_SOURCES: &[(&str, &str)] =
+    &[("std.bio.reporters", include_str!("authored/reporters.lab"))];
+
+static AUTHORED: OnceLock<Arc<BTreeMap<&'static str, ModuleInterface>>> = OnceLock::new();
+
+/// Compile the Lab-written standard modules once for the life of the process.
+///
+/// A checker is built for every module compiled, so doing this eagerly on each
+/// one would recompile the standard library per keystroke in an editor.
+fn authored_modules() -> Arc<BTreeMap<&'static str, ModuleInterface>> {
+    AUTHORED
+        .get_or_init(|| {
+            let mut compiled: BTreeMap<&'static str, ModuleInterface> = BTreeMap::new();
+            for (path, source) in AUTHORED_SOURCES {
+                let library = StandardLibrary::native(Arc::new(compiled.clone()));
+                let module =
+                    crate::compile_module_with_library(ModuleId::new(*path), source, library)
+                        .unwrap_or_else(|error| {
+                            panic!("bundled module '{path}' must compile: {error}")
+                        });
+                compiled.insert(path, module.interface);
+            }
+            Arc::new(compiled)
+        })
+        .clone()
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct StandardLibrary {
     modules: BTreeMap<&'static str, StandardModule>,
+    /// Standard modules written in Lab rather than in Rust. They arrive as
+    /// checked interfaces, so an importer resolves them exactly as it resolves
+    /// a module from a package.
+    authored: Arc<BTreeMap<&'static str, ModuleInterface>>,
 }
 
 impl StandardLibrary {
     pub(crate) fn bundled() -> Self {
+        Self::native(authored_modules())
+    }
+
+    /// The Rust-defined modules, together with whichever Lab-defined ones are
+    /// ready. Compiling a Lab-defined module uses this with only its
+    /// predecessors, which is what keeps the bootstrap from recursing.
+    fn native(authored: Arc<BTreeMap<&'static str, ModuleInterface>>) -> Self {
         let modules = crate::standard_library::prelude::modules()
             .into_iter()
             .chain(crate::standard_library::bio::modules())
             .chain(crate::standard_library::lab::modules());
-        Self::from_modules(modules).expect("bundled standard-library catalog must be valid")
+        let mut library =
+            Self::from_modules(modules).expect("bundled standard-library catalog must be valid");
+        library.authored = authored;
+        library
     }
 
     fn from_modules(
@@ -323,11 +382,19 @@ impl StandardLibrary {
             }
             indexed.insert(module.path, module);
         }
-        Ok(Self { modules: indexed })
+        Ok(Self {
+            modules: indexed,
+            authored: Arc::new(BTreeMap::new()),
+        })
     }
 
     pub(crate) fn module(&self, path: &str) -> Option<&StandardModule> {
         self.modules.get(path)
+    }
+
+    /// The checked interface of a standard module written in Lab.
+    pub(crate) fn authored_module(&self, path: &str) -> Option<&ModuleInterface> {
+        self.authored.get(path)
     }
 
     pub(crate) fn prelude_modules(&self) -> impl Iterator<Item = &StandardModule> {
@@ -362,6 +429,31 @@ impl StandardLibrary {
 
     pub(crate) fn render_markdown(&self) -> String {
         let mut output = String::from("# Lab standard library\n\n");
+        for (path, interface) in self.authored.iter() {
+            output.push_str(&format!("## `{path}`\n\nWritten in Lab.\n\n"));
+            if !interface.documentation.is_empty() {
+                output.push_str(&interface.documentation);
+                output.push_str("\n\n");
+            }
+            for (name, export) in &interface.exports {
+                let kind = match export.kind {
+                    ExportKind::Role => "role",
+                    ExportKind::Type => "type",
+                    ExportKind::Workflow => "workflow",
+                    ExportKind::Function => "circuit",
+                    _ => "value",
+                };
+                output.push_str(&format!("- {kind} `{name}`"));
+                if !export.roles.is_empty() {
+                    output.push_str(&format!(" is {}", export.roles.join(", ")));
+                }
+                if !export.documentation.is_empty() {
+                    output.push_str(&format!(": {}", export.documentation));
+                }
+                output.push('\n');
+            }
+            output.push('\n');
+        }
         for module in self.modules.values() {
             output.push_str(&format!("## `{}`\n\n", module.path));
             if !module.documentation.is_empty() {
@@ -568,5 +660,54 @@ mod tests {
         assert!(docs.contains("type `Plasmid`"));
         assert!(docs.contains("function `dna`"));
         assert!(docs.contains("action `transform`"));
+    }
+
+    /// A module written in Lab documents itself from its own source, so its
+    /// reference entry comes from the same text a reader sees in the file.
+    #[test]
+    fn renders_reference_docs_for_modules_written_in_lab() {
+        let docs = StandardLibrary::bundled().render_markdown();
+        assert!(docs.contains("## `std.bio.reporters`"), "{docs}");
+        assert!(docs.contains("Written in Lab."), "{docs}");
+        assert!(docs.contains("role `Reporter`"), "{docs}");
+        assert!(
+            docs.contains("type `Fluorescence` is Reporter"),
+            "membership is part of the published surface: {docs}"
+        );
+        assert!(
+            docs.contains("read by a plate reader"),
+            "the declaration's own documentation travels: {docs}"
+        );
+    }
+
+    #[test]
+    fn a_module_written_in_lab_exports_its_roles_and_their_members() {
+        let library = StandardLibrary::bundled();
+        let interface = library
+            .authored_module("std.bio.reporters")
+            .expect("the bundled Lab modules compiled");
+
+        assert_eq!(interface.exports["Reporter"].kind, ExportKind::Role);
+        assert_eq!(interface.exports["Fluorescence"].kind, ExportKind::Type);
+        assert_eq!(interface.exports["Fluorescence"].roles, ["Reporter"]);
+        assert!(
+            interface
+                .documentation
+                .starts_with("Reporters and the readouts"),
+            "{}",
+            interface.documentation
+        );
+    }
+
+    /// The bootstrap must not depend on being called from a particular place:
+    /// compiling any module builds a checker, which builds the library.
+    #[test]
+    fn a_user_module_may_import_a_standard_module_written_in_lab() {
+        let module = crate::compile_module(
+            "use std.bio.reporters\n\nrole Inducer\n\nworkflow read(\n  design: Circuit<any Inducer, Fluorescence>,\n) -> Circuit<any Inducer, Fluorescence>:\n  return design\n",
+        )
+        .expect("a Lab-written standard module resolves like any other import");
+        assert_eq!(module.imports[0].module, "std.bio.reporters");
+        assert_eq!(module.imports[0].provider, "builtin-standard-library");
     }
 }

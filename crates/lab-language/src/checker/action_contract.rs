@@ -12,7 +12,7 @@ use crate::semantic_error::SemanticError;
 use crate::semantics::DefinitionId;
 use crate::source::Span;
 use crate::standard_library::{ActionContractSpec, ContractType, PhrasePart};
-use crate::type_system::{Ty, compatible, to_checked_type};
+use crate::type_system::{Ty, to_checked_type};
 
 use super::Checker;
 
@@ -138,7 +138,13 @@ impl Checker {
                     }
                 } else {
                     let expected = resolve_contract_type(r#type, operands, effect.span)?;
-                    require_action_type(actual.clone(), expected, effect.span, contract.operation)?;
+                    require_action_type(
+                        self,
+                        actual.clone(),
+                        expected,
+                        effect.span,
+                        contract.operation,
+                    )?;
                 }
                 operands.insert((*name).to_owned(), actual.clone());
                 arguments.push(CheckedActionArgument {
@@ -325,12 +331,13 @@ pub(super) fn checked_integer_literal(
 }
 
 pub(super) fn require_action_type(
+    checker: &Checker,
     actual: Ty,
     expected: Ty,
     span: Span,
     operation: &str,
 ) -> Result<(), SemanticError> {
-    if compatible(&actual, &expected) {
+    if checker.compatible(&actual, &expected) {
         Ok(())
     } else {
         Err(SemanticError::new(

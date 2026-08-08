@@ -31,8 +31,19 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
                 requirements.len(),
                 acceptance.len()
             )),
-            CheckedDeclaration::Data { category, name, .. } => {
-                output.push_str(&format!("  - {category} {name}\n"))
+            CheckedDeclaration::Role { name, .. } => output.push_str(&format!("  - role {name}\n")),
+            CheckedDeclaration::Data {
+                category,
+                name,
+                roles,
+                ..
+            } => {
+                let played = if roles.is_empty() {
+                    String::new()
+                } else {
+                    format!(" is {}", roles.join(", "))
+                };
+                output.push_str(&format!("  - {category} {name}{played}\n"))
             }
             CheckedDeclaration::Workflow { name, outputs, .. } => {
                 let rendered = if let [result] = outputs.as_slice()

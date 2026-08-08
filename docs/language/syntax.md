@@ -53,13 +53,14 @@ The kernel keeps orchestration mechanics distinct from domain operations:
 | Modules | `use` |
 | Biological declarations | `part`, `circuit`, `plasmid`, `strain` |
 | Laboratory data declarations | `record`, `material`, `observation`, `evidence`, `event`, `outcome` |
+| Classification | `role`, `is`, `any` |
 | Orchestration declarations | `workflow`, `state` |
-| Signatures and contracts | `input`, `output`, `require`, `accept` |
+| Signatures and contracts | `require`, `accept` |
 | Control | `if`, `else`, `for`, `in`, `match`, `case`, `return` |
 | Reactive control | `when`, `every`, `after`, `emit` |
 | Boolean operators | `and`, `or`, `not` |
 
-Most of these are contextual: for example, `input` and `output` describe circuit ports. Workflow parameters and results instead form a callable signature in the declaration header. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
+Most of these are contextual. Circuits and workflows both declare a callable signature in their header, so neither has `input` or `output` lines. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
 
 The core punctuation has one job each:
 
@@ -71,11 +72,127 @@ The core punctuation has one job each:
 | `(...)` | call or group |
 | `[...]` | collection literal |
 | `<...>` | type arguments |
+| `Name: Role` inside `<...>` | introduce a type parameter |
+| `any Role` inside `<...>` | a type argument deliberately forgotten |
+| `is` after a declaration name | the roles that type plays |
 | `=` | deterministic evaluation or state transition |
 | `<-` | durable physical or external effect |
-| `->` | workflow result declaration |
+| `->` | circuit or workflow result declaration |
 | `==`, `!=`, `<`, `<=`, `>`, `>=` | comparison |
 | `+`, `-`, `*`, `/`, `..` | arithmetic, composition, or range operations selected by types |
+
+## Roles and type parameters
+
+A **role** is a name that types can play. It classifies types and has no values
+of its own, which is why it may bound a type parameter and may never be the type
+of anything.
+
+```lab
+role Inducer
+
+record Arabinose is Inducer
+record Tetracycline is Inducer
+```
+
+`Signal` and `Protein` are roles the prelude already declares, so a module
+declares its own rather than redeclaring those. A role takes no block. Its members are declared by the types that play it, so a
+package can classify its own types against a role it imported, and a role stays
+open to types that do not exist yet. Writing a role where a type belongs is an
+error that names both ways forward:
+
+```
+error: 'Signal' is a role, not a type
+  |
+6 |   used: Signal
+  |         ^^^^^^
+  |
+  = help: name it, and everything using that name must agree: <T: Signal>
+  = help: or name a type that plays Signal: Arabinose, Tetracycline
+```
+
+A **type parameter** is introduced where it is first needed, inside the type of
+the parameter that determines it. `Promoter<Trigger: Signal>` reads as "a
+promoter for some signal, call it Trigger":
+
+```lab
+circuit regulated_expression(
+  promoter: Promoter<Trigger: Signal>,
+  coding: CDS<Product: Protein>,
+) -> Circuit<Trigger, Product>:
+  layout:
+    promoter
+    coding
+```
+
+Naming a parameter is what links its occurrences. A workflow that takes both a
+design and the reagent it responds to says so by using one name twice, and the
+compiler then refuses the wrong reagent:
+
+```lab
+workflow characterize(
+  design: Circuit<S: Signal, GreenFluorescentProtein>,
+  inducer: Material<S>,
+) -> (
+  design: Circuit<S, GreenFluorescentProtein>,
+  inducer: Material<S>,
+):
+  return design, inducer
+```
+
+```
+error: 'S' cannot be both Tetracycline and Arabinose
+   |
+22 |   design, inducer <- characterize tet_reporter arabinose_stock
+   |                                   ^^^^^^^^^^^^ this fixes S = Tetracycline
+   |                                                ^^^^^^^^^^^^^^^ this requires S = Arabinose
+```
+
+Reading order and binding order are the same. The first occurrence of a name
+introduces it; introducing it twice, or using it before it is introduced, is an
+error rather than something a later pass resolves. A data declaration keeps a
+header instead — `record Sensor<T: Signal>:` — because its parameter appears in
+field types, where there is no argument position to introduce it at.
+
+## Forgetting a type argument
+
+`any Role` is a type argument whose identity has been discarded. A concrete type
+flows into it whenever it plays that role, and never back out:
+
+```lab
+panel: List<Circuit<any Signal, GreenFluorescentProtein>> = [tet_reporter, ara_reporter]
+```
+
+The asymmetry is the information. In a panel the trigger varies and the product
+is pinned, because two readings only mean something side by side when they
+measure the same thing. Varying the pinned position is refused:
+
+```
+error: binding has type List<Circuit<Arabinose, GreenFluorescentProtein> | Circuit<Arabinose, Luciferase>>,
+       but annotation requires List<Circuit<any Signal, GreenFluorescentProtein>>
+  = help: 'Luciferase' does not fit 'GreenFluorescentProtein'
+```
+
+`any Role` is legal only as a type argument. A value cannot *be* a signal, only
+carry one, so `x: any Signal` is rejected and `Material<any Signal>` is not.
+
+Forgetting happens only where an annotation asks for it. An unannotated list of
+mixed circuits infers a union, which preserves the alternatives; turning that
+into `any` is a deliberate act the author writes down. The two describe genuinely
+different things — a union says "one of these specific things, and you may
+`match` to find out which", an existential says "something that plays this role,
+and the question is not answerable".
+
+Which is why a forgotten argument cannot be recovered by naming it:
+
+```
+error: 'S' cannot be inferred from a forgotten type
+  = help: 'any Signal' means some Signal, deliberately not recorded
+  = help: there is nothing here for the other uses of 'S' to be matched against
+```
+
+That is not an awkwardness of the type system. A list of circuits with different
+triggers has, by construction, no inducer that works for all of them.
+[`semantics.md`](semantics.md) describes where the forgetting belongs instead.
 
 ## Bindings
 
@@ -96,9 +213,13 @@ strain, culture <- transform reporter_host from plasmids into cells
 
 The phrase after `<-` is resolved through an imported action contract. The contract—not a verb-specific parser rule—determines operand slots, ownership, result types, and required capability.
 
-## Workflow signatures
+## Callable signatures
 
-Workflow inputs and results are part of the declaration signature. A workflow with one result names its type directly:
+Circuits and workflows are both called, so both declare a callable signature in
+their header rather than inside their block. A circuit's block holds only what
+it is built from; a workflow's holds its state and statements.
+
+A declaration with one result names its type directly:
 
 ```lab
 workflow preserve_sample(
@@ -121,11 +242,24 @@ workflow preserve_build(
   return product, plate
 ```
 
-Parentheses are required for workflow parameters, including for a zero-input workflow, and an explicit result declaration after `->` is mandatory. Parameters and named results are comma-separated typed fields and may span lines with a trailing comma. A multi-value `return` is comma-separated and must match the declared result arity and types. `-> None` with `return None` is the no-information form; `-> ()` is rejected. The indented body contains state and executable statements—not interface declarations.
+Parentheses are required for parameters, including for a zero-input workflow, and an explicit result declaration after `->` is mandatory. Parameters and named results are comma-separated typed fields and may span lines with a trailing comma. A multi-value `return` is comma-separated and must match the declared result arity and types. `-> None` with `return None` is the no-information form; `-> ()` is rejected. The indented body contains state and executable statements—not interface declarations.
+
+Only workflows take named result lists. A circuit produces one value:
+
+```lab
+circuit regulated_expression(
+  promoter: Promoter<Trigger: Signal>,
+  coding: CDS<Product: Protein>,
+) -> Circuit<Trigger, Product>:
+  layout:
+    promoter
+    coding
+```
 
 ## Laboratory declarations
 
 ```text
+role         a part types can play, such as Signal or Reporter
 part         reusable biological part
 circuit      reusable biological organization
 plasmid      physical artifact design

@@ -258,3 +258,36 @@ fn a_target_build_rejects_a_profile_that_does_not_exist() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(stderr.contains("no target profile at"), "{stderr}");
 }
+
+#[test]
+fn checking_one_file_underlines_the_source_rather_than_naming_byte_offsets() {
+    let source = temporary_project().with_extension("lab");
+    std::fs::write(
+        &source,
+        "workflow grow() -> Integer:\n  return 1\n\nworkflow grow() -> Integer:\n  return 2\n",
+    )
+    .unwrap();
+
+    let output = run(&["check", source.to_str().unwrap()]);
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+        stderr.contains("duplicate declaration 'grow'"),
+        "the headline names the mistake:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("4 | workflow grow() -> Integer:") && stderr.contains("  |          ^^^^"),
+        "the offending line is excerpted and underlined:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("'grow' is already declared here"),
+        "the first declaration is shown as well:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("at bytes"),
+        "byte offsets are not a source location:\n{stderr}"
+    );
+
+    std::fs::remove_file(&source).unwrap();
+}

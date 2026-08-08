@@ -10,7 +10,7 @@ use crate::checked::{
     CheckedState, CheckedStatement, CheckedTrigger, OwnershipMode, ResolvedAction,
 };
 use crate::semantic_error::SemanticError;
-use crate::type_system::{Ty, compatible, to_checked_type};
+use crate::type_system::{Ty, substitute, to_checked_type};
 
 use super::Checker;
 use super::action_contract;
@@ -38,7 +38,7 @@ impl Checker {
             };
             let ty = self.lower_type(&declaration.ty, &BTreeSet::new())?;
             let initial_ty = self.infer_expr(&declaration.initial, &environment)?;
-            if !compatible(&initial_ty, &ty) {
+            if !self.compatible(&initial_ty, &ty) {
                 return Err(SemanticError::new(
                     declaration.initial.span(),
                     format!("state has type {initial_ty}, but declaration requires {ty}"),
@@ -84,6 +84,13 @@ impl Checker {
         Ok(CheckedDeclaration::Workflow {
             doc: declaration.doc.clone(),
             name: declaration.name.value.clone(),
+            parameters: signature.generics.parameters.clone(),
+            bounds: signature
+                .generics
+                .bounds
+                .iter()
+                .map(|(name, bound)| (name.clone(), to_checked_type(bound)))
+                .collect(),
             inputs: declaration
                 .inputs
                 .iter()
@@ -137,7 +144,7 @@ impl Checker {
                     }
                     let (binding_ir, ty) = self.check_binding(binding, &mut environment)?;
                     if let Some(state_type) = state_types.get(&binding.names[0].value) {
-                        if !compatible(&ty, state_type) {
+                        if !self.compatible(&ty, state_type) {
                             return Err(SemanticError::new(
                                 binding.span,
                                 format!("state update expects {state_type}, found {ty}"),
@@ -192,7 +199,7 @@ impl Checker {
                         .zip(outputs)
                         .map(|(value, (name, expected))| {
                             let actual = self.infer_expr(value, &environment)?;
-                            if !compatible(&actual, expected) {
+                            if !self.compatible(&actual, expected) {
                                 return Err(SemanticError::new(
                                     value.span(),
                                     format!(
@@ -398,18 +405,24 @@ impl Checker {
         let inferred = self.infer_expr(&binding.value, environment)?;
         let ty = if let Some(annotation) = &binding.annotation {
             let declared = self.lower_type(annotation, &BTreeSet::new())?;
-            if !compatible(&inferred, &declared) {
-                return Err(SemanticError::new(
+            if !self.compatible(&inferred, &declared) {
+                let mut error = SemanticError::new(
                     binding.value.span(),
                     format!("binding has type {inferred}, but annotation requires {declared}"),
-                ));
+                );
+                if let Some((actual, expected)) = self.first_mismatch(&inferred, &declared)
+                    && (actual != inferred || expected != declared)
+                {
+                    error = error.help(format!("'{actual}' does not fit '{expected}'"));
+                }
+                return Err(error);
             }
             declared
         } else {
             inferred
         };
         if let Some(previous) = environment.get(&binding.names[0].value)
-            && !compatible(&ty, previous)
+            && !self.compatible(&ty, previous)
         {
             return Err(SemanticError::new(
                 binding.span,
@@ -469,43 +482,57 @@ impl Checker {
                 ),
             ));
         }
-        for (word, expected) in words[1..].iter().zip(&signature.inputs) {
-            let actual = self.resolve_action_operand(word, environment, effect.span)?;
-            if !compatible(&actual, expected) {
-                return Err(SemanticError::new(
-                    effect.span,
-                    format!("workflow '{operation}' expects {expected}, found {actual}"),
-                ));
-            }
+        // A workflow may be generic, so its operands both check against the
+        // declared inputs and decide what its type parameters stand for.
+        let spans = effect.words();
+        let mut operands = Vec::new();
+        for ((word, span), expected) in spans[1..].iter().zip(&signature.inputs) {
+            let actual = self.resolve_action_operand(word, environment, *span)?;
+            operands.push((expected.clone(), actual, *span));
         }
-        let results = signature.outputs.iter().map(|(_, ty)| ty.clone()).collect();
-        let arguments = words[1..]
+        let substitutions = self.infer_type_arguments(
+            &signature.generics,
+            &operands,
+            "workflow",
+            operation,
+            effect.span,
+        )?;
+
+        let inputs = signature
+            .inputs
             .iter()
-            .zip(&signature.inputs)
+            .map(|ty| substitute(ty, &substitutions))
+            .collect::<Vec<_>>();
+        let outputs = signature
+            .outputs
+            .iter()
+            .map(|(name, ty)| (name.clone(), substitute(ty, &substitutions)))
+            .collect::<Vec<_>>();
+        let results = outputs.iter().map(|(_, ty)| ty.clone()).collect();
+        let arguments = spans[1..]
+            .iter()
+            .zip(&inputs)
             .enumerate()
-            .map(|(index, (word, ty))| {
-                Ok(CheckedActionArgument {
-                    name: format!("input_{index}"),
-                    mode: if self.type_contains_material(ty, &mut BTreeSet::new()) {
-                        OwnershipMode::Take
-                    } else {
-                        OwnershipMode::Copy
-                    },
-                    value: action_contract::action_reference(
-                        self.definition_for_action_word(word),
-                        word,
-                        ty,
-                    ),
-                })
+            .map(|(index, ((word, _), ty))| CheckedActionArgument {
+                name: format!("input_{index}"),
+                mode: if self.type_contains_material(ty, &mut BTreeSet::new()) {
+                    OwnershipMode::Take
+                } else {
+                    OwnershipMode::Copy
+                },
+                value: action_contract::action_reference(
+                    self.definition_for_action_word(word),
+                    word,
+                    ty,
+                ),
             })
-            .collect::<Result<Vec<_>, SemanticError>>()?;
+            .collect::<Vec<_>>();
         Ok((
             ResolvedAction {
                 operation: format!("workflow.{operation}"),
                 capability: None,
                 arguments,
-                results: signature
-                    .outputs
+                results: outputs
                     .iter()
                     .map(|(name, ty)| super::checked_field(name, ty))
                     .collect(),

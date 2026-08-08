@@ -3,6 +3,7 @@
 //! Every expression and action operand is structured and typed. Source text is
 //! deliberately absent: later compiler passes must not reinterpret syntax.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -10,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::ast::ArtifactKind;
 use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v1";
+/// Bumped to v2 by `CheckedType::Any`: a consumer that has not been updated
+/// cannot deserialize a type it has no variant for.
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v2";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -31,10 +34,23 @@ pub struct ResolvedImport {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CheckedDeclaration {
+    /// A part types can play. It has no members of its own: membership travels
+    /// with the type that declares it, so a role stays open to types from other
+    /// packages.
+    Role {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        doc: Option<String>,
+        name: String,
+    },
     Circuit {
         doc: Option<String>,
         name: String,
         parameters: Vec<String>,
+        /// What each type parameter is constrained to, where it is constrained.
+        /// This is part of a circuit's public contract, not an internal detail
+        /// of checking it.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        bounds: BTreeMap<String, CheckedType>,
         inputs: Vec<CheckedField>,
         output: CheckedType,
         sections: Vec<CheckedSection>,
@@ -51,12 +67,27 @@ pub enum CheckedDeclaration {
         doc: Option<String>,
         category: String,
         name: String,
+        /// Type parameters in declaration order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parameters: Vec<String>,
+        /// What each type parameter is constrained to, where it is constrained.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        bounds: BTreeMap<String, CheckedType>,
+        /// Roles this type plays.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        roles: Vec<String>,
         fields: Vec<CheckedField>,
         cases: Vec<CheckedCase>,
     },
     Workflow {
         doc: Option<String>,
         name: String,
+        /// Type parameters in declaration order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parameters: Vec<String>,
+        /// What each type parameter is constrained to, where it is constrained.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        bounds: BTreeMap<String, CheckedType>,
         inputs: Vec<CheckedField>,
         outputs: Vec<CheckedField>,
         state: Vec<CheckedState>,
@@ -80,6 +111,11 @@ pub enum CheckedType {
     },
     Quantity {
         unit: String,
+    },
+    /// A type argument whose identity was deliberately discarded, constrained
+    /// to a role.
+    Any {
+        role: String,
     },
     Integer,
     Decimal,
@@ -107,6 +143,7 @@ impl CheckedType {
                 .join(" | "),
             Self::List { element } => format!("List<{}>", element.display_name()),
             Self::Quantity { unit } => format!("Quantity<{unit}>"),
+            Self::Any { role } => format!("any {role}"),
             Self::Integer => "Integer".to_owned(),
             Self::Decimal => "Decimal".to_owned(),
             Self::String => "String".to_owned(),

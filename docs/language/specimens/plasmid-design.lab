@@ -1,11 +1,10 @@
 use std.bio.parts
 use std.bio.backbones
 
-circuit regulated_expression<I: Signal, O: Protein>:
-  input promoter: Promoter<I>
-  input coding: CDS<O>
-  output Circuit<I, O>
-
+circuit regulated_expression(
+  promoter: Promoter<Trigger: Signal>,
+  coding: CDS<Product: Protein>,
+) -> Circuit<Trigger, Product>:
   layout:
     promoter
     B0034

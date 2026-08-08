@@ -1,11 +1,16 @@
 //! Internal type representation, compatibility, and generic inference.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 use crate::checked::CheckedType;
 use crate::semantic_error::SemanticError;
 use crate::source::Span;
+
+/// The roles each type plays. Deciding whether one type fits another needs it,
+/// because a forgotten type argument is satisfied by playing a role rather than
+/// by being a particular type.
+pub(crate) type RoleTable = HashMap<String, BTreeSet<String>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Ty {
@@ -13,6 +18,10 @@ pub(crate) enum Ty {
     Union(Vec<Ty>),
     List(Box<Ty>),
     Quantity(String),
+    /// A type argument whose identity has been deliberately discarded,
+    /// constrained to a role. `Circuit<any Signal, Fluorescence>` is a circuit
+    /// driven by some signal nobody may name again.
+    Any(String),
     Integer,
     Decimal,
     String,
@@ -56,6 +65,7 @@ impl fmt::Display for Ty {
             }
             Self::List(element) => write!(formatter, "List<{element}>"),
             Self::Quantity(unit) => write!(formatter, "Quantity<{unit}>"),
+            Self::Any(role) => write!(formatter, "any {role}"),
             Self::Integer => formatter.write_str("Integer"),
             Self::Decimal => formatter.write_str("Decimal"),
             Self::String => formatter.write_str("String"),
@@ -82,6 +92,7 @@ pub(crate) fn to_checked_type(ty: &Ty) -> CheckedType {
         Ty::Integer => CheckedType::Integer,
         Ty::Decimal => CheckedType::Decimal,
         Ty::String => CheckedType::String,
+        Ty::Any(role) => CheckedType::Any { role: role.clone() },
         Ty::Bool => CheckedType::Bool,
         Ty::None => CheckedType::None,
         Ty::EmptyList => CheckedType::List {
@@ -104,6 +115,7 @@ pub(crate) fn from_checked_type(ty: &CheckedType) -> Ty {
         }
         CheckedType::List { element } => Ty::List(Box::new(from_checked_type(element))),
         CheckedType::Quantity { unit } => Ty::Quantity(unit.clone()),
+        CheckedType::Any { role } => Ty::Any(role.clone()),
         CheckedType::Integer => Ty::Integer,
         CheckedType::Decimal => Ty::Decimal,
         CheckedType::String => Ty::String,
@@ -112,14 +124,36 @@ pub(crate) fn from_checked_type(ty: &CheckedType) -> Ty {
     }
 }
 
-pub(crate) fn compatible(actual: &Ty, expected: &Ty) -> bool {
+/// Whether a type playing `role` is recorded as doing so.
+fn plays_role(roles: &RoleTable, actual: &Ty, role: &str) -> bool {
+    matches!(actual, Ty::Named(name, arguments)
+        if arguments.is_empty()
+            && roles.get(name).is_some_and(|played| played.contains(role)))
+}
+
+pub(crate) fn compatible(roles: &RoleTable, actual: &Ty, expected: &Ty) -> bool {
     if actual == expected || matches!(actual, Ty::EmptyList) && matches!(expected, Ty::List(_)) {
         return true;
     }
+    // A value that is one of several things fits wherever every one of them
+    // fits. This is what lets an inferred union settle into an existential.
+    if let Ty::Union(alternatives) = actual
+        && !matches!(expected, Ty::Union(_))
+        && alternatives
+            .iter()
+            .all(|alternative| compatible(roles, alternative, expected))
+    {
+        return true;
+    }
     match expected {
-        Ty::Union(alternatives) => alternatives.iter().any(|ty| compatible(actual, ty)),
+        // Packing: a concrete type may be forgotten into a role it plays.
+        // Because arguments compare recursively, this also lets
+        // `Circuit<Tetracycline, R>` become `Circuit<any Signal, R>` without a
+        // separate rule, and it never runs in the other direction.
+        Ty::Any(role) => plays_role(roles, actual, role),
+        Ty::Union(alternatives) => alternatives.iter().any(|ty| compatible(roles, actual, ty)),
         Ty::List(expected) => match actual {
-            Ty::List(actual) => compatible(actual, expected),
+            Ty::List(actual) => compatible(roles, actual, expected),
             Ty::EmptyList => true,
             _ => false,
         },
@@ -130,7 +164,7 @@ pub(crate) fn compatible(actual: &Ty, expected: &Ty) -> bool {
                     && actual_args
                         .iter()
                         .zip(expected_args)
-                        .all(|(actual, expected)| compatible(actual, expected))
+                        .all(|(actual, expected)| compatible(roles, actual, expected))
             }
             _ => false,
         },
@@ -138,11 +172,16 @@ pub(crate) fn compatible(actual: &Ty, expected: &Ty) -> bool {
     }
 }
 
-pub(crate) fn common_type(left: Ty, right: Ty) -> Ty {
-    if compatible(&right, &left) {
+/// The type a collection of both `left` and `right` has.
+///
+/// This never produces an existential. Forgetting which type a value had is a
+/// deliberate act the author writes down, so inference widens to a union — which
+/// keeps the alternatives — and only an annotation turns that into `any`.
+pub(crate) fn common_type(roles: &RoleTable, left: Ty, right: Ty) -> Ty {
+    if compatible(roles, &right, &left) {
         return left;
     }
-    if compatible(&left, &right) {
+    if compatible(roles, &left, &right) {
         return right;
     }
     let mut alternatives = Vec::new();
@@ -160,30 +199,53 @@ pub(crate) fn common_type(left: Ty, right: Ty) -> Ty {
     Ty::Union(alternatives)
 }
 
-pub(crate) fn comparable(left: &Ty, right: &Ty) -> bool {
-    compatible(left, right)
-        || compatible(right, left)
+pub(crate) fn comparable(roles: &RoleTable, left: &Ty, right: &Ty) -> bool {
+    compatible(roles, left, right)
+        || compatible(roles, right, left)
         || matches!((left, right), (Ty::Quantity(_), Ty::Quantity(_)))
 }
 
+/// What each type parameter was inferred as, and the operand that fixed it.
+pub(crate) type Substitutions = HashMap<String, (Ty, Span)>;
+
 pub(crate) fn unify(
+    roles: &RoleTable,
     template: &Ty,
     actual: &Ty,
     parameters: &[String],
-    substitutions: &mut HashMap<String, Ty>,
+    substitutions: &mut Substitutions,
     span: Span,
 ) -> Result<(), SemanticError> {
     if let Ty::Named(name, arguments) = template {
         if arguments.is_empty() && parameters.contains(name) {
-            if let Some(previous) = substitutions.get(name) {
-                if !compatible(actual, previous) {
+            // Binding a parameter to a forgotten type would let every other
+            // occurrence of that parameter accept anything playing the role,
+            // which is the mistake naming a parameter exists to catch.
+            if let Ty::Any(role) = actual {
+                return Err(SemanticError::new(
+                    span,
+                    format!("'{name}' cannot be inferred from a forgotten type"),
+                )
+                .help(format!(
+                    "'any {role}' means some {role}, deliberately not recorded"
+                ))
+                .help(format!(
+                    "there is nothing here for the other uses of '{name}' to be matched against"
+                )));
+            }
+            if let Some((previous, previous_span)) = substitutions.get(name) {
+                if !compatible(roles, actual, previous) {
+                    // Both operands are named, because neither is wrong on its
+                    // own — it is the disagreement that is the error.
                     return Err(SemanticError::new(
                         span,
-                        format!("type parameter {name} inferred as both {previous} and {actual}"),
-                    ));
+                        format!("'{name}' cannot be both {previous} and {actual}"),
+                    )
+                    .related(*previous_span, format!("this fixes {name} = {previous}"))
+                    .related(span, format!("this requires {name} = {actual}")));
                 }
             } else {
-                substitutions.insert(name.clone(), actual.clone());
+                substitutions.insert(name.clone(), (actual.clone(), span));
             }
             return Ok(());
         }
@@ -200,11 +262,24 @@ pub(crate) fn unify(
             ));
         }
         for (template, actual) in arguments.iter().zip(actual_arguments) {
-            unify(template, actual, parameters, substitutions, span)?;
+            unify(roles, template, actual, parameters, substitutions, span)?;
         }
         return Ok(());
     }
-    if compatible(actual, template) {
+    // A list is a type argument like any other, so a parameter introduced
+    // inside one is inferred from the element rather than left unsolved.
+    if let Ty::List(template) = template {
+        return match actual {
+            Ty::List(actual) => unify(roles, template, actual, parameters, substitutions, span),
+            // An empty list determines nothing about its element.
+            Ty::EmptyList => Ok(()),
+            _ => Err(SemanticError::new(
+                span,
+                format!("expected List<{template}>, found {actual}"),
+            )),
+        };
+    }
+    if compatible(roles, actual, template) {
         Ok(())
     } else {
         Err(SemanticError::new(
@@ -214,10 +289,10 @@ pub(crate) fn unify(
     }
 }
 
-pub(crate) fn substitute(ty: &Ty, substitutions: &HashMap<String, Ty>) -> Ty {
+pub(crate) fn substitute(ty: &Ty, substitutions: &Substitutions) -> Ty {
     match ty {
         Ty::Named(name, arguments) if arguments.is_empty() && substitutions.contains_key(name) => {
-            substitutions[name].clone()
+            substitutions[name].0.clone()
         }
         Ty::Named(name, arguments) => Ty::Named(
             name.clone(),

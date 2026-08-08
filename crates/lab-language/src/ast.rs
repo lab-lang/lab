@@ -18,6 +18,7 @@ pub struct Module {
 #[serde(tag = "item", rename_all = "snake_case")]
 pub enum Item {
     Use(UseDecl),
+    Role(RoleDecl),
     Circuit(CircuitDecl),
     Artifact(ArtifactDecl),
     Data(DataDecl),
@@ -29,6 +30,7 @@ impl Item {
     pub fn span(&self) -> Span {
         match self {
             Self::Use(item) => item.span,
+            Self::Role(item) => item.span,
             Self::Circuit(item) => item.span,
             Self::Artifact(item) => item.span,
             Self::Data(item) => item.span,
@@ -36,6 +38,19 @@ impl Item {
             Self::Binding(item) => item.span,
         }
     }
+}
+
+/// A named part a type can play, such as `Signal` or `Reporter`.
+///
+/// A role classifies types; it has no values of its own. It carries no members
+/// because membership is declared by the type that plays it, which keeps a role
+/// open to types declared in other packages.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RoleDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: Identifier,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -48,9 +63,8 @@ pub struct UseDecl {
 pub struct CircuitDecl {
     pub doc: Option<String>,
     pub name: Identifier,
-    pub parameters: Vec<TypeParameter>,
     pub inputs: Vec<FieldDecl>,
-    pub output: Option<TypeExpr>,
+    pub output: TypeExpr,
     pub sections: Vec<Section>,
     pub span: Span,
 }
@@ -133,6 +147,9 @@ pub struct DataDecl {
     pub kind: DataKind,
     pub name: Identifier,
     pub parameters: Vec<TypeParameter>,
+    /// Roles this type plays, declared with `is`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<Path>,
     pub fields: Vec<FieldDecl>,
     pub cases: Vec<CaseDecl>,
     pub span: Span,
@@ -167,6 +184,16 @@ pub struct WorkflowDecl {
 pub enum WorkflowOutputs {
     Single { ty: TypeExpr },
     Named { fields: Vec<FieldDecl> },
+}
+
+impl WorkflowOutputs {
+    /// Every result type, however the results are declared.
+    pub fn types(&self) -> Box<dyn Iterator<Item = &TypeExpr> + '_> {
+        match self {
+            Self::Single { ty } => Box::new(std::iter::once(ty)),
+            Self::Named { fields } => Box::new(fields.iter().map(|field| &field.ty)),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -237,7 +264,28 @@ pub struct EffectStmt {
     /// Phrase segmentation is intentionally deferred until action signatures
     /// and their module-resolution rules are specified.
     pub action: String,
+    /// Where the phrase sits in the source, so a diagnostic about one operand
+    /// can underline that operand instead of the whole statement.
+    pub phrase: Span,
     pub span: Span,
+}
+
+impl EffectStmt {
+    /// The phrase's words paired with their source ranges.
+    pub fn words(&self) -> Vec<(&str, Span)> {
+        let mut words = Vec::new();
+        let mut cursor = 0;
+        for word in self.action.split_whitespace() {
+            let offset = self.action[cursor..]
+                .find(word)
+                .expect("the word came from this phrase")
+                + cursor;
+            let start = self.phrase.start + offset;
+            words.push((word, Span::new(start, start + word.len())));
+            cursor = offset + word.len();
+        }
+        words
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -321,7 +369,7 @@ pub struct PatternField {
 pub enum TypeExpr {
     Path {
         path: Path,
-        arguments: Vec<TypeExpr>,
+        arguments: Vec<TypeArgument>,
         span: Span,
     },
     Union {
@@ -334,6 +382,42 @@ impl TypeExpr {
     pub fn span(&self) -> Span {
         match self {
             Self::Path { span, .. } | Self::Union { span, .. } => *span,
+        }
+    }
+}
+
+/// One argument inside `<...>`.
+///
+/// An argument may introduce the type parameter it stands for, which is how a
+/// signature says "some signal, and I am calling it S so I can name it again":
+/// `Promoter<S: Signal>`. A binding is only meaningful in a declaration's
+/// signature, so the parser accepts it anywhere and the checker decides where
+/// it means something.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TypeArgument {
+    Type(TypeExpr),
+    Binding {
+        name: Identifier,
+        role: Path,
+        span: Span,
+    },
+    /// `any Signal` — some type playing the role, deliberately not named.
+    ///
+    /// Naming a parameter and forgetting one are the same idea with and
+    /// without a name: `S: Signal` can be pointed at again, `any Signal`
+    /// cannot.
+    Any {
+        role: Path,
+        span: Span,
+    },
+}
+
+impl TypeArgument {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Type(ty) => ty.span(),
+            Self::Binding { span, .. } | Self::Any { span, .. } => *span,
         }
     }
 }

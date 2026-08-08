@@ -34,7 +34,12 @@ impl Server {
                     diagnostic_code(diagnostic.code).to_owned(),
                 )),
                 source: Some("lab".to_owned()),
-                message: diagnostic.message.clone(),
+                // LSP has no channel for suggestions, so help follows the
+                // message rather than being dropped.
+                message: std::iter::once(diagnostic.message.clone())
+                    .chain(diagnostic.help.iter().map(|help| format!("help: {help}")))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
                 related_information: (!diagnostic.related.is_empty()).then(|| {
                     diagnostic
                         .related

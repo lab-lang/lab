@@ -299,6 +299,9 @@ fn ok<T: serde::Serialize>(request: &Request, result: T) -> Result<Response, ser
 fn symbol_kind(kind: SymbolKind) -> lsp::SymbolKind {
     match kind {
         SymbolKind::Module => lsp::SymbolKind::MODULE,
+        // A role classifies types without describing values, which is what an
+        // editor calls an interface.
+        SymbolKind::Role => lsp::SymbolKind::INTERFACE,
         SymbolKind::Circuit | SymbolKind::Workflow => lsp::SymbolKind::FUNCTION,
         SymbolKind::Artifact | SymbolKind::Data => lsp::SymbolKind::STRUCT,
         SymbolKind::Variable => lsp::SymbolKind::VARIABLE,

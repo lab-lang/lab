@@ -1,0 +1,74 @@
+/*!
+ * A sensor panel, and where forgetting belongs.
+ *
+ * One circuit works for any signal. Two circuits built from it respond to
+ * different inducers but express the same product, which is what makes their
+ * readings comparable. The panel type says exactly that: the trigger varies,
+ * the product does not.
+ *
+ * The panel cannot be induced as a whole, and that is a fact about the bench
+ * rather than an awkwardness of the type system — circuits with different
+ * triggers have no inducer in common. So each characterization runs while its
+ * signal is still named, and the readings, not the designs, are what goes in a
+ * list at the end.
+ */
+
+use std.bio.parts
+use std.bio.reporters
+
+/**
+ * A promoter driving a coding sequence through a shared RBS and terminator.
+ *
+ * `Trigger` and `Product` are introduced where they are first needed. Naming
+ * them is what lets the result say that the circuit responds to the promoter's
+ * signal and expresses the coding sequence's product.
+ */
+circuit regulated_expression(
+  promoter: Promoter<Trigger: Signal>,
+  coding: CDS<Product: Protein>,
+) -> Circuit<Trigger, Product>:
+  layout:
+    promoter
+    B0034
+    coding
+    B0015
+
+tet_reporter = regulated_expression(pTet, sfGFP)
+ara_reporter = regulated_expression(pBAD, sfGFP)
+
+/**
+ * The panel. `any Signal` discards which inducer each circuit responds to;
+ * the product stays pinned, because two readings only mean something side by
+ * side when they measure the same thing.
+ */
+panel: List<Circuit<any Signal, GreenFluorescentProtein>> = [tet_reporter, ara_reporter]
+
+/** One number an instrument recorded, and the kind of light it was. */
+observation Reading<Of: Reporter>:
+  value: Decimal
+
+/**
+ * Characterization keeps the signal named, so the compiler enforces that the
+ * inducer poured onto a circuit is the one that circuit responds to. Inducing
+ * a tet-responsive strain with arabinose is a type error rather than a wasted
+ * plate.
+ */
+workflow characterize(
+  design: Circuit<S: Signal, GreenFluorescentProtein>,
+  inducer: Material<S>,
+) -> (
+  design: Circuit<S, GreenFluorescentProtein>,
+  inducer: Material<S>,
+):
+  return design, inducer
+
+/**
+ * The resolution. Provenance is forgotten one step later than feels natural —
+ * after the pairing has been checked — and what is forgotten is where a reading
+ * came from, not which design a circuit is.
+ */
+workflow compare(
+  from_tet: Reading<Fluorescence>,
+  from_ara: Reading<Fluorescence>,
+) -> List<Reading<Fluorescence>>:
+  return [from_tet, from_ara]

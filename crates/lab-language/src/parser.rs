@@ -38,6 +38,10 @@ impl<'a> Parser<'a> {
                     ));
                 }
                 Item::Use(self.parse_use()?)
+            } else if self.check_word("role") {
+                let mut declaration = self.parse_role()?;
+                declaration.doc = doc;
+                Item::Role(declaration)
             } else if self.check_word("circuit") {
                 let mut declaration = self.parse_circuit()?;
                 declaration.doc = doc;
@@ -79,35 +83,51 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// `role Signal` — a name types can play. A role has no block: its members
+    /// are declared by the types that play it, so a package can add members to
+    /// a role it imports.
+    fn parse_role(&mut self) -> Result<RoleDecl, ParseError> {
+        let start = self.expect_word("role")?.span;
+        let name = self.take_identifier("a role name")?;
+        let end = self.expect_line_end()?;
+        Ok(RoleDecl {
+            doc: None,
+            name,
+            span: start.join(end),
+        })
+    }
+
+    /// The `is Signal, Reporter` clause on a declaration that plays roles.
+    fn parse_roles_clause(&mut self) -> Result<Vec<Path>, ParseError> {
+        if !self.check_word("is") {
+            return Ok(Vec::new());
+        }
+        self.next();
+        let mut roles = vec![self.parse_path()?];
+        while self.consume(&TokenKind::Comma).is_some() {
+            roles.push(self.parse_path()?);
+        }
+        Ok(roles)
+    }
+
+    /// A circuit is called, so it declares a callable signature exactly as a
+    /// workflow does. Its block holds only the parts it is built from.
     fn parse_circuit(&mut self) -> Result<CircuitDecl, ParseError> {
         let start = self.expect_word("circuit")?.span;
         let name = self.take_identifier("a circuit name")?;
-        let parameters = self.parse_type_parameters()?;
+        let inputs = self.parse_signature_fields("a parameter name")?;
+        self.expect(TokenKind::RightArrow)?;
+        let output = self.parse_type()?;
         self.open_block()?;
 
-        let mut inputs = Vec::new();
-        let mut output = None;
         let mut sections = Vec::new();
         while !self.check(&TokenKind::Dedent) {
-            if self.check_word("input") {
-                self.next();
-                inputs.push(self.parse_field_line()?);
-            } else if self.check_word("output") {
-                let keyword = self.next().expect("checked");
-                if output.is_some() {
-                    return Err(syntax_span(keyword.span, "duplicate circuit output"));
-                }
-                output = Some(self.parse_type()?);
-                self.expect_line_end()?;
-            } else {
-                sections.push(self.parse_section()?);
-            }
+            sections.push(self.parse_section()?);
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(CircuitDecl {
             doc: None,
             name,
-            parameters,
             inputs,
             output,
             sections,
@@ -157,6 +177,23 @@ impl<'a> Parser<'a> {
         let keyword = self.next().expect("data kind was checked");
         let name = self.take_identifier("a declaration name")?;
         let parameters = self.parse_type_parameters()?;
+        let roles = self.parse_roles_clause()?;
+        // A declaration with no fields carries no block. A tag whose whole
+        // content is its identity — `record Tetracycline is Signal` — is a
+        // complete declaration, not a truncated one.
+        if !self.check(&TokenKind::Colon) {
+            let end = self.expect_line_end()?;
+            return Ok(DataDecl {
+                doc: None,
+                kind,
+                name,
+                parameters,
+                roles,
+                fields: Vec::new(),
+                cases: Vec::new(),
+                span: keyword.span.join(end),
+            });
+        }
         self.open_block()?;
         let mut fields = Vec::new();
         let mut cases = Vec::new();
@@ -173,6 +210,7 @@ impl<'a> Parser<'a> {
             kind,
             name,
             parameters,
+            roles,
             fields,
             cases,
             span: keyword.span.join(end),
@@ -374,9 +412,19 @@ impl<'a> Parser<'a> {
             ));
         }
         let end = self.expect_line_end()?;
+        // The phrase keeps its place in the source so a diagnostic can point at
+        // one operand rather than at the whole line.
+        let raw = &self.source[action_start..action_end];
+        let leading = raw.len() - raw.trim_start().len();
+        let action = raw.trim();
+        let phrase = Span::new(
+            action_start + leading,
+            action_start + leading + action.len(),
+        );
         Ok(EffectStmt {
             names,
-            action: self.source[action_start..action_end].trim().to_owned(),
+            action: action.to_owned(),
+            phrase,
             span: start.join(end),
         })
     }
@@ -596,12 +644,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_primary(&mut self) -> Result<TypeExpr, ParseError> {
+        // `any Signal` names some type playing a role. That is only meaningful
+        // as an argument to another type: a value cannot be a signal, only
+        // carry one.
+        if self.check_word("any") {
+            return Err(syntax_span(
+                self.current_span(),
+                "'any' is not a type on its own; write it as a type argument, such as Material<any Signal>",
+            ));
+        }
         let path = self.parse_path()?;
         let mut arguments = Vec::new();
         let mut end = path.span;
         if self.consume(&TokenKind::Less).is_some() {
             while !self.check(&TokenKind::Greater) {
-                arguments.push(self.parse_type()?);
+                arguments.push(self.parse_type_argument()?);
                 if self.consume(&TokenKind::Comma).is_none() {
                     break;
                 }
@@ -613,6 +670,31 @@ impl<'a> Parser<'a> {
             path,
             arguments,
         })
+    }
+
+    /// A type argument, which may introduce the parameter it stands for.
+    ///
+    /// Inside `<...>` a colon cannot mean anything else, so `S: Signal` is
+    /// unambiguously a binding rather than a type.
+    fn parse_type_argument(&mut self) -> Result<TypeArgument, ParseError> {
+        if self.check_word("any") {
+            let start = self.next().expect("checked").span;
+            let role = self.parse_path()?;
+            return Ok(TypeArgument::Any {
+                span: start.join(role.span),
+                role,
+            });
+        }
+        if let Some(TokenKind::Identifier(name)) = self.peek_kind(0)
+            && self.peek_kind(1) == Some(&TokenKind::Colon)
+        {
+            let name = Spanned::new(name.clone(), self.current_span());
+            self.cursor += 2;
+            let role = self.parse_path()?;
+            let span = name.span.join(role.span);
+            return Ok(TypeArgument::Binding { name, role, span });
+        }
+        Ok(TypeArgument::Type(self.parse_type()?))
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -1154,6 +1236,17 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
                 .items
                 .iter()
                 .any(|item| matches!(item, Item::Circuit(_)))
+        );
+
+        let panel = parse_module(include_str!(
+            "../../../docs/language/specimens/sensor-panel.lab"
+        ))
+        .unwrap();
+        assert!(
+            panel
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Data(data) if data.name.value == "Reading"))
         );
 
         let build = parse_module(include_str!(

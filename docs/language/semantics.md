@@ -10,6 +10,49 @@
 - An **event** is an immutable occurrence stored in the durable workflow journal.
 - An **outcome** is a tagged result of a workflow or scientific decision.
 
+## Roles, type parameters, and what a result is about
+
+A **role** classifies types. It has no values, so a role may bound a type
+parameter and may never be the type of anything. Membership is declared by the
+type that plays the role rather than listed by the role, which keeps a role open
+to types declared in packages that do not exist yet.
+
+A **type parameter** names an unknown so that its occurrences can be linked. A
+circuit generic over its trigger works for any signal; a workflow that takes both
+a circuit and the reagent poured onto it uses one name twice, and that is what
+makes inducing a tet-responsive strain with arabinose a compile error rather than
+a wasted plate. A bare type parameter is not itself a material: `Material<S>`
+transfers ownership, `S` alone carries none.
+
+**`any Role` discards a type argument on purpose.** A concrete type flows into it
+whenever it plays that role, and never back out. Discarding is available only
+where an annotation asks for it; inference widens a mixed collection to a union
+instead, which preserves the alternatives. The two say different things. A union
+is one of these specific things, and a `match` can find out which. An existential
+is something that plays this role, and the question is not answerable.
+
+### Where forgetting belongs
+
+A forgotten type argument cannot be recovered by naming it. That is not a
+limitation to work around: a collection of circuits with different triggers has,
+by construction, no inducer that works for all of them, so a type that let you
+ask which one to use would be lying about the bench.
+
+The resolution is to forget one step later than feels natural. Run each
+characterization while its signal is still named, so the compiler enforces the
+pairing, and then collect the **results** rather than the designs:
+
+```lab
+tet_reading <- characterize tet_reporter tetracycline_stock
+ara_reading <- characterize ara_reporter arabinose_stock
+
+panel: List<Reading<Fluorescence>> = [tet_reading, ara_reading]
+```
+
+Readings of the same kind of light are comparable across different triggers,
+because what is being claimed is the outcome rather than the design that produced
+it. Provenance is discarded after the type system has done its work, not before.
+
 ## Declarations, properties, and identities
 
 A biological declaration is immutable intent. Its `name: value` entries are typed declarative properties, not executable assignments. Portable module IR preserves them as named checked expressions without assigning target-specific meaning to every property name.

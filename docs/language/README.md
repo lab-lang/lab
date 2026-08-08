@@ -27,6 +27,7 @@ Actual executions are runtime records, not source modules. A program may be run 
 | Specimen | Language boundary exercised |
 | --- | --- |
 | [`plasmid-design.lab`](specimens/plasmid-design.lab) | circuits, typed composition, declarative plasmid properties, requirements, and acceptance |
+| [`sensor-panel.lab`](specimens/sensor-panel.lab) | roles, inline type parameters, a generic characterization workflow, and a panel that forgets which signal triggers it |
 | [`plasmid-build.lab`](specimens/plasmid-build.lab) | workflow signatures, durable effects, explicit state, reactive handlers, outcomes, and affine materials |
 | [`inventory-plasmid.lab`](specimens/inventory-plasmid.lab) | typed inventory identities, heterogeneous component lists, target-neutral properties, and one realization workflow |
 | [`dependency-build.lab`](specimens/dependency-build.lab) | dependencies expressed as `Material<Plasmid>` workflow inputs and resolved `realize` operands |
@@ -43,6 +44,7 @@ Compile any representative specimen into verified portable module IR:
 
 ```sh
 labc docs/language/specimens/plasmid-design.lab --emit module-ir
+labc docs/language/specimens/sensor-panel.lab --emit module-ir
 labc docs/language/specimens/plasmid-build.lab --emit module-ir
 labc docs/language/specimens/inventory-plasmid.lab --emit module-ir
 labc docs/language/specimens/dependency-build.lab --emit module-ir
@@ -56,5 +58,9 @@ The latest accepted design records are:
 - [`0010`](decisions/0010-standard-library-contracts-and-inventory-identities.md): module-provided contracts and typed external identities; and
 - [`0011`](decisions/0011-dependencies-from-material-dataflow.md): dependency graphs derived from checked material dataflow;
 - [`0012`](decisions/0012-named-workflow-results.md): named typed workflow results and direct multi-value returns;
-- [`0013`](decisions/0013-strain-artifacts.md): engineered organisms as first-class artifacts; and
-- [`0014`](decisions/0014-target-profiles-and-workspaces.md): target profiles for benches and workspaces for packages.
+- [`0013`](decisions/0013-strain-artifacts.md): engineered organisms as first-class artifacts;
+- [`0014`](decisions/0014-target-profiles-and-workspaces.md): target profiles for benches and workspaces for packages;
+- [`0015`](decisions/0015-roles-classify-types.md): roles classify types, and a role is not a type;
+- [`0016`](decisions/0016-callable-circuit-signatures.md): circuits declare callable signatures with inline type parameters;
+- [`0017`](decisions/0017-forgotten-type-arguments.md): a type argument may be deliberately forgotten; and
+- [`0018`](decisions/0018-standard-modules-written-in-lab.md): standard modules may be written in Lab.

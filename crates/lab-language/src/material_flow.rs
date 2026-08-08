@@ -735,6 +735,8 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
             declarations: vec![CheckedDeclaration::Workflow {
                 doc: None,
                 name: "invalid".to_owned(),
+                parameters: Vec::new(),
+                bounds: std::collections::BTreeMap::new(),
                 inputs: vec![CheckedField {
                     name: "sample".to_owned(),
                     r#type: sample_type.clone(),

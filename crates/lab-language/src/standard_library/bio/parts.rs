@@ -9,12 +9,17 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
         .documented("Named biological parts and their biological type relationships.")
         .with_type_specs([
             TypeSpec::nominal("Tetracycline").implements(["Signal"]),
+            TypeSpec::nominal("Arabinose").implements(["Signal"]),
             TypeSpec::nominal("GreenFluorescentProtein").implements(["Protein"]),
         ])
         .with_values([
             (
                 "pTet",
                 Ty::Named("Promoter".into(), vec![named("Tetracycline")]),
+            ),
+            (
+                "pBAD",
+                Ty::Named("Promoter".into(), vec![named("Arabinose")]),
             ),
             (
                 "sfGFP",

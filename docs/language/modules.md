@@ -23,6 +23,7 @@ The current frontend resolves a small bundled registry through the same conceptu
 | `std.prelude` | implicitly imported foundational types, values, and pure operations used by every module |
 | `std.bio.parts` | fixed demonstration part values used by the design specimen |
 | `std.bio.backbones` | fixed demonstration backbone values used by the design specimen |
+| `std.bio.reporters` | reporters and the readouts they produce, written in Lab |
 | `std.bio.inventory` | pure constructors for typed external part, backbone, enzyme, chassis, and antibiotic identities |
 | `std.bio.build` | typed artifact-realization effects |
 | `std.lab.plasmid_actions` | typed laboratory action contracts used by the workflow specimens |
@@ -32,6 +33,18 @@ Each bundled module owns one checked specification containing all of its exporte
 `std.prelude` is the one explicit exception to source-level `use`: it supplies the foundational nominal types and currently unqualified operations such as `dna` to every module. Keeping that surface in a named module makes implicit language vocabulary inspectable and prevents it from accumulating as checker special cases.
 
 The bundled catalog validates module paths, export uniqueness, stable operation identities, and action-contract structure when it is constructed. It remains an implementation bridge; changing catalogs and site-specific actions should move to ordinary versioned packages once package-defined public contracts exist.
+
+### Standard modules written in Lab
+
+A bundled module whose whole surface is expressible in Lab is written in Lab rather than in Rust, and resolves through the same checked `ModuleInterface` a package module does. `std.bio.reporters` is the first. Nothing in the checker distinguishes it from a Rust-defined module or from a package, and its own documentation comments become its reference entry, so the reference cannot drift from a second description of the same exports.
+
+A module needing pure functions, durable action contracts, or typed external identities stays in Rust, because none of those has a source declaration form yet. [`open-questions.md`](open-questions.md) records what that blocks.
+
+### Declaring roles other packages extend
+
+A role is open. Declaring `role Signal` publishes a classification; any package that imports it may declare its own types as members with `is`, and every generic circuit or workflow bounded by that role then accepts them. A role therefore names a contract between packages rather than a closed enumeration its author must keep updating, which is why a role has no block listing its members.
+
+Roles and types share one namespace, so a role cannot collide with a type of the same name, and both are registered before anything is lowered — a declaration may name a role declared further down its file.
 
 ## Project layout
 

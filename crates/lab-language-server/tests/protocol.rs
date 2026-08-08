@@ -308,3 +308,48 @@ fn resolves_a_package_sibling_import_without_opening_it() {
         "a `use` of an unopened package sibling resolves through the manifest"
     );
 }
+
+#[test]
+fn publishes_a_second_source_range_as_related_information() {
+    let messages = [
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "capabilities": {} }
+        }),
+        json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
+        json!({
+            "jsonrpc": "2.0",
+            "method": "textDocument/didOpen",
+            "params": {
+                "textDocument": {
+                    "uri": "file:///duplicate.lab",
+                    "languageId": "lab",
+                    "version": 1,
+                    "text": "workflow grow() -> Integer:\n  return 1\n\nworkflow grow() -> Integer:\n  return 2\n"
+                }
+            }
+        }),
+        json!({ "jsonrpc": "2.0", "id": 2, "method": "shutdown", "params": null }),
+        json!({ "jsonrpc": "2.0", "method": "exit", "params": null }),
+    ];
+    let output = run_server(messages);
+    let published = output
+        .iter()
+        .find(|message| message["method"] == "textDocument/publishDiagnostics")
+        .unwrap();
+    let diagnostic = &published["params"]["diagnostics"][0];
+
+    assert_eq!(diagnostic["message"], "duplicate declaration 'grow'");
+    let related = &diagnostic["relatedInformation"][0];
+    assert_eq!(related["message"], "'grow' is already declared here");
+    assert_eq!(
+        related["location"]["range"]["start"]["line"], 0,
+        "the first declaration is on the opening line: {published:#?}"
+    );
+    assert_eq!(
+        diagnostic["range"]["start"]["line"], 3,
+        "the duplicate itself is the primary range: {published:#?}"
+    );
+}

@@ -6,6 +6,9 @@ use crate::{DocumentSymbol, SemanticToken, SemanticTokenKind, SymbolKind};
 
 pub(crate) const KEYWORDS: &[&str] = &[
     "use",
+    "role",
+    "is",
+    "any",
     "circuit",
     "plasmid",
     "strain",
@@ -40,6 +43,7 @@ pub(crate) const KEYWORDS: &[&str] = &[
 pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> {
     match item {
         ast::Item::Use(_) => None,
+        ast::Item::Role(item) => Some((&item.name.value, SymbolKind::Role, item.name.span)),
         ast::Item::Circuit(item) => Some((&item.name.value, SymbolKind::Circuit, item.name.span)),
         ast::Item::Artifact(item) => Some((&item.name.value, SymbolKind::Artifact, item.name.span)),
         ast::Item::Data(item) => Some((&item.name.value, SymbolKind::Data, item.name.span)),
@@ -54,6 +58,7 @@ pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> 
 pub(crate) fn documentation(item: &ast::Item) -> Option<&str> {
     match item {
         ast::Item::Use(_) => None,
+        ast::Item::Role(item) => item.doc.as_deref(),
         ast::Item::Circuit(item) => item.doc.as_deref(),
         ast::Item::Artifact(item) => item.doc.as_deref(),
         ast::Item::Data(item) => item.doc.as_deref(),
@@ -192,6 +197,30 @@ struct SemanticNames {
     functions: BTreeSet<String>,
 }
 
+/// The type-parameter names a signature type introduces, so an editor colors
+/// them as types rather than as unresolved names.
+fn collect_bound_names(ty: &ast::TypeExpr, out: &mut BTreeSet<String>) {
+    match ty {
+        ast::TypeExpr::Path { arguments, .. } => {
+            for argument in arguments {
+                match argument {
+                    ast::TypeArgument::Binding { name, .. } => {
+                        out.insert(name.value.clone());
+                    }
+                    // A forgotten argument introduces no name.
+                    ast::TypeArgument::Any { .. } => {}
+                    ast::TypeArgument::Type(ty) => collect_bound_names(ty, out),
+                }
+            }
+        }
+        ast::TypeExpr::Union { alternatives, .. } => {
+            for alternative in alternatives {
+                collect_bound_names(alternative, out);
+            }
+        }
+    }
+}
+
 fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
     let mut names = SemanticNames::default();
     let Some(module) = module else {
@@ -200,14 +229,18 @@ fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
     for item in &module.items {
         match item {
             ast::Item::Use(_) => {}
+            // A role is highlighted as a type: it lives in the type namespace
+            // and only ever appears in type position.
+            ast::Item::Role(declaration) => {
+                names.types.insert(declaration.name.value.clone());
+            }
             ast::Item::Circuit(declaration) => {
                 names.functions.insert(declaration.name.value.clone());
-                names.types.extend(
-                    declaration
-                        .parameters
-                        .iter()
-                        .map(|parameter| parameter.name.value.clone()),
-                );
+                // A circuit's type parameters are introduced inside its
+                // parameter types rather than in a header.
+                for field in &declaration.inputs {
+                    collect_bound_names(&field.ty, &mut names.types);
+                }
             }
             ast::Item::Artifact(declaration) => {
                 names.values.insert(declaration.name.value.clone());

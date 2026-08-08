@@ -9,8 +9,9 @@ mod test_support;
 
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
 pub use lab_language::{
-    CheckedModule, MaterialFlowError, ModuleError, ParseError, SemanticError, compile_module,
-    parse_module, render_checked_module,
+    CheckedModule, Diagnostic, DiagnosticSeverity, MaterialFlowError, ModuleError, ParseError,
+    SemanticError, SourceId, analyze_module, compile_module, parse_module, render_checked_module,
+    render_diagnostic,
 };
 pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
 pub use lair::program::{

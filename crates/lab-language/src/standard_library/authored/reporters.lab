@@ -1,0 +1,19 @@
+/*!
+ * Reporters and the readouts they produce.
+ *
+ * A reporter is what a circuit expresses so that its behaviour can be measured.
+ * The readout is what an instrument records, and it is what makes two circuits
+ * comparable: a panel may vary which signal triggers it, but pinning the
+ * readout is what lets the numbers sit next to each other.
+ */
+
+role Reporter
+
+/** Light emitted after excitation, read by a plate reader or a microscope. */
+record Fluorescence is Reporter
+
+/** Light emitted by an enzymatic reaction, requiring no excitation source. */
+record Luminescence is Reporter
+
+/** Light absorbed rather than emitted, read as optical density. */
+record Absorbance is Reporter

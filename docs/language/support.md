@@ -12,7 +12,8 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | `//` comments, `/** */` declaration and `/*! */` module documentation | yes | attached to the declaration below or to the module | n/a | module and declaration docs in the portable module and its interface | n/a |
 | `require` predicates | topology subset | yes | yes | yes | yes |
 | `accept` predicates | sequence/concentration/volume | yes | yes | yes | yes |
-| Bundled `std` module imports | yes | five modules | module values and contracts | yes | no runtime dispatch |
+| Bundled `std` module imports | yes | six modules | module values and contracts | yes | no runtime dispatch |
+| Bundled `std` modules written in Lab | yes | `std.bio.reporters` | compiled once at startup | resolved through `ModuleInterface` | n/a |
 | Optional trailing action clauses | yes | contract-driven | omitted operand binds to the empty list | yes | n/a |
 | Typed inventory constructors | yes | `std.bio.inventory` | nominal values | structured calls | no live inventory lookup |
 | Heterogeneous list union inference | yes | symbols | e.g. `List<Plasmid | Part>` | yes | target-dependent |
@@ -23,7 +24,15 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Multi-module program lowering | n/a | whole program | n/a | one Design/Workflow module | n/a |
 | `targets/*.toml` site profiles | n/a | n/a | n/a | validated deck, labware, instruments | `lab build --target` or `[build] target` |
 | Registry dependency acquisition | n/a | rejected | no | no | no |
+| `role` declarations and `is` membership | yes | yes | bounds satisfied by role membership | `CheckedDeclaration::Role`, roles on type exports | n/a |
+| Roles crossing a module boundary | n/a | `ExportKind::Role` | membership restored from the interface | yes | n/a |
 | Circuit declarations and applications | yes | yes | yes | yes | no |
+| Callable circuit signatures with `-> T` | yes | yes | yes | yes | no |
+| Inline type parameters (`Promoter<S: Signal>`) | yes | yes | harvested in signature order, bounds checked at the call | `parameters` and `bounds` in the portable module and its interface | n/a |
+| Header type parameters on data declarations | yes | yes | arity and bounds checked where the type is used | yes | n/a |
+| Generic workflows and their calls | yes | yes | operands unify, results substitute | yes | runtime pending |
+| Forgotten type arguments (`any Role`) | type-argument position only | yes | packing only where an annotation asks | `CheckedType::Any` | n/a |
+| Diagnostics with secondary spans and help | n/a | n/a | n/a | `Diagnostic.related` and `.help` | rendered by `lab check` on one file, and by the language server |
 | Top-level pure bindings | yes | yes | yes | yes | no |
 | `record`, `material`, `observation`, `evidence`, and `event` | yes | yes | yes | yes | no |
 | Biological `part` declarations | syntax pending | no | no | no | no |

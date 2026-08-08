@@ -17,10 +17,23 @@ use crate::standard_library::{
 };
 use crate::type_system::{Ty, from_checked_type};
 
-#[derive(Clone)]
-pub(super) struct CircuitSignature {
+/// The type parameters a callable introduces, in the order they appear, with
+/// whatever each is bounded by.
+#[derive(Clone, Default)]
+pub(super) struct Generics {
     pub parameters: Vec<String>,
     pub bounds: HashMap<String, Ty>,
+}
+
+impl Generics {
+    pub fn names(&self) -> BTreeSet<String> {
+        self.parameters.iter().cloned().collect()
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct CircuitSignature {
+    pub generics: Generics,
     pub inputs: Vec<Ty>,
     pub output: Ty,
 }
@@ -28,12 +41,18 @@ pub(super) struct CircuitSignature {
 #[derive(Clone)]
 pub(super) struct DataSignature {
     pub kind: DataKind,
+    /// Type parameters in declaration order. Empty for an imported type, whose
+    /// parameters the module interface does not yet carry, which leaves its
+    /// arguments unchecked exactly as before.
+    pub parameters: Vec<String>,
+    pub bounds: HashMap<String, Ty>,
     pub fields: BTreeMap<String, Ty>,
     pub cases: BTreeMap<String, BTreeMap<String, Ty>>,
 }
 
 #[derive(Clone)]
 pub(super) struct WorkflowSignature {
+    pub generics: Generics,
     pub inputs: Vec<Ty>,
     pub outputs: Vec<(String, Ty)>,
 }
@@ -56,14 +75,29 @@ pub(super) struct SemanticContext {
     pub cases: HashMap<String, String>,
     pub event_types: BTreeSet<String>,
     pub workflows: HashMap<String, WorkflowSignature>,
+    /// Every role in scope. A role shares the type namespace so the two cannot
+    /// collide, but it is not a type: it may only bound a type parameter.
+    pub roles: BTreeSet<String>,
+    /// The roles each type plays. Membership declared in source and membership
+    /// built into the standard library land here together, so a bound is
+    /// satisfied the same way whichever it came from.
+    pub type_roles: HashMap<String, BTreeSet<String>>,
 }
 
 impl SemanticContext {
     pub fn new(module_id: ModuleId, provided_modules: SemanticEnvironment) -> Self {
+        Self::with_library(module_id, provided_modules, StandardLibrary::bundled())
+    }
+
+    pub fn with_library(
+        module_id: ModuleId,
+        provided_modules: SemanticEnvironment,
+        standard_library: StandardLibrary,
+    ) -> Self {
         Self {
             module_id,
             provided_modules,
-            standard_library: StandardLibrary::bundled(),
+            standard_library,
             known_types: ["Bool", "Decimal", "Integer", "None", "String"]
                 .into_iter()
                 .map(str::to_owned)
@@ -81,7 +115,62 @@ impl SemanticContext {
             cases: HashMap::new(),
             event_types: BTreeSet::new(),
             workflows: HashMap::new(),
+            roles: BTreeSet::new(),
+            type_roles: HashMap::new(),
         }
+    }
+
+    /// Whether a value of type `actual` may be used where `expected` is
+    /// required. Deciding this needs the role table, because a forgotten type
+    /// argument is satisfied by playing a role.
+    pub fn compatible(&self, actual: &Ty, expected: &Ty) -> bool {
+        crate::type_system::compatible(&self.type_roles, actual, expected)
+    }
+
+    pub fn common_type(&self, left: Ty, right: Ty) -> Ty {
+        crate::type_system::common_type(&self.type_roles, left, right)
+    }
+
+    pub fn comparable(&self, left: &Ty, right: &Ty) -> bool {
+        crate::type_system::comparable(&self.type_roles, left, right)
+    }
+
+    pub fn unify(
+        &self,
+        template: &Ty,
+        actual: &Ty,
+        parameters: &[String],
+        substitutions: &mut crate::type_system::Substitutions,
+        span: Span,
+    ) -> Result<(), SemanticError> {
+        crate::type_system::unify(
+            &self.type_roles,
+            template,
+            actual,
+            parameters,
+            substitutions,
+            span,
+        )
+    }
+
+    pub fn add_role(&mut self, ty: &str, role: &str) {
+        self.type_roles
+            .entry(ty.to_owned())
+            .or_default()
+            .insert(role.to_owned());
+    }
+
+    /// Every type known to play a role, for naming the alternatives when a
+    /// bound is not satisfied.
+    pub fn role_members(&self, role: &str) -> Vec<&str> {
+        let mut members = self
+            .type_roles
+            .iter()
+            .filter(|(_, roles)| roles.contains(role))
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        members.sort_unstable();
+        members
     }
 
     pub fn definition_for_path(&self, path: &Path) -> DefinitionId {
@@ -119,6 +208,12 @@ impl SemanticContext {
                     format!("imported type '{name}' is ambiguous"),
                 ));
             }
+            if spec.role {
+                self.roles.insert(name.to_owned());
+            }
+            for role in &spec.implements {
+                self.add_role(name, role);
+            }
             self.standard_types.insert(name.to_owned(), spec);
         }
         for (name, ty) in module.values {
@@ -151,7 +246,7 @@ impl SemanticContext {
         span: Span,
     ) -> Result<(), SemanticError> {
         for (name, export) in &interface.exports {
-            if export.kind != ExportKind::Type {
+            if !matches!(export.kind, ExportKind::Type | ExportKind::Role) {
                 continue;
             }
             if !self.known_types.insert(name.clone()) {
@@ -160,10 +255,24 @@ impl SemanticContext {
                     format!("imported type '{name}' is ambiguous"),
                 ));
             }
+            if export.kind == ExportKind::Role {
+                self.roles.insert(name.clone());
+                continue;
+            }
+            for role in &export.roles {
+                self.add_role(name, role);
+            }
             self.data.insert(
                 name.clone(),
                 DataSignature {
                     kind: DataKind::Record,
+                    parameters: export.parameters.names.clone(),
+                    bounds: export
+                        .parameters
+                        .bounds
+                        .iter()
+                        .map(|(name, bound)| (name.clone(), from_checked_type(bound)))
+                        .collect(),
                     fields: export
                         .fields
                         .iter()
@@ -176,7 +285,9 @@ impl SemanticContext {
 
         for (name, export) in &interface.exports {
             match export.kind {
-                ExportKind::Type => {}
+                // Types and roles are registered above, before anything that
+                // could refer to them.
+                ExportKind::Type | ExportKind::Role => {}
                 ExportKind::Value => {
                     self.insert_imported_name(interface.module.as_str(), name, span)?;
                     if let Some(ty) = &export.r#type {
@@ -195,8 +306,17 @@ impl SemanticContext {
                         self.circuits.insert(
                             name.clone(),
                             CircuitSignature {
-                                parameters: Vec::new(),
-                                bounds: HashMap::new(),
+                                generics: Generics {
+                                    parameters: export.parameters.names.clone(),
+                                    bounds: export
+                                        .parameters
+                                        .bounds
+                                        .iter()
+                                        .map(|(name, bound)| {
+                                            (name.clone(), from_checked_type(bound))
+                                        })
+                                        .collect(),
+                                },
                                 inputs: signature.inputs.iter().map(from_checked_type).collect(),
                                 output: from_checked_type(&output.r#type),
                             },
@@ -209,6 +329,17 @@ impl SemanticContext {
                         self.workflows.insert(
                             name.clone(),
                             WorkflowSignature {
+                                generics: Generics {
+                                    parameters: export.parameters.names.clone(),
+                                    bounds: export
+                                        .parameters
+                                        .bounds
+                                        .iter()
+                                        .map(|(name, bound)| {
+                                            (name.clone(), from_checked_type(bound))
+                                        })
+                                        .collect(),
+                                },
                                 inputs: signature.inputs.iter().map(from_checked_type).collect(),
                                 outputs: signature
                                     .outputs
