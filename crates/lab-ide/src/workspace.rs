@@ -94,6 +94,12 @@ impl Workspace {
         self.documents.contains_key(source)
     }
 
+    /// Every document identity the workspace holds, whether opened by an
+    /// editor or seeded from disk.
+    pub fn sources(&self) -> Vec<SourceId> {
+        self.documents.keys().cloned().collect()
+    }
+
     fn insert_document(&mut self, source: SourceId, version: i64, text: String, module: ModuleId) {
         let imports = parsed_use_paths(&text).into_iter().collect();
         self.documents.insert(
