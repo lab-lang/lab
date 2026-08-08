@@ -22,6 +22,8 @@ pub struct Ot2Well {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ot2ExecutionPlan {
     pub schema_version: String,
+    /// The backend that produced this plan, spelled exactly as a target
+    /// profile declares it.
     pub target: String,
     pub api_level: String,
     /// The bench this plan was allocated against. Emission reads every labware

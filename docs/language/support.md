@@ -20,7 +20,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | `[workspace]` members and default member | n/a | member packages | n/a | shared `.lab/build/` and `lab.lock` | no |
 | Path dependency resolution and lockfile | n/a | recursive path packages | imported module interfaces | `.lab/build/` index plus `lab.lock` | no |
 | Multi-module program lowering | n/a | whole program | n/a | one Design/Workflow module | n/a |
-| `targets/*.toml` site profiles | n/a | n/a | n/a | validated deck, labware, instruments | `lab build --target` |
+| `targets/*.toml` site profiles | n/a | n/a | n/a | validated deck, labware, instruments | `lab build --target` or `[build] target` |
 | Registry dependency acquisition | n/a | rejected | no | no | no |
 | Circuit declarations and applications | yes | yes | yes | yes | no |
 | Top-level pure bindings | yes | yes | yes | yes | no |

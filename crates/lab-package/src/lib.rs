@@ -6,8 +6,8 @@ mod package;
 
 pub use graph::{ImportResolution, ModuleGraph, ModuleGraphError, ModuleNode};
 pub use manifest::{
-    BuildMetadata, DependencyDetail, DependencySpec, LabManifest, PackageManifest, PackageMetadata,
-    WorkspaceManifest, WorkspaceMetadata,
+    BuildMetadata, DependencyDetail, DependencySpec, InventoryMetadata, LabManifest,
+    PackageManifest, PackageMetadata, WorkspaceManifest, WorkspaceMetadata,
 };
 pub use package::{DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource};
 

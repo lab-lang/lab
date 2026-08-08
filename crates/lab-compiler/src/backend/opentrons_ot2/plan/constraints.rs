@@ -2,8 +2,9 @@
 
 use crate::backend::TargetConstraintError;
 
+use super::Ot2PlanningError;
 use super::trace::{AssemblyTrace, StrainTrace};
-use super::{Ot2PlanningError, TARGET};
+use crate::backend::opentrons_ot2::BACKEND;
 
 pub(super) fn validate_assembly_constraints(
     trace: &AssemblyTrace,
@@ -24,7 +25,7 @@ pub(super) fn validate_assembly_constraints(
         + trace.chemistry(context, "part_volume_ul") * dna_pieces;
     if required_ul > reaction_volume_ul {
         return Err(TargetConstraintError::CapacityExceeded {
-            target: TARGET.into(),
+            target: BACKEND.into(),
             operation: "assembly".into(),
             subject: artifact,
             resource: "reaction_volume".into(),
@@ -64,7 +65,7 @@ fn require_range(
 ) -> Result<(), Ot2PlanningError> {
     if !(1..=maximum).contains(&value) {
         return Err(TargetConstraintError::ParameterOutOfRange {
-            target: TARGET.into(),
+            target: BACKEND.into(),
             subject: artifact.to_owned(),
             parameter: parameter.into(),
             minimum: 1,
@@ -96,7 +97,7 @@ pub(super) fn validate_uniform_batch_settings(
         ) != expected
     }) {
         Err(TargetConstraintError::NonUniformParameters {
-            target: TARGET.into(),
+            target: BACKEND.into(),
             subject: "automation_batch".into(),
             parameters: vec![
                 "transformation_replicates".into(),
@@ -117,7 +118,7 @@ pub(super) fn plate_capacity_error(
     capacity: usize,
 ) -> Ot2PlanningError {
     TargetConstraintError::CapacityExceeded {
-        target: TARGET.into(),
+        target: BACKEND.into(),
         operation: stage.into(),
         subject: "automation_batch".into(),
         resource: resource.into(),
@@ -136,7 +137,7 @@ pub(super) fn require_tip_capacity(
 ) -> Result<(), Ot2PlanningError> {
     if required > capacity {
         Err(TargetConstraintError::CapacityExceeded {
-            target: TARGET.into(),
+            target: BACKEND.into(),
             operation: stage.into(),
             subject: "automation_batch".into(),
             resource: format!("{pipette}_tip_rack"),

@@ -36,12 +36,30 @@ A workspace root owns membership and nothing else; each member stays an ordinary
 `lab build --target <name>` reads `targets/<name>.toml`, lowers the default member and everything it depends on as one program, and hands the verified result to the backend that profile names:
 
 ```sh
-lab build --target bench-ot2
+lab build --target opentrons-ot2
 ```
 
-The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable robot protocol it emitted, ready to hand to a robot application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored.
+The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable robot protocol it emitted, ready to hand to a robot application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
 
-An optional `[build] inventory` path names the JSON inventory a target build resolves artifact dependencies against.
+A package that usually compiles for one bench names it in the manifest instead of on every invocation:
+
+```toml
+[build]
+entry = "src/programs/main.lab"
+target = "opentrons-ot2"
+```
+
+`lab build` then produces that bench's protocols, `--target <name>` compiles for a different one, and `--no-target` stops at portable module IR.
+
+An `[inventory]` table states what the laboratory has on hand, and a target build resolves every artifact dependency against it:
+
+```toml
+[inventory]
+materials = ["BsaI", "T4_DNA_ligase", "pSB1C3"]
+artifacts = ["composite_plasmid_1"]
+```
+
+`materials` are consumables a reaction may draw on; `artifacts` are already realized and are not built again. Both default to empty, so a package that declares no inventory builds everything from nothing and reports what it is missing.
 
 All read-oriented commands support `--json` for editor and automation clients:
 

@@ -99,6 +99,10 @@ pub enum PackageError {
     UnsupportedEdition(String),
     #[error("invalid dependency '{name}': {message}")]
     InvalidDependency { name: String, message: String },
+    #[error(
+        "invalid default target '{0}'; a target names a profile under 'targets/' using letters, digits, '-' or '_'"
+    )]
+    InvalidTarget(String),
     #[error("package '{package}' has no Lab source modules under {source_root}")]
     NoSources {
         package: String,

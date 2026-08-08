@@ -139,6 +139,7 @@ mod tests {
         assert!(!protocol.contains("from lab_opentrons_ot2"));
         assert!(protocol.contains("class Ot2ExecutionPlan(TypedDict):"));
         assert!(protocol.contains("def run(protocol: protocol_api.ProtocolContext) -> None:"));
-        assert!(protocol.contains("opentrons_ot2"));
+        // The injected plan names the backend that produced it.
+        assert!(protocol.contains(crate::backend::opentrons_ot2::BACKEND));
     }
 }

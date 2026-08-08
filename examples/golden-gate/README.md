@@ -31,19 +31,23 @@ each workflow consumes.
 From the `examples/golden-gate` directory, run:
 
 ```bash
-lab build --target bench-ot2
+lab build
 ```
+
+The manifest declares `[build] target = "opentrons-ot2"`, so a plain `lab build`
+compiles for that bench; `lab build --target <name>` compiles for another one,
+and `lab build --no-target` stops at portable module IR.
 
 The build prints the path of every runnable protocol it emitted:
 
 ```text
 Robot protocols:
-  .../.lab/build/bench-ot2/wave-001/assembly_protocol.py
-  .../.lab/build/bench-ot2/wave-002/plating_protocol.py
-  .../.lab/build/bench-ot2/wave-002/transformation_protocol.py
+  .../.lab/build/opentrons-ot2/wave-001/assembly_protocol.py
+  .../.lab/build/opentrons-ot2/wave-002/plating_protocol.py
+  .../.lab/build/opentrons-ot2/wave-002/transformation_protocol.py
 ```
 
-It writes those under `.lab/build/bench-ot2/`, one directory per planning wave:
+It writes those under `.lab/build/opentrons-ot2/`, one directory per planning wave:
 
 | Path | Contents |
 | --- | --- |
@@ -72,7 +76,7 @@ To check a protocol without the GUI, run the app's own analyzer over it:
 ```bash
 /Applications/Opentrons.app/Contents/Resources/python/bin/python3.10 \
   -m opentrons.cli analyze --json-output /tmp/analysis.json \
-  examples/golden-gate/.lab/build/bench-ot2/wave-002/transformation_protocol.py
+  examples/golden-gate/.lab/build/opentrons-ot2/wave-002/transformation_protocol.py
 ```
 
 The JSON reports `errors` plus the full deck — modules, labware with slot
@@ -81,11 +85,11 @@ assignments, and pipettes with mounts — which is what the deck map renders.
 ## Verify the generated code
 
 ```bash
-scripts/check-opentrons-target.sh examples/golden-gate/.lab/build/bench-ot2
+scripts/check-opentrons-target.sh examples/golden-gate/.lab/build/opentrons-ot2
 ```
 
 ```bash
-scripts/simulate-opentrons.sh examples/golden-gate/.lab/build/bench-ot2
+scripts/simulate-opentrons.sh examples/golden-gate/.lab/build/opentrons-ot2
 ```
 
 The first lints and typechecks every emitted protocol; the second runs them

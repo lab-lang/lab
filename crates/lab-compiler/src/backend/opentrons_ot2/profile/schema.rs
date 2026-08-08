@@ -8,7 +8,11 @@ use super::defaults::*;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetMetadata {
-    #[serde(default = "default_profile_name")]
+    /// The bench this profile describes, named by whoever loaded it: a profile
+    /// is selected as `targets/<name>.toml`, so the file does not repeat its
+    /// own name and cannot disagree with it. Emitted plans carry the name so
+    /// an operator can see which bench a protocol was compiled for.
+    #[serde(skip_deserializing, default = "default_bench_name")]
     pub name: String,
     #[serde(default = "default_backend")]
     pub backend: String,
@@ -19,7 +23,7 @@ pub struct TargetMetadata {
 impl Default for TargetMetadata {
     fn default() -> Self {
         Self {
-            name: default_profile_name(),
+            name: default_bench_name(),
             backend: default_backend(),
             api_level: default_api_level(),
         }

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,8 @@ pub struct PackageManifest {
     #[serde(default)]
     pub build: BuildMetadata,
     #[serde(default)]
+    pub inventory: InventoryMetadata,
+    #[serde(default)]
     pub dependencies: BTreeMap<String, DependencySpec>,
 }
 
@@ -73,9 +75,23 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
-    /// Inventory of materials and already-realized artifacts available to a
-    /// target build, relative to the package root.
-    pub inventory: Option<PathBuf>,
+    /// Target profile a build compiles for when none is named on the command
+    /// line, resolved by filename under `targets/`. A package without one
+    /// builds portable module IR and stops.
+    pub target: Option<String>,
+}
+
+/// What a target build may draw on before it plans anything: the materials an
+/// operator has on hand and the artifacts already realized. Names are the
+/// symbolic identities `src/` declares, so the inventory reads as a statement
+/// about this package's stock rather than as an opaque data file.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InventoryMetadata {
+    #[serde(default)]
+    pub materials: BTreeSet<String>,
+    #[serde(default)]
+    pub artifacts: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +170,13 @@ impl PackageManifest {
                 self.package.edition.clone(),
             ));
         }
+        // A target is a filename under `targets/`, so it must not be able to
+        // reach outside that directory.
+        if let Some(target) = &self.build.target
+            && !valid_target_name(target)
+        {
+            return Err(PackageError::InvalidTarget(target.clone()));
+        }
         for (name, dependency) in &self.dependencies {
             if !valid_package_name(name) {
                 return Err(PackageError::InvalidDependency {
@@ -204,6 +227,13 @@ impl PackageManifest {
 
 fn default_edition() -> String {
     "2026".to_owned()
+}
+
+fn valid_target_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+        })
 }
 
 fn valid_package_name(name: &str) -> bool {
@@ -281,6 +311,66 @@ default-member = "packages/device"
             manifest.validate(),
             Err(PackageError::InvalidWorkspaceMember { .. })
         ));
+    }
+
+    #[test]
+    fn reads_the_default_target_and_rejects_one_that_is_not_a_profile_name() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "tet-reporter"
+version = "0.1.0"
+
+[build]
+entry = "src/programs/main.lab"
+target = "opentrons-ot2"
+"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.build.target.as_deref(), Some("opentrons-ot2"));
+        manifest.validate().unwrap();
+
+        let escaping = PackageManifest::parse(
+            "[package]\nname = \"tet-reporter\"\nversion = \"0.1.0\"\n\n[build]\ntarget = \"../benches/ot2\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            escaping.validate(),
+            Err(PackageError::InvalidTarget(_))
+        ));
+    }
+
+    #[test]
+    fn reads_the_inventory_a_target_build_resolves_against() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "tet-reporter"
+version = "0.1.0"
+
+[inventory]
+materials = ["BsaI", "pSB1C3", "BsaI"]
+artifacts = ["composite_plasmid_1"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.inventory.materials.len(), 2, "names are a set");
+        assert!(manifest.inventory.materials.contains("pSB1C3"));
+        assert_eq!(
+            manifest.inventory.artifacts.iter().collect::<Vec<_>>(),
+            ["composite_plasmid_1"]
+        );
+        manifest.validate().unwrap();
+
+        let empty =
+            PackageManifest::parse("[package]\nname = \"t\"\nversion = \"0.1.0\"\n").unwrap();
+        assert_eq!(empty.inventory, InventoryMetadata::default());
+
+        let misspelled = PackageManifest::parse(
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\n\n[inventory]\nmaterial = [\"BsaI\"]\n",
+        );
+        assert!(
+            misspelled.is_err(),
+            "a misspelled key must not silently empty the inventory"
+        );
     }
 
     #[test]

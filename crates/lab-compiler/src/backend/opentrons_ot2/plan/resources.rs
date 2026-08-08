@@ -5,9 +5,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::backend::TargetConstraintError;
 use crate::backend::opentrons_ot2::profile::Plates;
 
+use super::Ot2PlanningError;
 use super::execution::Ot2Well;
 use super::trace::{AssemblyTrace, StrainTrace};
-use super::{Ot2PlanningError, TARGET};
+use crate::backend::opentrons_ot2::BACKEND;
 
 pub(super) fn assembly_source_keys(
     traces: &[AssemblyTrace],
@@ -51,7 +52,7 @@ pub(super) fn assign_source_wells(
 ) -> Result<BTreeMap<String, String>, Ot2PlanningError> {
     if keys.len() > capacity {
         return Err(TargetConstraintError::CapacityExceeded {
-            target: TARGET.into(),
+            target: BACKEND.into(),
             operation: stage.into(),
             subject: "automation_batch".into(),
             resource: "source_rack".into(),
@@ -95,7 +96,7 @@ impl<'a> PlateAllocator<'a> {
         let capacity = self.plates.total_capacity();
         if self.cursor >= capacity {
             return Err(TargetConstraintError::CapacityExceeded {
-                target: TARGET.into(),
+                target: BACKEND.into(),
                 operation: self.stage.into(),
                 subject: "automation_batch".into(),
                 resource: self.resource.into(),

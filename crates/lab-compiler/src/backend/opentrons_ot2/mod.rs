@@ -11,6 +11,11 @@ mod package;
 mod plan;
 mod profile;
 
+/// This backend's identity. A target profile declares it, planning stamps it
+/// into every execution plan and target-constraint error, and no other
+/// spelling of it exists.
+pub(in crate::backend::opentrons_ot2) const BACKEND: &str = "opentrons.ot2";
+
 pub use backend::{Ot2Backend, Ot2CompileError};
 pub use package::{DependencyBuildBundle, DependencyBuildError, compile_dependency_build};
 pub use plan::{

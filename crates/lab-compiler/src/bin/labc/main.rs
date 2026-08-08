@@ -102,7 +102,13 @@ fn main() -> Result<()> {
             Some(path) => {
                 let contents = std::fs::read_to_string(path)
                     .with_context(|| format!("failed to read target profile {}", path.display()))?;
-                Ot2TargetProfile::parse(&contents)
+                // A profile is named by its file, the same way `lab build`
+                // resolves one under `targets/`.
+                let name = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .with_context(|| format!("target profile {} has no name", path.display()))?;
+                Ot2TargetProfile::parse(name, &contents)
                     .with_context(|| format!("failed to load target profile {}", path.display()))?
             }
             None => Ot2TargetProfile::default(),

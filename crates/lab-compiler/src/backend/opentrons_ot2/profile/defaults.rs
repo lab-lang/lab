@@ -4,13 +4,16 @@ use super::schema::{
     AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TemperatureModule, Thermocycler,
     TipRacks, TransformationStage,
 };
+use crate::backend::opentrons_ot2::BACKEND;
 
-pub(super) fn default_profile_name() -> String {
-    "opentrons-ot2".to_owned()
+/// Bench name for a build that named no profile: the reference bench this
+/// backend was developed against.
+pub(super) fn default_bench_name() -> String {
+    "reference-bench".to_owned()
 }
 
 pub(super) fn default_backend() -> String {
-    "opentrons.ot2".to_owned()
+    BACKEND.to_owned()
 }
 
 pub(super) fn default_api_level() -> String {

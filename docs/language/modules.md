@@ -40,7 +40,7 @@ An idiomatic project separates reusable intent from the runnable composition:
 ```text
 lab.toml
 targets/
-  bench-ot2.toml
+  opentrons-ot2.toml
 src/
   designs/
     parts.lab
@@ -85,11 +85,10 @@ default-member = "packages/golden-gate"
 
 ## Target profiles
 
-A target profile describes one bench. `lab build --target bench-ot2` reads `targets/bench-ot2.toml` and hands it to the backend the profile names:
+A target profile describes one bench. `lab build --target opentrons-ot2`, or a `[build] target = "opentrons-ot2"` in the manifest, reads `targets/opentrons-ot2.toml` and hands it to the backend the profile names:
 
 ```toml
 [target]
-name = "bench-ot2"
 backend = "opentrons.ot2"
 api_level = "2.21"
 
@@ -97,6 +96,8 @@ api_level = "2.21"
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
 slots = ["5", "6"]
 ```
+
+A profile's filename is its name, so the file does not state one and cannot disagree with the name a build resolved it by. Emitted plans carry that name, so an operator reading a protocol can see which bench it was compiled for. `backend` names the backend that consumes the profile, spelled the one way that backend spells itself; a profile written for another backend is rejected rather than compiled.
 
 Every field has a default, so a profile states only what differs from the backend's reference bench. Unknown keys are rejected rather than ignored: a misspelled slot that silently fell back to a default is how a protocol ends up aspirating from the wrong place.
 
@@ -114,12 +115,20 @@ edition = "2026"
 
 [build]
 entry = "src/programs/main.lab"
-inventory = "inventory.json"
+target = "opentrons-ot2"
+
+[inventory]
+materials = ["BsaI", "T4_DNA_ligase", "pSB1C3"]
+artifacts = ["composite_plasmid_1"]
 
 [dependencies]
 parts = "1.2"
 local-policies = { path = "../policies" }
 ```
+
+`[inventory]` states what the laboratory already has: `materials` a reaction may draw on, and `artifacts` that are already realized and are not built again. Both name the symbolic identities `src/` declares, so a target build resolves artifact dependencies against the manifest rather than against a separate data file, and both default to empty.
+
+`[build] target` names the profile a plain `lab build` compiles for, so the command a laboratory runs every day produces the protocols its robots execute rather than intermediate IR. It names a profile under `targets/` and nothing else: a value carrying a path separator is rejected. `--target` compiles for a different bench and `--no-target` stops at portable module IR, so a package that declares a default keeps both. A package that declares no default builds module IR alone.
 
 Source modules are discovered recursively beneath `src`. Their names are the normalized package name followed by their relative path, so `src/workflows/build-plasmid.lab` becomes `tet_reporter.workflows.build_plasmid`.
 

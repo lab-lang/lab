@@ -105,7 +105,7 @@ fn a_target_build_emits_robot_protocols_for_every_wave() {
             "build",
             example.to_str().unwrap(),
             "--target",
-            "bench-ot2",
+            "opentrons-ot2",
             "--out-dir",
             out_dir.to_str().unwrap(),
             "--json",
@@ -119,7 +119,7 @@ fn a_target_build_emits_robot_protocols_for_every_wave() {
     );
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "built");
-    assert_eq!(result["result"]["target"], "bench-ot2");
+    assert_eq!(result["result"]["target"], "opentrons-ot2");
     assert_eq!(
         result["result"]["modules"], 6,
         "designs, workflows, and the program lower as one program"
@@ -139,7 +139,7 @@ fn a_target_build_emits_robot_protocols_for_every_wave() {
             "build",
             example.to_str().unwrap(),
             "--target",
-            "bench-ot2",
+            "opentrons-ot2",
             "--out-dir",
             out_dir.to_str().unwrap(),
         ])
@@ -152,7 +152,7 @@ fn a_target_build_emits_robot_protocols_for_every_wave() {
         "{printed}"
     );
 
-    let target_root = out_dir.join("bench-ot2");
+    let target_root = out_dir.join("opentrons-ot2");
     // Assembly precedes transformation, and every artifact in a wave shares
     // one robot run.
     assert!(target_root.join("wave-001/assembly_protocol.py").is_file());
@@ -174,6 +174,71 @@ fn a_target_build_emits_robot_protocols_for_every_wave() {
         serde_json::json!(["5", "6"]),
         "the emitted plan carries the deck the target profile declared"
     );
+
+    std::fs::remove_dir_all(out_dir).unwrap();
+}
+
+#[test]
+fn the_manifest_target_builds_robot_protocols_without_naming_one() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-default-target-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let default_target = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        default_target.status.success(),
+        "default target build failed: {}",
+        String::from_utf8_lossy(&default_target.stderr)
+    );
+    let result: Value = serde_json::from_slice(&default_target.stdout).unwrap();
+    assert_eq!(result["result"]["target"], "opentrons-ot2");
+    assert!(
+        out_dir
+            .join("opentrons-ot2/wave-001/assembly_protocol.py")
+            .is_file()
+    );
+
+    // The default is reversible: a build can still stop at portable module IR.
+    std::fs::remove_dir_all(&out_dir).unwrap();
+    let ir_only = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--no-target",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        ir_only.status.success(),
+        "{}",
+        String::from_utf8_lossy(&ir_only.stderr)
+    );
+    let result: Value = serde_json::from_slice(&ir_only.stdout).unwrap();
+    assert_eq!(result["result"]["target"], Value::Null);
+    assert!(result["result"]["protocols"].as_array().unwrap().is_empty());
+    assert!(!out_dir.join("opentrons-ot2").exists());
+    assert!(out_dir.join("package.json").is_file());
 
     std::fs::remove_dir_all(out_dir).unwrap();
 }

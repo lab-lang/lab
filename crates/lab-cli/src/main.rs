@@ -47,9 +47,14 @@ enum Command {
         /// Artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
-        /// Target profile to compile for, named by a file under `targets/`.
+        /// Target profile to compile for, named by a file under `targets/`;
+        /// defaults to `[build] target` in the manifest.
         #[arg(long)]
         target: Option<String>,
+        /// Build portable module IR only, ignoring the manifest's default
+        /// target.
+        #[arg(long, conflicts_with = "target")]
+        no_target: bool,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -110,7 +115,8 @@ fn run() -> Result<()> {
             path,
             out_dir,
             target,
-        } => commands::build(path, out_dir, target, &output),
+            no_target,
+        } => commands::build(path, out_dir, target, no_target, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }
@@ -129,16 +135,25 @@ mod tests {
             "--out-dir",
             "dist",
             "--target",
-            "bench-ot2",
+            "opentrons-ot2",
         ])
         .unwrap();
         assert!(matches!(
             cli.command,
-            Command::Build { path, out_dir, target }
+            Command::Build { path, out_dir, target, no_target }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
-                    && target.as_deref() == Some("bench-ot2")
+                    && target.as_deref() == Some("opentrons-ot2")
+                    && !no_target
         ));
+    }
+
+    #[test]
+    fn rejects_naming_a_target_and_opting_out_of_one() {
+        assert!(
+            Cli::try_parse_from(["lab", "build", "--target", "opentrons-ot2", "--no-target"])
+                .is_err()
+        );
     }
 
     #[test]

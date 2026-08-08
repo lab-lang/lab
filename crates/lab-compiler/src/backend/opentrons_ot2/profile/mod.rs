@@ -18,6 +18,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
+use crate::backend::opentrons_ot2::BACKEND;
 pub use error::Ot2ProfileError;
 // Only the field types other `opentrons_ot2` submodules reach into directly
 // are re-exported; the rest of the schema stays behind `Ot2TargetProfile`.
@@ -44,16 +45,20 @@ pub struct Ot2TargetProfile {
 }
 
 impl Ot2TargetProfile {
-    pub fn parse(text: &str) -> Result<Self, Ot2ProfileError> {
-        let profile: Self = toml::from_str(text)?;
+    /// Load the profile named `name`. The name is the profile's filename under
+    /// `targets/`, supplied by whoever resolved it, so the file itself never
+    /// states which bench it is.
+    pub fn parse(name: &str, text: &str) -> Result<Self, Ot2ProfileError> {
+        let mut profile: Self = toml::from_str(text)?;
+        profile.target.name = name.to_owned();
         profile.validate()?;
         Ok(profile)
     }
 
     pub fn validate(&self) -> Result<(), Ot2ProfileError> {
-        if self.target.backend != defaults::default_backend() {
+        if self.target.backend != BACKEND {
             return Err(Ot2ProfileError::WrongBackend {
-                expected: "opentrons.ot2",
+                expected: BACKEND,
                 found: self.target.backend.clone(),
             });
         }
@@ -171,7 +176,7 @@ mod tests {
 
     #[test]
     fn an_empty_profile_describes_the_reference_bench() {
-        let profile = Ot2TargetProfile::parse("").unwrap();
+        let profile = Ot2TargetProfile::parse("reference-bench", "").unwrap();
         assert_eq!(profile, Ot2TargetProfile::default());
         assert_eq!(profile.deck.temperature_module.slot, "1");
         assert_eq!(profile.stages.plating.agar_plate.slots, ["5", "6"]);
@@ -181,10 +186,8 @@ mod tests {
     #[test]
     fn a_profile_overrides_only_what_it_states() {
         let profile = Ot2TargetProfile::parse(
+            "bench-two",
             r#"
-[target]
-name = "bench-two"
-
 [stages.plating.agar_plate]
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
 slots = ["5"]
@@ -192,7 +195,6 @@ capacity = 96
 "#,
         )
         .unwrap();
-        assert_eq!(profile.target.name, "bench-two");
         assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
         assert_eq!(
             profile.stages.plating.dilution_plate.slots,
@@ -202,8 +204,29 @@ capacity = 96
     }
 
     #[test]
+    fn the_loader_names_the_bench_and_the_file_may_not() {
+        let profile = Ot2TargetProfile::parse("bench-two", "[target]\napi_level = \"2.20\"\n")
+            .expect("a profile is named by the file it was loaded from");
+        assert_eq!(profile.target.name, "bench-two");
+        assert_eq!(profile.target.backend, BACKEND);
+
+        let error = Ot2TargetProfile::parse("bench-two", "[target]\nname = \"bench-three\"\n")
+            .expect_err("a profile that renames itself could disagree with its filename");
+        assert!(error.to_string().contains("name"), "{error}");
+    }
+
+    #[test]
+    fn rejects_a_profile_written_for_another_backend() {
+        let error =
+            Ot2TargetProfile::parse("bench-two", "[target]\nbackend = \"opentrons.flex\"\n")
+                .expect_err("this backend compiles only its own profiles");
+        assert!(error.to_string().contains(BACKEND), "{error}");
+    }
+
+    #[test]
     fn rejects_labware_placed_under_the_thermocycler() {
         let error = Ot2TargetProfile::parse(
+            "bench-two",
             r#"
 [stages.assembly.small_tips]
 labware = "opentrons_96_tiprack_20ul"
@@ -218,6 +241,7 @@ capacity = 96
     #[test]
     fn rejects_two_labware_in_one_slot_during_a_stage() {
         let error = Ot2TargetProfile::parse(
+            "bench-two",
             r#"
 [stages.plating.agar_plate]
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
@@ -231,7 +255,7 @@ capacity = 96
 
     #[test]
     fn rejects_an_unknown_key_rather_than_silently_ignoring_it() {
-        let error = Ot2TargetProfile::parse("[stages.plating]\nagar_plates = 2\n")
+        let error = Ot2TargetProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
             .expect_err("a misspelled key must not fall back to a default");
         assert!(error.to_string().contains("parse"), "{error}");
     }

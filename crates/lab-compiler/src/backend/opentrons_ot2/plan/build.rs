@@ -18,8 +18,9 @@ use super::resources::{
 use super::trace::{AssemblyTrace, ProtocolTraces, StrainTrace, analyze_protocol};
 use super::{
     Ot2AssemblyChemistry, Ot2AssemblyPlan, Ot2ExecutionPlan, Ot2PlanningError, Ot2PlatingPlan,
-    Ot2StrainChemistry, Ot2StrainPlan, Ot2TransformationPlan, Ot2Well, TARGET,
+    Ot2StrainChemistry, Ot2StrainPlan, Ot2TransformationPlan, Ot2Well,
 };
+use crate::backend::opentrons_ot2::BACKEND;
 
 /// Validate and allocate an OT-2 build against one bench without rendering any
 /// output files.
@@ -74,7 +75,7 @@ pub(in crate::backend::opentrons_ot2) fn plan_selected_build(
 
     Ok(Ot2ExecutionPlan {
         schema_version: "lab.automation.v0".into(),
-        target: TARGET.into(),
+        target: BACKEND.into(),
         api_level: profile.target.api_level.clone(),
         deck: profile.clone(),
         assembly_source_wells,

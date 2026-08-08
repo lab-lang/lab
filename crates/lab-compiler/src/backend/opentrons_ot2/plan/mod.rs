@@ -22,4 +22,3 @@ pub(in crate::backend::opentrons_ot2) use graph::protocol_build_graph;
 /// Laboratory steps each artifact kind contributes to a build graph node.
 const ASSEMBLY_STEPS: [&str; 1] = ["assemble"];
 const STRAIN_STEPS: [&str; 4] = ["transform", "recover", "dilute", "plate"];
-const TARGET: &str = "opentrons_ot2";

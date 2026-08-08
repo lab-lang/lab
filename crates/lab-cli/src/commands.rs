@@ -100,12 +100,20 @@ pub(crate) fn build(
     path: PathBuf,
     out_dir: Option<PathBuf>,
     target: Option<String>,
+    no_target: bool,
     output: &Output,
 ) -> Result<()> {
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     let compiled = project.compile()?;
     let package = project.default_package();
+    // A named target wins over the manifest's default, and `--no-target` asks
+    // for portable module IR alone.
+    let target = if no_target {
+        None
+    } else {
+        target.or_else(|| package.manifest.build.target.clone())
+    };
     let project_root = project.root().to_path_buf();
     let output_root = match out_dir {
         Some(path) if path.is_absolute() => path,
@@ -230,7 +238,7 @@ fn build_for_target(
     let profile = if profile_path.is_file() {
         let contents = fs::read_to_string(&profile_path)
             .with_context(|| format!("failed to read {}", profile_path.display()))?;
-        Ot2TargetProfile::parse(&contents)
+        Ot2TargetProfile::parse(target, &contents)
             .with_context(|| format!("failed to load target profile {}", profile_path.display()))?
     } else {
         bail!(
@@ -253,15 +261,10 @@ fn build_for_target(
         .context("failed to select a concrete protocol for a target build")?;
 
     let package = project.default_package();
-    let inventory = match &package.manifest.build.inventory {
-        Some(relative) => {
-            let path = package.root.join(relative);
-            let contents = fs::read_to_string(&path)
-                .with_context(|| format!("failed to read inventory {}", path.display()))?;
-            serde_json::from_str::<BuildInventory>(&contents)
-                .with_context(|| format!("failed to parse inventory {}", path.display()))?
-        }
-        None => BuildInventory::default(),
+    let declared = &package.manifest.inventory;
+    let inventory = BuildInventory {
+        available_materials: declared.materials.clone(),
+        available_artifacts: declared.artifacts.clone(),
     };
 
     let bundle = compile_dependency_build(&protocol, &profile, &inventory)

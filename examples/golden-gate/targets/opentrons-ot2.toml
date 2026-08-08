@@ -1,4 +1,6 @@
-# The bench this workspace compiles for.
+# The bench this workspace compiles for. Its filename is its name: this is
+# `opentrons-ot2`, built by `lab build --target opentrons-ot2` or by the
+# `[build] target` the manifest declares.
 #
 # Everything here describes the laboratory, not the science: which modules are
 # installed, what labware sits in which deck slot, and which pipette is on
@@ -10,7 +12,6 @@
 # example's subject.
 
 [target]
-name = "bench-ot2"
 backend = "opentrons.ot2"
 api_level = "2.21"
 
