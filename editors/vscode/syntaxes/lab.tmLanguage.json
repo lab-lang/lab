@@ -20,8 +20,14 @@
     "comments": {
       "patterns": [
         {
-          "name": "comment.line.number-sign.lab",
-          "match": "#.*$"
+          "comment": "Documentation attaches to what it describes: /** */ to the declaration below it, /*! */ to the module. Both scope as documentation rather than as an ordinary comment.",
+          "name": "comment.block.documentation.lab",
+          "begin": "/\\*[*!]",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.double-slash.lab",
+          "match": "//.*$"
         }
       ]
     },

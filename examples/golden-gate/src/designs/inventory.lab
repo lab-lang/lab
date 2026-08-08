@@ -1,28 +1,30 @@
+/*!
+ * External inventory identities, kept apart from the designs that use them.
+ *
+ * A typed symbol here says only that a name refers to a catalogued item. It is
+ * not a claim that a suitable lot is on the shelf; that remains an inventory
+ * resolution and a runtime evidence question.
+ */
+
 use std.bio.inventory
 
-# External inventory identities, kept apart from the designs that use them.
-#
-# A typed symbol here says only that a name refers to a catalogued item. It is
-# not a claim that a suitable lot is on the shelf; that remains an inventory
-# resolution and a runtime evidence question.
-
-# Constitutive promoters of differing strength.
+// Constitutive promoters of differing strength.
 J23101 = part("J23101")
 J23106 = part("J23106")
 
-# Ribosome binding site and terminator shared by both transcription units.
+// Ribosome binding site and terminator shared by both transcription units.
 B0034 = part("B0034")
 B0015 = part("B0015")
 
-# Fluorescent reporters.
+// Fluorescent reporters.
 GFP = part("GFP")
 RFP = part("RFP")
 
-# Assembly backbone and the type IIS enzyme that opens it.
+// Assembly backbone and the type IIS enzyme that opens it.
 pSB1C3 = backbone("pSB1C3")
 BsaI = restriction_enzyme("BsaI")
 
-# Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
+// Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
 DH5alpha = chassis("DH5alpha")
 BL21 = chassis("BL21")
 

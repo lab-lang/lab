@@ -9,6 +9,7 @@ use crate::source::{Identifier, Span};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Module {
+    pub doc: Option<String>,
     pub items: Vec<Item>,
     pub span: Span,
 }
@@ -45,6 +46,7 @@ pub struct UseDecl {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CircuitDecl {
+    pub doc: Option<String>,
     pub name: Identifier,
     pub parameters: Vec<TypeParameter>,
     pub inputs: Vec<FieldDecl>,
@@ -91,6 +93,7 @@ impl ArtifactKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactDecl {
+    pub doc: Option<String>,
     pub kind: ArtifactKind,
     pub name: Identifier,
     pub members: Vec<ArtifactMember>,
@@ -126,6 +129,7 @@ pub enum DataKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataDecl {
+    pub doc: Option<String>,
     pub kind: DataKind,
     pub name: Identifier,
     pub parameters: Vec<TypeParameter>,
@@ -150,6 +154,7 @@ pub struct FieldDecl {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowDecl {
+    pub doc: Option<String>,
     pub name: Identifier,
     pub inputs: Vec<FieldDecl>,
     pub outputs: WorkflowOutputs,
@@ -217,6 +222,7 @@ pub struct StateStmt {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BindingStmt {
+    pub doc: Option<String>,
     pub names: Vec<Identifier>,
     pub annotation: Option<TypeExpr>,
     pub value: Expr,

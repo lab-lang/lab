@@ -19,6 +19,12 @@ impl Span {
     pub const fn join(self, other: Self) -> Self {
         Self::new(self.start, other.end)
     }
+
+    /// Whether an offset falls in this span, including either edge: a cursor
+    /// resting against a name is on it.
+    pub const fn contains(self, offset: usize) -> bool {
+        self.start <= offset && offset <= self.end
+    }
 }
 
 /// A value paired with the source range that produced it.

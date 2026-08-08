@@ -16,6 +16,7 @@ pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v1";
 pub struct CheckedModule {
     pub schema_version: String,
     pub module: ModuleId,
+    pub doc: Option<String>,
     pub interface: ModuleInterface,
     pub imports: Vec<ResolvedImport>,
     pub declarations: Vec<CheckedDeclaration>,
@@ -31,6 +32,7 @@ pub struct ResolvedImport {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum CheckedDeclaration {
     Circuit {
+        doc: Option<String>,
         name: String,
         parameters: Vec<String>,
         inputs: Vec<CheckedField>,
@@ -38,6 +40,7 @@ pub enum CheckedDeclaration {
         sections: Vec<CheckedSection>,
     },
     Artifact {
+        doc: Option<String>,
         artifact: ArtifactKind,
         name: String,
         properties: Vec<CheckedProperty>,
@@ -45,12 +48,14 @@ pub enum CheckedDeclaration {
         acceptance: Vec<TypedExpression>,
     },
     Data {
+        doc: Option<String>,
         category: String,
         name: String,
         fields: Vec<CheckedField>,
         cases: Vec<CheckedCase>,
     },
     Workflow {
+        doc: Option<String>,
         name: String,
         inputs: Vec<CheckedField>,
         outputs: Vec<CheckedField>,
@@ -137,6 +142,7 @@ pub struct CheckedSection {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedBinding {
+    pub doc: Option<String>,
     pub targets: Vec<CheckedField>,
     pub value: TypedExpression,
 }

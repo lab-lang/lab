@@ -1,6 +1,7 @@
 {
   "comments": {
-    "lineComment": "#"
+    "lineComment": "//",
+    "blockComment": ["/**", "*/"]
   },
   "brackets": [
     ["{", "}"],
@@ -20,7 +21,7 @@
     ["\"", "\""]
   ],
   "indentationRules": {
-    "increaseIndentPattern": "^\\s*(?:.*:)\\s*(?:#.*)?$",
+    "increaseIndentPattern": "^\\s*(?:.*:)\\s*(?://.*)?$",
     "decreaseIndentPattern": "^\\s*(?:else|case)\\b.*:$"
   },
   "folding": {

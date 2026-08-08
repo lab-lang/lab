@@ -246,6 +246,7 @@ impl Checker {
             });
         }
         Ok(CheckedDeclaration::Circuit {
+            doc: declaration.doc.clone(),
             name: declaration.name.value.clone(),
             parameters: declaration
                 .parameters
@@ -272,6 +273,7 @@ impl Checker {
             .get(&declaration.name.value)
             .expect("data was collected");
         Ok(CheckedDeclaration::Data {
+            doc: declaration.doc.clone(),
             category: format!("{:?}", declaration.kind).to_ascii_lowercase(),
             name: declaration.name.value.clone(),
             fields: signature
@@ -377,6 +379,7 @@ impl Checker {
             ArtifactKind::Strain => self.check_strain_shape(declaration, &property_names)?,
         }
         Ok(CheckedDeclaration::Artifact {
+            doc: declaration.doc.clone(),
             artifact: kind,
             name: declaration.name.value.clone(),
             properties,

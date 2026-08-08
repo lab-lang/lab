@@ -1,16 +1,20 @@
+/*!
+ * Stages 2 and 3: assembled plasmids are introduced into competent cells by
+ * heat shock, the recovered culture is serially diluted, and each dilution is
+ * spotted onto selective agar.
+ */
+
 use std.lab.plasmid_actions
 use golden_gate.designs.inventory
 use golden_gate.designs.strains
 
-# Stages 2 and 3: assembled plasmids are introduced into competent cells by
-# heat shock, the recovered culture is serially diluted, and each dilution is
-# spotted onto selective agar.
-#
-# Each workflow consumes the plasmid material it transforms, so the compiler
-# knows a strain cannot be built before its plasmid exists. Two strains
-# consuming the same plasmid are two independent builds of two artifacts, not
-# one build with a shared step.
-
+/**
+ * Build the GFP reporter in DH5alpha.
+ *
+ * Consumes the `composite_plasmid_1` material it transforms, so the compiler
+ * knows this strain cannot be built before that plasmid exists. Returns the
+ * strain and the selective plate it was recovered on.
+ */
 workflow build_composite_strain_1(
   composite_plasmid_1: Material<Plasmid>,
 ) -> (
@@ -25,6 +29,13 @@ workflow build_composite_strain_1(
   plate <- plate culture on chloramphenicol
   return strain, plate
 
+/**
+ * Build the RFP reporter in DH5alpha.
+ *
+ * Consumes the `composite_plasmid_2` material it transforms, so the compiler
+ * knows this strain cannot be built before that plasmid exists. Returns the
+ * strain and the selective plate it was recovered on.
+ */
 workflow build_composite_strain_2(
   composite_plasmid_2: Material<Plasmid>,
 ) -> (
@@ -39,6 +50,13 @@ workflow build_composite_strain_2(
   plate <- plate culture on chloramphenicol
   return strain, plate
 
+/**
+ * Build the GFP reporter in BL21.
+ *
+ * Consumes the `composite_plasmid_1` material it transforms, so the compiler
+ * knows this strain cannot be built before that plasmid exists. Returns the
+ * strain and the selective plate it was recovered on.
+ */
 workflow build_composite_strain_3(
   composite_plasmid_1: Material<Plasmid>,
 ) -> (
@@ -53,6 +71,13 @@ workflow build_composite_strain_3(
   plate <- plate culture on chloramphenicol
   return strain, plate
 
+/**
+ * Build the RFP reporter in BL21.
+ *
+ * Consumes the `composite_plasmid_2` material it transforms, so the compiler
+ * knows this strain cannot be built before that plasmid exists. Returns the
+ * strain and the selective plate it was recovered on.
+ */
 workflow build_composite_strain_4(
   composite_plasmid_2: Material<Plasmid>,
 ) -> (

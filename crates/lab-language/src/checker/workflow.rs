@@ -82,6 +82,7 @@ impl Checker {
             ));
         }
         Ok(CheckedDeclaration::Workflow {
+            doc: declaration.doc.clone(),
             name: declaration.name.value.clone(),
             inputs: declaration
                 .inputs
@@ -421,6 +422,7 @@ impl Checker {
         environment.insert(binding.names[0].value.clone(), ty.clone());
         Ok((
             CheckedBinding {
+                doc: binding.doc.clone(),
                 targets: binding
                     .names
                     .iter()

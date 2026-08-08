@@ -1,16 +1,19 @@
+/*!
+ * Four engineered organisms: each composite plasmid in each of two chassis.
+ *
+ * The same plasmid appearing in two strains is the point. A strain is its own
+ * artifact, so DH5alpha carrying composite_plasmid_1 and BL21 carrying the same
+ * plasmid are two distinct things to build, accept, and store. Neither is a
+ * property of the plasmid.
+ *
+ * The heat-shock and plating parameters are shared across all four, because one
+ * robot run holds every strain in a single thermocycler block.
+ */
+
 use golden_gate.designs.inventory
 use golden_gate.designs.plasmids
 
-# Four engineered organisms: each composite plasmid in each of two chassis.
-#
-# The same plasmid appearing in two strains is the point. A strain is its own
-# artifact, so DH5alpha carrying composite_plasmid_1 and BL21 carrying the same
-# plasmid are two distinct things to build, accept, and store. Neither is a
-# property of the plasmid.
-#
-# The heat-shock and plating parameters below are shared, because one robot run
-# holds every strain in a single thermocycler block.
-
+/** The GFP reporter carried in the DH5alpha cloning strain. */
 strain composite_strain_1:
   chassis: DH5alpha
   plasmids: [composite_plasmid_1]
@@ -31,6 +34,7 @@ strain composite_strain_1:
   culture_volume: 2 uL
   colony_volume: 4 uL
 
+/** The RFP reporter carried in the DH5alpha cloning strain. */
 strain composite_strain_2:
   chassis: DH5alpha
   plasmids: [composite_plasmid_2]
@@ -51,6 +55,7 @@ strain composite_strain_2:
   culture_volume: 2 uL
   colony_volume: 4 uL
 
+/** The GFP reporter carried in the BL21 expression strain. */
 strain composite_strain_3:
   chassis: BL21
   plasmids: [composite_plasmid_1]
@@ -71,6 +76,7 @@ strain composite_strain_3:
   culture_volume: 2 uL
   colony_volume: 4 uL
 
+/** The RFP reporter carried in the BL21 expression strain. */
 strain composite_strain_4:
   chassis: BL21
   plasmids: [composite_plasmid_2]

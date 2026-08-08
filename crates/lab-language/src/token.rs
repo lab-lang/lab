@@ -11,6 +11,8 @@ pub(crate) struct Token {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TokenKind {
     Identifier(String),
+    DocComment(String),
+    ModuleDoc(String),
     String(String),
     Integer(u64),
     Decimal(String),
@@ -47,6 +49,8 @@ impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Identifier(identifier) => write!(f, "'{identifier}'"),
+            Self::DocComment(_) => f.write_str("a documentation comment"),
+            Self::ModuleDoc(_) => f.write_str("a module documentation comment"),
             Self::String(_) => f.write_str("a string"),
             Self::Integer(integer) => write!(f, "'{integer}'"),
             Self::Decimal(decimal) => write!(f, "'{decimal}'"),

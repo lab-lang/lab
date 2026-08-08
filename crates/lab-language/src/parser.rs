@@ -27,24 +27,43 @@ impl<'a> Parser<'a> {
     fn parse_module(mut self) -> Result<Module, ParseError> {
         let mut items = Vec::new();
         self.skip_newlines();
+        let doc = self.take_module_doc()?;
         while !self.at_end() {
+            let doc = self.take_doc()?;
             let item = if self.check_word("use") {
+                if doc.is_some() {
+                    return Err(syntax_span(
+                        self.current_span(),
+                        "documentation describes a declaration, not an import; use '//' to comment on an import",
+                    ));
+                }
                 Item::Use(self.parse_use()?)
             } else if self.check_word("circuit") {
-                Item::Circuit(self.parse_circuit()?)
+                let mut declaration = self.parse_circuit()?;
+                declaration.doc = doc;
+                Item::Circuit(declaration)
             } else if let Some(kind) = self.artifact_kind() {
-                Item::Artifact(self.parse_artifact(kind)?)
+                let mut declaration = self.parse_artifact(kind)?;
+                declaration.doc = doc;
+                Item::Artifact(declaration)
             } else if let Some(kind) = self.data_kind() {
-                Item::Data(self.parse_data(kind)?)
+                let mut declaration = self.parse_data(kind)?;
+                declaration.doc = doc;
+                Item::Data(declaration)
             } else if self.check_word("workflow") {
-                Item::Workflow(self.parse_workflow()?)
+                let mut declaration = self.parse_workflow()?;
+                declaration.doc = doc;
+                Item::Workflow(declaration)
             } else {
-                Item::Binding(self.parse_binding()?)
+                let mut declaration = self.parse_binding()?;
+                declaration.doc = doc;
+                Item::Binding(declaration)
             };
             items.push(item);
             self.skip_newlines();
         }
         Ok(Module {
+            doc,
             items,
             span: Span::new(0, self.source.len()),
         })
@@ -86,6 +105,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(CircuitDecl {
+            doc: None,
             name,
             parameters,
             inputs,
@@ -125,6 +145,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(ArtifactDecl {
+            doc: None,
             kind,
             name,
             members,
@@ -148,6 +169,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(DataDecl {
+            doc: None,
             kind,
             name,
             parameters,
@@ -204,6 +226,7 @@ impl<'a> Parser<'a> {
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(WorkflowDecl {
+            doc: None,
             name,
             inputs,
             outputs,
@@ -306,6 +329,7 @@ impl<'a> Parser<'a> {
         let value = self.parse_expr()?;
         let end = self.expect_line_end()?;
         Ok(BindingStmt {
+            doc: None,
             names: vec![name],
             annotation,
             value,
@@ -854,6 +878,50 @@ impl<'a> Parser<'a> {
         while self.consume(&TokenKind::Newline).is_some() {}
     }
 
+    /// Take the module's own documentation, which opens its file. A module
+    /// describes the file it is, so `/*! */` anywhere else has no subject.
+    fn take_module_doc(&mut self) -> Result<Option<String>, ParseError> {
+        let Some(TokenKind::ModuleDoc(text)) = self.peek_kind(0) else {
+            return Ok(None);
+        };
+        let text = text.clone();
+        self.cursor += 1;
+        self.skip_newlines();
+        Ok(Some(text))
+    }
+
+    /// Take the documentation comment standing above the declaration about to
+    /// be parsed. Documentation always describes the declaration that follows
+    /// it, so one that describes nothing is an error rather than a comment.
+    fn take_doc(&mut self) -> Result<Option<String>, ParseError> {
+        if matches!(self.peek_kind(0), Some(TokenKind::ModuleDoc(_))) {
+            return Err(syntax_span(
+                self.current_span(),
+                "a module's documentation opens its file; use '/** */' to document a declaration",
+            ));
+        }
+        let Some(TokenKind::DocComment(text)) = self.peek_kind(0) else {
+            return Ok(None);
+        };
+        let text = text.clone();
+        let span = self.current_span();
+        self.cursor += 1;
+        self.skip_newlines();
+        if self.at_end() {
+            return Err(syntax_span(
+                span,
+                "this documentation comment describes no declaration",
+            ));
+        }
+        if matches!(self.peek_kind(0), Some(TokenKind::DocComment(_))) {
+            return Err(syntax_span(
+                self.current_span(),
+                "a declaration takes one documentation comment; write the whole description in one '/** */'",
+            ));
+        }
+        Ok(Some(text))
+    }
+
     fn line_has(&self, kind: TokenKind) -> bool {
         self.tokens[self.cursor..]
             .iter()
@@ -1107,5 +1175,86 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
         )
         .unwrap_err();
         assert!(error.to_string().contains("expected ':'"), "{error}");
+    }
+
+    #[test]
+    fn documentation_attaches_to_the_declaration_below_it() {
+        let module = parse_module(
+            "use std.bio.build\n\n/**\n * Assemble the reporter plasmid.\n *\n * Takes no material input.\n */\nworkflow assemble() -> Material<Plasmid>:\n  product <- realize reporter\n  return product\n",
+        )
+        .unwrap();
+
+        let Item::Workflow(workflow) = &module.items[1] else {
+            panic!("the second item is the documented workflow");
+        };
+        assert_eq!(
+            workflow.doc.as_deref(),
+            Some("Assemble the reporter plasmid.\n\nTakes no material input.")
+        );
+        assert!(
+            matches!(&module.items[0], Item::Use(_)),
+            "documentation does not become an item of its own"
+        );
+    }
+
+    #[test]
+    fn documentation_reaches_every_kind_of_declaration() {
+        let module = parse_module(
+            "/** A reporter. */\nplasmid reporter:\n  sequence: dna(\"ACGT\")\n\n/** A count. */\ntotal = 3\n",
+        )
+        .unwrap();
+        let Item::Artifact(artifact) = &module.items[0] else {
+            panic!("the first item is a plasmid");
+        };
+        assert_eq!(artifact.doc.as_deref(), Some("A reporter."));
+        let Item::Binding(binding) = &module.items[1] else {
+            panic!("the second item is a binding");
+        };
+        assert_eq!(binding.doc.as_deref(), Some("A count."));
+    }
+
+    #[test]
+    fn module_documentation_opens_the_file_and_belongs_to_the_module() {
+        let module = parse_module(
+            "/*!\n * Four engineered organisms.\n */\n\nuse golden_gate.designs.plasmids\n\n/** The first. */\nstrain first:\n  chassis: DH5alpha\n",
+        )
+        .unwrap();
+
+        assert_eq!(module.doc.as_deref(), Some("Four engineered organisms."));
+        let Item::Artifact(artifact) = &module.items[1] else {
+            panic!("the strain follows the import");
+        };
+        assert_eq!(
+            artifact.doc.as_deref(),
+            Some("The first."),
+            "module documentation does not claim the first declaration's own"
+        );
+    }
+
+    #[test]
+    fn rejects_module_documentation_that_does_not_open_the_file() {
+        let error = parse_module(
+            "use std.bio.build\n\n/*! Too late. */\nstrain first:\n  chassis: DH5alpha\n",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("opens its file"), "{error}");
+    }
+
+    #[test]
+    fn rejects_documentation_that_describes_no_declaration() {
+        let dangling = parse_module("total = 3\n\n/** Describes nothing. */\n").unwrap_err();
+        assert!(
+            dangling.to_string().contains("describes no declaration"),
+            "{dangling}"
+        );
+
+        let import = parse_module("/** Describes an import. */\nuse std.bio.build\n").unwrap_err();
+        assert!(import.to_string().contains("not an import"), "{import}");
+
+        let doubled = parse_module("/** First. */\n/** Second. */\ntotal = 3\n").unwrap_err();
+        assert!(
+            doubled.to_string().contains("one documentation"),
+            "{doubled}"
+        );
     }
 }

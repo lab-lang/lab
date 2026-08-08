@@ -51,6 +51,17 @@ pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> 
     }
 }
 
+pub(crate) fn documentation(item: &ast::Item) -> Option<&str> {
+    match item {
+        ast::Item::Use(_) => None,
+        ast::Item::Circuit(item) => item.doc.as_deref(),
+        ast::Item::Artifact(item) => item.doc.as_deref(),
+        ast::Item::Data(item) => item.doc.as_deref(),
+        ast::Item::Workflow(item) => item.doc.as_deref(),
+        ast::Item::Binding(item) => item.doc.as_deref(),
+    }
+}
+
 pub(crate) fn symbol_from_item(item: &ast::Item) -> DocumentSymbol {
     let (name, kind, selection_span) =
         declaration(item).unwrap_or(("use", SymbolKind::Module, item.span()));
@@ -109,7 +120,7 @@ pub(crate) fn valid_identifier(name: &str) -> bool {
 }
 
 pub(crate) fn identifier_at(text: &str, offset: usize) -> Option<(&str, Span)> {
-    identifier_spans(text).find(|(_, span)| span.start <= offset && offset <= span.end)
+    identifier_spans(text).find(|(_, span)| span.contains(offset))
 }
 
 pub(crate) fn identifier_spans(text: &str) -> impl Iterator<Item = (&str, Span)> {
@@ -121,17 +132,28 @@ pub(crate) fn identifier_spans(text: &str) -> impl Iterator<Item = (&str, Span)>
                 && !(bytes[cursor] == b'_'
                     || bytes[cursor].is_ascii_alphabetic()
                     || bytes[cursor] == b'"'
-                    || bytes[cursor] == b'#'
-                    || (bytes[cursor] == b'/' && bytes.get(cursor + 1) == Some(&b'/')))
+                    || bytes[cursor] == b'/')
             {
                 cursor += 1;
             }
             if cursor == bytes.len() {
                 return None;
             }
-            if bytes[cursor] == b'#'
-                || (bytes[cursor] == b'/' && bytes.get(cursor + 1) == Some(&b'/'))
-            {
+            if bytes[cursor] == b'/' && bytes.get(cursor + 1) == Some(&b'*') {
+                cursor += 2;
+                while cursor < bytes.len()
+                    && !(bytes[cursor] == b'*' && bytes.get(cursor + 1) == Some(&b'/'))
+                {
+                    cursor += 1;
+                }
+                cursor = (cursor + 2).min(bytes.len());
+                continue;
+            }
+            if bytes[cursor] == b'/' {
+                if bytes.get(cursor + 1) != Some(&b'/') {
+                    cursor += 1;
+                    continue;
+                }
                 while cursor < bytes.len() && bytes[cursor] != b'\n' {
                     cursor += 1;
                 }
@@ -212,6 +234,32 @@ fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
     names
 }
 
+/// Report one token per line of a span. A semantic token may not cross a line
+/// boundary: a client encodes each one as a line-relative start and a length in
+/// characters, which says nothing about where the next line begins.
+fn push_line_tokens(
+    tokens: &mut Vec<SemanticToken>,
+    bytes: &[u8],
+    start: usize,
+    end: usize,
+    kind: SemanticTokenKind,
+) {
+    let mut line_start = start;
+    let mut cursor = start;
+    while cursor < end {
+        if bytes[cursor] == b'\n' {
+            if cursor > line_start {
+                tokens.push(token(line_start, cursor, kind));
+            }
+            line_start = cursor + 1;
+        }
+        cursor += 1;
+    }
+    if end > line_start {
+        tokens.push(token(line_start, end, kind));
+    }
+}
+
 pub(crate) fn scan_semantic_tokens(text: &str, module: Option<&ast::Module>) -> Vec<SemanticToken> {
     let names = semantic_names(module);
     let bytes = text.as_bytes();
@@ -220,12 +268,21 @@ pub(crate) fn scan_semantic_tokens(text: &str, module: Option<&ast::Module>) -> 
     while cursor < bytes.len() {
         let start = cursor;
         match bytes[cursor] {
-            b'#' => {
-                cursor += 1;
-                while cursor < bytes.len() && bytes[cursor] != b'\n' {
+            b'/' if bytes.get(cursor + 1) == Some(&b'*') => {
+                cursor += 2;
+                while cursor < bytes.len()
+                    && !(bytes[cursor] == b'*' && bytes.get(cursor + 1) == Some(&b'/'))
+                {
                     cursor += 1;
                 }
-                tokens.push(token(start, cursor, SemanticTokenKind::Comment));
+                cursor = (cursor + 2).min(bytes.len());
+                push_line_tokens(
+                    &mut tokens,
+                    bytes,
+                    start,
+                    cursor,
+                    SemanticTokenKind::Comment,
+                );
             }
             b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
                 cursor += 2;

@@ -79,10 +79,11 @@ impl Checker {
             }
         }
 
-        let interface = build_interface(&self.module_id, &declarations);
+        let interface = build_interface(&self.module_id, module.doc.as_deref(), &declarations);
         Ok(CheckedModule {
             schema_version: PORTABLE_MODULE_SCHEMA_VERSION.to_owned(),
             module: self.module_id.clone(),
+            doc: module.doc.clone(),
             interface,
             imports: self
                 .imports
@@ -203,6 +204,29 @@ mod tests {
             include_str!("../../../examples/golden-gate/src/programs/reporter_panel.lab"),
         ),
     ];
+
+    #[test]
+    fn documentation_travels_in_the_checked_module_and_its_interface() {
+        let module = compile_module(
+            "/*! Synthetic reporter designs. */\n\n/** A synthetic reporter plasmid. */\nplasmid reporter:\n  sequence: dna(\"ACGT\")\n",
+        )
+        .expect("the module checks");
+
+        assert_eq!(module.doc.as_deref(), Some("Synthetic reporter designs."));
+        assert_eq!(
+            module.interface.documentation, "Synthetic reporter designs.",
+            "an importer sees what the module documents"
+        );
+
+        let CheckedDeclaration::Artifact { doc, .. } = &module.declarations[0] else {
+            panic!("the declaration is an artifact");
+        };
+        assert_eq!(doc.as_deref(), Some("A synthetic reporter plasmid."));
+        assert_eq!(
+            module.interface.exports["reporter"].documentation, "A synthetic reporter plasmid.",
+            "an importer sees what the declaration documents"
+        );
+    }
 
     #[test]
     fn compiles_the_golden_gate_example_with_symbolic_inventory_names() {

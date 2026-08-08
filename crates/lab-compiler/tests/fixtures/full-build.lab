@@ -16,10 +16,10 @@ BsmBI = restriction_enzyme("BsmBI")
 DH5alpha = chassis("DH5alpha")
 kanamycin = antibiotic("kanamycin")
 
-# A three-wave build expressed through typed workflow material dependencies.
-#
-# The compiler derives ordering from Material<Plasmid> workflow dataflow below.
-# None of these declarations is assigned a biological assembly level.
+// A three-wave build expressed through typed workflow material dependencies.
+//
+// The compiler derives ordering from Material<Plasmid> workflow dataflow below.
+// None of these declarations is assigned a biological assembly level.
 
 plasmid promoter_carrier:
   sequence: dna("ACGT")

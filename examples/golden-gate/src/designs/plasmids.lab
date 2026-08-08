@@ -1,13 +1,21 @@
+/*!
+ * Two composite transcription units, each a promoter driving a fluorescent
+ * reporter through a shared RBS and terminator.
+ *
+ * Sequences are synthetic compiler fixtures, not qualified biological designs.
+ * The reaction chemistry in each design is scientific intent and travels with
+ * the artifact; where the reaction physically happens is a target profile's
+ * concern.
+ */
+
 use golden_gate.designs.inventory
 
-# Two composite transcription units, each a promoter driving a fluorescent
-# reporter through a shared RBS and terminator. Both are built by Golden Gate
-# assembly into the same backbone with the same type IIS enzyme.
-#
-# Sequences are synthetic compiler fixtures, not qualified biological designs.
-# The reaction chemistry below is scientific intent and travels with the
-# design; where the reaction physically happens is a target profile's concern.
-
+/**
+ * A GFP transcription unit in the pSB1C3 backbone.
+ *
+ * J23101 drives GFP through the shared RBS and terminator, assembled by Golden
+ * Gate with BsaI. Accepted only if the built sequence matches the design.
+ */
 plasmid composite_plasmid_1:
   sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
   backbone: pSB1C3
@@ -29,6 +37,13 @@ plasmid composite_plasmid_1:
   require topology == circular
   accept sequence == design.sequence
 
+/**
+ * An RFP transcription unit in the pSB1C3 backbone.
+ *
+ * Identical in construction to `composite_plasmid_1` but driven by the weaker
+ * J23106 promoter, so the panel reports two promoter strengths against two
+ * reporters.
+ */
 plasmid composite_plasmid_2:
   sequence: dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
   backbone: pSB1C3

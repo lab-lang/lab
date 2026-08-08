@@ -9,15 +9,18 @@ use crate::semantics::{
 
 pub(super) fn build_interface(
     module_id: &ModuleId,
+    doc: Option<&str>,
     declarations: &[CheckedDeclaration],
 ) -> ModuleInterface {
     let mut interface = ModuleInterface::empty(module_id.clone());
+    interface.documentation = doc.unwrap_or_default().to_owned();
     let insert = |interface: &mut ModuleInterface,
                   name: &str,
                   kind: ExportKind,
                   ty: Option<&CheckedType>,
                   callable: Option<CallableSignature>,
-                  fields: BTreeMap<String, CheckedType>| {
+                  fields: BTreeMap<String, CheckedType>,
+                  documentation: &Option<String>| {
         interface.exports.insert(
             name.to_owned(),
             ModuleExport {
@@ -26,7 +29,7 @@ pub(super) fn build_interface(
                 r#type: ty.cloned(),
                 callable,
                 fields,
-                documentation: String::new(),
+                documentation: documentation.clone().unwrap_or_default(),
             },
         );
     };
@@ -34,6 +37,7 @@ pub(super) fn build_interface(
     for declaration in declarations {
         match declaration {
             CheckedDeclaration::Circuit {
+                doc,
                 name,
                 inputs,
                 output,
@@ -51,8 +55,14 @@ pub(super) fn build_interface(
                     }],
                 }),
                 BTreeMap::new(),
+                doc,
             ),
-            CheckedDeclaration::Artifact { artifact, name, .. } => {
+            CheckedDeclaration::Artifact {
+                doc,
+                artifact,
+                name,
+                ..
+            } => {
                 let ty = CheckedType::Named {
                     name: artifact.type_name().to_owned(),
                     arguments: Vec::new(),
@@ -64,9 +74,11 @@ pub(super) fn build_interface(
                     Some(&ty),
                     None,
                     BTreeMap::new(),
+                    doc,
                 );
             }
             CheckedDeclaration::Data {
+                doc,
                 name,
                 fields,
                 cases,
@@ -87,6 +99,7 @@ pub(super) fn build_interface(
                     Some(&ty),
                     None,
                     base_fields.clone(),
+                    doc,
                 );
                 for case in cases {
                     let mut fields = base_fields.clone();
@@ -102,10 +115,12 @@ pub(super) fn build_interface(
                         Some(&ty),
                         None,
                         fields,
+                        doc,
                     );
                 }
             }
             CheckedDeclaration::Workflow {
+                doc,
                 name,
                 inputs,
                 outputs,
@@ -123,6 +138,7 @@ pub(super) fn build_interface(
                     outputs: outputs.clone(),
                 }),
                 BTreeMap::new(),
+                doc,
             ),
             CheckedDeclaration::Binding(binding) => {
                 for target in &binding.targets {
@@ -133,6 +149,7 @@ pub(super) fn build_interface(
                         Some(&target.r#type),
                         None,
                         BTreeMap::new(),
+                        &binding.doc,
                     );
                 }
             }

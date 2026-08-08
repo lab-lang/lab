@@ -6,7 +6,43 @@ Lab uses newlines and indentation for statement blocks. A colon introduces an in
 
 Braces construct or destructure data; they never delimit control-flow blocks. Parentheses call pure functions and group expressions. Brackets construct collections. Angle brackets delimit type arguments.
 
-Line comments begin with `#`.
+## Comments and documentation
+
+A comment begins with `//` and runs to the end of the line. It is the only comment form: `#` is not a comment character, and `/*` opens documentation rather than a block comment.
+
+Documentation is a `/** ... */` block standing immediately above the declaration it describes. Unlike a comment, it is part of the declaration: the parser attaches it to the AST node, it travels in the module's checked interface and portable IR, and editors show it on hover and in completions.
+
+```lab
+/**
+ * Assemble the GFP reporter plasmid.
+ *
+ * Returns the plasmid it produces and takes no material input, so the compiler
+ * places this build ahead of everything that consumes it.
+ */
+workflow assemble_composite_plasmid_1() -> Material<Plasmid>:
+  product <- realize composite_plasmid_1
+  return product
+```
+
+A module documents itself with `/*! ... */`, which opens its file above the imports:
+
+```lab
+/*!
+ * Four engineered organisms: each composite plasmid in each of two chassis.
+ *
+ * The same plasmid appearing in two strains is the point. A strain is its own
+ * artifact, so DH5alpha carrying composite_plasmid_1 and BL21 carrying the same
+ * plasmid are two distinct things to build, accept, and store.
+ */
+
+use golden_gate.designs.inventory
+```
+
+The two forms differ in what they describe, not in what they are: `/**` documents the declaration below it and `/*!` documents the file it opens. That is what keeps a block at the top of a file unambiguous — without the distinction, a reader and the compiler could disagree about whether it belongs to the module or to the first declaration.
+
+Following [PEP 257](https://peps.python.org/pep-0257/), a docstring opens with a one-line summary that stands on its own; anything further follows a blank line. A leading `*` on continuation lines is decoration and is stripped, as is blank space at either end, so the text a tool renders is the prose the author wrote.
+
+Documentation always has a subject, so it is an error rather than a comment that silently goes nowhere: a `/** */` that precedes an import, precedes nothing, or doubles up on one declaration is rejected, as is a `/*! */` anywhere but the start of a file. An aside inside a workflow body, or a note on an import, is a `//` comment.
 
 ## Current vocabulary
 
@@ -68,7 +104,7 @@ Workflow inputs and results are part of the declaration signature. A workflow wi
 workflow preserve_sample(
   source: Material<Plasmid>,
 ) -> Material<Plasmid>:
-  # durable workflow body
+  // durable workflow body
   return source
 ```
 

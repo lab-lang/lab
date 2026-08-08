@@ -9,6 +9,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Quantity-valued chemistry properties | yes | yes | unit-checked at lowering | chemistry dictionaries | generated protocols |
 | Mandatory workflow `(inputs) -> T` or `-> (name: T, ...)` signature | yes | yes | inputs, result arity, names, and types | yes | runtime pending |
 | Quantity literals | any expression position | built-in units | dimension subset | yes | yes |
+| `//` comments, `/** */` declaration and `/*! */` module documentation | yes | attached to the declaration below or to the module | n/a | module and declaration docs in the portable module and its interface | n/a |
 | `require` predicates | topology subset | yes | yes | yes | yes |
 | `accept` predicates | sequence/concentration/volume | yes | yes | yes | yes |
 | Bundled `std` module imports | yes | five modules | module values and contracts | yes | no runtime dispatch |
@@ -62,7 +63,7 @@ It does not yet resolve SBOL, inventory lots, overhang compatibility, sequence r
 | Source-aware diagnostics | byte-spanned syntax, semantic, and material-flow diagnostics |
 | Parse recovery | one syntax diagnostic; multi-error recovery pending |
 | Outline | top-level declarations plus data fields/cases and workflow input/result fields |
-| Completion and hover | keywords and open-document top-level declarations |
+| Completion and hover | keywords and open-document top-level declarations, with the documentation each declaration carries; a `use` path hovers the module it imports |
 | Package-aware module names | manifest-derived; a `use` of an unopened package sibling resolves |
 | Definition, references, rename | open documents; name-based fallback pending symbol identities/scopes |
 | Semantic highlighting | parsed declaration kinds before lexical fallback; comments, keywords, strings, numbers, types, functions, values, operators |

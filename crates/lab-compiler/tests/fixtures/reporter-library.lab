@@ -13,9 +13,9 @@ BsaI = restriction_enzyme("BsaI")
 DH5alpha = chassis("DH5alpha")
 chloramphenicol = antibiotic("chloramphenicol")
 
-# End-to-end Lab automation fixture for the OT-2 specialization.
-# Names identify inventory items; the compiler does not yet resolve lots or SBOL.
-# Sequences are synthetic compiler fixtures, not qualified biological designs.
+// End-to-end Lab automation fixture for the OT-2 specialization.
+// Names identify inventory items; the compiler does not yet resolve lots or SBOL.
+// Sequences are synthetic compiler fixtures, not qualified biological designs.
 
 plasmid p_gfp:
   sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")

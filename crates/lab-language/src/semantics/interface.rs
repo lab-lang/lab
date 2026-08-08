@@ -37,6 +37,7 @@ pub struct CallableSignature {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModuleInterface {
     pub module: ModuleId,
+    pub documentation: String,
     pub exports: BTreeMap<String, ModuleExport>,
 }
 
@@ -72,6 +73,7 @@ impl ModuleInterface {
     pub fn empty(module: ModuleId) -> Self {
         Self {
             module,
+            documentation: String::new(),
             exports: BTreeMap::new(),
         }
     }

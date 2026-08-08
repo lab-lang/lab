@@ -43,8 +43,16 @@ impl<'a> Lexer<'a> {
             match self.bytes[self.cursor] {
                 b' ' | b'\t' | b'\r' => self.cursor += 1,
                 b'\n' => self.lex_newline(),
-                b'#' => self.skip_comment(),
                 b'/' if self.bytes.get(self.cursor + 1) == Some(&b'/') => self.skip_comment(),
+                b'/' if self.bytes.get(self.cursor + 1) == Some(&b'*') => {
+                    self.lex_documentation()?
+                }
+                b'#' => {
+                    return Err(syntax(
+                        start,
+                        "'#' does not start a comment; use '//' for a comment and '/** */' for documentation",
+                    ));
+                }
                 b'"' => self.lex_string()?,
                 byte if byte.is_ascii_digit() => self.lex_number()?,
                 byte if byte == b'_' || byte.is_ascii_alphabetic() => self.lex_identifier(),
@@ -136,9 +144,9 @@ impl<'a> Lexer<'a> {
             self.line_start = true;
             return Ok(true);
         }
-        if self.bytes[self.cursor] == b'#'
-            || (self.bytes[self.cursor] == b'/' && self.bytes.get(self.cursor + 1) == Some(&b'/'))
-        {
+        // A comment-only line keeps the indentation of the code around it. A
+        // documentation comment is a token, so its line is laid out normally.
+        if self.bytes[self.cursor] == b'/' && self.bytes.get(self.cursor + 1) == Some(&b'/') {
             self.skip_comment();
             return Ok(true);
         }
@@ -188,6 +196,48 @@ impl<'a> Lexer<'a> {
             }
             self.line_start = true;
         }
+    }
+
+    /// Lex a documentation comment into a token the parser attaches to what it
+    /// describes: `/** */` to the declaration below it, `/*! */` to the module
+    /// it opens. `/*` opens documentation and nothing else: an ordinary comment
+    /// is `//`.
+    fn lex_documentation(&mut self) -> Result<(), ParseError> {
+        let start = self.cursor;
+        let module = match self.bytes.get(self.cursor + 2) {
+            Some(b'*') => false,
+            Some(b'!') => true,
+            _ => {
+                return Err(syntax(
+                    start,
+                    "'/*' opens documentation, written '/** */' for the declaration below it and '/*! */' for the module; use '//' for an ordinary comment",
+                ));
+            }
+        };
+        self.cursor += 3;
+        let text_start = self.cursor;
+        loop {
+            if self.cursor >= self.bytes.len() {
+                return Err(syntax_span(
+                    Span::new(start, self.cursor),
+                    "unterminated documentation comment; close it with '*/'",
+                ));
+            }
+            if self.bytes[self.cursor] == b'*' && self.bytes.get(self.cursor + 1) == Some(&b'/') {
+                break;
+            }
+            self.cursor += 1;
+        }
+        let text = documentation(&self.source[text_start..self.cursor]);
+        self.cursor += 2;
+        let kind = if module {
+            TokenKind::ModuleDoc(text)
+        } else {
+            TokenKind::DocComment(text)
+        };
+        self.push(kind, start, self.cursor);
+        self.line_start = false;
+        Ok(())
     }
 
     fn skip_comment(&mut self) {
@@ -328,18 +378,40 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// The prose inside a `/** ... */`, with the decoration a reader supplies for
+/// alignment removed: the leading `*` of a continuation line, trailing spaces,
+/// and blank lines at either end. Blank lines between paragraphs are kept.
+fn documentation(text: &str) -> String {
+    let mut lines: Vec<&str> = text
+        .lines()
+        .map(|line| {
+            let line = line.trim();
+            line.strip_prefix('*').map_or(line, str::trim_start)
+        })
+        .map(str::trim_end)
+        .collect();
+    while lines.first().is_some_and(|line| line.is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use crate::lexer::*;
 
     #[test]
     fn emits_layout_only_for_significant_lines() {
-        let kinds =
-            lex("workflow grow() -> Integer:\n  # note\n  x = f(\n    1,\n    2,\n  )\nnext = 3\n")
-                .unwrap()
-                .into_iter()
-                .map(|token| token.kind)
-                .collect::<Vec<_>>();
+        let kinds = lex(
+            "workflow grow() -> Integer:\n  // note\n  x = f(\n    1,\n    2,\n  )\nnext = 3\n",
+        )
+        .unwrap()
+        .into_iter()
+        .map(|token| token.kind)
+        .collect::<Vec<_>>();
 
         assert_eq!(
             kinds
@@ -361,5 +433,60 @@ mod tests {
     fn rejects_tabs_in_indentation() {
         let error = lex("plasmid p:\n\tsequence: dna(\"ACGT\")\n").unwrap_err();
         assert!(error.to_string().contains("tabs are not allowed"));
+    }
+
+    #[test]
+    fn a_documentation_comment_is_a_token_with_its_decoration_removed() {
+        let tokens = lex("/**\n * Two composite transcription units.\n *\n * Both are built by Golden Gate assembly.\n */\nx = 1\n")
+            .unwrap();
+        let TokenKind::DocComment(text) = &tokens[0].kind else {
+            panic!(
+                "documentation reaches the parser as a token: {:?}",
+                tokens[0]
+            );
+        };
+        assert_eq!(
+            text,
+            "Two composite transcription units.\n\nBoth are built by Golden Gate assembly."
+        );
+        assert_eq!(
+            tokens[1].kind,
+            TokenKind::Newline,
+            "a documentation comment does not swallow the line it ends"
+        );
+    }
+
+    #[test]
+    fn a_one_line_documentation_comment_keeps_its_prose() {
+        let tokens = lex("/** Assemble the reporter plasmid. */\nx = 1\n").unwrap();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::DocComment("Assemble the reporter plasmid.".to_owned())
+        );
+    }
+
+    #[test]
+    fn module_documentation_lexes_as_its_own_token() {
+        let tokens = lex("/*! What this file is. */\nuse std.bio.build\n").unwrap();
+        assert_eq!(
+            tokens[0].kind,
+            TokenKind::ModuleDoc("What this file is.".to_owned())
+        );
+    }
+
+    #[test]
+    fn rejects_comment_syntax_the_language_does_not_have() {
+        let hash = lex("# note\nx = 1\n").unwrap_err();
+        assert!(hash.to_string().contains("use '//'"), "{hash}");
+
+        let block = lex("/* note */\nx = 1\n").unwrap_err();
+        assert!(block.to_string().contains("'/** */'"), "{block}");
+        assert!(block.to_string().contains("'/*! */'"), "{block}");
+
+        let unterminated = lex("/** note\nx = 1\n").unwrap_err();
+        assert!(
+            unterminated.to_string().contains("unterminated"),
+            "{unterminated}"
+        );
     }
 }

@@ -1,9 +1,11 @@
+/*!
+ * Synthetic compiler fixture. Ordering is derived from typed workflow inputs;
+ * the source does not assign artifacts to biological assembly levels.
+ */
+
 use std.bio.build
 use std.bio.inventory
 use std.lab.plasmid_actions
-
-# Synthetic compiler fixture. Ordering is derived from typed workflow inputs;
-# the source does not assign artifacts to biological assembly levels.
 
 J23101 = part("J23101")
 B0034 = part("B0034")

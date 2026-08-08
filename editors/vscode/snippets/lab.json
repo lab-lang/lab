@@ -1,4 +1,24 @@
 {
+  "Module documentation": {
+    "prefix": "doc module",
+    "body": [
+      "/*!",
+      " * ${1:What this file is.}",
+      " */"
+    ],
+    "description": "Document the module this file is"
+  },
+  "Documentation": {
+    "prefix": "doc",
+    "body": [
+      "/**",
+      " * ${1:One-line summary.}",
+      " *",
+      " * ${0:What a reader needs that the signature does not say.}",
+      " */"
+    ],
+    "description": "Document the declaration below"
+  },
   "Workflow": {
     "prefix": "workflow",
     "body": [

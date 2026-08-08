@@ -727,11 +727,13 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
     fn rejects_implicit_physical_copying() {
         let sample_type = material("Plasmid");
         let module = CheckedModule {
+            doc: None,
             schema_version: PORTABLE_MODULE_SCHEMA_VERSION.to_owned(),
             module: crate::ModuleId::standalone(),
             interface: crate::ModuleInterface::empty(crate::ModuleId::standalone()),
             imports: Vec::new(),
             declarations: vec![CheckedDeclaration::Workflow {
+                doc: None,
                 name: "invalid".to_owned(),
                 inputs: vec![CheckedField {
                     name: "sample".to_owned(),
@@ -743,6 +745,7 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
                 }],
                 state: Vec::new(),
                 body: vec![CheckedStatement::Binding(CheckedBinding {
+                    doc: None,
                     targets: vec![
                         CheckedField {
                             name: "first".to_owned(),

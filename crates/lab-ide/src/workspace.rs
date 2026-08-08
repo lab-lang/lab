@@ -6,13 +6,28 @@ use lab_language::{
 };
 
 use crate::semantic::{
-    KEYWORDS, declaration, identifier_at, identifier_spans, scan_semantic_tokens, symbol_from_item,
-    valid_identifier,
+    KEYWORDS, declaration, documentation, identifier_at, identifier_spans, scan_semantic_tokens,
+    symbol_from_item, valid_identifier,
 };
 use crate::{
     CompletionItem, CompletionKind, DocumentSymbol, Hover, Location, SemanticToken, SymbolKind,
     TextEdit,
 };
+
+/// One named declaration an open document defines.
+#[derive(Clone, Debug)]
+struct Declaration {
+    name: String,
+    kind: SymbolKind,
+    doc: Option<String>,
+    location: Location,
+}
+
+/// The first line of a declaration's documentation, which a completion list
+/// has room for.
+fn summary(doc: &str) -> &str {
+    doc.lines().next().unwrap_or_default()
+}
 
 #[derive(Clone, Debug)]
 struct Document {
@@ -281,16 +296,21 @@ impl Workspace {
             })
             .collect::<Vec<_>>();
         let mut seen = BTreeSet::new();
-        for (name, kind, _) in self.declarations() {
-            if seen.insert(name.clone()) {
+        for declaration in self.declarations() {
+            if seen.insert(declaration.name.clone()) {
+                let kind = declaration.kind;
                 items.push(CompletionItem {
-                    label: name,
+                    label: declaration.name,
                     kind: match kind {
                         SymbolKind::Circuit | SymbolKind::Workflow => CompletionKind::Function,
                         SymbolKind::Data | SymbolKind::Artifact => CompletionKind::Type,
                         _ => CompletionKind::Value,
                     },
-                    detail: Some(format!("Lab {kind:?}").to_lowercase()),
+                    // A declaration's own first line says more than its kind.
+                    detail: Some(declaration.doc.map_or_else(
+                        || format!("Lab {kind:?}").to_lowercase(),
+                        |doc| summary(&doc).to_owned(),
+                    )),
                 });
             }
         }
@@ -299,17 +319,60 @@ impl Workspace {
 
     pub fn hover(&self, source: &SourceId, offset: usize) -> Option<Hover> {
         let document = self.documents.get(source)?;
+        if let Some(hover) = self.imported_module_hover(document, offset) {
+            return Some(hover);
+        }
         let (name, span) = identifier_at(&document.text, offset)?;
-        let (_, kind, location) = self
+        let declaration = self
             .declarations()
             .into_iter()
-            .find(|(candidate, _, _)| candidate == name)?;
+            .find(|candidate| candidate.name == name)?;
+        let kind = declaration.kind;
+        let mut markdown = format!("```lab\n{kind:?} {name}\n```\n\n");
+        if let Some(doc) = &declaration.doc {
+            markdown.push_str(doc);
+            markdown.push_str("\n\n");
+        }
+        markdown.push_str(&format!("Defined in `{}`.", declaration.location.source.0));
+        Some(Hover { span, markdown })
+    }
+
+    /// What a `use` path names. A module path is not an identifier the
+    /// declaration search can resolve, so it is answered from the module the
+    /// path imports rather than from any name inside it.
+    fn imported_module_hover(&self, document: &Document, offset: usize) -> Option<Hover> {
+        let path = document
+            .analysis
+            .syntax
+            .as_ref()?
+            .items
+            .iter()
+            .find_map(|item| match item {
+                ast::Item::Use(use_decl) if use_decl.path.span.contains(offset) => {
+                    Some(&use_decl.path)
+                }
+                _ => None,
+            })?;
+        let name = use_path_text(path);
+        let (source, imported) = self
+            .documents
+            .iter()
+            .find(|(_, candidate)| candidate.module.as_str() == name)?;
+
+        let mut markdown = format!("```lab\nmodule {name}\n```\n\n");
+        if let Some(doc) = imported
+            .analysis
+            .syntax
+            .as_ref()
+            .and_then(|m| m.doc.as_ref())
+        {
+            markdown.push_str(doc);
+            markdown.push_str("\n\n");
+        }
+        markdown.push_str(&format!("Defined in `{}`.", source.0));
         Some(Hover {
-            span,
-            markdown: format!(
-                "```lab\n{kind:?} {name}\n```\n\nDefined in `{}`.",
-                location.source.0
-            ),
+            span: path.span,
+            markdown,
         })
     }
 
@@ -318,7 +381,7 @@ impl Workspace {
         let (name, _) = identifier_at(&document.text, offset)?;
         self.declarations()
             .into_iter()
-            .find_map(|(candidate, _, location)| (candidate == name).then_some(location))
+            .find_map(|candidate| (candidate.name == name).then_some(candidate.location))
     }
 
     pub fn references(&self, source: &SourceId, offset: usize) -> Vec<Location> {
@@ -377,7 +440,7 @@ impl Workspace {
         Some(formatted)
     }
 
-    fn declarations(&self) -> Vec<(String, SymbolKind, Location)> {
+    fn declarations(&self) -> Vec<Declaration> {
         self.documents
             .iter()
             .flat_map(|(source, document)| {
@@ -388,15 +451,14 @@ impl Workspace {
                     .into_iter()
                     .flat_map(|module| module.items.iter())
                     .filter_map(|item| {
-                        declaration(item).map(|(name, kind, span)| {
-                            (
-                                name.to_owned(),
-                                kind,
-                                Location {
-                                    source: source.clone(),
-                                    span,
-                                },
-                            )
+                        declaration(item).map(|(name, kind, span)| Declaration {
+                            name: name.to_owned(),
+                            kind,
+                            doc: documentation(item).map(str::to_owned),
+                            location: Location {
+                                source: source.clone(),
+                                span,
+                            },
                         })
                     })
                     .collect::<Vec<_>>()
@@ -481,13 +543,112 @@ mod tests {
     }
 
     #[test]
+    fn hover_over_an_import_shows_what_that_module_documents() {
+        let design = SourceId::new("designs/strains.lab");
+        let program = SourceId::new("programs/main.lab");
+        let mut workspace = Workspace::new();
+        workspace.set_document(
+            design.clone(),
+            1,
+            "/*!\n * Four engineered organisms.\n *\n * One plasmid in two chassis.\n */\n\nplasmid donor:\n  sequence: dna(\"ACGT\")\n".to_owned(),
+        );
+        workspace.set_document(
+            program.clone(),
+            1,
+            "use designs.strains\n\nworkflow main() -> None:\n  return None\n".to_owned(),
+        );
+
+        let text = workspace.text(&program).unwrap().to_owned();
+        let offset = text.find("strains").unwrap();
+        let hover = workspace.hover(&program, offset).expect("a hover");
+
+        assert!(
+            hover.markdown.contains("module designs.strains"),
+            "{}",
+            hover.markdown
+        );
+        assert!(hover.markdown.contains("Four engineered organisms."));
+        assert!(hover.markdown.contains("One plasmid in two chassis."));
+        assert!(hover.markdown.contains("designs/strains.lab"));
+        // The whole path answers, not the segment the cursor happens to be in.
+        let first_segment = text.find("designs").unwrap();
+        assert_eq!(
+            workspace.hover(&program, first_segment).map(|h| h.span),
+            Some(hover.span)
+        );
+    }
+
+    #[test]
+    fn a_documentation_block_is_highlighted_one_line_at_a_time() {
+        let source = SourceId::new("memory:test.lab");
+        let mut workspace = Workspace::new();
+        let text = "/**\n * Assemble the reporter plasmid.\n *\n * Takes no input.\n */\nworkflow assemble() -> None:\n  return None\n";
+        workspace.set_document(source.clone(), 1, text.to_owned());
+
+        let comments = workspace
+            .semantic_tokens(&source)
+            .into_iter()
+            .filter(|token| token.kind == SemanticTokenKind::Comment)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            comments.len(),
+            5,
+            "every line of the block carries its own token"
+        );
+        // A client encodes a token as a line-relative start and a length, so a
+        // token that crossed a newline would leave its later lines uncoloured.
+        assert!(
+            comments
+                .iter()
+                .all(|token| !text[token.span.start..token.span.end].contains('\n')),
+            "{comments:?}"
+        );
+        assert!(
+            text[comments[1].span.start..comments[1].span.end].contains("* Assemble"),
+            "the decorated continuation lines are part of the comment"
+        );
+    }
+
+    #[test]
+    fn hover_shows_the_documentation_a_declaration_carries() {
+        let source = SourceId::new("memory:test.lab");
+        let mut workspace = Workspace::new();
+        workspace.set_document(
+            source.clone(),
+            1,
+            "/**\n * Assemble the reporter plasmid.\n *\n * Takes no material input.\n */\nworkflow assemble() -> None:\n  return None\n".to_owned(),
+        );
+        let offset = workspace.text(&source).unwrap().find("assemble").unwrap();
+
+        let hover = workspace.hover(&source, offset).expect("a hover");
+        assert!(
+            hover.markdown.contains("Assemble the reporter plasmid."),
+            "{}",
+            hover.markdown
+        );
+        assert!(hover.markdown.contains("Takes no material input."));
+
+        let completion = workspace
+            .completions(&source, offset)
+            .into_iter()
+            .find(|item| item.label == "assemble")
+            .expect("the workflow completes");
+        assert_eq!(
+            completion.detail.as_deref(),
+            Some("Assemble the reporter plasmid."),
+            "a completion list has room for the summary line"
+        );
+    }
+
+    #[test]
     fn semantic_tokens_include_lab_constructs() {
         let source = SourceId::new("memory:test.lab");
         let mut workspace = Workspace::new();
         workspace.set_document(
             source.clone(),
             1,
-            "workflow build() -> None:\n  # observe\n  return None\n".to_owned(),
+            "workflow build() -> None:\n  // observe\n  return None\n".to_owned(),
         );
         let tokens = workspace.semantic_tokens(&source);
         assert!(
@@ -561,7 +722,7 @@ plasmid reporter:
         workspace.set_document(
             source.clone(),
             1,
-            "plasmid reporter:\n  # reporter\n  label = \"reporter\"\n".to_owned(),
+            "plasmid reporter:\n  // reporter\n  label = \"reporter\"\n".to_owned(),
         );
         let offset = workspace.text(&source).unwrap().find("reporter").unwrap();
         assert_eq!(workspace.rename(&source, offset, "sensor").len(), 1);
