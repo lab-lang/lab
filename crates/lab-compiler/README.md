@@ -12,7 +12,7 @@ The source tree follows semantic ownership and dependency direction:
 
 - `src/lair/` contains Design, Workflow, and Protocol dialects; the Workflow-to-Protocol dialect conversion; material-linearity analysis and pass; stage contracts; and the textual IR session;
 - `src/planning/protocol/` defines and validates backend-neutral scientific plans;
-- `src/planning/dependencies/` resolves artifact graphs against inventory without robot knowledge;
+- `src/planning/` resolves artifact graphs against inventory without robot knowledge;
 - `src/simulation/` owns the symbolic execution graph and interprets it into shared lab state and event traces;
 - `src/backend/` defines backend contracts and contains concrete robot implementations;
 - `src/artifact/` defines generated files independently of filesystem persistence;
@@ -25,7 +25,7 @@ The dependency direction is language model → planning/LAIR → backend → art
 
 The OT-2 backend lives entirely under `src/backend/opentrons_ot2/` and accepts `ProtocolLairProgram`, not source IR or an OT-2-specific copy of the biological recipe. Its planner analyzes Protocol operations and their use-def chains directly, validates target constraints, and allocates an `Ot2ExecutionPlan`. The manifest, manual protocol, and three OT-2 protocol stages are rendered from that one execution plan. Robot constants, deck capacities, labware choices, Python generation, and robot-specific package text do not live in generic rendering, planning, or the language frontend. Robot behavior is maintained in the backend-local `python/` project and checked with Ruff, strict mypy, pytest, byte compilation, and Opentrons simulation; Rust bundles those Python modules and injects the execution plan.
 
-`dependency-plan` and `full-build-bundle` first use the target-neutral resolver in `src/planning/dependencies/` to resolve source-declared artifact dependencies against a JSON inventory. The OT-2 package layer then compiles each successful graph node. A full-build bundle includes one consolidated human protocol in dependency-safe execution order, a separate dependency report, and standalone human/robot artifacts for each planning wave. Artifacts in one wave have no ordering constraint between them, so a wave is a single robot run over one deck. Backends return an `ArtifactBundle`; `labc` is responsible for writing it to disk.
+`dependency-plan` and `full-build-bundle` first use the target-neutral resolver in `src/planning/` to resolve source-declared artifact dependencies against a JSON inventory. The OT-2 package layer then compiles each successful graph node. A full-build bundle includes one consolidated human protocol in dependency-safe execution order, a separate dependency report, and standalone human/robot artifacts for each planning wave. Artifacts in one wave have no ordering constraint between them, so a wave is a single robot run over one deck. Backends return an `ArtifactBundle`; `labc` is responsible for writing it to disk.
 
 `labc` compiles one source file, so the modules it accepts are self-contained; a multi-module package is `lab build`'s job. The single-module sources these commands are exercised against live in [`tests/fixtures/`](tests/fixtures/). For the end-to-end package — designs, target profile, and the OT-2 protocols a robot application can open — see the [Golden Gate example](../../examples/golden-gate/README.md).
 

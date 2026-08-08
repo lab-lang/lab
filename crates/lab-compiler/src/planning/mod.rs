@@ -1,9 +1,10 @@
 //! Target-neutral planning shared by compiler backends.
 
-pub mod dependencies;
+mod model;
+mod resolution;
 
-pub use dependencies::{
+pub use model::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,
-    DependencyBuildManifest, DependencyBuildStatus, DependencyEdge, DependencyGraphError,
-    DependencyNode, resolve_dependency_graph,
+    DependencyBuildManifest, DependencyBuildStatus, DependencyEdge, DependencyNode,
 };
+pub use resolution::{DependencyGraphError, resolve_dependency_graph};
