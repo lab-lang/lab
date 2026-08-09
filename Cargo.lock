@@ -661,6 +661,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-inheco-odtc"
+version = "0.1.0"
+dependencies = [
+ "lab-instruments",
+ "quick-xml",
+ "thiserror",
+ "ureq",
+]
+
+[[package]]
 name = "lab-instruments"
 version = "0.1.0"
 dependencies = [
@@ -976,6 +986,15 @@ dependencies = [
  "pyo3-build-config",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.41.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

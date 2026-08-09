@@ -1,0 +1,17 @@
+[package]
+name = "lab-inheco-odtc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed Inheco ODTC thermocycler driver speaking SiLA 1.x SOAP over plain HTTP."
+
+[dependencies]
+lab-instruments.workspace = true
+quick-xml.workspace = true
+thiserror.workspace = true
+ureq.workspace = true
+
+[lints]
+workspace = true

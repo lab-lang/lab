@@ -7,6 +7,7 @@ members = [
     "crates/lab-hamilton-star",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
+    "crates/lab-inheco-odtc",
     "crates/lab-instruments",
     "crates/lab-language",
     "crates/lab-language-server",
@@ -27,6 +28,10 @@ repository = "https://github.com/lab-lang/lab"
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
 hidapi = "2"
+quick-xml = "0.41.0"
+# The ODTC speaks plain HTTP with no TLS, so the default rustls stack and
+# gzip support stay out of the build.
+ureq = { version = "3.3.0", default-features = false }
 pyo3 = { version = "0.28.3", features = ["abi3-py311"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -50,6 +55,7 @@ lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
 # protocol use never links libusb; the CLI runner re-enables `usb`.
 lab-hamilton-star = { path = "crates/lab-hamilton-star", version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
+lab-inheco-odtc = { path = "crates/lab-inheco-odtc", version = "0.1.0" }
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
 lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }
