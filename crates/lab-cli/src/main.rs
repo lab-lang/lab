@@ -1,6 +1,7 @@
 mod commands;
 mod run;
 mod update;
+mod workcell_run;
 
 use std::path::PathBuf;
 
@@ -57,21 +58,27 @@ enum Command {
         #[arg(long, conflicts_with = "target")]
         no_target: bool,
     },
-    /// Execute an emitted Hamilton STAR run package on the connected
-    /// machine, or review it with --dry-run.
+    /// Execute an emitted run package — a Hamilton STAR package or a
+    /// workcell wave — on the connected stations, or review it with
+    /// --dry-run.
     Run {
-        /// A run directory produced by `lab build` for a hamilton.star
-        /// target (the target output directory, or one wave directory of a
-        /// dependency build).
+        /// A run directory produced by `lab build` (the target output
+        /// directory, or one wave directory of a dependency build). A
+        /// directory holding `plan.workcell.json` runs as a workcell
+        /// wave; anything else runs as a Hamilton STAR package.
         path: PathBuf,
         /// Validate and print the full step table without touching
         /// hardware.
         #[arg(long)]
         dry_run: bool,
-        /// Skip the initial confirmation. Manual steps between runs still
+        /// Skip the initial confirmation. Handoffs and manual steps still
         /// require the operator.
         #[arg(long)]
         yes: bool,
+        /// Continue a workcell wave from its ledger, skipping nodes it
+        /// records as completed.
+        #[arg(long)]
+        resume: bool,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -134,7 +141,22 @@ fn run() -> Result<()> {
             target,
             no_target,
         } => commands::build(path, out_dir, target, no_target, &output),
-        Command::Run { path, dry_run, yes } => run::run(path, dry_run, yes, &output),
+        Command::Run {
+            path,
+            dry_run,
+            yes,
+            resume,
+        } => {
+            if workcell_run::is_workcell_directory(&path) {
+                workcell_run::run_workcell(path, dry_run, yes, resume, &output)
+            } else if resume {
+                anyhow::bail!(
+                    "--resume applies to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
+                )
+            } else {
+                run::run(path, dry_run, yes, &output)
+            }
+        }
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }

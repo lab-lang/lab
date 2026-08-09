@@ -254,7 +254,7 @@ pub(crate) fn run(directory: PathBuf, dry_run: bool, yes: bool, output: &Output)
     }
 }
 
-fn confirm(prompt: &str) -> Result<bool> {
+pub(crate) fn confirm(prompt: &str) -> Result<bool> {
     print!("{prompt}");
     std::io::stdout().flush()?;
     let mut answer = String::new();

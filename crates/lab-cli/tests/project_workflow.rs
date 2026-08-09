@@ -520,3 +520,54 @@ fn a_workcell_target_lifts_thermal_work_onto_its_cycler_station() {
 
     std::fs::remove_dir_all(&out_dir).unwrap();
 }
+
+#[test]
+fn a_workcell_wave_dry_runs_through_the_coordination_plan() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-workcell-run-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+    let build = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "workcell build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+
+    let wave = out_dir.join("workcell-star/wave-002");
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", wave.to_str().unwrap(), "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "workcell dry run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["status"], "dry-run");
+    assert!(
+        result["result"]["nodes"].as_u64().unwrap() >= 8,
+        "the transformation wave coordinates runs, thermal programs, and handoffs: {result}"
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}
