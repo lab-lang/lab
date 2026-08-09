@@ -4,14 +4,12 @@ members = [
     "crates/lab-byonoy",
     "crates/lab-cli",
     "crates/lab-compiler",
-    "crates/lab-hamilton-star",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
     "crates/lab-inheco-odtc",
     "crates/lab-instruments",
     "crates/lab-language",
     "crates/lab-language-server",
-    "crates/lab-opentrons-protocol",
     "crates/lab-package",
     "crates/lab-project",
     "crates/lab-python",
@@ -53,14 +51,14 @@ lab-byonoy = { path = "crates/lab-byonoy", version = "0.1.0", default-features =
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
 # Default features stay off at the workspace level so the compiler's pure
 # protocol use never links libusb; the CLI runner re-enables `usb`.
-lab-hamilton-star = { path = "crates/lab-hamilton-star", version = "0.1.0", default-features = false }
+hamilton-star = { version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
 lab-inheco-odtc = { path = "crates/lab-inheco-odtc", version = "0.1.0" }
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
 lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }
 lab-language-server = { path = "crates/lab-language-server", version = "0.1.0" }
-lab-opentrons-protocol = { path = "crates/lab-opentrons-protocol", version = "0.1.0" }
+opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.0" }
 lab-project = { path = "crates/lab-project", version = "0.1.0" }
 

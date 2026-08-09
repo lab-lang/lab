@@ -18,7 +18,7 @@ flate2 = "1.1.9"
 lab-compiler.workspace = true
 # The runner needs the live USB transport the workspace dependency keeps
 # off by default.
-lab-hamilton-star = { workspace = true, features = ["usb"] }
+hamilton-star = { workspace = true, features = ["usb"] }
 lab-inheco-odtc.workspace = true
 lab-instruments.workspace = true
 lab-package.workspace = true

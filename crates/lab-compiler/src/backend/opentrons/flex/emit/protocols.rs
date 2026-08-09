@@ -1,7 +1,7 @@
 //! JSON protocol authoring for the three build stages.
 //!
 //! Each stage renders one Opentrons JSON protocol (schema v8) through the
-//! checked `lab-opentrons-protocol` builder, reproducing the liquid-handling
+//! checked `opentrons-protocol` builder, reproducing the liquid-handling
 //! choreography of the OT-2 Python protocols: reagent additions with a fresh
 //! tip per transfer, thermocycler digest/ligate cycling, cold-hold heat-shock
 //! transformation, and serial dilution with agar spotting. Plates stay in
@@ -9,8 +9,8 @@
 //! from assembly through plating — so no gripper move is needed inside a
 //! stage; between-run handling belongs to the manual protocol.
 
-use lab_opentrons_protocol::schema::{Metadata, WellLocation, WellOrigin};
-use lab_opentrons_protocol::{
+use opentrons_protocol::schema::{Metadata, WellLocation, WellOrigin};
+use opentrons_protocol::{
     FlexPipetteName, FlexProtocolBuilder, FlexSlot, LabwareId, ModuleId, PipetteId, PipetteMount,
     ProtocolError, TemperatureModule, Thermocycler, standard_definition,
 };

@@ -2,7 +2,7 @@
 //!
 //! This module is the containment boundary for every Flex-specific decision:
 //! accepted Protocol operations, deck and well allocation, Flex labware and
-//! instrument choices, JSON protocol emission through `lab-opentrons-protocol`,
+//! instrument choices, JSON protocol emission through `opentrons-protocol`,
 //! and packaged human instructions.
 
 mod backend;

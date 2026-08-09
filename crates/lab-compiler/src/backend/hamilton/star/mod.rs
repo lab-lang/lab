@@ -3,7 +3,7 @@
 //! This module is the containment boundary for every STAR-specific decision:
 //! accepted Protocol operations, the vendored carrier catalog and deck
 //! coordinates, channel batching and liquid-height derivation, firmware
-//! frame emission through `lab-hamilton-star`, and the packaged human
+//! frame emission through `hamilton-star`, and the packaged human
 //! instructions. The emitted `lab.star-run.v0` documents are the review
 //! boundary: `lab run` replays their frames verbatim, adding only command
 //! ids.

@@ -8,12 +8,12 @@
 //! — the deck constants the STAR firmware itself addresses. Every carrier
 //! and labware dimension below derives from PyLabRobot's Hamilton resource
 //! definitions (MIT License, Copyright (c) 2022 PyLabRobot), the same
-//! de-facto specification `lab-hamilton-star` credits for the wire
+//! de-facto specification `hamilton-star` credits for the wire
 //! protocol; the specific source resources are named on each definition.
 
-use lab_hamilton_star::catalog::{TIP_300UL_FILTER, TIP_1000UL_FILTER, TipType};
-use lab_hamilton_star::commands::system::{TipPickupMethod, TipSizeCode};
-use lab_hamilton_star::units::Millimeters;
+use hamilton_star::catalog::{TIP_300UL_FILTER, TIP_1000UL_FILTER, TipType};
+use hamilton_star::commands::system::{TipPickupMethod, TipSizeCode};
+use hamilton_star::units::Millimeters;
 
 /// Deck x of rail 1, in millimeters.
 pub const RAIL_ONE_X: f64 = 100.0;

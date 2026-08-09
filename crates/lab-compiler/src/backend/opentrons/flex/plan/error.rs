@@ -35,7 +35,7 @@ pub enum FlexEmissionError {
     /// protocol authoring layer rejects; the authoring error carries the
     /// specific rule.
     #[error("failed to author the Flex JSON protocol: {0}")]
-    Protocol(#[from] lab_opentrons_protocol::ProtocolError),
+    Protocol(#[from] opentrons_protocol::ProtocolError),
     #[error(transparent)]
     Artifact(#[from] ArtifactError),
 }

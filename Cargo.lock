@@ -479,6 +479,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hamilton-star"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0c00db24848af095fa9890395adee963b1764833da0d7121c1c5de4a9c235d8"
+dependencies = [
+ "rusb",
+ "thiserror",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -600,8 +610,8 @@ dependencies = [
  "anyhow",
  "clap",
  "flate2",
+ "hamilton-star",
  "lab-compiler",
- "lab-hamilton-star",
  "lab-inheco-odtc",
  "lab-instruments",
  "lab-package",
@@ -624,23 +634,15 @@ dependencies = [
  "anyhow",
  "cargo-husky",
  "clap",
- "lab-hamilton-star",
+ "hamilton-star",
  "lab-instruments",
  "lab-language",
- "lab-opentrons-protocol",
+ "opentrons-protocol",
  "pliron",
  "serde",
  "serde_json",
  "thiserror",
  "toml",
-]
-
-[[package]]
-name = "lab-hamilton-star"
-version = "0.1.0"
-dependencies = [
- "rusb",
- "thiserror",
 ]
 
 [[package]]
@@ -700,15 +702,6 @@ dependencies = [
  "lsp-types",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "lab-opentrons-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
 ]
 
 [[package]]
@@ -860,6 +853,17 @@ name = "once_vec"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a6298074a1742b584aaca148a6c61ecb27f0b55fdf237c235939c84924377a1"
+
+[[package]]
+name = "opentrons-protocol"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c288d8c0faaba785e3f120cbea1ec225c0fd577a48cb37160b97eb4d0fc08957"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "percent-encoding"

@@ -14,7 +14,7 @@
 //!   dispenses before it use partial jets (`dm0`);
 //! - tips are never reused across different source liquids.
 
-use lab_hamilton_star::catalog::{CorrectionCurve, TipType};
+use hamilton_star::catalog::{CorrectionCurve, TipType};
 
 use crate::backend::TargetConstraintError;
 use crate::backend::hamilton::star::BACKEND;
@@ -183,8 +183,8 @@ pub struct Curves {
 impl Default for Curves {
     fn default() -> Curves {
         Curves {
-            small: lab_hamilton_star::catalog::water_standard_volume_filter_surface(),
-            large: lab_hamilton_star::catalog::water_high_volume_filter_jet(),
+            small: hamilton_star::catalog::water_standard_volume_filter_surface(),
+            large: hamilton_star::catalog::water_high_volume_filter_jet(),
         }
     }
 }
@@ -265,7 +265,7 @@ impl<'a> RunBuilder<'a> {
             // the tip's total length (with the empirical size-class
             // correction), press down by the length that stays proud of
             // the cone.
-            let fitting = lab_hamilton_star::catalog::fitting_depth(tip.size).0;
+            let fitting = hamilton_star::catalog::fitting_depth(tip.size).0;
             let begin =
                 ((first.z + tip.total_length.0) * 10.0).round() as i32 + tip.pickup_z_correction();
             let travel = ((tip.total_length.0 - fitting) * 10.0).round() as i32;

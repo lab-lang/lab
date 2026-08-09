@@ -25,10 +25,10 @@ clap.workspace = true
 # The compiler consumes only the pure protocol layer: planning and frame
 # encoding never link libusb (the workspace dependency keeps default
 # features off).
-lab-hamilton-star.workspace = true
+hamilton-star.workspace = true
 lab-instruments.workspace = true
 lab-language.workspace = true
-lab-opentrons-protocol.workspace = true
+opentrons-protocol.workspace = true
 pliron.workspace = true
 serde.workspace = true
 serde_json.workspace = true

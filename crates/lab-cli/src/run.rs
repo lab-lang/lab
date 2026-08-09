@@ -12,8 +12,8 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use hamilton_star::{InitializeOptions, RawCommand, Star};
 use lab_compiler::runfmt::{STAR_RUN_FORMAT, StarRunDocument};
-use lab_hamilton_star::{InitializeOptions, RawCommand, Star};
 use serde::Deserialize;
 
 use crate::Output;
@@ -265,16 +265,14 @@ pub(crate) fn confirm(prompt: &str) -> Result<bool> {
 /// Test-only session construction over an arbitrary transport, so the
 /// replay loop is exercised without hardware.
 #[cfg(test)]
-pub(crate) fn star_over(
-    transport: std::sync::Arc<dyn lab_hamilton_star::Transport>,
-) -> Result<Star> {
+pub(crate) fn star_over(transport: std::sync::Arc<dyn hamilton_star::Transport>) -> Result<Star> {
     Ok(Star::new(transport)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_hamilton_star::{MockTransport, Transport};
+    use hamilton_star::{MockTransport, Transport};
     use std::sync::Arc;
 
     fn loaded(frames: &[(&str, &str)]) -> LoadedRun {

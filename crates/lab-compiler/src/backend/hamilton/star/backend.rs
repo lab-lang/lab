@@ -122,7 +122,7 @@ mod tests {
         for step in steps {
             let frame = step["frame"].as_str().expect("every step carries a frame");
             assert!(
-                lab_hamilton_star::RawCommand::parse(frame).is_ok(),
+                hamilton_star::RawCommand::parse(frame).is_ok(),
                 "every emitted frame replays through the driver crate: {frame}"
             );
         }

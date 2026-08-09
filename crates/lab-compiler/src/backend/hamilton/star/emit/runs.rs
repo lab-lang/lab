@@ -4,13 +4,13 @@
 //! is byte-for-byte what `lab run` sends; the session adds only command
 //! ids.
 
-use lab_hamilton_star::catalog::TipType;
-use lab_hamilton_star::commands::Command;
-use lab_hamilton_star::commands::pipetting::{
+use hamilton_star::catalog::TipType;
+use hamilton_star::commands::Command;
+use hamilton_star::commands::pipetting::{
     Aspirate, AspirateChannel, ChannelTarget, Dispense, DispenseChannel, DispenseMode, LldMode,
     TipDiscard, TipDiscardMethod, TipPickup,
 };
-use lab_hamilton_star::commands::system::{DefineTipType, MoveAllChannelsToZSafety};
+use hamilton_star::commands::system::{DefineTipType, MoveAllChannelsToZSafety};
 
 use crate::backend::hamilton::star::plan::{
     ChannelLiquid, StarEmissionError, StarExecutionPlan, StarOperation, StarRunPlan, TipClass,

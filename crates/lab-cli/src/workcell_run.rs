@@ -15,11 +15,11 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
+use hamilton_star::RawCommand;
 use lab_compiler::runfmt::{
     STAR_RUN_FORMAT, StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
     WORKCELL_RUN_FORMAT, WorkcellAction, WorkcellRunDocument,
 };
-use lab_hamilton_star::RawCommand;
 use serde::{Deserialize, Serialize};
 
 /// The ledger file a wave accumulates beside its plan.
@@ -323,7 +323,7 @@ pub(crate) fn render_dry_run(loaded: &LoadedWorkcell) -> String {
 /// The connected stations a walk accumulates: each opens on first use and
 /// stays open for the wave.
 struct Sessions {
-    star: Option<lab_hamilton_star::Star>,
+    star: Option<hamilton_star::Star>,
     odtc: Option<lab_inheco_odtc::Odtc>,
 }
 
@@ -437,14 +437,14 @@ pub(crate) fn run_workcell(
     )
 }
 
-fn ensure_star(sessions: &mut Sessions) -> Result<&lab_hamilton_star::Star> {
+fn ensure_star(sessions: &mut Sessions) -> Result<&hamilton_star::Star> {
     if sessions.star.is_none() {
         println!("connecting to the first Hamilton STAR on USB");
-        let star = lab_hamilton_star::Star::open_usb().context(
+        let star = hamilton_star::Star::open_usb().context(
             "no Hamilton STAR answered on USB; use --dry-run to review without hardware",
         )?;
         println!("connected; running the setup choreography");
-        star.initialize(lab_hamilton_star::InitializeOptions::default())
+        star.initialize(hamilton_star::InitializeOptions::default())
             .context("the setup choreography failed; the machine is not in a known state")?;
         sessions.star = Some(star);
     }

@@ -16,7 +16,7 @@ mod schema;
 
 use std::collections::BTreeSet;
 
-use lab_opentrons_protocol::{FlexPipetteName, FlexSlot, TrashArea};
+use opentrons_protocol::{FlexPipetteName, FlexSlot, TrashArea};
 use serde::{Deserialize, Serialize};
 
 use crate::backend::opentrons::flex::BACKEND;

@@ -38,7 +38,7 @@ pub enum StarEmissionError {
     /// a value outside a firmware range; the command error carries the
     /// specific parameter and bound.
     #[error("failed to encode a STAR firmware frame: {0}")]
-    Command(#[from] lab_hamilton_star::CommandError),
+    Command(#[from] hamilton_star::CommandError),
     #[error(transparent)]
     Artifact(#[from] ArtifactError),
 }

@@ -13,7 +13,7 @@ its "protocol" is the sequence of ASCII command frames the machine is sent.
 A backend for it must answer what `lab build` produces, and what stands
 between the produced thing and a moving machine.
 
-The driver crate `lab-hamilton-star` already separates the pure protocol
+The driver crate `hamilton-star` already separates the pure protocol
 (typed, golden-tested frame encoders) from the transport and session. The
 compiler consumes only the pure layer.
 
