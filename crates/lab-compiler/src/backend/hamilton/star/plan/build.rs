@@ -24,7 +24,7 @@ use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::{
     ManualStep, SourceFill, StarAssemblyChemistry, StarAssemblyPlan, StarExecutionPlan,
     StarPlatingPlan, StarRunPlan, StarStrainChemistry, StarStrainPlan, StarTransformationPlan,
-    StarWell, TipClass,
+    StarWell, ThermalRequirement, TipClass,
 };
 use crate::backend::hamilton::star::plan::liquids::{
     AGAR_SPOT_HEIGHT_MM, DeckIndex, LiquidState, PLATE_DEAD_VOLUME_UL, TROUGH_DEAD_VOLUME_UL,
@@ -47,7 +47,7 @@ pub fn plan_build(
     plan_selected_build(protocol, profile, None)
 }
 
-pub(in crate::backend::hamilton::star) fn plan_selected_build(
+pub(in crate::backend) fn plan_selected_build(
     protocol: &ProtocolLairProgram,
     profile: &StarTargetProfile,
     selected_artifacts: Option<&BTreeSet<String>>,
@@ -406,6 +406,7 @@ fn choreograph_program(
             title: "Golden Gate assembly".into(),
             operations,
             manual_after: assembly_manual_steps(science),
+            thermal_after: assembly_thermal_after(science),
         });
         // The operator moves the reactions off and stages a fresh plate, so
         // the culture wells start empty even where names repeat.
@@ -432,6 +433,7 @@ fn choreograph_program(
             title: "Heat-shock transformation: cells and DNA".into(),
             operations,
             manual_after: transformation_mix_manual_steps(science),
+            thermal_after: transformation_mix_thermal_after(science),
         });
 
         let mut builder = RunBuilder::new(
@@ -453,6 +455,7 @@ fn choreograph_program(
             title: "Heat-shock transformation: recovery medium".into(),
             operations,
             manual_after: transformation_recovery_manual_steps(science),
+            thermal_after: transformation_recovery_thermal_after(science),
         });
 
         let mut builder = RunBuilder::new(
@@ -478,6 +481,7 @@ fn choreograph_program(
             title: "Serial dilution and plating".into(),
             operations,
             manual_after: plating_manual_steps(science),
+            thermal_after: Vec::new(),
         });
     }
 
@@ -697,6 +701,112 @@ fn choreograph_plating(
         }
     }
     Ok(())
+}
+
+/// One plateau with the device-default ramp and lid.
+fn plateau(celsius: f64, hold_seconds: f64) -> lab_instruments::ThermalStep {
+    lab_instruments::ThermalStep {
+        celsius,
+        hold_seconds,
+        ramp_c_per_s: None,
+        lid_celsius: None,
+    }
+}
+
+/// The assembly thermal program behind the first manual step: the same
+/// digest/ligate cycling and finish the prose states, as data.
+fn assembly_thermal_after(science: &Science<'_>) -> Vec<ThermalRequirement> {
+    let Some(first) = science.assemblies.first() else {
+        return Vec::new();
+    };
+    let chemistry = &first.chemistry;
+    vec![ThermalRequirement {
+        id: "assembly_thermocycle".into(),
+        title: "Thermocycle the assembly reactions".into(),
+        plate: "reaction_plate".into(),
+        profile: lab_instruments::ThermalProfile {
+            stages: vec![
+                lab_instruments::ThermalStage {
+                    steps: vec![
+                        plateau(
+                            f64::from(chemistry.digest_temperature_c),
+                            f64::from(chemistry.digest_minutes) * 60.0,
+                        ),
+                        plateau(
+                            f64::from(chemistry.ligate_temperature_c),
+                            f64::from(chemistry.ligate_minutes) * 60.0,
+                        ),
+                    ],
+                    repeats: u32::from(chemistry.cycles),
+                },
+                lab_instruments::ThermalStage {
+                    steps: vec![plateau(50.0, 300.0), plateau(80.0, 600.0)],
+                    repeats: 1,
+                },
+            ],
+        },
+        final_hold_celsius: Some(4.0),
+        fill_volume_ul: f64::from(chemistry.reaction_volume_ul),
+        fallback_index: 0,
+    }]
+}
+
+/// The cold-hold and heat-shock program behind the transformation mix's
+/// manual step: ice approximated as a 4 °C block hold.
+fn transformation_mix_thermal_after(science: &Science<'_>) -> Vec<ThermalRequirement> {
+    let Some(first) = science.strains.first() else {
+        return Vec::new();
+    };
+    let chemistry = &first.chemistry;
+    vec![ThermalRequirement {
+        id: "transformation_heat_shock".into(),
+        title: "Cold hold and heat shock".into(),
+        plate: "reaction_plate".into(),
+        profile: lab_instruments::ThermalProfile {
+            stages: vec![lab_instruments::ThermalStage {
+                steps: vec![
+                    plateau(4.0, f64::from(chemistry.cold_minutes) * 60.0),
+                    plateau(
+                        f64::from(chemistry.heat_shock_temperature_c),
+                        f64::from(chemistry.heat_shock_minutes) * 60.0,
+                    ),
+                    plateau(4.0, 120.0),
+                ],
+                repeats: 1,
+            }],
+        },
+        final_hold_celsius: Some(4.0),
+        fill_volume_ul: f64::from(chemistry.cell_volume_ul) + f64::from(chemistry.dna_volume_ul),
+        fallback_index: 0,
+    }]
+}
+
+/// The recovery incubation behind the recovery run's manual step: a single
+/// warm hold.
+fn transformation_recovery_thermal_after(science: &Science<'_>) -> Vec<ThermalRequirement> {
+    let Some(first) = science.strains.first() else {
+        return Vec::new();
+    };
+    let chemistry = &first.chemistry;
+    vec![ThermalRequirement {
+        id: "transformation_recovery".into(),
+        title: "Recovery incubation".into(),
+        plate: "reaction_plate".into(),
+        profile: lab_instruments::ThermalProfile {
+            stages: vec![lab_instruments::ThermalStage {
+                steps: vec![plateau(
+                    f64::from(chemistry.recovery_temperature_c),
+                    f64::from(chemistry.recovery_minutes) * 60.0,
+                )],
+                repeats: 1,
+            }],
+        },
+        final_hold_celsius: None,
+        fill_volume_ul: f64::from(chemistry.cell_volume_ul)
+            + f64::from(chemistry.dna_volume_ul)
+            + f64::from(chemistry.recovery_volume_ul),
+        fallback_index: 0,
+    }]
 }
 
 fn assembly_manual_steps(science: &Science<'_>) -> Vec<ManualStep> {

@@ -28,6 +28,7 @@ mod profile;
 mod resources;
 mod trace;
 mod traits;
+pub mod workcell;
 
 pub use constraints::TargetConstraintError;
 pub use descriptor::{BackendDescriptor, BackendTarget};

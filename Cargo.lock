@@ -601,6 +601,7 @@ dependencies = [
  "cargo-husky",
  "clap",
  "lab-hamilton-star",
+ "lab-instruments",
  "lab-language",
  "lab-opentrons-protocol",
  "pliron",

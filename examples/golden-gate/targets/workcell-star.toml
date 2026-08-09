@@ -1,0 +1,19 @@
+# A workcell bench: the Hamilton STAR does the liquid handling, an Inheco
+# ODTC beside it takes the thermal programs the STAR would otherwise hand
+# to the operator, and a human carries the plate between them.
+
+[target]
+backend = "workcell"
+
+[[station]]
+name = "star-1"
+kind = "hamilton.star"
+profile = "hamilton-star"
+
+[[station]]
+name = "odtc-1"
+kind = "inheco.odtc"
+address = "169.254.10.40:8080"
+
+[transport]
+between = "human"

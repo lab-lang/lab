@@ -5,6 +5,7 @@ use anyhow::{Context, Result, bail};
 use lab_compiler::backend::hamilton::star::StarTargetProfile;
 use lab_compiler::backend::opentrons::flex::FlexTargetProfile;
 use lab_compiler::backend::opentrons::ot2::Ot2TargetProfile;
+use lab_compiler::backend::workcell::WorkcellProfile;
 use lab_compiler::planning::BuildInventory;
 use lab_compiler::{
     DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
@@ -258,6 +259,7 @@ enum TargetProfile {
     Ot2(Ot2TargetProfile),
     Flex(FlexTargetProfile),
     Star(StarTargetProfile),
+    Workcell(WorkcellProfile),
 }
 
 fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
@@ -277,8 +279,11 @@ fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
         "hamilton.star" => Ok(TargetProfile::Star(StarTargetProfile::parse(
             name, contents,
         )?)),
+        "workcell" => Ok(TargetProfile::Workcell(WorkcellProfile::parse(
+            name, contents,
+        )?)),
         other => bail!(
-            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2', 'opentrons.flex', and 'hamilton.star'"
+            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2', 'opentrons.flex', 'hamilton.star', and 'workcell'"
         ),
     }
 }
@@ -292,6 +297,9 @@ fn is_robot_protocol(path: &Path) -> bool {
             name.ends_with("_protocol.py")
                 || name.ends_with("_protocol.json")
                 || name.ends_with(".star.json")
+                || name.ends_with(".odtc.json")
+                || name.ends_with(".read.json")
+                || name == "plan.workcell.json"
         })
 }
 
@@ -357,6 +365,36 @@ fn build_for_target(
         TargetProfile::Star(profile) => {
             lab_compiler::backend::hamilton::star::compile_dependency_build(
                 &protocol, profile, &inventory,
+            )
+            .with_context(|| format!("failed to compile the {target} build"))?
+            .artifacts()
+            .clone()
+        }
+        TargetProfile::Workcell(profile) => {
+            let station = profile.liquid_handler();
+            let station_profile = station
+                .profile
+                .as_deref()
+                .expect("workcell validation requires the liquid handler to name a profile");
+            let station_path = project_root
+                .join("targets")
+                .join(format!("{station_profile}.toml"));
+            let station_contents = fs::read_to_string(&station_path).with_context(|| {
+                format!(
+                    "station '{}' names profile '{station_profile}', but there is no target profile at {}",
+                    station.name,
+                    station_path.display()
+                )
+            })?;
+            let star_profile = StarTargetProfile::parse(station_profile, &station_contents)
+                .with_context(|| {
+                    format!("failed to load station profile {}", station_path.display())
+                })?;
+            lab_compiler::backend::workcell::compile_dependency_build(
+                &protocol,
+                profile,
+                &star_profile,
+                &inventory,
             )
             .with_context(|| format!("failed to compile the {target} build"))?
             .artifacts()

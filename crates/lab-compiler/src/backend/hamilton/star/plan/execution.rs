@@ -156,6 +156,34 @@ pub struct StarRunPlan {
     pub title: String,
     pub operations: Vec<StarOperation>,
     pub manual_after: Vec<ManualStep>,
+    /// The thermal programs behind this run's manual steps, structured so a
+    /// workcell can assign them to a thermocycler station. On a bare STAR
+    /// target the operator prose in `manual_after` is the whole story, so
+    /// these never reach the serialized manifest.
+    #[serde(skip)]
+    pub thermal_after: Vec<ThermalRequirement>,
+}
+
+/// A thermal program a run needs after its liquid handling. Each
+/// requirement shadows one step of `manual_after` (named by
+/// `fallback_index`): a workcell with a thermocycler station executes the
+/// profile and drops the prose; anything else keeps the prose verbatim.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThermalRequirement {
+    /// Stable identity within the run, e.g. `assembly_thermocycle`.
+    pub id: String,
+    pub title: String,
+    /// The deck resource that carries the reactions through the program.
+    pub plate: String,
+    pub profile: lab_instruments::ThermalProfile,
+    /// Temperature held after the profile ends, until retrieval.
+    pub final_hold_celsius: Option<f64>,
+    /// Approximate per-well fill, which thermocyclers use to pick a
+    /// volume-dependent control class.
+    pub fill_volume_ul: f64,
+    /// The position of this requirement's operator fallback in the run's
+    /// `manual_after`.
+    pub fallback_index: usize,
 }
 
 pub use crate::runfmt::ManualStep;

@@ -9,14 +9,15 @@ mod liquids;
 
 use crate::ProtocolLairProgram;
 pub use crate::backend::hamilton::star::plan::build::plan_build;
-pub(in crate::backend::hamilton::star) use crate::backend::hamilton::star::plan::build::plan_selected_build;
+pub(in crate::backend) use crate::backend::hamilton::star::plan::build::plan_selected_build;
 pub use crate::backend::hamilton::star::plan::error::{
     StarBuildError, StarEmissionError, StarPlanningError,
 };
 pub use crate::backend::hamilton::star::plan::execution::{
     ChannelLiquid, ManualStep, SourceFill, StarAssemblyChemistry, StarAssemblyPlan,
     StarExecutionPlan, StarOperation, StarPlatingPlan, StarRunPlan, StarStrainChemistry,
-    StarStrainPlan, StarTransformationPlan, StarWell, TipClass, TipPickupPosition,
+    StarStrainPlan, StarTransformationPlan, StarWell, ThermalRequirement, TipClass,
+    TipPickupPosition,
 };
 use crate::planning::BuildGraph;
 

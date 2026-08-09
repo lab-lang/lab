@@ -11,6 +11,109 @@ use serde::{Deserialize, Serialize};
 /// The format string every `lab.star-run.v0` document declares.
 pub const STAR_RUN_FORMAT: &str = "lab.star-run.v0";
 
+/// The format string every `lab.thermocycle-run.v0` document declares.
+pub const THERMOCYCLE_RUN_FORMAT: &str = "lab.thermocycle-run.v0";
+
+/// The format string every `lab.plate-read.v0` document declares.
+pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
+
+/// The format string every `lab.workcell-run.v0` document declares.
+pub const WORKCELL_RUN_FORMAT: &str = "lab.workcell-run.v0";
+
+/// One `lab.thermocycle-run.v0` document: a device-neutral thermal program
+/// for one plate. The station's kind decides which instrument executes it;
+/// the document never names a vendor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThermocycleRunDocument {
+    /// Always [`THERMOCYCLE_RUN_FORMAT`]; readers reject any other value.
+    pub format: String,
+    /// The program's identity within its wave, e.g. `assembly_thermocycle`.
+    pub id: String,
+    pub title: String,
+    /// The labware resource that rides through the program.
+    pub plate: String,
+    pub profile: lab_instruments::ThermalProfile,
+    /// Temperature held after the profile ends, until retrieval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_hold_celsius: Option<f64>,
+    /// Approximate per-well fill, for volume-dependent control classes.
+    pub fill_volume_ul: f64,
+}
+
+/// One `lab.plate-read.v0` document: a device-neutral plate acquisition.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlateReadDocument {
+    /// Always [`PLATE_READ_FORMAT`]; readers reject any other value.
+    pub format: String,
+    pub id: String,
+    pub title: String,
+    /// The labware resource being measured.
+    pub plate: String,
+    pub mode: PlateReadMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "lowercase")]
+pub enum PlateReadMode {
+    Absorbance { wavelength_nm: u16 },
+    Luminescence { integration_seconds: f64 },
+}
+
+/// One `lab.workcell-run.v0` document: the coordination plan for one wave
+/// of a multi-station build. Nodes execute in dependency order; every
+/// physical plate movement is an explicit handoff node the operator
+/// confirms.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkcellRunDocument {
+    /// Always [`WORKCELL_RUN_FORMAT`]; readers reject any other value.
+    pub format: String,
+    pub stations: Vec<WorkcellStation>,
+    pub nodes: Vec<WorkcellNode>,
+}
+
+/// One station as the coordination plan sees it: a name, the kind that
+/// selects its executor, and where its program documents live relative to
+/// the wave directory.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkcellStation {
+    pub name: String,
+    /// The station kind string, e.g. `hamilton.star` or `inheco.odtc`.
+    pub kind: String,
+    pub program_dir: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkcellNode {
+    /// Stable, human-readable identity, e.g. `assembly_run` or
+    /// `assembly_thermocycle.to-odtc-1`.
+    pub id: String,
+    /// Node ids that must complete first.
+    #[serde(default)]
+    pub after: Vec<String>,
+    #[serde(flatten)]
+    pub action: WorkcellAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "kebab-case")]
+pub enum WorkcellAction {
+    /// Execute one station program document.
+    StationProgram {
+        station: String,
+        /// The document path relative to the wave directory.
+        document: String,
+    },
+    /// A human moves labware between stations and confirms.
+    Handoff {
+        from: String,
+        to: String,
+        labware: String,
+        instructions: String,
+    },
+    /// A human performs a step that is not a movement, and confirms.
+    Manual { title: String, instructions: String },
+}
+
 /// One replayable Hamilton STAR step: the id-less firmware frame and the
 /// operator's view of it. `module` and `code` repeat the frame's first four
 /// characters so a reviewer can scan the document without decoding frames.

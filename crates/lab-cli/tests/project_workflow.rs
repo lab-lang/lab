@@ -406,3 +406,117 @@ fn checking_one_file_underlines_the_source_rather_than_naming_byte_offsets() {
 
     std::fs::remove_file(&source).unwrap();
 }
+
+#[test]
+fn a_workcell_target_lifts_thermal_work_onto_its_cycler_station() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-workcell-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "workcell target build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let target_root = out_dir.join("workcell-star");
+    let coordination: Value = serde_json::from_str(
+        &std::fs::read_to_string(target_root.join("wave-001/plan.workcell.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(coordination["format"], "lab.workcell-run.v0");
+    let stations = coordination["stations"].as_array().unwrap();
+    assert_eq!(stations.len(), 2, "the profile declares two stations");
+
+    let nodes = coordination["nodes"].as_array().unwrap();
+    assert_eq!(
+        nodes[0]["action"], "station-program",
+        "the wave opens with the liquid handler's run"
+    );
+    assert_eq!(nodes[0]["station"], "star-1");
+    let actions: Vec<&str> = nodes
+        .iter()
+        .map(|node| node["action"].as_str().unwrap())
+        .collect();
+    assert!(
+        actions.contains(&"handoff"),
+        "plate movements are explicit nodes: {actions:?}"
+    );
+
+    // The thermal program left the operator prose and became a station
+    // document the cycler executes.
+    let cycler_doc: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            target_root.join("wave-001/stations/odtc-1/assembly_thermocycle.odtc.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(cycler_doc["format"], "lab.thermocycle-run.v0");
+    assert_eq!(cycler_doc["plate"], "reaction_plate");
+    assert_eq!(cycler_doc["final_hold_celsius"], 4.0);
+    let stages = cycler_doc["profile"]["stages"].as_array().unwrap();
+    assert_eq!(
+        stages[0]["steps"].as_array().unwrap().len(),
+        2,
+        "digest and ligate alternate inside the cycled stage"
+    );
+
+    // The handler's run document is the same reviewed program it would be
+    // on a bare STAR target, minus the operator prose the coordination
+    // plan now owns.
+    let star_doc: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            target_root.join("wave-001/stations/star-1/assembly_run.star.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(star_doc["format"], "lab.star-run.v0");
+    assert_eq!(
+        star_doc["manual_after"].as_array().unwrap().len(),
+        0,
+        "sequencing lives in plan.workcell.json, not in the station package"
+    );
+    assert!(
+        target_root
+            .join("wave-001/stations/star-1/manual_protocol.md")
+            .is_file(),
+        "deck and source loading stay with the handler's own manual"
+    );
+
+    // Later waves carry the transformation thermal programs.
+    assert!(
+        target_root
+            .join("wave-002/stations/odtc-1/transformation_heat_shock.odtc.json")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("wave-002/stations/odtc-1/transformation_recovery.odtc.json")
+            .is_file()
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}

@@ -26,7 +26,7 @@ pub struct StarBundle {
 }
 
 impl StarBundle {
-    pub(in crate::backend::hamilton::star) fn from_plan(
+    pub(in crate::backend) fn from_plan(
         manifest: StarExecutionPlan,
     ) -> Result<Self, StarEmissionError> {
         let mut artifacts = ArtifactBundle::new();
