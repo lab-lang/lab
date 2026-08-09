@@ -243,6 +243,120 @@ fn the_manifest_target_builds_robot_protocols_without_naming_one() {
     std::fs::remove_dir_all(out_dir).unwrap();
 }
 
+/// The `backend` key a profile declares selects the backend, so the same
+/// program builds for a Flex without a source edit.
+#[test]
+fn a_profile_selects_its_backend_and_that_backends_protocol_format() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-flex-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "opentrons-flex",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "Flex target build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["result"]["target"], "opentrons-flex");
+    let protocols = result["result"]["protocols"].as_array().unwrap();
+    assert_eq!(protocols.len(), 3);
+    assert!(
+        protocols
+            .iter()
+            .all(|path| path.as_str().unwrap().ends_with("_protocol.json")),
+        "a Flex build emits JSON protocols: {protocols:?}"
+    );
+
+    let target_root = out_dir.join("opentrons-flex");
+    assert!(
+        target_root
+            .join("wave-001/assembly_protocol.json")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("wave-002/transformation_protocol.json")
+            .is_file()
+    );
+    assert!(!target_root.join("wave-001/assembly_protocol.py").exists());
+
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(target_root.join("wave-002/automation_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["target"], "opentrons.flex");
+    assert_eq!(
+        manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
+        serde_json::json!(["B2", "B3"]),
+        "the emitted plan carries the deck the target profile declared"
+    );
+
+    let protocol: Value = serde_json::from_str(
+        &std::fs::read_to_string(target_root.join("wave-001/assembly_protocol.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(protocol["schemaVersion"], 8);
+    assert_eq!(protocol["robot"]["model"], "OT-3 Standard");
+
+    std::fs::remove_dir_all(out_dir).unwrap();
+}
+
+#[test]
+fn a_target_build_rejects_a_backend_this_toolchain_does_not_provide() {
+    let project = temporary_project();
+    std::fs::create_dir_all(project.join("src/programs")).unwrap();
+    std::fs::write(
+        project.join("lab.toml"),
+        "[package]\nname = \"unknown-backend\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[build]\nentry = \"src/programs/main.lab\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/programs/main.lab"),
+        "use std.bio.build\nuse std.bio.designs\n\nplasmid starter:\n  sequence = dna(\"ATGC\")\n  require topology == circular\n  accept sequence == design.sequence\n\nworkflow main() -> Material<Plasmid>:\n  product <- realize starter\n  return product\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.join("targets")).unwrap();
+    std::fs::write(
+        project.join("targets/hamilton.toml"),
+        "[target]\nbackend = \"hamilton.star\"\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["build", project.to_str().unwrap(), "--target", "hamilton"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("hamilton.star"), "{stderr}");
+    assert!(stderr.contains("opentrons.flex"), "{stderr}");
+
+    std::fs::remove_dir_all(project).unwrap();
+}
+
 #[test]
 fn a_target_build_rejects_a_profile_that_does_not_exist() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

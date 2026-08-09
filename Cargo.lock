@@ -588,6 +588,7 @@ dependencies = [
  "sha2",
  "tar",
  "tempfile",
+ "toml",
  "ureq",
 ]
 
@@ -599,6 +600,7 @@ dependencies = [
  "cargo-husky",
  "clap",
  "lab-language",
+ "lab-opentrons-protocol",
  "pliron",
  "serde",
  "serde_json",
@@ -644,6 +646,15 @@ dependencies = [
  "lsp-types",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lab-opentrons-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

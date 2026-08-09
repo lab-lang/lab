@@ -61,6 +61,24 @@ Artifacts in the same wave have no ordering constraint between them, so a wave
 is a single robot run over a single deck. Wave 2 cannot start until wave 1's
 plasmids physically exist and have been accepted as suitable inputs.
 
+## Build it for a different robot
+
+`targets/opentrons-flex.toml` describes an Opentrons Flex. It declares
+`[target] backend = "opentrons.flex"`, and that key is what selects the
+backend:
+
+```bash
+lab build --target opentrons-flex
+```
+
+The same programs, designs, and inventory produce the same waves under
+`.lab/build/opentrons-flex/`, with each stage emitted as an Opentrons JSON
+protocol (schema 8) rather than Python. Verify them with:
+
+```bash
+scripts/analyze-opentrons-flex.sh examples/golden-gate/.lab/build/opentrons-flex
+```
+
 ## See the deck
 
 Open the Opentrons app, go to **Protocols**, and either drag one of those

@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
+use lab_compiler::ProtocolLairProgram;
 use lab_compiler::backend::Backend;
-use lab_compiler::backend::opentrons_ot2::{
-    Ot2Backend, Ot2TargetProfile, compile_dependency_build, emit_program,
-};
+use lab_compiler::backend::opentrons::flex::{FlexBackend, FlexTargetProfile};
+use lab_compiler::backend::opentrons::ot2::{Ot2Backend, Ot2TargetProfile};
 use lab_compiler::planning::BuildInventory;
 use lab_compiler::{PortableLairProgram, compile_module, parse_module, render_checked_module};
 
@@ -47,11 +47,183 @@ enum Emit {
     FullBuildBundle,
 }
 
+/// A target profile parsed for whichever backend it declares. The `backend`
+/// key is peeked out of the TOML before committing to a profile schema; an
+/// absent key means `opentrons.ot2`, matching that profile schema's default.
+enum TargetProfile {
+    Ot2(Ot2TargetProfile),
+    Flex(FlexTargetProfile),
+}
+
+fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
+    let table = contents
+        .parse::<toml::Table>()
+        .context("failed to parse target profile")?;
+    let backend = table
+        .get("target")
+        .and_then(|target| target.get("backend"))
+        .and_then(|backend| backend.as_str())
+        .unwrap_or("opentrons.ot2");
+    match backend {
+        "opentrons.ot2" => Ok(TargetProfile::Ot2(Ot2TargetProfile::parse(name, contents)?)),
+        "opentrons.flex" => Ok(TargetProfile::Flex(FlexTargetProfile::parse(
+            name, contents,
+        )?)),
+        other => bail!(
+            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2' and 'opentrons.flex'"
+        ),
+    }
+}
+
 /// A build emits a stage protocol only when it realizes an artifact that
 /// reaches that stage.
 fn print_stage(stage: &str, protocol: Option<&str>) -> Result<()> {
     let protocol = protocol.with_context(|| format!("this build has no {stage} stage"))?;
     print!("{protocol}");
+    Ok(())
+}
+
+fn write_bundle(
+    artifacts: &lab_compiler::ArtifactBundle,
+    output_dir: &std::path::Path,
+) -> Result<()> {
+    std::fs::create_dir_all(output_dir)
+        .with_context(|| format!("failed to create output directory {}", output_dir.display()))?;
+    for artifact in artifacts.iter() {
+        let path = output_dir.join(artifact.path());
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create output directory {}", parent.display())
+            })?;
+        }
+        std::fs::write(&path, artifact.contents())
+            .with_context(|| format!("failed to write {}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn load_inventory(cli: &Cli) -> Result<BuildInventory> {
+    if let Some(path) = &cli.inventory {
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read inventory {}", path.display()))?;
+        serde_json::from_str::<BuildInventory>(&contents)
+            .with_context(|| format!("failed to parse inventory {}", path.display()))
+    } else {
+        Ok(BuildInventory::default())
+    }
+}
+
+fn emit_ot2(cli: &Cli, protocol: &ProtocolLairProgram, profile: Ot2TargetProfile) -> Result<()> {
+    use lab_compiler::backend::opentrons::ot2::{compile_dependency_build, emit_program};
+
+    if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {
+        let inventory = load_inventory(cli)?;
+        let bundle =
+            compile_dependency_build(protocol, &profile, &inventory).with_context(|| {
+                format!(
+                    "failed to compile dependency build {}",
+                    cli.source.display()
+                )
+            })?;
+        match cli.emit {
+            Emit::DependencyPlan => print!("{}", bundle.manifest_json()?),
+            Emit::FullBuildBundle => {
+                let output_dir = cli
+                    .output_dir
+                    .as_ref()
+                    .context("--emit full-build-bundle requires --output-dir <directory>")?;
+                write_bundle(bundle.artifacts(), output_dir)?;
+                println!(
+                    "Wrote dependency-driven build bundle to {}",
+                    output_dir.display()
+                );
+            }
+            _ => unreachable!(),
+        }
+        return Ok(());
+    }
+
+    let backend = Ot2Backend::new(profile);
+    let program = backend
+        .compile(protocol)
+        .with_context(|| format!("failed to compile OT-2 build {}", cli.source.display()))?;
+    let bundle = emit_program(&program)
+        .with_context(|| format!("failed to compile automated build {}", cli.source.display()))?;
+    match cli.emit {
+        Emit::AutomationJson => print!("{}", bundle.manifest_json()?),
+        Emit::ManualProtocol => print!("{}", bundle.manual_protocol()),
+        Emit::OpentronsAssembly => print_stage("assembly", bundle.assembly_protocol())?,
+        Emit::OpentronsTransformation => {
+            print_stage("transformation", bundle.transformation_protocol())?
+        }
+        Emit::OpentronsPlating => print_stage("plating", bundle.plating_protocol())?,
+        Emit::AutomationBundle => {
+            let output_dir = cli
+                .output_dir
+                .as_ref()
+                .context("--emit automation-bundle requires --output-dir <directory>")?;
+            write_bundle(bundle.artifacts(), output_dir)?;
+            println!("Wrote Lab automation bundle to {}", output_dir.display());
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
+fn emit_flex(cli: &Cli, protocol: &ProtocolLairProgram, profile: FlexTargetProfile) -> Result<()> {
+    use lab_compiler::backend::opentrons::flex::{compile_dependency_build, emit_program};
+
+    if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {
+        let inventory = load_inventory(cli)?;
+        let bundle =
+            compile_dependency_build(protocol, &profile, &inventory).with_context(|| {
+                format!(
+                    "failed to compile dependency build {}",
+                    cli.source.display()
+                )
+            })?;
+        match cli.emit {
+            Emit::DependencyPlan => print!("{}", bundle.manifest_json()?),
+            Emit::FullBuildBundle => {
+                let output_dir = cli
+                    .output_dir
+                    .as_ref()
+                    .context("--emit full-build-bundle requires --output-dir <directory>")?;
+                write_bundle(bundle.artifacts(), output_dir)?;
+                println!(
+                    "Wrote dependency-driven build bundle to {}",
+                    output_dir.display()
+                );
+            }
+            _ => unreachable!(),
+        }
+        return Ok(());
+    }
+
+    let backend = FlexBackend::new(profile);
+    let program = backend
+        .compile(protocol)
+        .with_context(|| format!("failed to compile Flex build {}", cli.source.display()))?;
+    let bundle = emit_program(&program)
+        .with_context(|| format!("failed to compile automated build {}", cli.source.display()))?;
+    match cli.emit {
+        Emit::AutomationJson => print!("{}", bundle.manifest_json()?),
+        Emit::ManualProtocol => print!("{}", bundle.manual_protocol()),
+        Emit::OpentronsAssembly => print_stage("assembly", bundle.assembly_protocol())?,
+        Emit::OpentronsTransformation => {
+            print_stage("transformation", bundle.transformation_protocol())?
+        }
+        Emit::OpentronsPlating => print_stage("plating", bundle.plating_protocol())?,
+        Emit::AutomationBundle => {
+            let output_dir = cli
+                .output_dir
+                .as_ref()
+                .context("--emit automation-bundle requires --output-dir <directory>")?;
+            write_bundle(bundle.artifacts(), output_dir)?;
+            println!("Wrote Lab automation bundle to {}", output_dir.display());
+        }
+        _ => unreachable!(),
+    }
     Ok(())
 }
 
@@ -77,135 +249,34 @@ fn main() -> Result<()> {
         print!("{}", render_checked_module(&module));
         return Ok(());
     }
-    if matches!(
-        cli.emit,
-        Emit::AutomationJson
-            | Emit::ManualProtocol
-            | Emit::OpentronsAssembly
-            | Emit::OpentronsTransformation
-            | Emit::OpentronsPlating
-            | Emit::AutomationBundle
-            | Emit::DependencyPlan
-            | Emit::FullBuildBundle
-    ) {
-        let checked = compile_module(&text)
-            .with_context(|| format!("failed to check build module {}", cli.source.display()))?;
-        let lair = PortableLairProgram::lower(&checked)
-            .with_context(|| format!("failed to lower LAIR for {}", cli.source.display()))?;
-        let protocol = lair.select_protocol().with_context(|| {
-            format!(
-                "failed to select plasmid-build Protocol LAIR for {}",
-                cli.source.display()
-            )
-        })?;
-        let profile = match &cli.target_profile {
-            Some(path) => {
-                let contents = std::fs::read_to_string(path)
-                    .with_context(|| format!("failed to read target profile {}", path.display()))?;
-                // A profile is named by its file, the same way `lab build`
-                // resolves one under `targets/`.
-                let name = path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .with_context(|| format!("target profile {} has no name", path.display()))?;
-                Ot2TargetProfile::parse(name, &contents)
-                    .with_context(|| format!("failed to load target profile {}", path.display()))?
-            }
-            None => Ot2TargetProfile::default(),
-        };
-        if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {
-            let inventory = if let Some(path) = &cli.inventory {
-                let contents = std::fs::read_to_string(path)
-                    .with_context(|| format!("failed to read inventory {}", path.display()))?;
-                serde_json::from_str::<BuildInventory>(&contents)
-                    .with_context(|| format!("failed to parse inventory {}", path.display()))?
-            } else {
-                BuildInventory::default()
-            };
-            let bundle =
-                compile_dependency_build(&protocol, &profile, &inventory).with_context(|| {
-                    format!(
-                        "failed to compile dependency build {}",
-                        cli.source.display()
-                    )
-                })?;
-            match cli.emit {
-                Emit::DependencyPlan => print!("{}", bundle.manifest_json()?),
-                Emit::FullBuildBundle => {
-                    let output_dir = cli
-                        .output_dir
-                        .as_ref()
-                        .context("--emit full-build-bundle requires --output-dir <directory>")?;
-                    std::fs::create_dir_all(output_dir).with_context(|| {
-                        format!("failed to create output directory {}", output_dir.display())
-                    })?;
-                    for artifact in bundle.artifacts().iter() {
-                        let path = output_dir.join(artifact.path());
-                        if let Some(parent) = path.parent() {
-                            std::fs::create_dir_all(parent).with_context(|| {
-                                format!("failed to create output directory {}", parent.display())
-                            })?;
-                        }
-                        std::fs::write(&path, artifact.contents())
-                            .with_context(|| format!("failed to write {}", path.display()))?;
-                    }
-                    println!(
-                        "Wrote dependency-driven build bundle to {}",
-                        output_dir.display()
-                    );
-                }
-                _ => unreachable!(),
-            }
-            return Ok(());
-        }
 
-        let backend = Ot2Backend::new(profile);
-        let program = backend
-            .compile(&protocol)
-            .with_context(|| format!("failed to compile OT-2 build {}", cli.source.display()))?;
-        let bundle = emit_program(&program).with_context(|| {
-            format!("failed to compile automated build {}", cli.source.display())
-        })?;
-        match cli.emit {
-            Emit::AutomationJson => print!("{}", bundle.manifest_json()?),
-            Emit::ManualProtocol => print!("{}", bundle.manual_protocol()),
-            Emit::OpentronsAssembly => print_stage("assembly", bundle.assembly_protocol())?,
-            Emit::OpentronsTransformation => {
-                print_stage("transformation", bundle.transformation_protocol())?
-            }
-            Emit::OpentronsPlating => print_stage("plating", bundle.plating_protocol())?,
-            Emit::AutomationBundle => {
-                let output_dir = cli
-                    .output_dir
-                    .as_ref()
-                    .context("--emit automation-bundle requires --output-dir <directory>")?;
-                std::fs::create_dir_all(output_dir).with_context(|| {
-                    format!("failed to create output directory {}", output_dir.display())
-                })?;
-                for artifact in bundle.artifacts().iter() {
-                    let path = output_dir.join(artifact.path());
-                    std::fs::write(&path, artifact.contents())
-                        .with_context(|| format!("failed to write {}", path.display()))?;
-                }
-                println!("Wrote Lab automation bundle to {}", output_dir.display());
-            }
-            Emit::DependencyPlan | Emit::FullBuildBundle => unreachable!(),
-            _ => unreachable!(),
+    let checked = compile_module(&text)
+        .with_context(|| format!("failed to check build module {}", cli.source.display()))?;
+    let lair = PortableLairProgram::lower(&checked)
+        .with_context(|| format!("failed to lower LAIR for {}", cli.source.display()))?;
+    let protocol = lair.select_protocol().with_context(|| {
+        format!(
+            "failed to select plasmid-build Protocol LAIR for {}",
+            cli.source.display()
+        )
+    })?;
+    let profile = match &cli.target_profile {
+        Some(path) => {
+            let contents = std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read target profile {}", path.display()))?;
+            // A profile is named by its file, the same way `lab build`
+            // resolves one under `targets/`.
+            let name = path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .with_context(|| format!("target profile {} has no name", path.display()))?;
+            parse_target_profile(name, &contents)
+                .with_context(|| format!("failed to load target profile {}", path.display()))?
         }
-        return Ok(());
-    }
-
-    match cli.emit {
-        Emit::Human
-        | Emit::SourceAst
-        | Emit::ModuleIr
-        | Emit::AutomationJson
-        | Emit::ManualProtocol
-        | Emit::OpentronsAssembly
-        | Emit::OpentronsTransformation
-        | Emit::OpentronsPlating
-        | Emit::AutomationBundle
-        | Emit::DependencyPlan
-        | Emit::FullBuildBundle => unreachable!(),
+        None => TargetProfile::Ot2(Ot2TargetProfile::default()),
+    };
+    match profile {
+        TargetProfile::Ot2(profile) => emit_ot2(&cli, &protocol, profile),
+        TargetProfile::Flex(profile) => emit_flex(&cli, &protocol, profile),
     }
 }

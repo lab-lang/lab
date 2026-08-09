@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::opentrons_ot2::{Ot2TargetProfile, compile_dependency_build};
+use lab_compiler::backend::opentrons::flex::FlexTargetProfile;
+use lab_compiler::backend::opentrons::ot2::Ot2TargetProfile;
 use lab_compiler::planning::BuildInventory;
 use lab_compiler::{
     DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
@@ -247,6 +248,44 @@ struct TargetBuild {
     protocols: Vec<PathBuf>,
 }
 
+/// A target profile parsed for whichever backend it declares. The `backend`
+/// key is peeked out of the TOML before committing to a profile schema, the
+/// same way `LabManifest::parse` distinguishes packages from workspaces. An
+/// absent key means `opentrons.ot2`, matching that profile schema's default,
+/// so existing projects keep building unchanged.
+enum TargetProfile {
+    Ot2(Ot2TargetProfile),
+    Flex(FlexTargetProfile),
+}
+
+fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
+    let table = contents
+        .parse::<toml::Table>()
+        .context("failed to parse target profile")?;
+    let backend = table
+        .get("target")
+        .and_then(|target| target.get("backend"))
+        .and_then(|backend| backend.as_str())
+        .unwrap_or("opentrons.ot2");
+    match backend {
+        "opentrons.ot2" => Ok(TargetProfile::Ot2(Ot2TargetProfile::parse(name, contents)?)),
+        "opentrons.flex" => Ok(TargetProfile::Flex(FlexTargetProfile::parse(
+            name, contents,
+        )?)),
+        other => bail!(
+            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2' and 'opentrons.flex'"
+        ),
+    }
+}
+
+/// A generated artifact is a robot protocol when it follows the emitters'
+/// naming convention, whatever format the backend writes.
+fn is_robot_protocol(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with("_protocol.py") || name.ends_with("_protocol.json"))
+}
+
 /// Lower the program the default member forms, together with everything it
 /// depends on, and hand the verified Protocol to the named target's backend.
 fn build_for_target(
@@ -260,7 +299,7 @@ fn build_for_target(
     let profile = if profile_path.is_file() {
         let contents = fs::read_to_string(&profile_path)
             .with_context(|| format!("failed to read {}", profile_path.display()))?;
-        Ot2TargetProfile::parse(target, &contents)
+        parse_target_profile(target, &contents)
             .with_context(|| format!("failed to load target profile {}", profile_path.display()))?
     } else {
         bail!(
@@ -289,11 +328,27 @@ fn build_for_target(
         available_artifacts: declared.artifacts.clone(),
     };
 
-    let bundle = compile_dependency_build(&protocol, &profile, &inventory)
-        .with_context(|| format!("failed to compile the {target} build"))?;
+    let artifacts = match &profile {
+        TargetProfile::Ot2(profile) => {
+            lab_compiler::backend::opentrons::ot2::compile_dependency_build(
+                &protocol, profile, &inventory,
+            )
+            .with_context(|| format!("failed to compile the {target} build"))?
+            .artifacts()
+            .clone()
+        }
+        TargetProfile::Flex(profile) => {
+            lab_compiler::backend::opentrons::flex::compile_dependency_build(
+                &protocol, profile, &inventory,
+            )
+            .with_context(|| format!("failed to compile the {target} build"))?
+            .artifacts()
+            .clone()
+        }
+    };
     let target_root = output_root.join(target);
     let mut protocols = Vec::new();
-    for artifact in bundle.artifacts().iter() {
+    for artifact in artifacts.iter() {
         let path = target_root.join(artifact.path());
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -301,7 +356,7 @@ fn build_for_target(
         }
         fs::write(&path, artifact.contents())
             .with_context(|| format!("failed to write {}", path.display()))?;
-        if path.extension().is_some_and(|extension| extension == "py") {
+        if is_robot_protocol(&path) {
             protocols.push(path);
         }
     }

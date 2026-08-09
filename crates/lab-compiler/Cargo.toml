@@ -23,6 +23,7 @@ path = "src/bin/lab-opt/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 lab-language.workspace = true
+lab-opentrons-protocol.workspace = true
 pliron.workspace = true
 serde.workspace = true
 serde_json.workspace = true
