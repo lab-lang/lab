@@ -34,8 +34,13 @@ pub mod session;
 pub mod soap;
 pub mod transport;
 
-pub use methodset::{MethodSetError, MethodSettings, odtc_limits};
-pub use session::{DeviceIdentification, Odtc, OdtcError, OdtcOptions};
+pub use methodset::{
+    BLOCK_MAX_CELSIUS, BLOCK_MIN_CELSIUS, LID_MAX_CELSIUS, LID_MIN_CELSIUS, MAX_SLOPE_C_PER_S,
+    MethodSetError, MethodSettings, ProgramStage, ProgramStep, ThermalProgram,
+};
+pub use session::{
+    ActualTemperatures, DeviceIdentification, MethodRun, Odtc, OdtcError, OdtcOptions, SensorValue,
+};
 pub use soap::{
     Command, DataEvent, DataSeries, DeviceState, IncomingEvent, ResponseEvent, SoapError,
     StatusEvent, SyncResponse,

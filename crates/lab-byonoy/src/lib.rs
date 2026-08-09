@@ -34,7 +34,7 @@ pub use report::{
     ReportDecodeError, Rgb, RoutingTag, SlotState, Status, SupportedReportsChunk, Versions,
     WellMask,
 };
-pub use session::{AbortHandle, Absorbance96, Absorbance96Error, Timeouts};
+pub use session::{AbortHandle, Absorbance96, Absorbance96Error, AbsorbanceMeasurement, Timeouts};
 #[cfg(feature = "hid")]
 pub use transport::HidapiTransport;
 pub use transport::{

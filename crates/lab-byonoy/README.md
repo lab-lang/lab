@@ -25,8 +25,9 @@ tags — is implemented directly over the OS HID layer.
   the chunk-reassembling measurement engine (chunks are indexed into
   their sequence slot, so reordered packets still assemble correctly),
   the authoritative post-measurement status gate with typed firmware
-  errors, and cross-thread abort. It implements
-  `lab_instruments::PlateReader`.
+  errors, and cross-thread abort. Measurements come back as the device's
+  own vocabulary (`AbsorbanceMeasurement`: rows of `f32` optical
+  density); this crate knows nothing outside the instrument it drives.
 
 ## The replug caveat
 

@@ -1,7 +1,6 @@
 //! The session layer: an [`Odtc`] handle owning a transport, the connect
 //! handshake, the run choreography, and completion resolved by callback
-//! with a polling fallback. It implements
-//! [`lab_instruments::Thermocycler`].
+//! with a polling fallback.
 //!
 //! One command is in flight at a time — the device serializes commands
 //! anyway — and request ids increment and wrap within 31 bits.
@@ -17,12 +16,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use lab_instruments::{
-    RunHandle, SensorReading, ThermalLimits, ThermalProfile, ThermalReadings, Thermocycler,
-};
 use thiserror::Error;
 
-use crate::methodset::{self, MethodSetError, MethodSettings};
+use crate::methodset::{self, MethodSetError, MethodSettings, ThermalProgram};
 use crate::soap::{
     Command, DataEvent, DeviceState, IncomingEvent, RETURN_CODE_ACCEPTED,
     RETURN_CODE_ASYNC_SUCCESS, RETURN_CODE_ASYNC_WARNING, RETURN_CODE_SUCCESS, ResponseEvent,
@@ -63,14 +59,14 @@ pub enum OdtcError {
     IdleTimeout { seconds: u64 },
     #[error("the device is '{state}'; {problem}")]
     State { state: String, problem: String },
-    #[error("run handle {handle} names no run this session started")]
-    UnknownRun { handle: u64 },
+    #[error("method run {request_id} names no run this session started")]
+    UnknownRun { request_id: u32 },
     #[error(
         "{command} completed without a ResponseEvent, so its data never arrived; check that the device can reach the callback listener at {uri}"
     )]
     MissingResponseData { command: String, uri: String },
-    #[error("the temperature report names no Mount sensor; the block reading is mandatory")]
-    MissingBlockSensor,
+    #[error("the temperature report names no Mount sensor; the mount reading is mandatory")]
+    MissingMountSensor,
 }
 
 /// Options for a session.
@@ -113,10 +109,38 @@ pub struct DeviceIdentification {
     pub firmware_version: Option<String>,
 }
 
+/// A method run this session started, resolved by [`Odtc::await_method`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MethodRun {
+    request_id: u32,
+}
+
+impl MethodRun {
+    /// The request id `ExecuteMethod` ran under.
+    pub fn request_id(&self) -> u32 {
+        self.request_id
+    }
+}
+
+/// One named sensor's reading, verbatim from the device.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SensorValue {
+    pub name: String,
+    pub celsius: f64,
+}
+
+/// What `ReadActualTemperature` reported: the mount (block) sensor, the
+/// lid when present, and every other named sensor as the device sent it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ActualTemperatures {
+    pub mount_celsius: f64,
+    pub lid_celsius: Option<f64>,
+    pub sensors: Vec<SensorValue>,
+}
+
 #[derive(Clone, Debug)]
 struct ActiveRun {
-    handle: RunHandle,
-    request_id: u32,
+    run: MethodRun,
     method_name: String,
 }
 
@@ -379,20 +403,16 @@ impl Odtc {
     }
 }
 
-impl Thermocycler for Odtc {
-    type Error = OdtcError;
-
-    fn limits(&self) -> ThermalLimits {
-        methodset::odtc_limits()
-    }
-
-    fn open_lid(&mut self) -> Result<(), OdtcError> {
+impl Odtc {
+    /// Opens the motorized door. Refused while a method runs.
+    pub fn open_door(&mut self) -> Result<(), OdtcError> {
         self.refuse_door_while_running()?;
         self.execute(&Command::OpenDoor)?;
         Ok(())
     }
 
-    fn close_lid(&mut self) -> Result<(), OdtcError> {
+    /// Closes the motorized door. Refused while a method runs.
+    pub fn close_door(&mut self) -> Result<(), OdtcError> {
         self.refuse_door_while_running()?;
         self.execute(&Command::CloseDoor)?;
         Ok(())
@@ -400,9 +420,9 @@ impl Thermocycler for Odtc {
 
     /// Uploads and runs a `PreMethod`: the device equilibrates block and
     /// lid together — several minutes — then holds until a method runs
-    /// or [`Thermocycler::stop`] intervenes. The call blocks until the
-    /// hold is established.
-    fn hold_block(&mut self, celsius: f64, lid_celsius: Option<f64>) -> Result<(), OdtcError> {
+    /// or [`Odtc::stop`] intervenes. The call blocks until the hold is
+    /// established.
+    pub fn hold(&mut self, celsius: f64, lid_celsius: Option<f64>) -> Result<(), OdtcError> {
         let lid = lid_celsius.unwrap_or(DEFAULT_HOLD_LID_CELSIUS);
         let method_name = self.fresh_method_name("hold");
         let method_xml = methodset::render_pre_method(
@@ -422,47 +442,48 @@ impl Thermocycler for Odtc {
         Ok(())
     }
 
-    /// Validates and renders the profile, stops whatever runs, settles
+    /// Validates and renders the program, stops whatever runs, settles
     /// the device, uploads the method set under a fresh name, and starts
     /// it. Returns without waiting; completion belongs to
-    /// [`Thermocycler::await_completion`].
-    fn run_profile(&mut self, profile: &ThermalProfile) -> Result<RunHandle, OdtcError> {
+    /// [`Odtc::await_method`].
+    pub fn start_method(&mut self, program: &ThermalProgram) -> Result<MethodRun, OdtcError> {
         let method_name = self.fresh_method_name("profile");
         let settings = self.options.method_settings.clone();
         let method_xml =
-            methodset::render_method(&method_name, "lab", &utc_timestamp(), profile, &settings)?;
+            methodset::render_method(&method_name, "lab", &utc_timestamp(), program, &settings)?;
         self.stop_and_settle()?;
         self.upload_method_set(&method_xml)?;
         let (request_id, _) = self.transact(&Command::ExecuteMethod {
             method_name: method_name.clone(),
         })?;
-        let handle = RunHandle::new(u64::from(request_id));
-        self.active_run = Some(ActiveRun {
-            handle,
-            request_id,
-            method_name,
-        });
-        Ok(handle)
+        let run = MethodRun { request_id };
+        self.active_run = Some(ActiveRun { run, method_name });
+        Ok(run)
     }
 
-    fn await_completion(&mut self, handle: RunHandle) -> Result<(), OdtcError> {
-        let Some(run) = self.active_run.clone() else {
+    /// Blocks until the referenced run finishes, however long that takes.
+    pub fn await_method(&mut self, run: MethodRun) -> Result<(), OdtcError> {
+        let Some(active) = self.active_run.clone() else {
             return Err(OdtcError::UnknownRun {
-                handle: handle.id(),
+                request_id: run.request_id,
             });
         };
-        if run.handle != handle {
+        if active.run != run {
             return Err(OdtcError::UnknownRun {
-                handle: handle.id(),
+                request_id: run.request_id,
             });
         }
-        let outcome =
-            self.wait_for_response(run.request_id, "ExecuteMethod", self.options.method_timeout);
+        let outcome = self.wait_for_response(
+            active.run.request_id,
+            "ExecuteMethod",
+            self.options.method_timeout,
+        );
         self.active_run = None;
         outcome.map(|_| ())
     }
 
-    fn read_temperatures(&mut self) -> Result<ThermalReadings, OdtcError> {
+    /// Reads every temperature sensor the device reports.
+    pub fn read_temperatures(&mut self) -> Result<ActualTemperatures, OdtcError> {
         let event = self
             .execute(&Command::ReadActualTemperature)?
             .ok_or_else(|| OdtcError::MissingResponseData {
@@ -474,24 +495,25 @@ impl Thermocycler for Odtc {
             .ok_or_else(|| SoapError::MissingElement {
                 element: "responseData".to_string(),
             })?;
-        let mut block = None;
+        let mut mount = None;
         let mut lid = None;
         let mut sensors = Vec::new();
         for (name, celsius) in crate::soap::parse_temperature_data(&data)? {
             match name.as_str() {
-                "Mount" => block = Some(celsius),
+                "Mount" => mount = Some(celsius),
                 "Lid" => lid = Some(celsius),
-                _ => sensors.push(SensorReading { name, celsius }),
+                _ => sensors.push(SensorValue { name, celsius }),
             }
         }
-        Ok(ThermalReadings {
-            block_celsius: block.ok_or(OdtcError::MissingBlockSensor)?,
+        Ok(ActualTemperatures {
+            mount_celsius: mount.ok_or(OdtcError::MissingMountSensor)?,
             lid_celsius: lid,
             sensors,
         })
     }
 
-    fn stop(&mut self) -> Result<(), OdtcError> {
+    /// Stops whatever runs and leaves the device idle.
+    pub fn stop(&mut self) -> Result<(), OdtcError> {
         self.stop_and_settle()
     }
 }
@@ -553,7 +575,6 @@ mod tests {
     use super::*;
     use crate::soap::request_id_of;
     use crate::transport::mock::{MockReply, MockSoapTransport, sync_response};
-    use lab_instruments::{ThermalStage, ThermalStep};
     use std::sync::Mutex;
 
     fn fast_options() -> OdtcOptions {
@@ -633,20 +654,20 @@ mod tests {
         (transport, state, session)
     }
 
-    fn two_step_profile() -> ThermalProfile {
-        ThermalProfile {
-            stages: vec![ThermalStage {
+    fn two_step_profile() -> ThermalProgram {
+        ThermalProgram {
+            stages: vec![crate::methodset::ProgramStage {
                 steps: vec![
-                    ThermalStep {
-                        celsius: 37.0,
+                    crate::methodset::ProgramStep {
+                        plateau_celsius: 37.0,
                         hold_seconds: 90.0,
-                        ramp_c_per_s: None,
+                        slope_c_per_s: None,
                         lid_celsius: None,
                     },
-                    ThermalStep {
-                        celsius: 16.0,
+                    crate::methodset::ProgramStep {
+                        plateau_celsius: 16.0,
                         hold_seconds: 180.0,
-                        ramp_c_per_s: None,
+                        slope_c_per_s: None,
                         lid_celsius: None,
                     },
                 ],
@@ -689,7 +710,7 @@ mod tests {
     fn run_profile_stops_settles_uploads_then_executes() {
         let (transport, _state, mut session) = connected_session();
         session
-            .run_profile(&two_step_profile())
+            .start_method(&two_step_profile())
             .expect("the scripted device accepts the run");
         let names = transport.sent_names();
         assert_eq!(
@@ -723,7 +744,7 @@ mod tests {
         let (transport, state, mut session) = connected_session();
         transport.set_responder(silent_device(Arc::clone(&state)));
         let handle = session
-            .run_profile(&two_step_profile())
+            .start_method(&two_step_profile())
             .expect("the scripted device accepts the run");
         // The device is busy for the whole wait, so the polling fallback
         // cannot resolve it; only the injected completion event can.
@@ -740,7 +761,7 @@ mod tests {
             response_data: None,
         }));
         session
-            .await_completion(handle)
+            .await_method(handle)
             .expect("the injected completion event resolves the wait");
     }
 
@@ -749,11 +770,11 @@ mod tests {
         let (transport, state, mut session) = connected_session();
         transport.set_responder(silent_device(Arc::clone(&state)));
         let handle = session
-            .run_profile(&two_step_profile())
+            .start_method(&two_step_profile())
             .expect("the scripted device accepts the run");
         let sends_before = transport.sent_names().len();
         session
-            .await_completion(handle)
+            .await_method(handle)
             .expect("the idle status poll resolves the wait without any event");
         let status_polls = transport.sent_names()[sends_before..]
             .iter()
@@ -770,7 +791,7 @@ mod tests {
         let (transport, state, mut session) = connected_session();
         transport.set_responder(silent_device(Arc::clone(&state)));
         let handle = session
-            .run_profile(&two_step_profile())
+            .start_method(&two_step_profile())
             .expect("the scripted device accepts the run");
         let request_id = transport
             .sent()
@@ -785,7 +806,7 @@ mod tests {
             response_data: None,
         }));
         let error = session
-            .await_completion(handle)
+            .await_method(handle)
             .expect_err("a failing completion event fails the wait");
         assert_eq!(
             error,
@@ -802,7 +823,7 @@ mod tests {
         let (transport, state, mut session) = connected_session();
         transport.set_responder(silent_device(Arc::clone(&state)));
         let handle = session
-            .run_profile(&two_step_profile())
+            .start_method(&two_step_profile())
             .expect("the scripted device accepts the run");
         let request_id = transport
             .sent()
@@ -817,7 +838,7 @@ mod tests {
             response_data: None,
         }));
         session
-            .await_completion(handle)
+            .await_method(handle)
             .expect("return code 12 is success with a warning, not a failure");
         assert_eq!(
             session.take_warnings(),
@@ -832,7 +853,7 @@ mod tests {
         let (transport, state, mut session) = connected_session();
         *state.lock().expect("the state lock is never poisoned") = "busy";
         let error = session
-            .open_lid()
+            .open_door()
             .expect_err("a busy device refuses door motion");
         assert_eq!(
             error,
@@ -854,8 +875,10 @@ mod tests {
     #[test]
     fn a_settled_device_opens_and_closes_its_door() {
         let (transport, _state, mut session) = connected_session();
-        session.open_lid().expect("an idle device opens its door");
-        session.close_lid().expect("an idle device closes its door");
+        session.open_door().expect("an idle device opens its door");
+        session
+            .close_door()
+            .expect("an idle device closes its door");
         let names = transport.sent_names();
         assert!(names.contains(&"OpenDoor".to_string()));
         assert!(names.contains(&"CloseDoor".to_string()));
@@ -889,16 +912,16 @@ mod tests {
         let readings = session
             .read_temperatures()
             .expect("the scripted report parses");
-        assert_eq!(readings.block_celsius, 37.0, "Mount is the block");
+        assert_eq!(readings.mount_celsius, 37.0, "Mount is the block sensor");
         assert_eq!(readings.lid_celsius, Some(104.96), "Lid is the lid");
         assert_eq!(
             readings.sensors,
             vec![
-                SensorReading {
+                SensorValue {
                     name: "Ambient".to_string(),
                     celsius: 22.1
                 },
-                SensorReading {
+                SensorValue {
                     name: "Heatsink".to_string(),
                     celsius: 29.0
                 },
@@ -933,16 +956,16 @@ mod tests {
     fn an_unknown_handle_is_refused_by_name() {
         let (_transport, _state, mut session) = connected_session();
         let error = session
-            .await_completion(RunHandle::new(999))
+            .await_method(MethodRun { request_id: 999 })
             .expect_err("no run was started");
-        assert_eq!(error, OdtcError::UnknownRun { handle: 999 });
+        assert_eq!(error, OdtcError::UnknownRun { request_id: 999 });
     }
 
     #[test]
     fn hold_block_uploads_a_pre_method_and_waits_for_equilibration() {
         let (transport, _state, mut session) = connected_session();
         session
-            .hold_block(95.0, None)
+            .hold(95.0, None)
             .expect("the scripted device equilibrates");
         let names = transport.sent_names();
         assert_eq!(

@@ -12,8 +12,8 @@ involved: control is HTTP and XML end to end.
   `CloseDoor`, `SetParameters`, `ExecuteMethod`, `StopMethod`,
   `ReadActualTemperature`), the response and return-code model,
   device-event parsing with the canned acknowledgements, and a validated
-  MethodSet builder rendering `lab_instruments::ThermalProfile` into the
-  vendor's thermal-profile XML dialect. Timestamps and method names are
+  MethodSet builder rendering a `ThermalProgram` — this crate's own
+  staged thermal-program type — into the vendor's XML dialect. Timestamps and method names are
   caller inputs — nothing in the protocol layer reads a clock — so every
   envelope and method document is pinned byte for byte by golden tests.
 - **Transport** (`transport`) — a blocking `SoapTransport` trait carrying
@@ -24,9 +24,11 @@ involved: control is HTTP and XML end to end.
 - **Session** (`session`) — an `Odtc` handle owning the transport: the
   connect handshake (`Reset` with the callback URI, `Initialize`, poll to
   idle), door control, method upload and execution, temperature readout,
-  and stop. It implements `lab_instruments::Thermocycler`; `progress()`
-  stays `None` because the ODTC cannot report where a running method
-  stands.
+  and stop, all in the device's own vocabulary (`start_method`,
+  `await_method`, `ActualTemperatures` with the Mount sensor named as
+  the vendor names it). The device reports no run progress; nothing here
+  pretends otherwise. This crate knows nothing outside the instrument it
+  drives.
 
 ## The callback obligation, and the polling fallback
 

@@ -9,7 +9,6 @@ description = "Typed Byonoy Absorbance 96 HID report protocol and plate-reader s
 
 [dependencies]
 hidapi = { workspace = true, optional = true }
-lab-instruments.workspace = true
 thiserror.workspace = true
 
 [features]

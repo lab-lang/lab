@@ -6,14 +6,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use lab_instruments::{
-    MeasurementUnit, PlateData, PlateReader, ReaderCapabilities, WavelengthSupport,
-};
 use thiserror::Error;
 
 use crate::report::{
     self, Abs96FirmwareError, AbsorbanceChunk, AbsorbanceTrigger, ReportDecodeError, RoutingTag,
-    SlotState, Status,
+    Status,
 };
 #[cfg(feature = "hid")]
 use crate::transport::{ABSORBANCE_96_PRODUCT_ID, HidapiTransport};
@@ -72,10 +69,6 @@ pub enum Absorbance96Error {
     InconsistentSequence { expected: u8, found: u8 },
     #[error("the firmware sent chunk {seq} of a {seq_len}-chunk sequence; chunks index from 0")]
     SequenceOutOfRange { seq: u8, seq_len: u8 },
-    #[error(
-        "the Absorbance 96 has no luminescence optics; luminescence reads need a Luminescence 96"
-    )]
-    LuminescenceUnsupported,
 }
 
 fn format_nm_list(list: &[u16]) -> String {
@@ -107,7 +100,7 @@ pub struct AbortHandle {
 
 impl AbortHandle {
     /// Aborts the in-flight measurement, if any; the blocked
-    /// [`Absorbance96::read_absorbance`] call returns
+    /// [`Absorbance96::measure_absorbance`] call returns
     /// [`Absorbance96Error::Aborted`].
     pub fn abort(&self) -> Result<(), HidError> {
         self.flag.store(true, Ordering::SeqCst);
@@ -123,20 +116,19 @@ impl AbortHandle {
 /// reference — skipping it yields garbage data) followed by the
 /// available-wavelengths query. Wavelengths are per-unit hardware: each
 /// unit ships with up to six LEDs chosen at purchase, and
-/// [`PlateReader::read_absorbance`] rejects wavelengths the unit does not
-/// carry.
+/// [`Absorbance96::measure_absorbance`] rejects wavelengths the unit does
+/// not carry.
 ///
 /// # Example
 ///
 /// ```no_run
 /// use lab_byonoy::Absorbance96;
-/// use lab_instruments::PlateReader;
 ///
 /// # #[cfg(feature = "hid")]
 /// # fn main() -> Result<(), lab_byonoy::Absorbance96Error> {
 /// let mut reader = Absorbance96::open()?;
-/// let plate = reader.read_absorbance(600)?;
-/// println!("A1 reads {:?} OD", plate.value(0, 0));
+/// let plate = reader.measure_absorbance(600)?;
+/// println!("A1 reads {} OD", plate.rows[0][0]);
 /// # Ok(())
 /// # }
 /// # #[cfg(not(feature = "hid"))]
@@ -350,20 +342,22 @@ impl Absorbance96 {
     }
 }
 
-impl PlateReader for Absorbance96 {
-    type Error = Absorbance96Error;
+/// One completed absorbance measurement: every well, in device units.
+///
+/// The device always reads the whole plate; rows run A to H, each row
+/// A1 to A12, and values are unitless optical density.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AbsorbanceMeasurement {
+    pub wavelength_nm: u16,
+    pub rows: Vec<[f32; 12]>,
+}
 
-    fn capabilities(&self) -> ReaderCapabilities {
-        ReaderCapabilities {
-            absorbance: Some(WavelengthSupport::Discrete(
-                self.installed_wavelengths.clone(),
-            )),
-            luminescence: false,
-            plate_sensing: true,
-        }
-    }
-
-    fn read_absorbance(&mut self, wavelength_nm: u16) -> Result<PlateData, Self::Error> {
+impl Absorbance96 {
+    /// Measures the whole plate at one installed wavelength.
+    pub fn measure_absorbance(
+        &mut self,
+        wavelength_nm: u16,
+    ) -> Result<AbsorbanceMeasurement, Absorbance96Error> {
         if !self.installed_wavelengths.contains(&wavelength_nm) {
             return Err(Absorbance96Error::UnsupportedWavelength {
                 requested: wavelength_nm,
@@ -373,37 +367,17 @@ impl PlateReader for Absorbance96 {
         let signal = i16::try_from(wavelength_nm)
             .expect("installed wavelengths decode from i16, so a member fits");
         let rows = self.run_absorbance(signal, 0, false)?;
-        let values: Vec<Option<f64>> = rows
-            .iter()
-            .flatten()
-            .map(|&value| Some(f64::from(value)))
-            .collect();
-        // The device reads all 96 wells always and reports no temperature.
-        Ok(PlateData::new(rows.len(), 12, values, MeasurementUnit::Od)
-            .expect("each chunk carries exactly one twelve-well row"))
-    }
-
-    fn read_luminescence(&mut self, _integration: Duration) -> Result<PlateData, Self::Error> {
-        Err(Absorbance96Error::LuminescenceUnsupported)
-    }
-
-    fn plate_present(&mut self) -> Result<Option<bool>, Self::Error> {
-        Ok(match self.status()?.slot_state {
-            SlotState::Occupied => Some(true),
-            SlotState::Empty => Some(false),
-            SlotState::Unknown | SlotState::Undetermined => None,
+        Ok(AbsorbanceMeasurement {
+            wavelength_nm,
+            rows,
         })
-    }
-
-    fn abort(&mut self) -> Result<(), Self::Error> {
-        self.abort_handle().abort()?;
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::SlotState;
     use crate::transport::MockHidTransport;
     use std::sync::atomic::AtomicU8;
 
@@ -549,26 +523,22 @@ mod tests {
     }
 
     #[test]
-    fn a_full_measurement_assembles_eight_chunks_into_row_major_plate_data() {
+    fn a_full_measurement_assembles_eight_chunks_into_ordered_rows() {
         let (_, mut session, _, _) = ready_session((0..8).collect());
         let plate = session
-            .read_absorbance(600)
+            .measure_absorbance(600)
             .expect("eight chunks complete a plate");
-        assert_eq!((plate.rows, plate.cols), (8, 12));
-        assert_eq!(plate.unit, MeasurementUnit::Od);
+        assert_eq!(plate.wavelength_nm, 600);
+        assert_eq!(plate.rows.len(), 8);
+        assert_eq!(plate.rows[0][0], 0.0, "A1 leads the plate");
         assert_eq!(
-            plate.temperature_celsius, None,
-            "the device reports no temperature"
-        );
-        assert_eq!(plate.value(0, 0), Some(0.0), "A1 leads the plate");
-        assert_eq!(
-            plate.value(2, 5),
-            Some(f64::from(2.0f32 + 5.0 / 100.0)),
+            plate.rows[2][5],
+            2.0f32 + 5.0 / 100.0,
             "C6 sits at row 2, column 5 in row-major order"
         );
         assert_eq!(
-            plate.value(7, 11),
-            Some(f64::from(7.0f32 + 11.0 / 100.0)),
+            plate.rows[7][11],
+            7.0f32 + 11.0 / 100.0,
             "H12 ends the plate"
         );
     }
@@ -577,12 +547,11 @@ mod tests {
     fn reordered_chunks_land_in_their_sequence_slots() {
         let (_, mut session, _, _) = ready_session(vec![5, 0, 3, 1, 7, 2, 6, 4]);
         let plate = session
-            .read_absorbance(450)
+            .measure_absorbance(450)
             .expect("every slot fills regardless of arrival order");
         for row in 0..8 {
             assert_eq!(
-                plate.value(row, 0),
-                Some(f64::from(row as u8)),
+                plate.rows[row][0], row as f32,
                 "row {row} carries its own values even when its chunk arrived out of order"
             );
         }
@@ -593,7 +562,7 @@ mod tests {
         let (_, mut session, error_code, _) = ready_session((0..8).collect());
         error_code.store(2, Ordering::SeqCst);
         let error = session
-            .read_absorbance(600)
+            .measure_absorbance(600)
             .expect_err("the status gate rejects the measurement");
         assert_eq!(
             error,
@@ -610,7 +579,7 @@ mod tests {
         let (_, mut session, error_code, _) = ready_session((0..8).collect());
         error_code.store(0x2A, Ordering::SeqCst);
         let error = session
-            .read_absorbance(600)
+            .measure_absorbance(600)
             .expect_err("a non-zero code fails the measurement");
         assert!(
             error.to_string().contains("errorCode=0x2A"),
@@ -622,7 +591,7 @@ mod tests {
     fn an_uninstalled_wavelength_is_rejected_naming_the_installed_set() {
         let (mock, mut session, _, _) = ready_session((0..8).collect());
         let error = session
-            .read_absorbance(405)
+            .measure_absorbance(405)
             .expect_err("no 405 nm LED is installed");
         assert_eq!(
             error.to_string(),
@@ -636,43 +605,27 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_report_discrete_wavelengths_and_plate_sensing() {
-        let (_, session, _, _) = ready_session((0..8).collect());
+    fn the_status_reports_every_documented_slot_state() {
+        let (_, session, _, slot_state) = ready_session((0..8).collect());
         assert_eq!(
-            session.capabilities(),
-            ReaderCapabilities {
-                absorbance: Some(WavelengthSupport::Discrete(vec![450, 600, 660])),
-                luminescence: false,
-                plate_sensing: true,
-            }
-        );
-    }
-
-    #[test]
-    fn plate_present_maps_slot_states_and_admits_ignorance() {
-        let (_, mut session, _, slot_state) = ready_session((0..8).collect());
-        assert_eq!(
-            session.plate_present().expect("status readable"),
-            Some(true),
+            session.status().expect("status readable").slot_state,
+            SlotState::Occupied,
             "OCCUPIED is a seated plate"
         );
         slot_state.store(1, Ordering::SeqCst);
         assert_eq!(
-            session.plate_present().expect("status readable"),
-            Some(false),
-            "EMPTY is no plate"
+            session.status().expect("status readable").slot_state,
+            SlotState::Empty
         );
         slot_state.store(0, Ordering::SeqCst);
         assert_eq!(
-            session.plate_present().expect("status readable"),
-            None,
-            "UNKNOWN is an honest None"
+            session.status().expect("status readable").slot_state,
+            SlotState::Unknown
         );
         slot_state.store(3, Ordering::SeqCst);
         assert_eq!(
-            session.plate_present().expect("status readable"),
-            None,
-            "UNDETERMINED is an honest None"
+            session.status().expect("status readable").slot_state,
+            SlotState::Undetermined
         );
     }
 
@@ -696,7 +649,7 @@ mod tests {
             handle.abort().expect("the abort report writes to the mock");
         });
         let error = session
-            .read_absorbance(600)
+            .measure_absorbance(600)
             .expect_err("the read ends with an abort, not a full plate");
         assert_eq!(error, Absorbance96Error::Aborted);
         aborter.join().expect("the aborting thread finishes");
@@ -709,15 +662,6 @@ mod tests {
             abort_packets,
             vec![report::abort(report::ABSORBANCE_TRIGGER)],
             "the abort report names the absorbance trigger"
-        );
-    }
-
-    #[test]
-    fn read_luminescence_is_rejected_as_unsupported() {
-        let (_, mut session, _, _) = ready_session((0..8).collect());
-        assert_eq!(
-            session.read_luminescence(Duration::from_secs(2)),
-            Err(Absorbance96Error::LuminescenceUnsupported)
         );
     }
 
@@ -743,7 +687,7 @@ mod tests {
             _ => Vec::new(),
         });
         let error = session
-            .read_absorbance(660)
+            .measure_absorbance(660)
             .expect_err("a shrinking sequence is a firmware fault");
         assert_eq!(
             error,
@@ -771,7 +715,7 @@ mod tests {
             _ => Vec::new(),
         });
         session
-            .read_absorbance(600)
+            .measure_absorbance(600)
             .expect("undocumented flags never fail a measurement");
         assert_eq!(
             session.last_chunk_flags(),

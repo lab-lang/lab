@@ -9,8 +9,6 @@
 
 #![cfg(feature = "hid")]
 
-use lab_instruments::{PlateReader, WavelengthSupport};
-
 #[test]
 #[ignore = "needs a physically connected Absorbance 96; set LAB_BYONOY_HARDWARE=1 and pass --ignored"]
 fn bring_up_checklist() {
@@ -24,29 +22,24 @@ fn bring_up_checklist() {
     let mut reader = lab_byonoy::Absorbance96::open()
         .expect("the reader opens and completes its reference measurement");
 
-    // 2. Capabilities: the discrete wavelength list is this unit's LEDs.
-    let capabilities = reader.capabilities();
-    println!("capabilities: {capabilities:?}");
-    let Some(WavelengthSupport::Discrete(wavelengths)) = capabilities.absorbance else {
-        panic!("an Absorbance 96 always reports a discrete wavelength list");
-    };
+    // 2. The discrete wavelength list is this unit's LEDs.
+    let wavelengths = reader.installed_wavelengths().to_vec();
+    println!("installed wavelengths: {wavelengths:?} nm");
     assert!(
         !wavelengths.is_empty(),
         "a unit ships with at least one LED"
     );
 
     // 3. Slot sensing.
-    let present = reader.plate_present().expect("the status query answers");
-    println!("plate present: {present:?}");
+    let status = reader.status().expect("the status query answers");
+    println!("slot state: {:?}", status.slot_state);
 
     // 4. A full-plate read at the first installed wavelength (~65 s).
     let plate = reader
-        .read_absorbance(wavelengths[0])
+        .measure_absorbance(wavelengths[0])
         .expect("a full-plate read completes");
     println!(
-        "A1 at {} nm: {:?} OD; H12: {:?} OD",
-        wavelengths[0],
-        plate.value(0, 0),
-        plate.value(7, 11)
+        "A1 at {} nm: {} OD; H12: {} OD",
+        plate.wavelength_nm, plate.rows[0][0], plate.rows[7][11]
     );
 }

@@ -5,7 +5,6 @@
 //! Timestamps and method names are caller inputs — nothing here reads a
 //! clock — so a given profile always renders to the same bytes.
 
-use lab_instruments::{ThermalLimits, ThermalProfile, ThermalProfileError};
 use thiserror::Error;
 
 /// The ambient temperature below which a plateau condenses moisture on
@@ -15,26 +14,95 @@ pub const AMBIENT_CELSIUS: f64 = 20.0;
 /// The longest total sub-ambient hold the condensation limit allows.
 pub const MAX_SUB_AMBIENT_HOLD_SECONDS: f64 = 7200.0;
 
-/// The device's maximum ramp slope; unset ramps render as this value.
+/// The device's maximum ramp slope; unset slopes render as this value.
 pub const MAX_SLOPE_C_PER_S: f64 = 4.4;
 
-/// The envelope the ODTC accepts.
-pub fn odtc_limits() -> ThermalLimits {
-    ThermalLimits {
-        block_min_celsius: 4.0,
-        block_max_celsius: 99.0,
-        lid_min_celsius: 30.0,
-        lid_max_celsius: 115.0,
-        ramp_max_c_per_s: MAX_SLOPE_C_PER_S,
-        per_step_lid: true,
-    }
+/// The block temperature range the device accepts.
+pub const BLOCK_MIN_CELSIUS: f64 = 4.0;
+pub const BLOCK_MAX_CELSIUS: f64 = 99.0;
+
+/// The lid temperature range the device accepts.
+pub const LID_MIN_CELSIUS: f64 = 30.0;
+pub const LID_MAX_CELSIUS: f64 = 115.0;
+
+/// A thermal program: ordered stages, each a cycled group of plateau
+/// steps, rendered as one `Method` whose loops encode the repeats.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ThermalProgram {
+    pub stages: Vec<ProgramStage>,
+}
+
+/// A group of steps executed in order and repeated as a block; the last
+/// step of a repeated stage carries the `GotoNumber`/`LoopNumber` pair.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgramStage {
+    pub steps: Vec<ProgramStep>,
+    /// Total executions of the block; 1 means run once.
+    pub repeats: u32,
+}
+
+/// One plateau: ramp to a temperature, hold it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProgramStep {
+    pub plateau_celsius: f64,
+    pub hold_seconds: f64,
+    /// Ramp slope toward this plateau; `None` renders the device maximum.
+    pub slope_c_per_s: Option<f64>,
+    /// Lid temperature during this step; `None` renders the method's
+    /// start lid.
+    pub lid_celsius: Option<f64>,
 }
 
 /// The error raised when a method document cannot be rendered.
 #[derive(Clone, Debug, Error, PartialEq)]
 pub enum MethodSetError {
-    #[error(transparent)]
-    Profile(#[from] ThermalProfileError),
+    #[error("a thermal program must contain at least one stage with at least one step")]
+    EmptyProgram,
+    #[error("stage {stage} repeats {repeats} times; a stage runs at least once")]
+    ZeroRepeats { stage: usize, repeats: u32 },
+    #[error(
+        "step {step} of stage {stage} targets {celsius} °C, outside the block range {min}–{max} °C"
+    )]
+    StepBlockOutOfRange {
+        stage: usize,
+        step: usize,
+        celsius: f64,
+        min: f64,
+        max: f64,
+    },
+    #[error(
+        "step {step} of stage {stage} sets the lid to {celsius} °C, outside the lid range {min}–{max} °C"
+    )]
+    StepLidOutOfRange {
+        stage: usize,
+        step: usize,
+        celsius: f64,
+        min: f64,
+        max: f64,
+    },
+    #[error(
+        "step {step} of stage {stage} asks for {slope} °C/s, above the device maximum {max} °C/s"
+    )]
+    SlopeOutOfRange {
+        stage: usize,
+        step: usize,
+        slope: f64,
+        max: f64,
+    },
+    #[error(
+        "step {step} of stage {stage} asks for a slope of {slope} °C/s; a slope must be positive"
+    )]
+    NonPositiveSlope {
+        stage: usize,
+        step: usize,
+        slope: f64,
+    },
+    #[error("step {step} of stage {stage} holds for {seconds} s; a hold cannot be negative")]
+    NegativeHold {
+        stage: usize,
+        step: usize,
+        seconds: f64,
+    },
     #[error(
         "method name {name:?} is empty or uses characters outside ASCII letters, digits, '_' and '-'; the device rejects other names"
     )]
@@ -114,33 +182,24 @@ pub fn render_method(
     method_name: &str,
     creator: &str,
     timestamp: &str,
-    profile: &ThermalProfile,
+    program: &ThermalProgram,
     settings: &MethodSettings,
 ) -> Result<String, MethodSetError> {
     validate_method_name(method_name)?;
     validate_timestamp(timestamp)?;
-    let limits = odtc_limits();
-    profile.validate(&limits)?;
-    validate_sub_ambient_hold(profile)?;
+    validate_program(program)?;
+    validate_sub_ambient_hold(program)?;
     if settings.fill_volume_ul < 0.0 {
         return Err(MethodSetError::NegativeFillVolume {
             volume: settings.fill_volume_ul,
         });
     }
-    check_block(
-        &limits,
-        "the start block temperature",
-        settings.start_block_celsius,
-    )?;
-    check_lid(
-        &limits,
-        "the start lid temperature",
-        settings.start_lid_celsius,
-    )?;
+    check_block("the start block temperature", settings.start_block_celsius)?;
+    check_lid("the start lid temperature", settings.start_lid_celsius)?;
 
     let mut steps = String::new();
     let mut step_number = 1u32;
-    for stage in &profile.stages {
+    for stage in &program.stages {
         let stage_start = step_number;
         for (index, step) in stage.steps.iter().enumerate() {
             let last_in_stage = index + 1 == stage.steps.len();
@@ -149,7 +208,7 @@ pub fn render_method(
             } else {
                 (0, 0)
             };
-            let slope = step.ramp_c_per_s.unwrap_or(MAX_SLOPE_C_PER_S);
+            let slope = step.slope_c_per_s.unwrap_or(MAX_SLOPE_C_PER_S);
             let lid = step.lid_celsius.unwrap_or(settings.start_lid_celsius);
             steps.push_str(&format!(
                 "<Step><Number>{number}</Number><Slope>{slope}</Slope>\
@@ -163,7 +222,7 @@ pub fn render_method(
                  <PIDNumber>1</PIDNumber><LidTemp>{lid}</LidTemp></Step>",
                 number = step_number,
                 slope = number(slope),
-                plateau = number(step.celsius),
+                plateau = number(step.plateau_celsius),
                 hold = number(step.hold_seconds),
                 lid = number(lid),
             ));
@@ -208,9 +267,8 @@ pub fn render_pre_method(
 ) -> Result<String, MethodSetError> {
     validate_method_name(method_name)?;
     validate_timestamp(timestamp)?;
-    let limits = odtc_limits();
-    check_block(&limits, "the constant hold", block_celsius)?;
-    check_lid(&limits, "the constant hold", lid_celsius)?;
+    check_block("the constant hold", block_celsius)?;
+    check_lid("the constant hold", lid_celsius)?;
     Ok(format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?><MethodSet>\
          <DeleteAllMethods>false</DeleteAllMethods>\
@@ -322,15 +380,79 @@ fn timestamp_is_valid(timestamp: &str) -> bool {
     }
 }
 
-fn validate_sub_ambient_hold(profile: &ThermalProfile) -> Result<(), MethodSetError> {
-    let total: f64 = profile
+/// Validates a program against the device envelope: block and lid ranges
+/// per plateau, positive slopes inside the maximum, non-negative holds,
+/// and a non-empty, non-zero-repeat shape.
+fn validate_program(program: &ThermalProgram) -> Result<(), MethodSetError> {
+    if program.stages.is_empty() || program.stages.iter().any(|stage| stage.steps.is_empty()) {
+        return Err(MethodSetError::EmptyProgram);
+    }
+    for (stage_index, stage) in program.stages.iter().enumerate() {
+        if stage.repeats == 0 {
+            return Err(MethodSetError::ZeroRepeats {
+                stage: stage_index,
+                repeats: stage.repeats,
+            });
+        }
+        for (step_index, step) in stage.steps.iter().enumerate() {
+            if !(BLOCK_MIN_CELSIUS..=BLOCK_MAX_CELSIUS).contains(&step.plateau_celsius) {
+                return Err(MethodSetError::StepBlockOutOfRange {
+                    stage: stage_index,
+                    step: step_index,
+                    celsius: step.plateau_celsius,
+                    min: BLOCK_MIN_CELSIUS,
+                    max: BLOCK_MAX_CELSIUS,
+                });
+            }
+            if step.hold_seconds < 0.0 {
+                return Err(MethodSetError::NegativeHold {
+                    stage: stage_index,
+                    step: step_index,
+                    seconds: step.hold_seconds,
+                });
+            }
+            if let Some(slope) = step.slope_c_per_s {
+                if slope <= 0.0 {
+                    return Err(MethodSetError::NonPositiveSlope {
+                        stage: stage_index,
+                        step: step_index,
+                        slope,
+                    });
+                }
+                if slope > MAX_SLOPE_C_PER_S {
+                    return Err(MethodSetError::SlopeOutOfRange {
+                        stage: stage_index,
+                        step: step_index,
+                        slope,
+                        max: MAX_SLOPE_C_PER_S,
+                    });
+                }
+            }
+            if let Some(lid) = step.lid_celsius
+                && !(LID_MIN_CELSIUS..=LID_MAX_CELSIUS).contains(&lid)
+            {
+                return Err(MethodSetError::StepLidOutOfRange {
+                    stage: stage_index,
+                    step: step_index,
+                    celsius: lid,
+                    min: LID_MIN_CELSIUS,
+                    max: LID_MAX_CELSIUS,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_sub_ambient_hold(program: &ThermalProgram) -> Result<(), MethodSetError> {
+    let total: f64 = program
         .stages
         .iter()
         .map(|stage| {
             stage
                 .steps
                 .iter()
-                .filter(|step| step.celsius < AMBIENT_CELSIUS)
+                .filter(|step| step.plateau_celsius < AMBIENT_CELSIUS)
                 .map(|step| step.hold_seconds * f64::from(stage.repeats))
                 .sum::<f64>()
         })
@@ -346,34 +468,26 @@ fn validate_sub_ambient_hold(profile: &ThermalProfile) -> Result<(), MethodSetEr
     }
 }
 
-fn check_block(
-    limits: &ThermalLimits,
-    context: &'static str,
-    celsius: f64,
-) -> Result<(), MethodSetError> {
-    if celsius < limits.block_min_celsius || celsius > limits.block_max_celsius {
+fn check_block(context: &'static str, celsius: f64) -> Result<(), MethodSetError> {
+    if !(BLOCK_MIN_CELSIUS..=BLOCK_MAX_CELSIUS).contains(&celsius) {
         Err(MethodSetError::BlockOutOfRange {
             context,
             celsius,
-            min: limits.block_min_celsius,
-            max: limits.block_max_celsius,
+            min: BLOCK_MIN_CELSIUS,
+            max: BLOCK_MAX_CELSIUS,
         })
     } else {
         Ok(())
     }
 }
 
-fn check_lid(
-    limits: &ThermalLimits,
-    context: &'static str,
-    celsius: f64,
-) -> Result<(), MethodSetError> {
-    if celsius < limits.lid_min_celsius || celsius > limits.lid_max_celsius {
+fn check_lid(context: &'static str, celsius: f64) -> Result<(), MethodSetError> {
+    if !(LID_MIN_CELSIUS..=LID_MAX_CELSIUS).contains(&celsius) {
         Err(MethodSetError::LidOutOfRange {
             context,
             celsius,
-            min: limits.lid_min_celsius,
-            max: limits.lid_max_celsius,
+            min: LID_MIN_CELSIUS,
+            max: LID_MAX_CELSIUS,
         })
     } else {
         Ok(())
@@ -383,27 +497,26 @@ fn check_lid(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_instruments::{ThermalStage, ThermalStep};
 
-    fn step(celsius: f64, hold_seconds: f64) -> ThermalStep {
-        ThermalStep {
-            celsius,
+    fn step(plateau_celsius: f64, hold_seconds: f64) -> ProgramStep {
+        ProgramStep {
+            plateau_celsius,
             hold_seconds,
-            ramp_c_per_s: None,
+            slope_c_per_s: None,
             lid_celsius: None,
         }
     }
 
     /// 30 cycles of 37 °C for 90 s then 16 °C for 180 s, closing with a
     /// single 60 °C 300 s ligation hold.
-    fn golden_gate_profile() -> ThermalProfile {
-        ThermalProfile {
+    fn golden_gate_profile() -> ThermalProgram {
+        ThermalProgram {
             stages: vec![
-                ThermalStage {
+                ProgramStage {
                     steps: vec![step(37.0, 90.0), step(16.0, 180.0)],
                     repeats: 30,
                 },
-                ThermalStage {
+                ProgramStage {
                     steps: vec![step(60.0, 300.0)],
                     repeats: 1,
                 },
@@ -461,13 +574,13 @@ mod tests {
 
     #[test]
     fn a_stated_ramp_and_per_step_lid_render_verbatim() {
-        let mut profile = ThermalProfile {
-            stages: vec![ThermalStage {
+        let mut profile = ThermalProgram {
+            stages: vec![ProgramStage {
                 steps: vec![step(72.0, 30.0)],
                 repeats: 1,
             }],
         };
-        profile.stages[0].steps[0].ramp_c_per_s = Some(2.5);
+        profile.stages[0].steps[0].slope_c_per_s = Some(2.5);
         profile.stages[0].steps[0].lid_celsius = Some(110.0);
         let xml = render_method(
             "lab_profile_002",
@@ -582,7 +695,7 @@ mod tests {
     #[test]
     fn a_block_temperature_above_the_ceiling_is_rejected_with_the_range() {
         let mut profile = golden_gate_profile();
-        profile.stages[0].steps[0].celsius = 105.0;
+        profile.stages[0].steps[0].plateau_celsius = 105.0;
         let error = render_method(
             "lab_profile_004",
             "lab",
@@ -593,20 +706,20 @@ mod tests {
         .expect_err("105 °C is above the 99 °C block ceiling");
         assert_eq!(
             error,
-            MethodSetError::Profile(ThermalProfileError::BlockTemperatureOutOfRange {
+            MethodSetError::StepBlockOutOfRange {
                 stage: 0,
                 step: 0,
                 celsius: 105.0,
                 min: 4.0,
                 max: 99.0,
-            })
+            }
         );
     }
 
     #[test]
     fn a_ramp_above_the_device_maximum_is_rejected_with_the_maximum() {
         let mut profile = golden_gate_profile();
-        profile.stages[0].steps[0].ramp_c_per_s = Some(5.0);
+        profile.stages[0].steps[0].slope_c_per_s = Some(5.0);
         let error = render_method(
             "lab_profile_005",
             "lab",
@@ -617,19 +730,19 @@ mod tests {
         .expect_err("5 °C/s is above the 4.4 °C/s maximum");
         assert_eq!(
             error,
-            MethodSetError::Profile(ThermalProfileError::RampOutOfRange {
+            MethodSetError::SlopeOutOfRange {
                 stage: 0,
                 step: 0,
-                ramp: 5.0,
+                slope: 5.0,
                 max: MAX_SLOPE_C_PER_S,
-            })
+            }
         );
     }
 
     #[test]
     fn a_long_sub_ambient_hold_is_rejected_with_the_condensation_limit() {
-        let profile = ThermalProfile {
-            stages: vec![ThermalStage {
+        let profile = ThermalProgram {
+            stages: vec![ProgramStage {
                 steps: vec![step(4.0, 3600.0)],
                 repeats: 3,
             }],
