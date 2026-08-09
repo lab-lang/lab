@@ -19,6 +19,8 @@ lab-compiler.workspace = true
 # The runner needs the live USB transport the workspace dependency keeps
 # off by default.
 lab-hamilton-star = { workspace = true, features = ["usb"] }
+lab-inheco-odtc.workspace = true
+lab-instruments.workspace = true
 lab-package.workspace = true
 lab-project.workspace = true
 self-replace = "1.5.0"

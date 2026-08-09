@@ -79,6 +79,11 @@ enum Command {
         /// records as completed.
         #[arg(long)]
         resume: bool,
+        /// Where a networked station answers on this bench, as
+        /// NAME=ADDRESS (repeatable). Compiled artifacts never carry
+        /// addresses; the bench supplies them at run time.
+        #[arg(long = "station", value_name = "NAME=ADDRESS")]
+        station: Vec<String>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -146,12 +151,13 @@ fn run() -> Result<()> {
             dry_run,
             yes,
             resume,
+            station,
         } => {
             if workcell_run::is_workcell_directory(&path) {
-                workcell_run::run_workcell(path, dry_run, yes, resume, &output)
-            } else if resume {
+                workcell_run::run_workcell(path, dry_run, yes, resume, station, &output)
+            } else if resume || !station.is_empty() {
                 anyhow::bail!(
-                    "--resume applies to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
+                    "--resume and --station apply to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
                 )
             } else {
                 run::run(path, dry_run, yes, &output)

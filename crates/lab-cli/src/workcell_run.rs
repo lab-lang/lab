@@ -120,12 +120,21 @@ pub(crate) struct LoadedNode {
 
 pub(crate) enum LoadedAction {
     Program(LoadedProgram),
-    Handoff { instructions: String },
-    Manual { title: String, instructions: String },
+    Handoff {
+        from: String,
+        to: String,
+        instructions: String,
+    },
+    Manual {
+        title: String,
+        instructions: String,
+    },
 }
 
 pub(crate) struct LoadedWorkcell {
     pub nodes: Vec<LoadedNode>,
+    /// The thermocycler station's name, when the plan declares one.
+    pub thermocycler_station: Option<String>,
 }
 
 /// True when the directory holds a workcell coordination plan.
@@ -219,6 +228,8 @@ pub(crate) fn load_workcell_directory(directory: &Path) -> Result<LoadedWorkcell
                 labware,
                 instructions,
             } => LoadedAction::Handoff {
+                from: from.clone(),
+                to: to.clone(),
                 instructions: format!("{instructions} ({labware}: {from} -> {to})"),
             },
             WorkcellAction::Manual {
@@ -234,7 +245,15 @@ pub(crate) fn load_workcell_directory(directory: &Path) -> Result<LoadedWorkcell
             action,
         });
     }
-    Ok(LoadedWorkcell { nodes })
+    let thermocycler_station = plan
+        .stations
+        .iter()
+        .find(|station| station.kind == "inheco.odtc")
+        .map(|station| station.name.clone());
+    Ok(LoadedWorkcell {
+        nodes,
+        thermocycler_station,
+    })
 }
 
 /// Renders the dry-run walk: every node in order, with program contents
@@ -277,7 +296,7 @@ pub(crate) fn render_dry_run(loaded: &LoadedWorkcell) -> String {
                     }
                 );
             }
-            LoadedAction::Handoff { instructions } => {
+            LoadedAction::Handoff { instructions, .. } => {
                 let _ = writeln!(
                     text,
                     "\n[{}] {} — by hand: {instructions}",
@@ -301,16 +320,38 @@ pub(crate) fn render_dry_run(loaded: &LoadedWorkcell) -> String {
     text
 }
 
+/// The connected stations a walk accumulates: each opens on first use and
+/// stays open for the wave.
+struct Sessions {
+    star: Option<lab_hamilton_star::Star>,
+    odtc: Option<lab_inheco_odtc::Odtc>,
+}
+
+/// Bench context the walk carries: which station is the cycler, and where
+/// stations answer on this bench. Addresses are runtime input — compiled
+/// artifacts never carry them.
+struct Bench {
+    thermocycler_station: Option<String>,
+    addresses: std::collections::BTreeMap<String, String>,
+}
+
 /// The workcell `lab run` flow: validate everything, then walk.
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_workcell(
     directory: PathBuf,
     dry_run: bool,
     yes: bool,
     resume: bool,
+    station_addresses: Vec<String>,
     output: &crate::Output,
 ) -> Result<()> {
     let loaded = load_workcell_directory(&directory)?;
+    let mut addresses = std::collections::BTreeMap::new();
+    for entry in &station_addresses {
+        let Some((name, address)) = entry.split_once('=') else {
+            bail!("--station takes NAME=ADDRESS, e.g. --station odtc-1=169.254.10.40:8080");
+        };
+        addresses.insert(name.to_string(), address.to_string());
+    }
 
     if dry_run {
         let human = render_dry_run(&loaded);
@@ -352,7 +393,14 @@ pub(crate) fn run_workcell(
         bail!("run cancelled before any motion");
     }
 
-    let mut star_session: Option<lab_hamilton_star::Star> = None;
+    let bench = Bench {
+        thermocycler_station: loaded.thermocycler_station.clone(),
+        addresses,
+    };
+    let mut sessions = Sessions {
+        star: None,
+        odtc: None,
+    };
     let mut executed = 0usize;
     for node in &loaded.nodes {
         if completed.contains(&node.id) {
@@ -360,7 +408,7 @@ pub(crate) fn run_workcell(
             continue;
         }
         append_ledger(&directory, &node.id, LedgerEvent::Started)?;
-        let outcome = execute_node(node, &mut star_session);
+        let outcome = execute_node(node, &mut sessions, &bench);
         match outcome {
             Ok(()) => {
                 append_ledger(&directory, &node.id, LedgerEvent::Completed)?;
@@ -389,15 +437,89 @@ pub(crate) fn run_workcell(
     )
 }
 
-fn execute_node(
-    node: &LoadedNode,
-    star_session: &mut Option<lab_hamilton_star::Star>,
-) -> Result<()> {
+fn ensure_star(sessions: &mut Sessions) -> Result<&lab_hamilton_star::Star> {
+    if sessions.star.is_none() {
+        println!("connecting to the first Hamilton STAR on USB");
+        let star = lab_hamilton_star::Star::open_usb().context(
+            "no Hamilton STAR answered on USB; use --dry-run to review without hardware",
+        )?;
+        println!("connected; running the setup choreography");
+        star.initialize(lab_hamilton_star::InitializeOptions::default())
+            .context("the setup choreography failed; the machine is not in a known state")?;
+        sessions.star = Some(star);
+    }
+    Ok(sessions.star.as_ref().expect("just ensured"))
+}
+
+fn ensure_odtc<'sessions>(
+    sessions: &'sessions mut Sessions,
+    bench: &Bench,
+    station: &str,
+) -> Result<&'sessions mut lab_inheco_odtc::Odtc> {
+    if sessions.odtc.is_none() {
+        let address = bench.addresses.get(station).with_context(|| {
+            format!(
+                "station '{station}' has no address on this bench; pass --station {station}=<ip:port> (the ODTC answers on port 8080)"
+            )
+        })?;
+        let socket: std::net::SocketAddr = address.parse().with_context(|| {
+            format!("'{address}' is not an <ip:port> address for station '{station}'")
+        })?;
+        println!("connecting to {station} at {socket}");
+        let transport = lab_inheco_odtc::HttpSoapTransport::connect(socket)
+            .with_context(|| format!("station '{station}' did not answer at {socket}"))?;
+        let session = lab_inheco_odtc::Odtc::connect(
+            std::sync::Arc::new(transport),
+            lab_inheco_odtc::OdtcOptions::default(),
+        )
+        .with_context(|| format!("the {station} connection handshake failed"))?;
+        println!("connected; {station} is idle");
+        sessions.odtc = Some(session);
+    }
+    Ok(sessions.odtc.as_mut().expect("just ensured"))
+}
+
+/// True when a handoff endpoint is the cycler, whose motorized door the
+/// runner must open before the operator can reach the block.
+fn involves_cycler(bench: &Bench, station: &str) -> bool {
+    bench
+        .thermocycler_station
+        .as_deref()
+        .is_some_and(|cycler| cycler == station)
+}
+
+fn execute_node(node: &LoadedNode, sessions: &mut Sessions, bench: &Bench) -> Result<()> {
+    use lab_instruments::Thermocycler as _;
     match &node.action {
-        LoadedAction::Handoff { instructions } => {
+        LoadedAction::Handoff {
+            from,
+            to,
+            instructions,
+        } => {
+            let to_cycler = involves_cycler(bench, to);
+            let from_cycler = involves_cycler(bench, from);
+            if to_cycler || from_cycler {
+                let station = if to_cycler { to } else { from };
+                let odtc = ensure_odtc(sessions, bench, station)?;
+                odtc.open_lid()
+                    .with_context(|| format!("could not open the {station} door"))?;
+                println!("{station} door is open");
+            }
             println!("\nby hand — {instructions}");
             if !crate::run::confirm("done, and the bench matches the plan? Continue [y/N] ")? {
                 bail!("the operator declined the handoff");
+            }
+            if to_cycler || from_cycler {
+                let station = if to_cycler { to } else { from };
+                let odtc = ensure_odtc(sessions, bench, station)?;
+                if from_cycler {
+                    // The plate is out; nothing holds temperature for it now.
+                    odtc.stop()
+                        .with_context(|| format!("could not stop {station} after retrieval"))?;
+                }
+                odtc.close_lid()
+                    .with_context(|| format!("could not close the {station} door"))?;
+                println!("{station} door is closed");
             }
             Ok(())
         }
@@ -416,21 +538,8 @@ fn execute_node(
             document,
             steps,
         }) => {
-            let star = match star_session {
-                Some(star) => star,
-                None => {
-                    println!("connecting to {station} (first Hamilton STAR on USB)");
-                    let star = lab_hamilton_star::Star::open_usb().context(
-                        "no Hamilton STAR answered on USB; use --dry-run to review without hardware",
-                    )?;
-                    println!("connected; running the setup choreography");
-                    star.initialize(lab_hamilton_star::InitializeOptions::default())
-                        .context(
-                            "the setup choreography failed; the machine is not in a known state",
-                        )?;
-                    star_session.insert(star)
-                }
-            };
+            ensure_star(sessions)?;
+            let star = sessions.star.as_ref().expect("just ensured");
             println!("\n{station}: {} ({} frames)", document.title, steps.len());
             for (index, (command, description)) in steps.iter().enumerate() {
                 println!("  [{:>3}] {description}", index + 1);
@@ -446,12 +555,34 @@ fn execute_node(
             }
             Ok(())
         }
-        LoadedAction::Program(LoadedProgram::Thermocycle { station, .. }) => {
-            // The ODTC executor arrives with the lab-inheco-odtc driver
-            // crate; until it lands, a thermocycle node cannot run live.
-            bail!(
-                "station '{station}' needs the ODTC executor, which this runner does not carry yet; review the wave with --dry-run"
-            )
+        LoadedAction::Program(LoadedProgram::Thermocycle { station, document }) => {
+            let odtc = ensure_odtc(sessions, bench, station)?;
+            document
+                .profile
+                .validate(&lab_inheco_odtc::odtc_limits())
+                .with_context(|| format!("'{}' is outside the {station} envelope", document.id))?;
+            println!(
+                "\n{station}: {} ({} plateaus)",
+                document.title,
+                document.profile.total_steps()
+            );
+            let handle = odtc
+                .run_profile(&document.profile)
+                .with_context(|| format!("could not start '{}' on {station}", document.id))?;
+            println!(
+                "running; completion may take hours — the wave resumes with --resume if interrupted"
+            );
+            odtc.await_completion(handle)
+                .with_context(|| format!("'{}' did not complete on {station}", document.id))?;
+            for warning in odtc.take_warnings() {
+                println!("{station} warning: {warning}");
+            }
+            if let Some(celsius) = document.final_hold_celsius {
+                println!("holding the block at {celsius} °C until retrieval");
+                odtc.hold_block(celsius, None)
+                    .with_context(|| format!("could not hold {celsius} °C on {station}"))?;
+            }
+            Ok(())
         }
     }
 }
