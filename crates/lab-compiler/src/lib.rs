@@ -4,6 +4,7 @@ pub mod artifact;
 pub mod backend;
 pub mod lair;
 pub mod planning;
+pub mod runfmt;
 #[cfg(test)]
 mod test_support;
 

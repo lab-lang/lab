@@ -11,21 +11,13 @@ use lab_hamilton_star::commands::pipetting::{
     TipDiscard, TipDiscardMethod, TipPickup,
 };
 use lab_hamilton_star::commands::system::{DefineTipType, MoveAllChannelsToZSafety};
-use serde::Serialize;
 
 use crate::backend::hamilton::star::plan::{
     ChannelLiquid, StarEmissionError, StarExecutionPlan, StarOperation, StarRunPlan, TipClass,
 };
 use crate::backend::hamilton::star::profile::{LldPolicy, MachineVariant};
 
-/// One replayable step: the id-less frame and the operator's view of it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct RunStep {
-    pub frame: String,
-    pub module: String,
-    pub code: String,
-    pub description: String,
-}
+pub use crate::runfmt::RunStep;
 
 /// The tip-type indices a run document defines: the small class is index 0
 /// and the large class index 1, re-defined at every run start because the
@@ -47,30 +39,19 @@ fn waste_y(channel: usize) -> u32 {
     4050 - (channel as u32) * (4050 - 2175) / 7
 }
 
-#[derive(Serialize)]
-struct RunDocument<'plan> {
-    format: &'static str,
-    run: &'plan str,
-    title: &'plan str,
-    machine: &'static str,
-    channels: usize,
-    steps: Vec<RunStep>,
-    manual_after: &'plan [crate::backend::hamilton::star::plan::ManualStep],
-}
-
 /// Renders one run to its `lab.star-run.v0` JSON document.
 pub(in crate::backend::hamilton::star) fn render_run(
     plan: &StarExecutionPlan,
     run: &StarRunPlan,
 ) -> Result<String, StarEmissionError> {
-    let document = RunDocument {
-        format: "lab.star-run.v0",
-        run: &run.id,
-        title: &run.title,
-        machine: plan.deck.machine.variant.name(),
+    let document = crate::runfmt::StarRunDocument {
+        format: crate::runfmt::STAR_RUN_FORMAT.to_string(),
+        run: run.id.clone(),
+        title: run.title.clone(),
+        machine: plan.deck.machine.variant.name().to_string(),
         channels: plan.deck.machine.channels,
         steps: run_steps(plan, run)?,
-        manual_after: &run.manual_after,
+        manual_after: run.manual_after.clone(),
     };
     serde_json::to_string_pretty(&document)
         .map(|mut text| {

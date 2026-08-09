@@ -12,10 +12,13 @@ use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use lab_compiler::runfmt::{STAR_RUN_FORMAT, StarRunDocument};
 use lab_hamilton_star::{InitializeOptions, RawCommand, Star};
 use serde::Deserialize;
 
 use crate::Output;
+
+pub(crate) use lab_compiler::runfmt::ManualStep;
 
 /// One `lab.star-run.v0` document, loaded and frame-validated.
 pub(crate) struct LoadedRun {
@@ -28,32 +31,6 @@ pub(crate) struct LoadedRun {
 pub(crate) struct LoadedStep {
     pub command: RawCommand,
     pub description: String,
-}
-
-#[derive(Deserialize)]
-struct RunDocument {
-    format: String,
-    run: String,
-    title: String,
-    #[allow(dead_code)]
-    machine: String,
-    #[allow(dead_code)]
-    channels: usize,
-    steps: Vec<StepDocument>,
-    #[serde(default)]
-    manual_after: Vec<ManualStep>,
-}
-
-#[derive(Deserialize)]
-struct StepDocument {
-    frame: String,
-    description: String,
-}
-
-#[derive(Deserialize, serde::Serialize, Clone)]
-pub(crate) struct ManualStep {
-    title: String,
-    instructions: String,
 }
 
 /// The manifest fields the runner reads: run order and the bench's
@@ -106,11 +83,11 @@ pub(crate) fn load_run_directory(directory: &Path) -> Result<(Vec<LoadedRun>, Op
         let path = directory.join(format!("{}.star.json", run.id));
         let text = fs::read_to_string(&path)
             .with_context(|| format!("missing run document {}", path.display()))?;
-        let document: RunDocument = serde_json::from_str(&text)
+        let document: StarRunDocument = serde_json::from_str(&text)
             .with_context(|| format!("failed to parse {}", path.display()))?;
-        if document.format != "lab.star-run.v0" {
+        if document.format != STAR_RUN_FORMAT {
             bail!(
-                "{} declares format '{}'; this runner speaks lab.star-run.v0",
+                "{} declares format '{}'; this runner speaks {STAR_RUN_FORMAT}",
                 path.display(),
                 document.format
             );

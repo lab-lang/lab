@@ -10,8 +10,9 @@
 //! dependency-driven build. Backend identity enters that planning only as a
 //! parameter, so a capacity error names the machine that planned the build.
 //!
-//! Below both sits one module per vendor family, [`opentrons`], holding one
-//! module per machine. A target implementation owns the selection from
+//! Below both sits one module per vendor family — [`opentrons`] and
+//! [`hamilton`] — holding one module per machine. A target implementation
+//! owns the selection from
 //! verified LAIR into a target IR, target validation and resource planning,
 //! and concrete emitters. The language frontend and generic output renderers
 //! deliberately do not depend on any target module.

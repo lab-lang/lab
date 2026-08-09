@@ -158,12 +158,7 @@ pub struct StarRunPlan {
     pub manual_after: Vec<ManualStep>,
 }
 
-/// A step the operator performs between robot runs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ManualStep {
-    pub title: String,
-    pub instructions: String,
-}
+pub use crate::runfmt::ManualStep;
 
 /// The two tip sizes a run draws on, mapped to concrete racks and driver
 /// tip types by the profile.
