@@ -5,6 +5,7 @@ members = [
     "crates/lab-compiler",
     "crates/lab-hamilton-star",
     "crates/lab-ide",
+    "crates/lab-instruments",
     "crates/lab-ide-wasm",
     "crates/lab-language",
     "crates/lab-language-server",
@@ -44,6 +45,7 @@ lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
 # protocol use never links libusb; the CLI runner re-enables `usb`.
 lab-hamilton-star = { path = "crates/lab-hamilton-star", version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
+lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }
 lab-language-server = { path = "crates/lab-language-server", version = "0.1.0" }
