@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/lab-cli",
     "crates/lab-compiler",
+    "crates/lab-hamilton-star",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
     "crates/lab-language",
@@ -26,6 +27,7 @@ clap = { version = "4.5", features = ["derive"] }
 pyo3 = { version = "0.28.3", features = ["abi3-py311"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rusb = "0.9"
 semver = "1"
 thiserror = "2"
 toml = "0.8"
@@ -38,6 +40,9 @@ serde-wasm-bindgen = "0.6"
 pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1a18a0c0e64a0f1137f091b91" }
 
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
+# Default features stay off at the workspace level so the compiler's pure
+# protocol use never links libusb; the CLI runner re-enables `usb`.
+lab-hamilton-star = { path = "crates/lab-hamilton-star", version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }

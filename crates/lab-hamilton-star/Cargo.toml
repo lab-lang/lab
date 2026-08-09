@@ -1,0 +1,22 @@
+[package]
+name = "lab-hamilton-star"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed Hamilton STAR/STARlet firmware protocol and USB transport."
+
+[dependencies]
+rusb = { workspace = true, optional = true }
+thiserror.workspace = true
+
+[features]
+# The `usb` feature carries the libusb-backed transport. Consumers that only
+# plan and encode (the compiler backend) disable default features so they
+# never link libusb; the runner enables it.
+default = ["usb"]
+usb = ["dep:rusb"]
+
+[lints]
+workspace = true
