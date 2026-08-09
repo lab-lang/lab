@@ -602,6 +602,8 @@ dependencies = [
  "flate2",
  "lab-compiler",
  "lab-hamilton-star",
+ "lab-inheco-odtc",
+ "lab-instruments",
  "lab-package",
  "lab-project",
  "self-replace",
