@@ -1,0 +1,64 @@
+/*!
+ * Watching a plate until it has something to say.
+ *
+ * A plate is not ready on a schedule; it is ready when enough colonies have
+ * appeared. So this is written as a reaction rather than as a wait: it images
+ * on a timer, and finishes on whichever comes first — enough colonies, or the
+ * point past which nothing more will grow.
+ */
+
+use std.lab.plasmid
+
+/** One image, what was counted in it, and how long the plate had been growing. */
+record PlateObservation is Evidential:
+  image: Image
+  colonies: ColonyMap
+  elapsed: Duration
+
+/**
+ * What watching a plate produced.
+ *
+ * Both cases carry the observations, because a plate that never grew is
+ * evidence about the transformation rather than an absence of information.
+ */
+record ColonyGrowth:
+  plate: Material<Plate>
+  observations: List<PlateObservation>
+
+  case Ready:
+    colonies: ColonyMap
+
+  case TimedOut
+
+/**
+ * Image every half hour, and stop at the first plate worth picking from.
+ *
+ * `state` is the memory this run owns: the observations accumulate across
+ * firings of the timer, and both exits carry them out.
+ */
+workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
+
+  state observations: List<PlateObservation> = []
+
+  when every 30 min:
+    image <- capture image of plate
+    colonies = detect_colonies(image)
+    observation = PlateObservation{
+      image: image,
+      colonies: colonies,
+      elapsed: workflow.elapsed,
+    }
+    observations = observations + [observation]
+
+    if colonies.isolated.count >= 8:
+      return Ready{
+        plate: plate,
+        colonies: colonies,
+        observations: observations,
+      }
+
+  when after 18 h:
+    return TimedOut{
+      plate: plate,
+      observations: observations,
+    }

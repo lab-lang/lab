@@ -241,39 +241,40 @@ mod tests {
 
     const SOURCE: &str = r#"
 use std.bio.build
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.bio.designs
+use std.bio.golden_gate
+use std.lab.plasmid
 
-J23101 = part("J23101")
-B0034 = part("B0034")
-GFP = part("GFP")
-B0015 = part("B0015")
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
-DH5alpha = chassis("DH5alpha")
-chloramphenicol = antibiotic("chloramphenicol")
+buy part J23101
+buy part B0034
+buy part GFP
+buy part B0015
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
+buy chassis DH5alpha
+buy antibiotic chloramphenicol
 
 plasmid p_gfp:
-  sequence: dna("ACGT")
-  backbone: pSB1C3
-  components: [J23101, B0034, GFP, B0015]
-  restriction_enzyme: BsaI
-  assembly_replicates: 1
-  reaction_volume: 30 uL
-  part_volume: 3 uL
-  assembly_cycles: 40
+  sequence = dna("ACGT")
+  backbone = pSB1C3
+  components = [J23101, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+  reaction_volume = 30 uL
+  part_volume = 3 uL
+  assembly_cycles = 40
   require topology == circular
   accept sequence == design.sequence
 
 strain reporter_host:
-  chassis: DH5alpha
-  plasmids: [p_gfp]
-  selection: chloramphenicol
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
-  heat_shock_temperature: 45 C
-  colony_volume: 6 uL
+  chassis = DH5alpha
+  plasmids = [p_gfp]
+  selection = chloramphenicol
+  transformation_replicates = 1
+  plating_replicates = 1
+  serial_dilutions = 1
+  heat_shock_temperature = 45 C
+  colony_volume = 6 uL
 
 workflow assemble_p_gfp() -> Material<Plasmid>:
   dependencies = []

@@ -117,7 +117,7 @@ fn publishes_source_diagnostics_over_stdio() {
 fn supports_advertised_editor_features_over_stdio() {
     let uri = "file:///features.lab";
     let source = concat!(
-        "observation PlateObservation:\n",
+        "record PlateObservation is Evidential:\n",
         "  image: Image  \n",
         "  colonies: ColonyMap\n",
         "\n",

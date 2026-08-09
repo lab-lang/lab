@@ -44,7 +44,7 @@ ara_reporter = regulated_expression(pBAD, sfGFP)
 panel: List<Circuit<any Signal, GreenFluorescentProtein>> = [tet_reporter, ara_reporter]
 
 /** One number an instrument recorded, and the kind of light it was. */
-observation Reading<Of: Reporter>:
+record Reading<Of: Reporter> is Evidential:
   value: Decimal
 
 /**

@@ -1,4 +1,4 @@
-use std.lab.plasmid_actions
+use std.lab.plasmid
 use golden_gate.workflows.assemble
 use golden_gate.workflows.build_strains
 

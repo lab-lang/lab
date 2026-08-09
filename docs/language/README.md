@@ -6,13 +6,14 @@ The documents have distinct jobs:
 
 - `syntax.md` records accepted surface-language rules;
 - `semantics.md` records the meaning of laboratory values and effects;
+- `generics.md` records how type parameters, roles, generic kinds, and unit types fit together;
 - `modules.md` records package imports and idiomatic source organization;
 - `open-questions.md` keeps unresolved design choices visible;
 - `support.md` records how far each feature has progressed through the compiler;
 - `decisions/` records design decisions and their status;
 - `specimens/` contains representative programs used to test the design.
 
-A specimen is not necessarily executable. The runnable example is the [Golden Gate package](../../examples/golden-gate/README.md) under the repository-level `examples/` directory. The support matrix is the authoritative statement of what `labc` currently accepts, checks, lowers, and executes.
+A specimen is not necessarily executable. The runnable examples are the [Golden Gate package](../../examples/golden-gate/README.md) and its [extended counterpart](../../examples/golden-gate-extended/README.md), under the repository-level `examples/` directory. The support matrix is the authoritative statement of what `labc` currently accepts, checks, lowers, and executes.
 
 The language is organized around three source-level concerns:
 
@@ -55,12 +56,22 @@ Portable module compilation resolves and checks the program but does not select 
 The latest accepted design records are:
 
 - [`0009`](decisions/0009-declaration-properties-and-workflow-signatures.md): declaration properties and callable workflow signatures;
-- [`0010`](decisions/0010-standard-library-contracts-and-inventory-identities.md): module-provided contracts and typed external identities; and
+- [`0010`](decisions/0010-standard-library-contracts-and-inventory-identities.md): module-provided contracts and typed external identities;
 - [`0011`](decisions/0011-dependencies-from-material-dataflow.md): dependency graphs derived from checked material dataflow;
 - [`0012`](decisions/0012-named-workflow-results.md): named typed workflow results and direct multi-value returns;
 - [`0013`](decisions/0013-strain-artifacts.md): engineered organisms as first-class artifacts;
 - [`0014`](decisions/0014-target-profiles-and-workspaces.md): target profiles for benches and workspaces for packages;
 - [`0015`](decisions/0015-roles-classify-types.md): roles classify types, and a role is not a type;
 - [`0016`](decisions/0016-callable-circuit-signatures.md): circuits declare callable signatures with inline type parameters;
-- [`0017`](decisions/0017-forgotten-type-arguments.md): a type argument may be deliberately forgotten; and
-- [`0018`](decisions/0018-standard-modules-written-in-lab.md): standard modules may be written in Lab.
+- [`0017`](decisions/0017-forgotten-type-arguments.md): a type argument may be deliberately forgotten;
+- [`0018`](decisions/0018-standard-modules-written-in-lab.md): standard modules may be written in Lab;
+- [`0019`](decisions/0019-properties-are-written-with-equals.md): properties are written with `=`;
+- [`0020`](decisions/0020-laws-are-declared-roles.md): laws are declared roles the compiler enforces;
+- [`0021`](decisions/0021-typed-external-identities.md): typed external identities are declarations, revised by [`0027`](decisions/0027-provenance-is-stated-per-thing.md);
+- [`0022`](decisions/0022-fixed-grammar-open-vocabulary.md): fixed grammar, open vocabulary;
+- [`0023`](decisions/0023-required-fields-and-optional-marks.md): schema fields are required unless marked optional;
+- [`0024`](decisions/0024-catalogued-items-carry-properties.md): a catalogued item states the fields of its type;
+- [`0025`](decisions/0025-quantity-types.md): a quantity type names the unit it is measured in;
+- [`0026`](decisions/0026-lineage-and-replicates.md): replicate class is lineage, not a property;
+- [`0027`](decisions/0027-provenance-is-stated-per-thing.md): provenance is a fact about a thing, not about its type; and
+- [`0028`](decisions/0028-schemas-are-contributed-to.md): several packages describe one kind.

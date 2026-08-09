@@ -4,7 +4,7 @@
  * spotted onto selective agar.
  */
 
-use std.lab.plasmid_actions
+use std.lab.plasmid
 use golden_gate.designs.inventory
 use golden_gate.designs.strains
 

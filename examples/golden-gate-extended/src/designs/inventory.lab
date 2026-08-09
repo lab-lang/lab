@@ -1,0 +1,42 @@
+/*!
+ * What this laboratory orders rather than makes.
+ *
+ * A bought item carries its own datasheet. The temperature a digest runs at
+ * belongs to the enzyme, and the way competent cells are shocked belongs to the
+ * chassis, so no design has to repeat either.
+ */
+
+use std.bio.designs
+
+// Constitutive promoters, the shared ribosome binding site and terminator, and
+// the fluorescent reporters.
+buy part J23101
+buy part J23106
+buy part B0034
+buy part B0015
+buy part GFP
+buy part RFP
+
+buy backbone pSB1C3
+
+/** BsaI cuts at 37 C, so every plasmid it opens digests the same way. */
+buy restriction_enzyme BsaI:
+  identity = "NEB-R0535"
+  digest_temperature = 37 C
+  digest_duration = 2 min
+
+// Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
+// Both are transformed the way competent cells are: chilled, shocked, recovered.
+buy chassis DH5alpha:
+  heat_shock_temperature = 42 C
+  cold_incubation = 30 min
+  recovery_temperature = 37 C
+  recovery_duration = 60 min
+
+buy chassis BL21:
+  heat_shock_temperature = 42 C
+  cold_incubation = 30 min
+  recovery_temperature = 37 C
+  recovery_duration = 60 min
+
+buy antibiotic chloramphenicol

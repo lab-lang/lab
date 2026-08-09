@@ -1,0 +1,50 @@
+/*!
+ * Golden Gate assembly and heat-shock transformation.
+ *
+ * The scale a reaction runs at is neither the design's identity nor the
+ * laboratory's equipment: it is what this method needs to make one. A package
+ * that builds by another method describes its own, and a design that builds by
+ * this one imports it.
+ *
+ * Every property here is optional, because a method's standard values stand
+ * behind a design that states nothing.
+ */
+
+use std.bio.designs
+
+/** What Golden Gate assembly needs to build a plasmid. */
+artifact Plasmid:
+  reaction_volume?: Quantity<uL>
+  part_volume?: Quantity<uL>
+  enzyme_volume?: Quantity<uL>
+  ligase_volume?: Quantity<uL>
+  buffer_volume?: Quantity<uL>
+  assembly_cycles?: Integer
+  assembly_replicates?: Integer
+  restriction_enzyme?: RestrictionEnzyme
+  ligate_temperature?: Quantity<C>
+  ligate_duration?: Quantity<min>
+
+  // A digest runs at the enzyme's temperature unless a protocol departs from
+  // the datasheet, so a design may state its own.
+  digest_temperature?: Quantity<C>
+  digest_duration?: Quantity<min>
+
+/** What heat-shock transformation and plating need to build a strain. */
+artifact Strain:
+  cell_volume?: Quantity<uL>
+  dna_volume?: Quantity<uL>
+  recovery_volume?: Quantity<uL>
+  heat_shock_duration?: Quantity<min>
+  medium_volume?: Quantity<uL>
+  culture_volume?: Quantity<uL>
+  colony_volume?: Quantity<uL>
+  transformation_replicates?: Integer
+  plating_replicates?: Integer
+  serial_dilutions?: Integer
+
+  // Heat shock follows the chassis unless a protocol departs from it.
+  heat_shock_temperature?: Quantity<C>
+  cold_incubation?: Quantity<min>
+  recovery_temperature?: Quantity<C>
+  recovery_duration?: Quantity<min>

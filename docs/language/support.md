@@ -4,18 +4,28 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 
 | Feature | Parse | Resolve | Type | Lower | Execute |
 | --- | --- | --- | --- | --- | --- |
-| Indented `plasmid` and `strain` declarations | yes | yes | yes | portable module | specialized targets |
-| Declarative artifact properties with `:` | yes | expressions | inferred checked values | `CheckedProperty` | target-dependent |
+| Package-declared artifact kinds (`artifact Type:`) | yes | imported kinds | schema fields and `declares` | `CheckedDeclaration::ArtifactKind` and the interface schema | n/a |
+| Artifact instances naming a package's word | yes | resolved against imported kinds | properties against the schema | portable module | specialized targets |
+| `declares` completeness rules | yes | property names only | presence, not values | `CheckedPresence` | n/a |
+| Optional schema fields (`name?:`) | yes | yes | required unless marked | `CheckedSchemaField.optional` | n/a |
+| Bought-item properties (`buy`) | yes | yes | against the kind's schema, strictly | `CheckedDeclaration::Catalog.properties` | n/a |
+| Quantity types (`Quantity<uL>`) | yes | yes | unit-exact | `CheckedType::Quantity` | n/a |
+| `across N biological replicates` | yes | yes | count resolved, and evidence checked against the lineage it spans | `CheckedAcceptance.replicates` | n/a |
+| Material lineage and replicate class | n/a | n/a | derived from action results | `provenance::lineage` | n/a |
+| Provenance verbs (`build`, `buy`) | yes | yes | `require`/`accept` only on what is built; identity only on what is bought | `CheckedDeclaration::Artifact` and `Catalog` | manifest cross-check at build |
+| Schemas contributed to by several modules | yes | yes | union of every kind declaration in scope | the merged interface schema | n/a |
+| Reagent-owned chemistry with design override | yes | yes | a stated value wins over the item's | `CheckedDeclaration::Catalog.properties` | read by the lowerer |
+| Declarative artifact properties with `=` | yes | expressions | inferred checked values | `CheckedProperty` | target-dependent |
 | Quantity-valued chemistry properties | yes | yes | unit-checked at lowering | chemistry dictionaries | generated protocols |
 | Mandatory workflow `(inputs) -> T` or `-> (name: T, ...)` signature | yes | yes | inputs, result arity, names, and types | yes | runtime pending |
 | Quantity literals | any expression position | built-in units | dimension subset | yes | yes |
 | `//` comments, `/** */` declaration and `/*! */` module documentation | yes | attached to the declaration below or to the module | n/a | module and declaration docs in the portable module and its interface | n/a |
 | `require` predicates | topology subset | yes | yes | yes | yes |
 | `accept` predicates | sequence/concentration/volume | yes | yes | yes | yes |
-| Bundled `std` module imports | yes | six modules | module values and contracts | yes | no runtime dispatch |
-| Bundled `std` modules written in Lab | yes | `std.bio.reporters` | compiled once at startup | resolved through `ModuleInterface` | n/a |
+| Bundled `std` module imports | yes | eight modules | module values and contracts | yes | no runtime dispatch |
+| Bundled `std` modules written in Lab | yes | `designs`, `golden_gate`, `parts`, `backbones`, `reporters` | compiled once at startup | resolved through `ModuleInterface` | n/a |
 | Optional trailing action clauses | yes | contract-driven | omitted operand binds to the empty list | yes | n/a |
-| Typed inventory constructors | yes | `std.bio.inventory` | nominal values | structured calls | no live inventory lookup |
+| Typed external identities (`buy`) | yes | against imported kinds | nominal values | `CheckedDeclaration::Catalog` | no live inventory lookup |
 | Heterogeneous list union inference | yes | symbols | e.g. `List<Plasmid | Part>` | yes | target-dependent |
 | Project/package import graph | yes | module paths | imported module interfaces | yes | no |
 | `lab.toml` manifest and source discovery | n/a | yes | n/a | yes | no |
@@ -34,9 +44,9 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Forgotten type arguments (`any Role`) | type-argument position only | yes | packing only where an annotation asks | `CheckedType::Any` | n/a |
 | Diagnostics with secondary spans and help | n/a | n/a | n/a | `Diagnostic.related` and `.help` | rendered by `lab check` on one file, and by the language server |
 | Top-level pure bindings | yes | yes | yes | yes | no |
-| `record`, `material`, `observation`, `evidence`, and `event` | yes | yes | yes | yes | no |
-| Biological `part` declarations | syntax pending | no | no | no | no |
-| Tagged `outcome` declarations and constructors | yes | yes | yes | yes | no |
+| `record` plus role membership (`is Event`, `is Evidential`) | yes | yes | yes | yes | no |
+| Biological `part` declarations carrying sequence and provenance | syntax pending | no | no | no | no |
+| Tagged `record` declarations with `case` constructors | yes | yes | yes | yes | no |
 | Workflow declarations and calls | yes | yes | yes | yes | runtime pending |
 | Pure workflow bindings | yes | yes | yes | yes | no |
 | Explicit durable workflow `state` | yes | yes | yes | yes | no |
@@ -59,7 +69,7 @@ All complete source modules use the portable-module boundary. A backend may reje
 
 `lab` resolves workspace members, same-package modules, and recursive path dependencies into one deterministic compilation order, detects package and module cycles, and checks an optional semver requirement against each path dependency's manifest. Each package compiles against the checked `ModuleInterface` values of its dependencies, so imported public symbols resolve and type-check across package boundaries. A package that declares a build entry must declare `workflow main` in that module; one that declares no entry is a library and is accepted without it. `lab build` writes portable module IR plus a package index under `.lab/build/` and a `lab.lock` recording each package's name, version, source, and dependency aliases. Registry dependencies fail closed: acquisition, integrity, caching, and visibility rules are unimplemented, and a manifest that declares one is rejected rather than silently ignored.
 
-The separate OT-2 specialization accepts plasmid properties (`backbone`, ordered `components`, `restriction_enzyme`, replicate counts, and reaction chemistry) and strain properties (`chassis`, carried `plasmids`, `selection`, replicate counts, and transformation chemistry) as checked symbol references, plus workflows composed from bundled standard-library effects. `std.bio.inventory` constructors give external inventory identities typed source names; strings are not used as component references. The source selects `realize`, provision, transformation, recovery, dilution, and plating operations. Dependencies are typed material inputs to `realize` and `transform`; the generic language does not encode assembly levels. The specialization emits a deterministic Lab manifest, human instructions, and OT-2 scripts, and explicitly rejects properties or operation sequences it cannot lower.
+The separate OT-2 specialization accepts plasmid properties (`backbone`, ordered `components`, `restriction_enzyme`, replicate counts, and reaction chemistry) and strain properties (`chassis`, carried `plasmids`, `selection`, replicate counts, and transformation chemistry) as checked symbol references, plus workflows composed from bundled standard-library effects. `buy` declarations give external inventory identities typed source names; strings are not used as component references. The source selects `realize`, provision, transformation, recovery, dilution, and plating operations. Dependencies are typed material inputs to `realize` and `transform`; the generic language does not encode assembly levels. The specialization emits a deterministic Lab manifest, human instructions, and OT-2 scripts, and explicitly rejects properties or operation sequences it cannot lower.
 
 Deck layout, labware, instruments, and per-stage capacity come from a target profile rather than from constants, and allocation spills across every plate a profile declares. The target validates reaction balance against each design's own stated volume, replicate and dilution bounds, plate capacity, source-rack capacity, and tip capacity. A batch emits a robot protocol only for the stages its artifacts reach, and artifacts sharing a planning wave share one run.
 

@@ -136,6 +136,19 @@ impl Checker {
                             ),
                         ));
                     }
+                } else if matches!(r#type, ContractType::AnyValue) {
+                    // Fetching something off the shelf gives you material of
+                    // it, so what is fetched cannot already be material.
+                    if matches!(&actual, Ty::Named(name, arguments) if name == "Material" && arguments.len() == 1)
+                    {
+                        return Err(SemanticError::new(
+                            effect.span,
+                            format!(
+                                "operation '{}' fetches a declared thing, and {actual} is already on the bench",
+                                contract.operation
+                            ),
+                        ));
+                    }
                 } else {
                     let expected = resolve_contract_type(r#type, operands, effect.span)?;
                     require_action_type(
@@ -271,9 +284,18 @@ pub(super) fn resolve_contract_type(
                 format!("action contract references unknown operand '{name}'"),
             )
         }),
-        ContractType::AnyMaterial => Err(SemanticError::new(
+        ContractType::MaterialOf(name) => operands
+            .get(*name)
+            .map(|ty| Ty::material(ty.clone()))
+            .ok_or_else(|| {
+                SemanticError::new(
+                    span,
+                    format!("action contract references unknown operand '{name}'"),
+                )
+            }),
+        ContractType::AnyMaterial | ContractType::AnyValue => Err(SemanticError::new(
             span,
-            "action result cannot use unconstrained AnyMaterial",
+            "action result cannot use an unconstrained type",
         )),
     }
 }

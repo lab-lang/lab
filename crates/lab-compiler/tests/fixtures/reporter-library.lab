@@ -1,57 +1,59 @@
-use std.bio.build
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.bio.designs
+use std.bio.golden_gate
 
-J23101 = part("J23101")
-J23106 = part("J23106")
-B0034 = part("B0034")
-GFP = part("GFP")
-RFP = part("RFP")
-B0015 = part("B0015")
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
-DH5alpha = chassis("DH5alpha")
-chloramphenicol = antibiotic("chloramphenicol")
+use std.bio.build
+use std.lab.plasmid
+
+buy part J23101
+buy part J23106
+buy part B0034
+buy part GFP
+buy part RFP
+buy part B0015
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
+buy chassis DH5alpha
+buy antibiotic chloramphenicol
 
 // End-to-end Lab automation fixture for the OT-2 specialization.
 // Names identify inventory items; the compiler does not yet resolve lots or SBOL.
 // Sequences are synthetic compiler fixtures, not qualified biological designs.
 
 plasmid p_gfp:
-  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
-  backbone: pSB1C3
-  components: [J23101, B0034, GFP, B0015]
-  restriction_enzyme: BsaI
-  assembly_replicates: 1
+  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone = pSB1C3
+  components = [J23101, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
 
   require topology == circular
   accept sequence == design.sequence
 
 plasmid p_rfp:
-  sequence: dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
-  backbone: pSB1C3
-  components: [J23106, B0034, RFP, B0015]
-  restriction_enzyme: BsaI
-  assembly_replicates: 1
+  sequence = dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
+  backbone = pSB1C3
+  components = [J23106, B0034, RFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
 
   require topology == circular
   accept sequence == design.sequence
 
 strain reporter_gfp:
-  chassis: DH5alpha
-  plasmids: [p_gfp]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
+  chassis = DH5alpha
+  plasmids = [p_gfp]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 2
+  serial_dilutions = 2
 
 strain reporter_rfp:
-  chassis: DH5alpha
-  plasmids: [p_rfp]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
+  chassis = DH5alpha
+  plasmids = [p_rfp]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 2
+  serial_dilutions = 2
 
 workflow assemble_p_gfp() -> Material<Plasmid>:
   product <- realize p_gfp

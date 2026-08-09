@@ -3,48 +3,50 @@
  * the source does not assign artifacts to biological assembly levels.
  */
 
-use std.bio.build
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.bio.designs
+use std.bio.golden_gate
 
-J23101 = part("J23101")
-B0034 = part("B0034")
-GFP = part("GFP")
-B0015 = part("B0015")
-part_receiver = backbone("part_receiver")
-region_receiver = backbone("region_receiver")
-BsaI = restriction_enzyme("BsaI")
-BsmBI = restriction_enzyme("BsmBI")
-DH5alpha = chassis("DH5alpha")
-chloramphenicol = antibiotic("chloramphenicol")
+use std.bio.build
+use std.lab.plasmid
+
+buy part J23101
+buy part B0034
+buy part GFP
+buy part B0015
+buy backbone part_receiver
+buy backbone region_receiver
+buy restriction_enzyme BsaI
+buy restriction_enzyme BsmBI
+buy chassis DH5alpha
+buy antibiotic chloramphenicol
 
 plasmid promoter_carrier:
-  sequence: dna("ACGT")
-  backbone: part_receiver
-  components: [J23101]
-  restriction_enzyme: BsmBI
-  assembly_replicates: 1
+  sequence = dna("ACGT")
+  backbone = part_receiver
+  components = [J23101]
+  restriction_enzyme = BsmBI
+  assembly_replicates = 1
 
   require topology == circular
   accept sequence == design.sequence
 
 plasmid reporter_region:
-  sequence: dna("ACGTACGT")
-  backbone: region_receiver
-  components: [promoter_carrier, B0034, GFP, B0015]
-  restriction_enzyme: BsaI
-  assembly_replicates: 1
+  sequence = dna("ACGTACGT")
+  backbone = region_receiver
+  components = [promoter_carrier, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
 
   require topology == circular
   accept sequence == design.sequence
 
 strain reporter_host:
-  chassis: DH5alpha
-  plasmids: [reporter_region]
-  selection: chloramphenicol
-  transformation_replicates: 1
-  plating_replicates: 1
-  serial_dilutions: 1
+  chassis = DH5alpha
+  plasmids = [reporter_region]
+  selection = chloramphenicol
+  transformation_replicates = 1
+  plating_replicates = 1
+  serial_dilutions = 1
 
 workflow assemble_promoter_carrier() -> Material<Plasmid>:
   product <- realize promoter_carrier

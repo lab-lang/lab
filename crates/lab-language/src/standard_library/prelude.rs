@@ -22,7 +22,10 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("Culture"),
         TypeSpec::nominal("DNA"),
         TypeSpec::nominal("Duration"),
-        TypeSpec::nominal("Evidence"),
+        TypeSpec::nominal("Evidence").implements(["Evidential"]),
+        TypeSpec::law("Evidential")
+            .documented("Information that may be offered in support of a claim."),
+        TypeSpec::law("Event").documented("An occurrence the durable workflow journal records."),
         TypeSpec::nominal("Fragment"),
         TypeSpec::nominal("Image"),
         TypeSpec::nominal("List").parameters(1),
@@ -79,12 +82,15 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
             vec![named("RestrictionEnzyme")],
             Ty::Integer,
         ),
+        // A judgement about a design given evidence, rather than something the
+        // design does, so the design is an argument like any other.
         PureFunctionSpec::new(
-            "design.accepts",
+            "accepts",
             "Plasmid.accepts",
-            vec![Ty::List(Box::new(named("Evidence")))],
+            vec![named("Plasmid"), Ty::List(Box::new(named("Evidence")))],
             Ty::Bool,
-        ),
+        )
+        .documented("Whether a design's acceptance criteria are met by this evidence."),
     ];
     let evidence = Ty::List(Box::new(named("Evidence")));
     let constructors = [

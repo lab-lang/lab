@@ -10,89 +10,76 @@
  * robot run holds every strain in a single thermocycler block.
  */
 
+use std.bio.designs
+use std.bio.golden_gate
+
 use golden_gate.designs.inventory
 use golden_gate.designs.plasmids
 
 /** The GFP reporter carried in the DH5alpha cloning strain. */
 strain composite_strain_1:
-  chassis: DH5alpha
-  plasmids: [composite_plasmid_1]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 1
-  serial_dilutions: 2
+  chassis = DH5alpha
+  plasmids = [composite_plasmid_1]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
 
-  cell_volume: 20 uL
-  dna_volume: 2 uL
-  recovery_volume: 60 uL
-  cold_incubation: 30 min
-  heat_shock_temperature: 42 C
-  heat_shock_duration: 1 min
-  recovery_temperature: 37 C
-  recovery_duration: 60 min
-  medium_volume: 18 uL
-  culture_volume: 2 uL
-  colony_volume: 4 uL
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL
 
 /** The RFP reporter carried in the DH5alpha cloning strain. */
 strain composite_strain_2:
-  chassis: DH5alpha
-  plasmids: [composite_plasmid_2]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 1
-  serial_dilutions: 2
+  chassis = DH5alpha
+  plasmids = [composite_plasmid_2]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
 
-  cell_volume: 20 uL
-  dna_volume: 2 uL
-  recovery_volume: 60 uL
-  cold_incubation: 30 min
-  heat_shock_temperature: 42 C
-  heat_shock_duration: 1 min
-  recovery_temperature: 37 C
-  recovery_duration: 60 min
-  medium_volume: 18 uL
-  culture_volume: 2 uL
-  colony_volume: 4 uL
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL
 
 /** The GFP reporter carried in the BL21 expression strain. */
 strain composite_strain_3:
-  chassis: BL21
-  plasmids: [composite_plasmid_1]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 1
-  serial_dilutions: 2
+  chassis = BL21
+  plasmids = [composite_plasmid_1]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
 
-  cell_volume: 20 uL
-  dna_volume: 2 uL
-  recovery_volume: 60 uL
-  cold_incubation: 30 min
-  heat_shock_temperature: 42 C
-  heat_shock_duration: 1 min
-  recovery_temperature: 37 C
-  recovery_duration: 60 min
-  medium_volume: 18 uL
-  culture_volume: 2 uL
-  colony_volume: 4 uL
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL
 
 /** The RFP reporter carried in the BL21 expression strain. */
 strain composite_strain_4:
-  chassis: BL21
-  plasmids: [composite_plasmid_2]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 1
-  serial_dilutions: 2
+  chassis = BL21
+  plasmids = [composite_plasmid_2]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
 
-  cell_volume: 20 uL
-  dna_volume: 2 uL
-  recovery_volume: 60 uL
-  cold_incubation: 30 min
-  heat_shock_temperature: 42 C
-  heat_shock_duration: 1 min
-  recovery_temperature: 37 C
-  recovery_duration: 60 min
-  medium_volume: 18 uL
-  culture_volume: 2 uL
-  colony_volume: 4 uL
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL

@@ -6,7 +6,7 @@
 
 ```lab
 use std.bio.parts
-use std.lab.plasmid_actions
+use std.lab.plasmid
 use my_lab.policies.plasmid_acceptance
 ```
 
@@ -21,12 +21,13 @@ The current frontend resolves a small bundled registry through the same conceptu
 | Module | Current role |
 | --- | --- |
 | `std.prelude` | implicitly imported foundational types, values, and pure operations used by every module |
-| `std.bio.parts` | fixed demonstration part values used by the design specimen |
-| `std.bio.backbones` | fixed demonstration backbone values used by the design specimen |
+| `std.bio.designs` | the artifact kinds — `plasmid`, `strain`, `part`, `backbone`, and the rest — and their schemas, written in Lab |
+| `std.bio.golden_gate` | what Golden Gate assembly and heat-shock transformation need, contributed to the `plasmid` and `strain` schemas, written in Lab |
+| `std.bio.parts` | catalogued demonstration parts and the roles they play, written in Lab |
+| `std.bio.backbones` | catalogued demonstration backbones, written in Lab |
 | `std.bio.reporters` | reporters and the readouts they produce, written in Lab |
-| `std.bio.inventory` | pure constructors for typed external part, backbone, enzyme, chassis, and antibiotic identities |
 | `std.bio.build` | typed artifact-realization effects |
-| `std.lab.plasmid_actions` | typed laboratory action contracts used by the workflow specimens |
+| `std.lab.plasmid` | typed laboratory action contracts used by the workflow specimens |
 
 Each bundled module owns one checked specification containing all of its exported types, values, pure-function signatures, and action contracts. Import resolution adds those exports to the generic checker scope and diagnoses ambiguous names. The checker does not maintain separate verb or constructor lookup tables, and adding a module does not add parser or AST cases.
 
@@ -36,9 +37,24 @@ The bundled catalog validates module paths, export uniqueness, stable operation 
 
 ### Standard modules written in Lab
 
-A bundled module whose whole surface is expressible in Lab is written in Lab rather than in Rust, and resolves through the same checked `ModuleInterface` a package module does. `std.bio.reporters` is the first. Nothing in the checker distinguishes it from a Rust-defined module or from a package, and its own documentation comments become its reference entry, so the reference cannot drift from a second description of the same exports.
+A bundled module whose whole surface is expressible in Lab is written in Lab rather than in Rust, and resolves through the same checked `ModuleInterface` a package module does. `std.bio.designs`, `std.bio.golden_gate`, `std.bio.parts`, `std.bio.backbones`, and `std.bio.reporters` all are. Nothing in the checker distinguishes them from a Rust-defined module or from a package, and their own documentation comments become their reference entries, so the reference cannot drift from a second description of the same exports.
 
-A module needing pure functions, durable action contracts, or typed external identities stays in Rust, because none of those has a source declaration form yet. [`open-questions.md`](open-questions.md) records what that blocks.
+A module needing pure functions or durable action contracts stays in Rust, because neither has a source declaration form yet. [`open-questions.md`](open-questions.md) records what that blocks.
+
+### Declaring kinds other packages use
+
+A package declares a word and the schema its declarations are checked against:
+
+```lab
+artifact Plasmid:
+  sequence: DNA
+```
+
+Any module importing that package may then write `build plasmid p_gfp:`. The parser
+never learns the word — an unknown word followed by a name and a block is always
+an artifact instance, and which kind it names is resolved while checking. That is
+what keeps a lone file parseable and an editor able to recover from broken code,
+and it is why no package may introduce a grammar production.
 
 ### Declaring roles other packages extend
 

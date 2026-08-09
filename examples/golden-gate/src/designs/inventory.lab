@@ -6,26 +6,37 @@
  * resolution and a runtime evidence question.
  */
 
-use std.bio.inventory
+use std.bio.designs
 
-// Constitutive promoters of differing strength.
-J23101 = part("J23101")
-J23106 = part("J23106")
-
-// Ribosome binding site and terminator shared by both transcription units.
-B0034 = part("B0034")
-B0015 = part("B0015")
-
-// Fluorescent reporters.
-GFP = part("GFP")
-RFP = part("RFP")
+// Constitutive promoters of differing strength, the shared ribosome binding
+// site and terminator, and the fluorescent reporters.
+buy part J23101
+buy part J23106
+buy part B0034
+buy part B0015
+buy part GFP
+buy part RFP
 
 // Assembly backbone and the type IIS enzyme that opens it.
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
+buy backbone pSB1C3
+
+// BsaI cuts at 37 C; every plasmid it opens digests the same way.
+buy restriction_enzyme BsaI:
+  digest_temperature = 37 C
+  digest_duration = 2 min
 
 // Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
-DH5alpha = chassis("DH5alpha")
-BL21 = chassis("BL21")
+// Both are transformed the way competent cells are: chilled, shocked, recovered.
+buy chassis DH5alpha:
+  heat_shock_temperature = 42 C
+  cold_incubation = 30 min
+  recovery_temperature = 37 C
+  recovery_duration = 60 min
 
-chloramphenicol = antibiotic("chloramphenicol")
+buy chassis BL21:
+  heat_shock_temperature = 42 C
+  cold_incubation = 30 min
+  recovery_temperature = 37 C
+  recovery_duration = 60 min
+
+buy antibiotic chloramphenicol

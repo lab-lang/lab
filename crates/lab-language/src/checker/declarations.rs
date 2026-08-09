@@ -5,16 +5,22 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::{
-    ArtifactDecl, ArtifactKind, ArtifactMember, CircuitDecl, DataDecl, DataKind, FieldDecl, Item,
-    Module, Path, TypeArgument, TypeExpr, WorkflowOutputs,
+    ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FieldDecl, Item, Module, Path,
+    Provenance, TypeArgument, TypeExpr, WorkflowOutputs,
 };
-use crate::checked::{CheckedCase, CheckedDeclaration, CheckedProperty, CheckedSection};
+use crate::checked::{
+    CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
+    CheckedSection,
+};
 use crate::semantic_error::SemanticError;
 use crate::source::{Identifier, Span};
 use crate::type_system::{Ty, to_checked_type};
 
 use super::Checker;
-use super::context::{CircuitSignature, DataSignature, Generics, WorkflowSignature};
+use super::context::{
+    ArtifactKindSignature, CircuitSignature, DataSignature, Generics, SchemaField,
+    WorkflowSignature,
+};
 
 /// Where a type parameter's name appears in a signature, in source order.
 enum Mention<'a> {
@@ -67,7 +73,93 @@ fn collect_mentions<'a>(ty: &'a TypeExpr, out: &mut Vec<Mention<'a>>) {
                 collect_mentions(alternative, out);
             }
         }
+        // A unit is not a name a signature can introduce or refer to.
+        TypeExpr::Quantity { .. } => {}
     }
+}
+
+/// Where an expression first names one of `names` on its own, if it does.
+///
+/// A bare name is the only form that reads a property, so a qualified path or a
+/// field access on some other subject is not a mention.
+fn first_mention<'a>(
+    expression: &'a Expr,
+    names: &BTreeSet<&str>,
+) -> Option<(&'a str, crate::source::Span)> {
+    let mention = |expression| first_mention(expression, names);
+    match expression {
+        Expr::Path(path) => {
+            let [segment] = path.segments.as_slice() else {
+                return None;
+            };
+            names
+                .contains(segment.value.as_str())
+                .then_some((segment.value.as_str(), path.span))
+        }
+        Expr::Quantity { magnitude, .. } => mention(magnitude),
+        Expr::List { elements, .. } => elements.iter().find_map(mention),
+        Expr::Call {
+            callee, arguments, ..
+        } => mention(callee).or_else(|| arguments.iter().find_map(|it| mention(&it.value))),
+        Expr::Record { fields, .. } => fields.iter().find_map(|it| mention(&it.value)),
+        Expr::Field { subject, .. } => mention(subject),
+        Expr::Unary { operand, .. } => mention(operand),
+        Expr::Binary { left, right, .. } => mention(left).or_else(|| mention(right)),
+        Expr::Integer { .. } | Expr::Decimal { .. } | Expr::String { .. } => None,
+    }
+}
+
+/// Edit distance between two names, for suggesting the one that was meant.
+fn distance(from: &str, to: &str) -> usize {
+    let target = to.chars().collect::<Vec<_>>();
+    let mut row = (0..=target.len()).collect::<Vec<_>>();
+    for (i, source) in from.chars().enumerate() {
+        let mut previous = row[0];
+        row[0] = i + 1;
+        for (j, target) in target.iter().enumerate() {
+            let cost = usize::from(source != *target);
+            let replace = previous + cost;
+            previous = row[j + 1];
+            row[j + 1] = (row[j] + 1).min(previous + 1).min(replace);
+        }
+    }
+    row[target.len()]
+}
+
+/// The candidate a misspelling most likely meant, if one is close enough to be
+/// worth suggesting.
+///
+/// Two slips are worth catching and they need different measures. A mistyped
+/// name is a short edit away, where a third of it may differ before the
+/// suggestion stops being credible. A name typed short — `digest_temp` for
+/// `digest_temperature` — is many edits away but is a prefix of what was meant,
+/// which on its own is strong enough evidence.
+fn nearest<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let limit = (name.chars().count() / 3).max(1);
+    candidates
+        .map(|candidate| (distance(name, candidate), candidate))
+        .filter(|(distance, candidate)| *distance <= limit || candidate.starts_with(name))
+        .min_by_key(|(distance, candidate)| (*distance, candidate.len()))
+        .map(|(_, candidate)| candidate)
+}
+
+/// `a`, `a and b`, `a, b, and c` — a list that reads as a sentence rather than
+/// as compiler output.
+fn conjunction(names: &[&str]) -> String {
+    match names {
+        [] => String::new(),
+        [only] => (*only).to_owned(),
+        [first, second] => format!("{first} and {second}"),
+        [rest @ .., last] => format!("{}, and {last}", rest.join(", ")),
+    }
+}
+
+fn quoted_conjunction(names: &[&str]) -> String {
+    let quoted = names
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>();
+    conjunction(&quoted.iter().map(String::as_str).collect::<Vec<_>>())
 }
 
 impl Checker {
@@ -113,6 +205,7 @@ impl Checker {
             let (name, span) = match item {
                 Item::Use(_) => continue,
                 Item::Role(value) => (&value.name.value, value.name.span),
+                Item::ArtifactKind(value) => (&value.name.value, value.name.span),
                 Item::Circuit(value) => (&value.name.value, value.name.span),
                 Item::Artifact(value) => (&value.name.value, value.name.span),
                 Item::Data(value) => (&value.name.value, value.name.span),
@@ -191,6 +284,43 @@ impl Checker {
                     );
                 }
                 Item::Role(_) => {}
+                Item::ArtifactKind(declaration) => {
+                    let produces = self.lower_kind_type(&declaration.produces)?;
+                    // A kind that states no schema of its own takes the
+                    // fields of the type it names, which is what a supplier's
+                    // item fills in. Stating a schema replaces them.
+                    let fields = if declaration.fields.is_empty() {
+                        self.type_fields(&produces)
+                            .into_iter()
+                            .map(|(name, ty)| {
+                                (
+                                    name,
+                                    SchemaField {
+                                        ty,
+                                        optional: false,
+                                    },
+                                )
+                            })
+                            .collect()
+                    } else {
+                        self.collect_schema_fields(&declaration.fields)?
+                    };
+                    let declares = declaration
+                        .declares
+                        .as_ref()
+                        .map(|predicate| {
+                            self.check_presence_predicate(predicate, &fields, &declaration.fields)
+                        })
+                        .transpose()?;
+                    self.artifact_kinds.insert(
+                        declaration.name.value.clone(),
+                        ArtifactKindSignature {
+                            produces,
+                            fields,
+                            declares,
+                        },
+                    );
+                }
                 Item::Data(declaration) => {
                     let generic_names = declaration
                         .parameters
@@ -229,7 +359,10 @@ impl Checker {
                         {
                             return Err(SemanticError::new(
                                 case.name.span,
-                                format!("duplicate outcome case '{}'", case.name.value),
+                                format!("case '{}' is already declared", case.name.value),
+                            )
+                            .help(
+                                "a case constructor is a module-level name, so no two cases may share one",
                             ));
                         }
                         let case_fields = self.collect_fields(&case.fields, &generic_names)?;
@@ -240,7 +373,6 @@ impl Checker {
                     self.data.insert(
                         declaration.name.value.clone(),
                         DataSignature {
-                            kind: declaration.kind,
                             parameters: declaration
                                 .parameters
                                 .iter()
@@ -251,7 +383,13 @@ impl Checker {
                             cases,
                         },
                     );
-                    if declaration.kind == DataKind::Event {
+                    // A journalled occurrence says so by playing `Event`,
+                    // which is what `emit` and `when` resolve against.
+                    if self
+                        .type_roles
+                        .get(&declaration.name.value)
+                        .is_some_and(|roles| roles.contains("Event"))
+                    {
                         self.event_types.insert(declaration.name.value.clone());
                     }
                 }
@@ -281,10 +419,28 @@ impl Checker {
                     );
                 }
                 Item::Artifact(declaration) => {
-                    self.values.insert(
-                        declaration.name.value.clone(),
-                        Ty::named(declaration.kind.type_name()),
-                    );
+                    // The kind says what its instances are, so the value's type
+                    // comes from the schema rather than from the word — except
+                    // where a generic kind leaves the arguments to the instance.
+                    let ty = self
+                        .artifact_kinds
+                        .get(&declaration.kind.value)
+                        .map(|signature| signature.produces.clone())
+                        .ok_or_else(|| {
+                            self.unknown_artifact_kind(
+                                &declaration.kind.value,
+                                declaration.kind.span,
+                            )
+                        })?;
+                    let ty = match &declaration.ascribed {
+                        Some(ascribed) => {
+                            let named = self.lower_type(ascribed, &BTreeSet::new())?;
+                            self.check_ascription(&named, &ty, ascribed.span())?;
+                            named
+                        }
+                        None => ty,
+                    };
+                    self.values.insert(declaration.name.value.clone(), ty);
                 }
                 Item::Use(_) | Item::Binding(_) => {}
             }
@@ -370,6 +526,30 @@ impl Checker {
             }
         }
         Ok(generics)
+    }
+
+    /// An artifact kind's schema, where a field carries whether an instance may
+    /// omit it. A kind takes no type parameters, so its fields lower against no
+    /// generics.
+    pub fn collect_schema_fields(
+        &self,
+        fields: &[FieldDecl],
+    ) -> Result<BTreeMap<String, SchemaField>, SemanticError> {
+        let mut result = BTreeMap::new();
+        for field in fields {
+            let ty = self.lower_type(&field.ty, &BTreeSet::new())?;
+            let schema = SchemaField {
+                ty,
+                optional: field.optional,
+            };
+            if result.insert(field.name.value.clone(), schema).is_some() {
+                return Err(SemanticError::new(
+                    field.name.span,
+                    format!("duplicate field '{}'", field.name.value),
+                ));
+            }
+        }
+        Ok(result)
     }
 
     pub fn collect_fields(
@@ -477,7 +657,6 @@ impl Checker {
             .expect("data was collected");
         Ok(CheckedDeclaration::Data {
             doc: declaration.doc.clone(),
-            category: format!("{:?}", declaration.kind).to_ascii_lowercase(),
             name: declaration.name.value.clone(),
             parameters: signature.parameters.clone(),
             bounds: signature
@@ -509,25 +688,229 @@ impl Checker {
         })
     }
 
+    /// A rule cannot read a property this declaration leaves unstated. Saying
+    /// that plainly is worth more than the unknown-name error the missing
+    /// binding would otherwise produce, because the name is right there in the
+    /// schema and the reader would go looking for a typo.
+    fn reject_omitted(
+        &self,
+        predicate: &Expr,
+        omitted: &BTreeSet<&str>,
+        keyword: &str,
+        artifact: &Identifier,
+    ) -> Result<(), SemanticError> {
+        let Some((name, span)) = first_mention(predicate, omitted) else {
+            return Ok(());
+        };
+        Err(SemanticError::new(
+            span,
+            format!("{keyword} '{}' does not state '{name}'", artifact.value),
+        )
+        .related(artifact.span, format!("this {keyword} states no '{name}'"))
+        .help(format!(
+            "'{name}' is optional, so a rule may read it only where it is stated"
+        )))
+    }
+
+    /// The fields of a named type, whether it is declared in Lab or built in.
+    ///
+    /// A generic type's fields are read through its arguments, so a
+    /// `Promoter<Tetracycline>` states what a promoter for tetracycline states.
+    fn type_fields(&self, ty: &Ty) -> BTreeMap<String, Ty> {
+        let Ty::Named(name, arguments) = ty else {
+            return BTreeMap::new();
+        };
+        if let Some(signature) = self.data.get(name) {
+            let substitutions = signature
+                .parameters
+                .iter()
+                .cloned()
+                .zip(arguments.iter().map(|ty| (ty.clone(), Span::at(0))))
+                .collect();
+            return signature
+                .fields
+                .iter()
+                .map(|(field, ty)| {
+                    (
+                        field.clone(),
+                        crate::type_system::substitute(ty, &substitutions),
+                    )
+                })
+                .collect();
+        }
+        self.standard_types
+            .get(name)
+            .map(|spec| {
+                spec.fields
+                    .iter()
+                    .map(|(field, ty)| ((*field).to_owned(), ty.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The type a kind produces. A generic kind names a bare head, because the
+    /// arguments belong to each instance: `artifact Promoter` covers every
+    /// promoter, and `buy promoter pTet: Promoter<Tetracycline>` says which.
+    fn lower_kind_type(&self, expression: &TypeExpr) -> Result<Ty, SemanticError> {
+        if let TypeExpr::Path {
+            path, arguments, ..
+        } = expression
+            && arguments.is_empty()
+        {
+            let name = super::path_text(path);
+            let generic = self
+                .standard_types
+                .get(&name)
+                .map(|spec| spec.parameters)
+                .or_else(|| self.data.get(&name).map(|spec| spec.parameters.len()))
+                .is_some_and(|parameters| parameters > 0);
+            if generic {
+                return Ok(Ty::Named(name, Vec::new()));
+            }
+        }
+        self.lower_type(expression, &BTreeSet::new())
+    }
+
+    /// An instance may fill in a generic kind's arguments, and may not name
+    /// some other type: the word already said what kind of thing this is.
+    fn check_ascription(&self, named: &Ty, produces: &Ty, span: Span) -> Result<(), SemanticError> {
+        let head = |ty: &Ty| match ty {
+            Ty::Named(name, _) => Some(name.clone()),
+            _ => None,
+        };
+        if head(named) == head(produces) {
+            return Ok(());
+        }
+        Err(
+            SemanticError::new(span, format!("this names {named}, not {produces}"))
+                .help("an instance may fill in its kind's type arguments, not replace its type"),
+        )
+    }
+
+    /// Evidence is counted in entities, so asking for none is asking for
+    /// nothing and is a mistake rather than a way to opt out.
+    fn check_replication(
+        &self,
+        replication: &crate::ast::Replication,
+    ) -> Result<(), SemanticError> {
+        if replication.count == 0 {
+            return Err(SemanticError::new(
+                replication.span,
+                "a claim cannot be believed on zero biological replicates",
+            )
+            .help("omit 'across' to accept whatever evidence is offered"));
+        }
+        Ok(())
+    }
+
     pub fn check_artifact(
         &self,
         declaration: &ArtifactDecl,
     ) -> Result<CheckedDeclaration, SemanticError> {
-        let kind = declaration.kind;
-        let keyword = kind.keyword();
+        let keyword = declaration.kind.value.as_str();
+        let signature = self
+            .artifact_kinds
+            .get(keyword)
+            .ok_or_else(|| self.unknown_artifact_kind(keyword, declaration.kind.span))?;
+        let produces = match &declaration.ascribed {
+            Some(ascribed) => self.lower_type(ascribed, &BTreeSet::new())?,
+            None => signature.produces.clone(),
+        };
         let mut environment = self.values.clone();
+        // `require` and `accept` read the type's own fields; the kind's schema
+        // says which properties an author may state and what each holds.
+        // Whether the type is declared here or built in, its own fields are
+        // what a rule reads and what a bought item fills in.
+        let produced_fields = self.type_fields(&produces);
         environment.extend(
-            self.standard_types
-                .get(kind.type_name())
-                .expect("the bundled prelude defines every artifact type")
+            produced_fields
+                .iter()
+                .map(|(name, ty)| (name.clone(), ty.clone())),
+        );
+        // An unstated optional property is absent, so it never reaches the
+        // environment and `require` reading it is an unknown name rather than a
+        // value that silently means nothing. Which properties a declaration
+        // states is known before any of them is checked, so a rule may read a
+        // property declared below it.
+        let stated = declaration
+            .members
+            .iter()
+            .filter_map(|member| match member {
+                ArtifactMember::Property(property) => Some(property.name.value.clone()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        environment.extend(
+            signature
                 .fields
                 .iter()
-                .map(|(name, ty)| ((*name).to_owned(), ty.clone())),
+                .map(|(name, field)| (name.clone(), field.ty.clone())),
         );
+        // A rule reads the artifact that gets built, so where the produced type
+        // carries a field of the same name that field is what the rule means:
+        // `accept sequence == design.sequence` compares the realized plasmid
+        // against its design, whether or not the declaration stated a sequence.
+        // A schema property with no such field is only ever the stated value,
+        // so omitting it leaves nothing to read.
+        let mut omitted = BTreeSet::new();
+        for (name, field) in &signature.fields {
+            if !field.optional || stated.contains(name.as_str()) {
+                continue;
+            }
+            match produced_fields.get(name) {
+                Some(ty) => {
+                    environment.insert(name.clone(), ty.clone());
+                }
+                None => {
+                    environment.remove(name);
+                    omitted.insert(name.as_str());
+                }
+            }
+        }
+        if declaration.provenance == Provenance::Buy
+            && let Some(span) = declaration.members.iter().find_map(|member| match member {
+                ArtifactMember::Requirement(claim) | ArtifactMember::Acceptance(claim) => {
+                    Some(claim.span)
+                }
+                ArtifactMember::Replication(replication) => Some(replication.span),
+                _ => None,
+            })
+        {
+            return Err(SemanticError::new(
+                span,
+                format!(
+                    "'{}' is bought, so nothing here builds it",
+                    declaration.name.value
+                ),
+            )
+            .help("'require', 'accept', and 'across' describe a thing a laboratory makes"));
+        }
         let mut properties = Vec::new();
         let mut property_names = BTreeSet::new();
         let mut requirements = Vec::new();
         let mut acceptance = Vec::new();
+        // The declaration's standard is read first so a claim written above it
+        // still takes it, and so stating it twice is caught rather than
+        // silently resolved by position.
+        let mut default_replicates = None;
+        for member in &declaration.members {
+            let ArtifactMember::Replication(replication) = member else {
+                continue;
+            };
+            if default_replicates.is_some() {
+                return Err(SemanticError::new(
+                    replication.span,
+                    format!(
+                        "{keyword} '{}' states its evidence twice",
+                        declaration.name.value
+                    ),
+                )
+                .help("a declaration sets one standard; a claim may state its own"));
+            }
+            self.check_replication(replication)?;
+            default_replicates = Some(replication.count);
+        }
         for member in &declaration.members {
             match member {
                 ArtifactMember::Property(property) => {
@@ -537,7 +920,38 @@ impl Checker {
                             format!("duplicate {keyword} property '{}'", property.name.value),
                         ));
                     }
+                    // A schema says what a thing may state, so a name it does
+                    // not declare is a mistake rather than an extension. Every
+                    // bought thing may name what an order asks for, so
+                    // `identity` belongs to buying rather than to any one
+                    // kind's schema.
+                    if !(declaration.provenance == Provenance::Buy
+                        && property.name.value == "identity")
+                        && !signature.fields.contains_key(&property.name.value)
+                    {
+                        let mut error = SemanticError::new(
+                            property.name.span,
+                            format!("{produces} has no property '{}'", property.name.value),
+                        );
+                        if let Some(near) = nearest(
+                            &property.name.value,
+                            signature.fields.keys().map(String::as_str),
+                        ) {
+                            error = error.help(format!("did you mean '{near}'?"));
+                        }
+                        return Err(error);
+                    }
                     let inferred = self.infer_expr(&property.value, &environment)?;
+                    if declaration.provenance == Provenance::Buy
+                        && property.name.value == "identity"
+                        && inferred != Ty::String
+                    {
+                        return Err(SemanticError::new(
+                            property.value.span(),
+                            format!("an identity is a String, found {inferred}"),
+                        )
+                        .help("an identity is what a supplier's catalogue calls this item"));
+                    }
                     if let Some(expected) = environment.get(&property.name.value)
                         && !self.compatible(&inferred, expected)
                     {
@@ -560,6 +974,7 @@ impl Checker {
                     });
                 }
                 ArtifactMember::Requirement(claim) => {
+                    self.reject_omitted(&claim.predicate, &omitted, keyword, &declaration.name)?;
                     self.require_bool(&claim.predicate, &environment, "require")?;
                     requirements.push(self.lower_checked_expr(
                         &claim.predicate,
@@ -568,13 +983,24 @@ impl Checker {
                     )?);
                 }
                 ArtifactMember::Acceptance(claim) => {
+                    self.reject_omitted(&claim.predicate, &omitted, keyword, &declaration.name)?;
                     self.require_bool(&claim.predicate, &environment, "accept")?;
-                    acceptance.push(self.lower_checked_expr(
-                        &claim.predicate,
-                        &environment,
-                        None,
-                    )?);
+                    // A claim's own standard replaces the declaration's rather
+                    // than adding to it, so what a claim is believed on is
+                    // written in one place.
+                    let replicates = match &claim.replicates {
+                        Some(replication) => {
+                            self.check_replication(replication)?;
+                            Some(replication.count)
+                        }
+                        None => default_replicates,
+                    };
+                    acceptance.push(CheckedAcceptance {
+                        predicate: self.lower_checked_expr(&claim.predicate, &environment, None)?,
+                        replicates,
+                    });
                 }
+                ArtifactMember::Replication(_) => {}
                 ArtifactMember::Section(section) => {
                     return Err(SemanticError::new(
                         section.span,
@@ -586,76 +1012,67 @@ impl Checker {
                 }
             }
         }
-        match kind {
-            ArtifactKind::Plasmid => {
-                self.check_plasmid_shape(declaration, &property_names, &environment)?
-            }
-            ArtifactKind::Strain => self.check_strain_shape(declaration, &property_names)?,
+        let missing = signature
+            .fields
+            .iter()
+            .filter(|(name, field)| !field.optional && !property_names.contains(name.as_str()))
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            let required = signature
+                .fields
+                .iter()
+                .filter(|(_, field)| !field.optional)
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>();
+            return Err(SemanticError::new(
+                declaration.name.span,
+                format!(
+                    "{keyword} '{}' does not state {}",
+                    declaration.name.value,
+                    quoted_conjunction(&missing)
+                ),
+            )
+            .help(format!("every {keyword} states {}", conjunction(&required))));
+        }
+        if let Some(predicate) = &signature.declares
+            && !predicate.satisfied_by(&property_names)
+        {
+            return Err(SemanticError::new(
+                declaration.span,
+                format!("{keyword} '{}' is incomplete", declaration.name.value),
+            )
+            .help(format!("a {keyword} states {}", predicate.describe())));
+        }
+        if declaration.provenance == Provenance::Buy {
+            // A supplier lists it, so it is never built and there is nothing to
+            // accept it against. The identity is what an order names, which is
+            // the declared name unless the item states otherwise.
+            let identity = properties
+                .iter()
+                .find(|property| property.name == "identity")
+                .and_then(|property| match &property.value.value {
+                    crate::checked::CheckedExpression::String { value } => Some(value.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| declaration.name.value.clone());
+            return Ok(CheckedDeclaration::Catalog {
+                doc: declaration.doc.clone(),
+                name: declaration.name.value.clone(),
+                r#type: to_checked_type(&produces),
+                identity,
+                properties,
+            });
         }
         Ok(CheckedDeclaration::Artifact {
             doc: declaration.doc.clone(),
-            artifact: kind,
+            artifact: keyword.to_owned(),
             name: declaration.name.value.clone(),
+            produces: to_checked_type(&produces),
             properties,
             requirements,
             acceptance,
         })
-    }
-
-    /// A plasmid states its sequence directly, or states the backbone and cargo
-    /// a sequence can be derived from.
-    pub fn check_plasmid_shape(
-        &self,
-        declaration: &ArtifactDecl,
-        property_names: &BTreeSet<String>,
-        environment: &HashMap<String, Ty>,
-    ) -> Result<(), SemanticError> {
-        let has_direct_sequence = property_names.contains("sequence");
-        if !has_direct_sequence
-            && (!environment.contains_key("backbone") || !environment.contains_key("cargo"))
-        {
-            return Err(SemanticError::new(
-                declaration.span,
-                "plasmid requires either a sequence property or backbone and cargo properties",
-            ));
-        }
-        if !has_direct_sequence
-            && let Some(backbone) = environment.get("backbone")
-            && !self.compatible(backbone, &Ty::named("Backbone"))
-        {
-            return Err(SemanticError::new(
-                declaration.span,
-                format!("plasmid backbone must be Backbone, found {backbone}"),
-            ));
-        }
-        if let Some(cargo) = environment.get("cargo")
-            && !matches!(cargo, Ty::Named(name, _) if name == "Circuit")
-        {
-            return Err(SemanticError::new(
-                declaration.span,
-                format!("plasmid cargo must be Circuit, found {cargo}"),
-            ));
-        }
-        Ok(())
-    }
-
-    /// A strain names the chassis it is built in and the plasmid designs it
-    /// carries. Both are properties rather than derived facts, because a strain
-    /// carrying no plasmid is a different artifact from one that does.
-    pub fn check_strain_shape(
-        &self,
-        declaration: &ArtifactDecl,
-        property_names: &BTreeSet<String>,
-    ) -> Result<(), SemanticError> {
-        for required in ["chassis", "plasmids"] {
-            if !property_names.contains(required) {
-                return Err(SemanticError::new(
-                    declaration.span,
-                    format!("strain requires a '{required}' property"),
-                ));
-            }
-        }
-        Ok(())
     }
 
     /// Lower a type parameter's bound, which may name a role.
@@ -693,6 +1110,7 @@ impl Checker {
         generics: &BTreeSet<String>,
     ) -> Result<Ty, SemanticError> {
         match expression {
+            TypeExpr::Quantity { unit, .. } => Ok(Ty::Quantity(unit.clone())),
             TypeExpr::Path {
                 path,
                 arguments,
@@ -838,6 +1256,93 @@ impl Checker {
         ))
     }
 
+    /// A `declares` clause is a predicate over which properties were stated,
+    /// not an expression over their values. Keeping its operators to `and`,
+    /// `or`, and `not` is what stops it becoming a second expression language.
+    fn check_presence_predicate(
+        &self,
+        predicate: &Expr,
+        fields: &BTreeMap<String, SchemaField>,
+        declared: &[FieldDecl],
+    ) -> Result<CheckedPresence, SemanticError> {
+        match predicate {
+            Expr::Path(path) => {
+                let name = super::path_text(path);
+                let Some(field) = fields.get(&name) else {
+                    return Err(SemanticError::new(
+                        path.span,
+                        format!("'{name}' is not a property of this kind"),
+                    )
+                    .help("a completeness rule names properties the schema declares"));
+                };
+                // A required field is already stated by every declaration, so
+                // naming it here asserts nothing. The two ways of saying a
+                // property is needed would then disagree in every case that
+                // matters, and the author has to pick one.
+                if !field.optional {
+                    let mut error = SemanticError::new(
+                        path.span,
+                        format!("'{name}' is required, so a completeness rule cannot mention it"),
+                    );
+                    if let Some(declaration) =
+                        declared.iter().find(|field| field.name.value == name)
+                    {
+                        error = error.related(declaration.name.span, "declared required here");
+                    }
+                    return Err(error
+                        .help(format!(
+                            "write '{name}?:' if it is one of several ways to be complete"
+                        ))
+                        .help(format!(
+                            "or drop '{name}' from the rule if every declaration must state it"
+                        )));
+                }
+                Ok(CheckedPresence::Property { name })
+            }
+            Expr::Binary {
+                op: op @ (crate::ast::BinaryOp::And | crate::ast::BinaryOp::Or),
+                left,
+                right,
+                ..
+            } => {
+                let parts = vec![
+                    self.check_presence_predicate(left, fields, declared)?,
+                    self.check_presence_predicate(right, fields, declared)?,
+                ];
+                Ok(if matches!(op, crate::ast::BinaryOp::And) {
+                    CheckedPresence::All { parts }
+                } else {
+                    CheckedPresence::Any { parts }
+                })
+            }
+            Expr::Unary {
+                op: crate::ast::UnaryOp::Not,
+                operand,
+                ..
+            } => Ok(CheckedPresence::Not {
+                part: Box::new(self.check_presence_predicate(operand, fields, declared)?),
+            }),
+            other => Err(SemanticError::new(
+                other.span(),
+                "a completeness rule combines property names with 'and', 'or', and 'not'",
+            )
+            .help("it asks which properties were stated, not what their values are")),
+        }
+    }
+
+    /// The error for a word no imported package declares.
+    fn unknown_artifact_kind(&self, word: &str, span: Span) -> SemanticError {
+        let mut known = self.artifact_kinds.keys().cloned().collect::<Vec<_>>();
+        known.sort();
+        let mut error = SemanticError::new(span, format!("unknown declaration kind '{word}'"));
+        if known.is_empty() {
+            error = error.help("a package declares one with 'artifact <Type>:'");
+        } else {
+            error = error.help(format!("kinds in scope: {}", known.join(", ")));
+        }
+        error
+    }
+
     /// The error for `is` naming something that is not a role.
     fn not_a_role(&self, name: &str, span: Span) -> SemanticError {
         let mut error = SemanticError::new(span, format!("'{name}' is not a role"));
@@ -867,5 +1372,43 @@ impl Checker {
             "or name a type that plays {name}: {}",
             members.join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{conjunction, nearest, quoted_conjunction};
+
+    #[test]
+    fn suggests_the_name_a_typo_meant() {
+        let fields = ["digest_temperature", "supplier"];
+        assert_eq!(
+            nearest("digest_temperatue", fields.into_iter()),
+            Some("digest_temperature")
+        );
+    }
+
+    #[test]
+    fn suggests_the_name_a_short_spelling_opens() {
+        // Many edits away, but a prefix of exactly what was meant.
+        let fields = ["digest_temperature", "supplier"];
+        assert_eq!(
+            nearest("digest_temp", fields.into_iter()),
+            Some("digest_temperature")
+        );
+    }
+
+    #[test]
+    fn offers_nothing_for_an_unrelated_name() {
+        let fields = ["digest_temperature", "supplier"];
+        assert_eq!(nearest("volume", fields.into_iter()), None);
+    }
+
+    #[test]
+    fn lists_names_as_a_sentence() {
+        assert_eq!(conjunction(&["a"]), "a");
+        assert_eq!(conjunction(&["a", "b"]), "a and b");
+        assert_eq!(conjunction(&["a", "b", "c"]), "a, b, and c");
+        assert_eq!(quoted_conjunction(&["a", "b"]), "'a' and 'b'");
     }
 }

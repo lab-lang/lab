@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 
 use lab_language::{
-    ArtifactKind, CheckedActionArgument, CheckedDeclaration, CheckedExpression, CheckedModule,
-    CheckedStatement, ResolvedAction, TypedExpression,
+    CheckedActionArgument, CheckedDeclaration, CheckedExpression, CheckedModule, CheckedStatement,
+    ResolvedAction, TypedExpression,
 };
 use thiserror::Error;
 
@@ -49,6 +49,11 @@ struct RealizationFlow {
 pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
     EmptyBuild,
+    #[error(
+        "the opentrons-ot2 target does not know how to build a '{kind}', which artifact \
+         '{artifact}' declares"
+    )]
+    UnsupportedArtifactKind { artifact: String, kind: String },
     #[error("artifact '{artifact}' is missing workflow input '{field}'")]
     MissingField {
         artifact: String,
@@ -208,6 +213,7 @@ pub(crate) fn lower_build_intent(
     modules: &[&CheckedModule],
 ) -> Result<Vec<BuildArtifactIntent>, SourceLoweringError> {
     let identities = inventory_identities(modules);
+    let stated = inventory_properties(modules);
     let flows = realization_flows(modules, &identities)?;
     let artifacts = declarations(modules)
         .filter_map(|declaration| {
@@ -221,11 +227,12 @@ pub(crate) fn lower_build_intent(
                 return None;
             };
             Some(lower_artifact(
-                *artifact,
+                artifact.as_str(),
                 name,
                 properties,
                 flows.get(name),
                 &identities,
+                &stated,
             ))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -242,11 +249,12 @@ fn declarations<'a>(
 }
 
 fn lower_artifact(
-    kind: ArtifactKind,
+    kind: &str,
     name: &str,
     properties: &[lab_language::CheckedProperty],
     flow: Option<&RealizationFlow>,
     identities: &BTreeMap<String, String>,
+    stated: &BTreeMap<String, Vec<lab_language::CheckedProperty>>,
 ) -> Result<BuildArtifactIntent, SourceLoweringError> {
     let find = |field: &'static str| {
         properties
@@ -261,22 +269,43 @@ fn lower_artifact(
     let symbol = |field, accepted| checked_symbol(name, field, find(field)?, identities, accepted);
     let symbols =
         |field, accepted| checked_symbols(name, field, find(field)?, identities, accepted);
+    let owner = |owner_field: &'static str| {
+        properties
+            .iter()
+            .find(|property| property.name == owner_field)
+            .and_then(|property| reference_name(&property.value))
+            .and_then(|name| stated.get(name))
+    };
+    // A design's own value wins; otherwise the item it names supplies one.
+    let inherited = |owner_field: &'static str, field: &'static str| {
+        owner(owner_field)?
+            .iter()
+            .find(|property| property.name == field)
+            .map(|property| property.value.clone())
+    };
     let count = |field, default| match properties.iter().find(|property| property.name == field) {
         Some(property) => checked_u8(name, field, &property.value),
         None => Ok(default),
     };
-    let quantity =
-        |field, unit, default| match properties.iter().find(|property| property.name == field) {
-            Some(property) => checked_quantity(name, field, &property.value, unit),
-            None => Ok(default),
-        };
+    let quantity = |field: &'static str, unit, default| match properties
+        .iter()
+        .find(|property| property.name == field)
+    {
+        Some(property) => checked_quantity(name, field, &property.value, unit),
+        None => {
+            match inherited("restriction_enzyme", field).or_else(|| inherited("chassis", field)) {
+                Some(value) => checked_quantity(name, field, &value, unit),
+                None => Ok(default),
+            }
+        }
+    };
     let whole = |field, default| match properties.iter().find(|property| property.name == field) {
         Some(property) => checked_u16(name, field, &property.value),
         None => Ok(default),
     };
     let flow = flow.ok_or_else(|| SourceLoweringError::MissingRealization(name.to_owned()))?;
     match kind {
-        ArtifactKind::Plasmid => {
+        "plasmid" => {
             let components = symbols("components", &["Part", "Plasmid"])?;
             let chemistry = AssemblyChemistryIntent {
                 reaction_volume_ul: quantity("reaction_volume", "uL", 20)?,
@@ -311,7 +340,7 @@ fn lower_artifact(
                 actions: flow.actions.clone(),
             }))
         }
-        ArtifactKind::Strain => Ok(BuildArtifactIntent::Strain(StrainArtifactIntent {
+        "strain" => Ok(BuildArtifactIntent::Strain(StrainArtifactIntent {
             name: name.to_owned(),
             chassis: symbol("chassis", &["Chassis"])?,
             plasmids: symbols("plasmids", &["Plasmid"])?,
@@ -335,30 +364,44 @@ fn lower_artifact(
             },
             actions: flow.actions.clone(),
         })),
+        // This backend builds plasmids and strains. A package may declare other
+        // kinds; a target that does not know how to make one says so.
+        other => Err(SourceLoweringError::UnsupportedArtifactKind {
+            artifact: name.to_owned(),
+            kind: other.to_owned(),
+        }),
     }
 }
 
+/// What each catalogued item states about itself.
+///
+/// An enzyme's working temperature and a chassis's heat shock belong to the
+/// item rather than to every design that names it, so a design that says
+/// nothing about them still gets them.
+fn inventory_properties(
+    modules: &[&CheckedModule],
+) -> BTreeMap<String, Vec<lab_language::CheckedProperty>> {
+    declarations(modules)
+        .filter_map(|declaration| match declaration {
+            CheckedDeclaration::Catalog {
+                name, properties, ..
+            } if !properties.is_empty() => Some((name.clone(), properties.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// What each catalogued symbol calls the item a supplier lists.
+///
+/// A catalog declaration carries both, so this reads two fields rather than
+/// recognizing the shape of a synthesized call.
 fn inventory_identities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
     declarations(modules)
-        .filter_map(|declaration| {
-            let CheckedDeclaration::Binding(binding) = declaration else {
-                return None;
-            };
-            let target = binding.targets.first()?.name.clone();
-            let CheckedExpression::Call {
-                operation,
-                arguments,
-            } = &binding.value.value
-            else {
-                return None;
-            };
-            if !operation.starts_with("std.bio.inventory.") || arguments.len() != 1 {
-                return None;
+        .filter_map(|declaration| match declaration {
+            CheckedDeclaration::Catalog { name, identity, .. } => {
+                Some((name.clone(), identity.clone()))
             }
-            let CheckedExpression::String { value } = &arguments[0].value.value else {
-                return None;
-            };
-            Some((target, value.clone()))
+            _ => None,
         })
         .collect()
 }
@@ -415,18 +458,18 @@ fn realization_flows(
                         product: product.clone(),
                     });
                 }
-                "std.lab.plasmid_actions.provision" => {
+                "std.lab.plasmid.provision" => {
                     let names = result_names();
                     let [cells] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
                     };
-                    let item = resolved_reference(action, "chassis", identities, &design)?;
+                    let item = resolved_reference(action, "item", identities, &design)?;
                     actions.push(WorkflowActionIntent::Provision {
                         cells: cells.clone(),
                         item,
                     });
                 }
-                "std.lab.plasmid_actions.transform" => {
+                "std.lab.plasmid.transform" => {
                     let names = result_names();
                     let [strain, culture] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
@@ -438,7 +481,7 @@ fn realization_flows(
                         cells: required_reference(action, "cells", &design)?,
                     });
                 }
-                "std.lab.plasmid_actions.recover" => {
+                "std.lab.plasmid.recover" => {
                     let names = result_names();
                     let [culture] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
@@ -455,7 +498,7 @@ fn realization_flows(
                         duration_unit: unit.clone(),
                     });
                 }
-                "std.lab.plasmid_actions.dilute" => {
+                "std.lab.plasmid.dilute" => {
                     let names = result_names();
                     let [culture] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
@@ -465,7 +508,7 @@ fn realization_flows(
                         input: required_reference(action, "culture", &design)?,
                     });
                 }
-                "std.lab.plasmid_actions.plate" => {
+                "std.lab.plasmid.plate" => {
                     let names = result_names();
                     let [plate] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
@@ -506,7 +549,7 @@ fn realized_design(body: &[CheckedStatement]) -> Option<String> {
         };
         matches!(
             action.operation.as_str(),
-            "std.bio.build.realize" | "std.lab.plasmid_actions.transform"
+            "std.bio.build.realize" | "std.lab.plasmid.transform"
         )
         .then(|| action_argument(action, "design").and_then(reference_name))
         .flatten()

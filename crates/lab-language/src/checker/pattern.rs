@@ -35,7 +35,7 @@ impl Checker {
                 let constructor = self
                     .cases
                     .get(&name)
-                    .map_or_else(|| name.clone(), |parent| format!("outcome.{parent}.{name}"));
+                    .map_or_else(|| name.clone(), |parent| format!("case.{parent}.{name}"));
                 CheckedPattern::Constructor {
                     constructor,
                     fields: fields

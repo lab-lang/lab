@@ -10,6 +10,12 @@ pub(crate) enum ContractType {
     Concrete(Ty),
     SameAs(&'static str),
     AnyMaterial,
+    /// Any declared thing, whatever its type. Fetching one off the shelf does
+    /// not depend on what it is.
+    AnyValue,
+    /// Material of whatever an earlier operand was. What comes back from the
+    /// shelf is the thing that was asked for.
+    MaterialOf(&'static str),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,10 +55,29 @@ impl PhrasePart {
     }
 }
 
+/// Whether a result is a new biological entity or the same one further along.
+///
+/// This is what separates a technical replicate from a biological one. Picking
+/// two colonies gives two independent transformants; splitting one culture into
+/// two tubes gives one organism measured twice. Averaging the second and
+/// reporting `n = 2` counts pipetting variance as biology.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Lineage {
+    /// The result carries on the lineage of the material it came from. Diluting,
+    /// recovering, and plating all leave you with the same organism.
+    #[default]
+    Continues,
+    /// The result begins a lineage of its own, independent of its siblings and
+    /// of anything produced by another invocation. Each picked colony is an
+    /// independent transformant; each transformation establishes a new one.
+    Begins,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResultSpec {
     pub name: &'static str,
     pub r#type: ContractType,
+    pub lineage: Lineage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -158,16 +183,17 @@ impl ActionContractSpec {
             }
             match &result.r#type {
                 ContractType::Concrete(_) => {}
-                ContractType::SameAs(reference) if operands.contains(reference) => {}
-                ContractType::SameAs(reference) => {
+                ContractType::MaterialOf(reference) | ContractType::SameAs(reference)
+                    if operands.contains(reference) => {}
+                ContractType::MaterialOf(reference) | ContractType::SameAs(reference) => {
                     return Err(format!(
                         "action result '{}' references unknown operand '{reference}'",
                         result.name
                     ));
                 }
-                ContractType::AnyMaterial => {
+                ContractType::AnyMaterial | ContractType::AnyValue => {
                     return Err(format!(
-                        "action result '{}' cannot have unconstrained AnyMaterial type",
+                        "action result '{}' cannot have an unconstrained type",
                         result.name
                     ));
                 }

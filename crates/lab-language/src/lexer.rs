@@ -91,6 +91,7 @@ impl<'a> Lexer<'a> {
                 }
                 b'>' => self.single(TokenKind::Greater),
                 b'|' => self.single(TokenKind::Pipe),
+                b'?' => self.single(TokenKind::Question),
                 b'+' => self.single(TokenKind::Plus),
                 b'*' => self.single(TokenKind::Star),
                 b'/' => self.single(TokenKind::Slash),
@@ -431,7 +432,7 @@ mod tests {
 
     #[test]
     fn rejects_tabs_in_indentation() {
-        let error = lex("plasmid p:\n\tsequence: dna(\"ACGT\")\n").unwrap_err();
+        let error = lex("plasmid p:\n\tsequence = dna(\"ACGT\")\n").unwrap_err();
         assert!(error.to_string().contains("tabs are not allowed"));
     }
 

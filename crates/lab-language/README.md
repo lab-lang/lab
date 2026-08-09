@@ -9,7 +9,7 @@ For example:
 
 ```lab
 plasmid p_sensor:
-  sequence: dna("ATGCGTACGTTAGCTA")
+  sequence = dna("ATGCGTACGTTAGCTA")
   require topology == circular
 
   accept sequence == design.sequence

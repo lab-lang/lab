@@ -11,7 +11,6 @@ members = [
     "crates/lab-project",
     "crates/lab-python",
 ]
-default-members = ["crates/lab-compiler"]
 
 [workspace.package]
 version = "0.1.0"

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::ast::{Argument, BinaryOp, DataKind, Expr, FieldValue, Path, UnaryOp};
+use crate::ast::{Argument, BinaryOp, Expr, FieldValue, Path, UnaryOp};
 use crate::checked::{CheckedArgument, CheckedExpression, CheckedFieldValue, TypedExpression};
 use crate::semantic_error::SemanticError;
 use crate::source::Span;
@@ -88,7 +88,7 @@ impl Checker {
             } => {
                 let name = super::path_text(constructor);
                 let constructor = if let Some(parent) = self.cases.get(&name) {
-                    format!("outcome.{parent}.{name}")
+                    format!("case.{parent}.{name}")
                 } else if self.data.contains_key(&name) {
                     format!("data.{name}")
                 } else if let Some(spec) = self.constructors.get(&name) {
@@ -374,11 +374,13 @@ impl Checker {
                         .chain(
                             self.data
                                 .iter()
-                                .filter(|(_, signature)| {
-                                    matches!(
-                                        signature.kind,
-                                        DataKind::Observation | DataKind::Evidence
-                                    )
+                                // Anything playing `Evidential` may be offered
+                                // in support of a claim, which is what this
+                                // field asks for.
+                                .filter(|(name, _)| {
+                                    self.type_roles
+                                        .get(*name)
+                                        .is_some_and(|roles| roles.contains("Evidential"))
                                 })
                                 .map(|(name, _)| Ty::named(name)),
                         )

@@ -1,0 +1,83 @@
+/*!
+ * The DNA this panel is built from.
+ *
+ * Two plasmids are assembled here from ordered parts; one arrives from a
+ * repository already made. Being built is a fact about a particular plasmid
+ * rather than about plasmids, so both are the same kind of thing and only their
+ * provenance differs.
+ */
+
+use std.bio.designs
+use std.bio.golden_gate
+
+use golden_gate_extended.designs.inventory
+
+/**
+ * The GFP reporter under a strong constitutive promoter.
+ *
+ * Its acceptance criteria are the ones that matter for a construct that will
+ * carry a measurement: the sequence has to be what was designed, and the yield
+ * has to clear a bar on enough independent clones to mean something.
+ */
+plasmid composite_plasmid_1:
+  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone = pSB1C3
+  components = [J23101, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+
+  reaction_volume = 20 uL
+  part_volume = 2 uL
+  enzyme_volume = 2 uL
+  ligase_volume = 4 uL
+  buffer_volume = 2 uL
+  assembly_cycles = 75
+
+  require topology == circular
+  require sites(BsaI) == 0
+  require length <= 12 kb
+
+  across 3 biological replicates
+
+  accept sequence == design.sequence
+  accept concentration >= 100 ng/uL
+  accept volume >= 20 uL across 1 biological replicate
+
+/**
+ * The RFP reporter under a weaker promoter, assembled the same way.
+ *
+ * A weaker promoter yields less, so this one clears a lower bar. The standard
+ * is a property of the design rather than of the protocol that built it.
+ */
+plasmid composite_plasmid_2:
+  sequence = dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
+  backbone = pSB1C3
+  components = [J23106, B0034, RFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+
+  reaction_volume = 20 uL
+  part_volume = 2 uL
+  enzyme_volume = 2 uL
+  ligase_volume = 4 uL
+  buffer_volume = 2 uL
+  assembly_cycles = 75
+
+  require topology == circular
+  require sites(BsaI) == 0
+
+  across 3 biological replicates
+
+  accept sequence == design.sequence
+  accept concentration >= 60 ng/uL
+
+/**
+ * The reference plasmid, ordered rather than assembled.
+ *
+ * It has an identity to order against and no recipe, because nothing here makes
+ * it. Nothing else about it changes: it is the same kind of thing as the two
+ * above, and only its provenance differs.
+ */
+buy plasmid reference_gfp:
+  identity = "Addgene-#134516"
+  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")

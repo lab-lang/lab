@@ -8,6 +8,7 @@ mod error;
 mod lexer;
 mod material_flow;
 mod parser;
+pub mod provenance;
 mod render;
 mod semantic_error;
 mod semantics;
@@ -16,13 +17,12 @@ mod standard_library;
 mod token;
 mod type_system;
 
-pub use ast::ArtifactKind;
 pub use checked::{
     CheckedActionArgument, CheckedArgument, CheckedBinding, CheckedCase, CheckedDeclaration,
     CheckedExpression, CheckedField, CheckedFieldValue, CheckedMatchCase, CheckedModule,
-    CheckedPattern, CheckedPatternField, CheckedProperty, CheckedSection, CheckedState,
-    CheckedStatement, CheckedTrigger, CheckedType, OwnershipMode, ResolvedAction, ResolvedImport,
-    TypedExpression,
+    CheckedPattern, CheckedPatternField, CheckedPresence, CheckedProperty, CheckedSection,
+    CheckedState, CheckedStatement, CheckedTrigger, CheckedType, OwnershipMode, ResolvedAction,
+    ResolvedImport, TypedExpression,
 };
 pub use diagnostics::{
     Analysis, Diagnostic, DiagnosticCode, DiagnosticRelatedInformation, DiagnosticSeverity,
@@ -34,8 +34,8 @@ pub use parser::parse_module;
 pub use render::render_checked_module;
 pub use semantic_error::{ModuleError, RelatedSpan, SemanticError};
 pub use semantics::{
-    CallableSignature, DefinitionId, ExportKind, ModuleExport, ModuleId, ModuleInterface,
-    SemanticEnvironment, TypeParameters,
+    ArtifactSchema, CallableSignature, DefinitionId, ExportKind, ModuleExport, ModuleId,
+    ModuleInterface, SemanticEnvironment, TypeParameters,
 };
 pub use source::{Identifier, LineIndex, Span, Spanned};
 
@@ -86,7 +86,7 @@ pub(crate) fn compile_module_with_library(
         &module,
         library,
     )?;
-    material_flow::verify_module(&checked)?;
+    material_flow::verify_module(&checked, &SemanticEnvironment::default())?;
     Ok(checked)
 }
 
@@ -96,6 +96,6 @@ fn compile_parsed_module(
     module: &ast::Module,
 ) -> Result<CheckedModule, ModuleError> {
     let checked = checker::check_module(module_id, environment, module)?;
-    material_flow::verify_module(&checked)?;
+    material_flow::verify_module(&checked, environment)?;
     Ok(checked)
 }

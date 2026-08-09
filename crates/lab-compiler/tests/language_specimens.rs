@@ -33,7 +33,7 @@ fn module_ir(name: &str) -> Value {
 #[test]
 fn plasmid_design_compiles_through_the_portable_module_boundary() {
     let module = module_ir("plasmid-design.lab");
-    assert_eq!(module["imports"].as_array().unwrap().len(), 2);
+    assert_eq!(module["imports"].as_array().unwrap().len(), 3);
     let declarations = module["declarations"].as_array().unwrap();
     assert!(declarations.iter().any(|declaration| {
         declaration["kind"] == "binding"
@@ -120,8 +120,11 @@ fn sensor_panel_compiles_roles_generics_and_forgotten_arguments() {
         .iter()
         .find(|declaration| declaration["name"] == "Reading")
         .unwrap();
-    assert_eq!(reading["category"], "observation");
     assert_eq!(reading["bounds"]["Of"]["name"], "Reporter");
+    assert_eq!(
+        reading["roles"][0], "Evidential",
+        "a reading may be offered in support of a claim"
+    );
     assert!(
         module["imports"]
             .as_array()
@@ -153,7 +156,7 @@ fn plasmid_build_compiles_typed_effects_and_reactive_handlers() {
     );
     let serialized = serde_json::to_string(workflow).unwrap();
     assert!(serialized.contains("workflow.await_colonies"));
-    assert!(serialized.contains("std.lab.plasmid_actions.split"));
+    assert!(serialized.contains("std.lab.plasmid.split"));
     assert!(serialized.contains("\"mode\":\"take\""));
     assert!(serialized.contains("\"mode\":\"borrow\""));
 
@@ -196,8 +199,16 @@ fn inventory_specimen_preserves_properties_and_resolved_operations() {
                 && property["value"]["type"]["element"]["name"] == "Part")
     );
 
+    // A catalogued name carries its supplier's identifier as a field, so a
+    // backend reads it directly rather than recognizing a call shape.
+    let catalogued = declarations
+        .iter()
+        .find(|declaration| declaration["kind"] == "catalog" && declaration["name"] == "J23101")
+        .expect("the specimen catalogues its parts");
+    assert_eq!(catalogued["identity"], "J23101");
+    assert_eq!(catalogued["type"]["name"], "Part");
+
     let serialized = serde_json::to_string(&module).unwrap();
-    assert!(serialized.contains("std.bio.inventory.part"));
     assert!(serialized.contains("std.bio.build.realize"));
     assert!(serialized.contains("artifact_realization"));
 }
@@ -243,6 +254,6 @@ fn dependency_specimen_preserves_typed_material_edges_without_levels() {
     assert!(
         serde_json::to_string(host)
             .unwrap()
-            .contains("std.lab.plasmid_actions.transform")
+            .contains("std.lab.plasmid.transform")
     );
 }

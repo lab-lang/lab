@@ -14,6 +14,11 @@ pub enum DependencyGraphError {
         artifact: String,
         dependency: String,
     },
+    #[error(
+        "the manifest declares material '{material}', which this build never uses; \
+         a catalogued name that was renamed leaves its old identity here"
+    )]
+    UnusedInventoryMaterial { material: String },
 }
 
 /// Resolve graph waves against inventory without interpreting any biological
@@ -22,6 +27,25 @@ pub fn resolve_dependency_graph(
     graph: &BuildGraph,
     inventory: &BuildInventory,
 ) -> Result<DependencyBuildManifest, DependencyGraphError> {
+    // A catalogued name supplies its own external identity, so a rename that
+    // was meant to keep the supplier's name silently leaves the old one behind
+    // in the manifest. Declaring stock this build never asks for is that
+    // mistake, and a typo, and a stale entry — all worth stopping for.
+    let required = graph
+        .nodes
+        .values()
+        .flat_map(|node| node.required_materials.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if let Some(material) = inventory
+        .available_materials
+        .iter()
+        .find(|material| !required.contains(*material))
+    {
+        return Err(DependencyGraphError::UnusedInventoryMaterial {
+            material: material.clone(),
+        });
+    }
+
     let names = graph.nodes.keys().cloned().collect::<BTreeSet<_>>();
     let mut referenced = BTreeSet::new();
     let mut edges = Vec::new();

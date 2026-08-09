@@ -1,0 +1,31 @@
+[package]
+name = "golden-gate-extended"
+version = "0.1.0"
+edition = "2026"
+
+[build]
+entry = "src/programs/panel.lab"
+target = "opentrons-ot2"
+
+[inventory]
+materials = [
+  "B0015",
+  "B0034",
+  "BL21",
+  # BsaI states a supplier identity, so that is what an order names.
+  "NEB-R0535",
+  "DH5alpha",
+  "GFP",
+  "J23101",
+  "J23106",
+  "RFP",
+  "T4_DNA_ligase",
+  "T4_DNA_ligase_buffer",
+  "chloramphenicol",
+  "nuclease_free_water",
+  "pSB1C3",
+  "recovery_medium",
+  # The reference plasmid is ordered, so the build asks for it as stock.
+  "Addgene-#134516",
+]
+artifacts = []

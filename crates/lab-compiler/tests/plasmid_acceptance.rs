@@ -30,21 +30,26 @@ fn successful_stdout(kind: &str) -> String {
 #[test]
 fn plasmid_acceptance_uses_the_canonical_frontend_boundary() {
     let source_ast: Value = serde_json::from_str(&successful_stdout("source-ast")).unwrap();
-    assert_eq!(source_ast["items"][0]["item"], "artifact");
-    assert_eq!(source_ast["items"][0]["kind"], "plasmid");
-    assert_eq!(source_ast["items"][0]["name"]["value"], "p_acceptance");
+    // The kinds are imported, so the artifact is not the first item.
+    let artifact = source_ast["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["item"] == "artifact")
+        .expect("the specimen declares an artifact");
+    assert_eq!(artifact["kind"]["value"], "plasmid");
+    assert_eq!(artifact["name"]["value"], "p_acceptance");
 
     let module: Value = serde_json::from_str(&successful_stdout("module-ir")).unwrap();
-    assert_eq!(module["declarations"][0]["kind"], "artifact");
-    assert_eq!(module["declarations"][0]["artifact"], "plasmid");
-    assert_eq!(module["declarations"][0]["name"], "p_acceptance");
-    assert_eq!(
-        module["declarations"][0]["acceptance"]
-            .as_array()
-            .unwrap()
-            .len(),
-        3
-    );
+    let declared = module["declarations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|declaration| declaration["kind"] == "artifact")
+        .expect("the module lowers an artifact");
+    assert_eq!(declared["artifact"], "plasmid");
+    assert_eq!(declared["name"], "p_acceptance");
+    assert_eq!(declared["acceptance"].as_array().unwrap().len(), 3);
 
     let human = successful_stdout("human");
     assert!(human.contains("Lab module compiled"));

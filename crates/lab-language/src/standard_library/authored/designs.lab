@@ -1,0 +1,73 @@
+/*!
+ * The kinds of thing a synthetic-biology laboratory works with.
+ *
+ * A kind names a type, and its instances are written with that type's name in
+ * snake_case. The word is vocabulary a package supplies; the compiler only
+ * knows the shape. Whether any one thing was built or bought is stated by the
+ * declaration that names it, not by its kind.
+ */
+
+/** A part a supplier lists, ordered rather than built. */
+artifact Part
+
+/** A promoter for some signal. */
+artifact Promoter
+
+/** A coding sequence for some protein. */
+artifact CDS
+
+/** An assembly backbone. */
+artifact Backbone
+
+/**
+ * A type IIS enzyme that opens a backbone.
+ *
+ * The temperature and time a digest runs at are the enzyme's, not the design's:
+ * every plasmid cut with the same enzyme cuts the same way. A design may still
+ * state its own where a protocol departs from the datasheet.
+ */
+artifact RestrictionEnzyme:
+  digest_temperature?: Quantity<C>
+  digest_duration?: Quantity<min>
+
+/**
+ * A host organism engineered DNA is carried in.
+ *
+ * Competent cells are transformed the way their supplier says, so the heat
+ * shock and recovery belong to the chassis rather than to each strain built in
+ * it.
+ */
+artifact Chassis:
+  heat_shock_temperature?: Quantity<C>
+  cold_incubation?: Quantity<min>
+  recovery_temperature?: Quantity<C>
+  recovery_duration?: Quantity<min>
+
+/** A selection agent a transformed culture is plated on. */
+artifact Antibiotic
+
+/**
+ * A DNA design a laboratory can build.
+ *
+ * A plasmid states its sequence directly, or states the backbone together with
+ * what goes into it: the parts an assembly joins, or the circuit a sequence can
+ * be derived from.
+ */
+artifact Plasmid:
+  sequence?: DNA
+  backbone?: Backbone
+  components?: List<Part | Plasmid>
+  cargo?: Circuit<any Signal, any Protein>
+
+  declares sequence or (backbone and components) or (backbone and cargo)
+
+/**
+ * An engineered organism: a chassis carrying named plasmid designs.
+ *
+ * The same plasmid in two hosts is two artifacts, each with its own acceptance
+ * criteria and its own place in a build order.
+ */
+artifact Strain:
+  chassis: Chassis
+  plasmids: List<Plasmid>
+  selection?: Antibiotic

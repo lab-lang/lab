@@ -18,15 +18,25 @@ The explicit `<-` boundary currently makes durable external work visible and kee
 
 Sequential effects and independent `when` handlers are represented. Syntax for starting several physical actions together, joining them, races, timeouts, and explicit cancellation is not settled. Cancellation must distinguish stopping a subscription from attempting to cancel an already-dispatched physical action.
 
-## Declaring pure functions and typed identities in source
+## Declaring pure functions and action contracts in source
 
-A standard module written in Lab can declare roles, membership, and data types; `std.bio.reporters` is written that way. Three things have no source declaration form, and a module needing any of them stays in Rust: pure functions such as `dna` and `sites`, durable action contracts, and typed external identities.
-
-The third is the sharpest, because it is what blocks the biological catalog from moving. `part("pTet")` returns `Part`, so a catalogue entry of type `Promoter<Tetracycline>` cannot be written at all. Three of `std.bio.parts`' five values are ordinary constructor calls; the two typed promoters and coding sequences are not. Resolving this needs either generic pure functions, a type-directed reading of a constructor's result, or a declaration form for an external identity that carries its own type.
+A standard module written in Lab can declare roles, membership, data types, artifact kinds, and catalogued items; `std.bio.designs`, `std.bio.golden_gate`, and `std.bio.parts` are written that way. Two things have no source declaration form, and a module needing either stays in Rust: pure functions such as `dna` and `sites`, and durable action contracts.
 
 ## Parts and biological catalogs
 
-`std.bio.inventory` now provides typed constructors for external part, backbone, enzyme, chassis, and antibiotic identities, and roles give a source form for the biological relationships a part participates in. This is not yet authoring syntax for declaring a part's sequence, provenance, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
+A catalogued item is declared with `buy` against an imported kind, states the fields of its type, and names its own type where its kind is generic — `buy promoter pTet: Promoter<Tetracycline>` — so the biological catalog is written in Lab. This is not yet authoring syntax for declaring a part's sequence, provenance chain, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
+
+## Target contracts
+
+A kind now declares a schema, so the language states which properties an artifact
+may hold and what each contains. What it still cannot state is which of them a
+*target* consumes: the OT-2 backend reads `reaction_volume` and
+`digest_temperature` by name, and a schema gives it something to validate against
+without telling it what to expect. This is why moving `plasmid` into
+`std.bio.designs` removes biology from the frontend and not from the toolchain.
+
+Schema composition is also unresolved. A kind cannot extend or refine another, so
+a target-specific chemistry schema has no way to say it adds to the design one.
 
 ## Property schemas and target contracts
 

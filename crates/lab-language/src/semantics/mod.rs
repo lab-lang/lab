@@ -9,6 +9,6 @@ mod interface;
 
 pub use ids::{DefinitionId, ModuleId};
 pub use interface::{
-    CallableSignature, ExportKind, ModuleExport, ModuleInterface, SemanticEnvironment,
-    TypeParameters,
+    ArtifactSchema, CallableSignature, ExportKind, ModuleExport, ModuleInterface,
+    SemanticEnvironment, TypeParameters,
 };

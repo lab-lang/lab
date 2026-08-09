@@ -1,32 +1,34 @@
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.bio.designs
+use std.bio.golden_gate
 
-competent_ecoli = chassis("competent_ecoli")
-kanamycin = antibiotic("kanamycin")
-BsaI = restriction_enzyme("BsaI")
-p15A_kan = backbone("p15A_kan")
-GFP = part("GFP")
+use std.lab.plasmid
+
+buy chassis competent_ecoli
+buy antibiotic kanamycin
+buy restriction_enzyme BsaI
+buy backbone p15A_kan
+buy part GFP
 
 plasmid p_reporter:
-  sequence: dna("ACGTACGT")
-  backbone: p15A_kan
-  components: [GFP]
-  restriction_enzyme: BsaI
+  sequence = dna("ACGTACGT")
+  backbone = p15A_kan
+  components = [GFP]
+  restriction_enzyme = BsaI
 
   require topology == circular
   accept sequence == design.sequence
 
 strain reporter_host:
-  chassis: competent_ecoli
-  plasmids: [p_reporter]
-  selection: kanamycin
+  chassis = competent_ecoli
+  plasmids = [p_reporter]
+  selection = kanamycin
 
-observation PlateObservation:
+record PlateObservation is Evidential:
   image: Image
   colonies: ColonyMap
   elapsed: Duration
 
-outcome ColonyGrowth:
+record ColonyGrowth:
   plate: Material<Plate>
   observations: List<PlateObservation>
 
@@ -35,7 +37,7 @@ outcome ColonyGrowth:
 
   case TimedOut
 
-outcome SequenceCheck:
+record SequenceCheck:
   material: Material<Plasmid>
   evidence: List<Evidence>
 
@@ -128,7 +130,7 @@ workflow build_plasmid() -> Accepted<Plasmid> | Rejected<Plasmid>:
 
   evidence = sequence_result.evidence + [quantity]
 
-  if design.accepts(evidence):
+  if accepts(design, evidence):
     retained <- store retained at -20 C
     return Accepted{
       material: retained,

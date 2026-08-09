@@ -1,0 +1,5 @@
+/*! Assembly backbones a laboratory can order. */
+
+use std.bio.designs
+
+buy backbone p15A_kan

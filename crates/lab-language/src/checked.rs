@@ -8,12 +8,14 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ast::ArtifactKind;
 use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 
-/// Bumped to v2 by `CheckedType::Any`: a consumer that has not been updated
-/// cannot deserialize a type it has no variant for.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v2";
+/// The IR shape consumers must understand to read a checked module. A consumer
+/// written against an earlier version cannot read this one: `Catalog` is a
+/// declaration of its own and carries the properties its item states, `Data`
+/// carries no category, a schema field states whether an instance may omit it,
+/// and an acceptance claim carries the evidence it is believed on.
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v3";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -42,6 +44,21 @@ pub enum CheckedDeclaration {
         doc: Option<String>,
         name: String,
     },
+    /// A name a supplier lists, and the Lab type it stands for.
+    ///
+    /// The identity is a field rather than an argument to a synthesized call,
+    /// so a backend reads it directly instead of recognizing a call shape.
+    Catalog {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        doc: Option<String>,
+        name: String,
+        r#type: CheckedType,
+        identity: String,
+        /// What the supplier's item states about itself, checked against the
+        /// fields of the type it is listed as.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        properties: Vec<CheckedProperty>,
+    },
     Circuit {
         doc: Option<String>,
         name: String,
@@ -55,17 +72,29 @@ pub enum CheckedDeclaration {
         output: CheckedType,
         sections: Vec<CheckedSection>,
     },
+    /// A kind of artifact a package declares, and the schema its instances are
+    /// checked against.
+    ArtifactKind {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        doc: Option<String>,
+        name: String,
+        produces: CheckedType,
+        fields: Vec<CheckedSchemaField>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        declares: Option<CheckedPresence>,
+    },
     Artifact {
         doc: Option<String>,
-        artifact: ArtifactKind,
+        /// The word a package supplied for this kind.
+        artifact: String,
         name: String,
+        produces: CheckedType,
         properties: Vec<CheckedProperty>,
         requirements: Vec<TypedExpression>,
-        acceptance: Vec<TypedExpression>,
+        acceptance: Vec<CheckedAcceptance>,
     },
     Data {
         doc: Option<String>,
-        category: String,
         name: String,
         /// Type parameters in declaration order.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -159,10 +188,66 @@ impl fmt::Display for CheckedType {
     }
 }
 
+/// Which combinations of stated properties a kind calls complete.
+///
+/// A predicate over presence, not over values: its whole vocabulary is property
+/// names combined with all, any, and not.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CheckedPresence {
+    Property { name: String },
+    All { parts: Vec<CheckedPresence> },
+    Any { parts: Vec<CheckedPresence> },
+    Not { part: Box<CheckedPresence> },
+}
+
+impl CheckedPresence {
+    /// Whether a declaration that stated these properties is complete.
+    pub fn satisfied_by(&self, stated: &std::collections::BTreeSet<String>) -> bool {
+        match self {
+            Self::Property { name } => stated.contains(name),
+            Self::All { parts } => parts.iter().all(|part| part.satisfied_by(stated)),
+            Self::Any { parts } => parts.iter().any(|part| part.satisfied_by(stated)),
+            Self::Not { part } => !part.satisfied_by(stated),
+        }
+    }
+
+    /// The rule written back as prose, for the error a reader meets.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Property { name } => name.clone(),
+            Self::All { parts } => parts
+                .iter()
+                .map(Self::describe)
+                .collect::<Vec<_>>()
+                .join(" and "),
+            Self::Any { parts } => format!(
+                "either {}",
+                parts
+                    .iter()
+                    .map(Self::describe)
+                    .collect::<Vec<_>>()
+                    .join(", or ")
+            ),
+            Self::Not { part } => format!("no {}", part.describe()),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedField {
     pub name: String,
     pub r#type: CheckedType,
+}
+
+/// A property an artifact kind declares. Unlike a record's field, which every
+/// value of that record has, a schema field may be one an instance omits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedSchemaField {
+    pub name: String,
+    pub r#type: CheckedType,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +267,17 @@ pub struct CheckedBinding {
     pub doc: Option<String>,
     pub targets: Vec<CheckedField>,
     pub value: TypedExpression,
+}
+
+/// An acceptance claim, with how much independent evidence it is believed on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedAcceptance {
+    pub predicate: TypedExpression,
+    /// Independent biological lineages the evidence must span. Absent where
+    /// neither the claim nor its declaration states a standard, which leaves
+    /// the claim believed on whatever evidence is offered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replicates: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

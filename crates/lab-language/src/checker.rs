@@ -15,6 +15,7 @@ use crate::ast::*;
 use crate::checked::*;
 use crate::semantic_error::SemanticError;
 use crate::semantics::{ModuleId, SemanticEnvironment};
+use crate::source::Span;
 use crate::type_system::{Ty, to_checked_type};
 
 pub(crate) fn check_module(
@@ -76,6 +77,27 @@ impl Checker {
                         name: declaration.name.value.clone(),
                     });
                 }
+                Item::ArtifactKind(declaration) => {
+                    let signature = self
+                        .artifact_kinds
+                        .get(&declaration.name.value)
+                        .expect("the kind was collected");
+                    declarations.push(CheckedDeclaration::ArtifactKind {
+                        doc: declaration.doc.clone(),
+                        name: declaration.name.value.clone(),
+                        produces: to_checked_type(&signature.produces),
+                        fields: signature
+                            .fields
+                            .iter()
+                            .map(|(name, field)| CheckedSchemaField {
+                                name: name.clone(),
+                                r#type: to_checked_type(&field.ty),
+                                optional: field.optional,
+                            })
+                            .collect(),
+                        declares: signature.declares.clone(),
+                    });
+                }
                 Item::Circuit(declaration) => {
                     declarations.push(self.check_circuit(declaration)?);
                 }
@@ -96,6 +118,8 @@ impl Checker {
                 }
             }
         }
+
+        self.check_evidence_supports_claims(module, &declarations)?;
 
         let interface = build_interface(&self.module_id, module.doc.as_deref(), &declarations);
         Ok(CheckedModule {
@@ -118,6 +142,219 @@ impl Checker {
             declarations,
         })
     }
+}
+
+impl Checker {
+    /// Refuse a program that offers less independent evidence than the design
+    /// it is judging asks for.
+    ///
+    /// Three measurements of one colony are one biological replicate however
+    /// many times they are repeated, so counting them as three claims more than
+    /// the experiment supports. This fires only where every lineage is known:
+    /// a sample that arrived from a caller, or a member of a family picked at
+    /// runtime, leaves the question open and nothing is said.
+    fn check_evidence_supports_claims(
+        &self,
+        module: &Module,
+        declarations: &[CheckedDeclaration],
+    ) -> Result<(), SemanticError> {
+        let required = declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                CheckedDeclaration::Artifact {
+                    name, acceptance, ..
+                } => {
+                    let most = acceptance
+                        .iter()
+                        .filter_map(|claim| claim.replicates)
+                        .max()?;
+                    Some((name.as_str(), most))
+                }
+                _ => None,
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        if required.is_empty() {
+            return Ok(());
+        }
+
+        let table = crate::provenance::lineage_table(&self.standard_library);
+        for declaration in declarations {
+            let CheckedDeclaration::Workflow { name, body, .. } = declaration else {
+                continue;
+            };
+            let lineage = crate::provenance::analyze(body, &table);
+            let mut designs = std::collections::HashMap::new();
+            let mut found = None;
+            collect_acceptance_calls(body, &mut designs, &required, &lineage, &mut found);
+            let Some((design, asked, offered)) = found else {
+                continue;
+            };
+            let span = acceptance_call_span(module, name).unwrap_or_else(|| Span::at(0));
+            let claim = if asked == 1 {
+                "1 biological replicate".to_owned()
+            } else {
+                format!("{asked} biological replicates")
+            };
+            return Err(SemanticError::new(
+                span,
+                format!(
+                    "'{design}' is accepted on {claim}, but this evidence spans {offered}"
+                ),
+            )
+            .help(
+                "measuring one sample repeatedly gives technical replicates, which measure handling rather than biology",
+            )
+            .help(
+                "independent colonies, or independent transformations, give biological replicates",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Walk a checked body for a judgement whose evidence falls short, following
+/// bindings so a design named once and used later is still recognized.
+fn collect_acceptance_calls(
+    body: &[CheckedStatement],
+    designs: &mut std::collections::HashMap<String, String>,
+    required: &std::collections::HashMap<&str, u64>,
+    lineage: &crate::provenance::LineageMap,
+    found: &mut Option<(String, u64, usize)>,
+) {
+    for statement in body {
+        match statement {
+            CheckedStatement::Binding(binding) => {
+                if let CheckedExpression::Reference { path, .. } = &binding.value.value
+                    && let Some(source) = path.first()
+                    && let [target] = binding.targets.as_slice()
+                {
+                    let design = designs
+                        .get(source)
+                        .cloned()
+                        .unwrap_or_else(|| source.clone());
+                    designs.insert(target.name.clone(), design);
+                }
+                // A judgement bound to a name is judged the same as one
+                // written in a condition.
+                judge(&binding.value, designs, required, lineage, found);
+            }
+            CheckedStatement::If {
+                condition,
+                body,
+                else_body,
+            } => {
+                judge(condition, designs, required, lineage, found);
+                collect_acceptance_calls(body, designs, required, lineage, found);
+                collect_acceptance_calls(else_body, designs, required, lineage, found);
+            }
+            CheckedStatement::Match { cases, .. } => {
+                for case in cases {
+                    collect_acceptance_calls(&case.body, designs, required, lineage, found);
+                }
+            }
+            CheckedStatement::For { body, .. } | CheckedStatement::When { body, .. } => {
+                collect_acceptance_calls(body, designs, required, lineage, found);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn judge(
+    expression: &TypedExpression,
+    designs: &std::collections::HashMap<String, String>,
+    required: &std::collections::HashMap<&str, u64>,
+    lineage: &crate::provenance::LineageMap,
+    found: &mut Option<(String, u64, usize)>,
+) {
+    let CheckedExpression::Call {
+        operation,
+        arguments,
+    } = &expression.value
+    else {
+        return;
+    };
+    // An acceptance judgement is registered as `<Type>.accepts`, taking the
+    // design and its evidence, so the suffix names the judgement whichever
+    // artifact type it is about.
+    if !operation.ends_with(".accepts") || found.is_some() {
+        return;
+    }
+    let [design, evidence] = arguments.as_slice() else {
+        return;
+    };
+    let CheckedExpression::Reference { path, .. } = &design.value.value else {
+        return;
+    };
+    let Some(name) = path.first() else {
+        return;
+    };
+    let design = designs.get(name).cloned().unwrap_or_else(|| name.clone());
+    let Some(asked) = required.get(design.as_str()).copied() else {
+        return;
+    };
+    // Silence where the lineage is not fully known: a sample from a caller
+    // could be anything, and guessing there would refuse correct programs.
+    let Some(offered) = lineage.of(&evidence.value).independent_count() else {
+        return;
+    };
+    if (offered as u64) < asked {
+        *found = Some((design, asked, offered));
+    }
+}
+
+/// The span of the first acceptance judgement in a workflow, so the diagnostic
+/// points at the claim rather than at the file.
+fn acceptance_call_span(module: &Module, workflow: &str) -> Option<Span> {
+    let Item::Workflow(declaration) = module.items.iter().find(
+        |item| matches!(item, Item::Workflow(candidate) if candidate.name.value == workflow),
+    )?
+    else {
+        return None;
+    };
+    fn in_statements(statements: &[Stmt]) -> Option<Span> {
+        statements.iter().find_map(in_statement)
+    }
+    fn in_statement(statement: &Stmt) -> Option<Span> {
+        match statement {
+            Stmt::If(value) => in_expression(&value.condition)
+                .or_else(|| in_statements(&value.then_body))
+                .or_else(|| in_statements(&value.else_body)),
+            Stmt::Binding(value) => in_expression(&value.value),
+            Stmt::For(value) => in_statements(&value.body),
+            Stmt::When(value) => in_statements(&value.body),
+            Stmt::Match(value) => in_expression(&value.value).or_else(|| {
+                value.cases.iter().find_map(|case| {
+                    case.guard
+                        .as_ref()
+                        .and_then(in_expression)
+                        .or_else(|| in_statements(&case.body))
+                })
+            }),
+            _ => None,
+        }
+    }
+    fn in_expression(expression: &Expr) -> Option<Span> {
+        match expression {
+            Expr::Call { callee, span, .. } => match callee.as_ref() {
+                Expr::Path(path)
+                    if path
+                        .segments
+                        .last()
+                        .is_some_and(|segment| segment.value == "accepts") =>
+                {
+                    Some(*span)
+                }
+                _ => None,
+            },
+            Expr::Unary { operand, .. } => in_expression(operand),
+            Expr::Binary { left, right, .. } => {
+                in_expression(left).or_else(|| in_expression(right))
+            }
+            _ => None,
+        }
+    }
+    in_statements(&declaration.body)
 }
 
 pub(super) fn checked_field(name: &str, ty: &Ty) -> CheckedField {
@@ -150,13 +387,9 @@ mod tests {
             "../../../docs/language/specimens/plasmid-design.lab"
         ))
         .unwrap();
-        assert!(module.declarations.iter().any(|declaration| matches!(
-            declaration,
-            CheckedDeclaration::Artifact {
-                artifact: ArtifactKind::Plasmid,
-                ..
-            }
-        )));
+        assert!(module.declarations.iter().any(
+            |declaration| matches!(declaration, CheckedDeclaration::Artifact { artifact, .. } if artifact == "plasmid")
+        ));
     }
 
     #[test]
@@ -227,7 +460,7 @@ mod tests {
     #[test]
     fn documentation_travels_in_the_checked_module_and_its_interface() {
         let module = compile_module(
-            "/*! Synthetic reporter designs. */\n\n/** A synthetic reporter plasmid. */\nplasmid reporter:\n  sequence: dna(\"ACGT\")\n",
+            "/*! Synthetic reporter designs. */\n\nuse std.bio.designs\nuse std.bio.golden_gate\n\n/** A synthetic reporter plasmid. */\nplasmid reporter:\n  sequence = dna(\"ACGT\")\n",
         )
         .expect("the module checks");
 
@@ -264,17 +497,11 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(declarations.iter().any(|declaration| matches!(
             declaration,
-            CheckedDeclaration::Artifact {
-                artifact: ArtifactKind::Plasmid,
-                ..
-            }
+            CheckedDeclaration::Artifact { artifact, .. } if artifact == "plasmid"
         )));
         assert!(declarations.iter().any(|declaration| matches!(
             declaration,
-            CheckedDeclaration::Artifact {
-                artifact: ArtifactKind::Strain,
-                ..
-            }
+            CheckedDeclaration::Artifact { artifact, .. } if artifact == "strain"
         )));
         assert!(
             declarations
@@ -318,26 +545,27 @@ mod tests {
     #[test]
     fn a_component_list_admits_both_plasmids_and_parts() {
         let module = compile_module(
-            r#"use std.bio.inventory
+            r#"use std.bio.designs
+use std.bio.golden_gate
 
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
-J23101 = part("J23101")
-GFP = part("GFP")
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
+buy part J23101
+buy part GFP
 
 plasmid promoter_carrier:
-  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
-  backbone: pSB1C3
-  components: [J23101]
-  restriction_enzyme: BsaI
+  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone = pSB1C3
+  components = [J23101]
+  restriction_enzyme = BsaI
   require topology == circular
   accept sequence == design.sequence
 
 plasmid reporter_region:
-  sequence: dna("GATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTTGGCACT")
-  backbone: pSB1C3
-  components: [promoter_carrier, GFP]
-  restriction_enzyme: BsaI
+  sequence = dna("GATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTTGGCACT")
+  backbone = pSB1C3
+  components = [promoter_carrier, GFP]
+  restriction_enzyme = BsaI
   require topology == circular
   accept sequence == design.sequence
 "#,
@@ -1291,14 +1519,95 @@ workflow read_out(
         }
     }
 
+    /// `record` is the one declaration word for structured data; what a record
+    /// is for is a role it plays, and each role is something the checker reads:
+    /// `Event` is what `emit` resolves against, and `Evidential` is what may
+    /// support a claim.
     #[test]
-    fn inventory_constructors_require_their_standard_module() {
-        let error = compile_module("J23101 = part(\"J23101\")\n").unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("requires 'use std.bio.inventory'")
+    fn a_records_roles_say_what_the_checker_reads_from_it() {
+        let module = compile_module(
+            "record Started is Event\n\nrecord PlateReading is Evidential:\n  count: Integer\n\nrecord Aliquot:\n  volume: Integer\n",
+        )
+        .expect("one declaration word, with roles saying what each type is for");
+
+        let roles = module
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                CheckedDeclaration::Data { name, roles, .. } => {
+                    Some((name.as_str(), roles.clone()))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            roles,
+            [
+                ("Started", vec!["Event".to_owned()]),
+                ("PlateReading", vec!["Evidential".to_owned()]),
+                ("Aliquot", Vec::new()),
+            ]
         );
+    }
+
+    /// `observation` is an ordinary identifier, not a declaration word, so a
+    /// line led by it parses as an artifact instance of an unknown kind.
+    #[test]
+    fn only_record_opens_a_data_declaration() {
+        let error = compile_module("observation PlateReading:\n  count: Integer\n").unwrap_err();
+        assert!(
+            error.to_string().contains("expected"),
+            "'observation' does not open a declaration: {error}"
+        );
+    }
+
+    /// What an order names is the declared name, unless the item states an
+    /// identity of its own, because in practice the two are almost always the
+    /// same.
+    #[test]
+    fn a_bought_item_defaults_its_identity_to_its_name() {
+        let module = compile_module(
+            "use std.bio.designs\nuse std.bio.golden_gate\n\nbuy part J23101\nbuy part GFP\nbuy restriction_enzyme BsaI_HF:\n  identity = \"BsaI-HF-v2\"\n",
+        )
+        .expect("each bought item names its kind");
+
+        let catalogued = module
+            .declarations
+            .iter()
+            .filter_map(|declaration| match declaration {
+                CheckedDeclaration::Catalog {
+                    name,
+                    identity,
+                    r#type,
+                    ..
+                } => Some((name.as_str(), identity.as_str(), r#type.display_name())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            catalogued,
+            [
+                ("J23101", "J23101", "Part".to_owned()),
+                ("GFP", "GFP", "Part".to_owned()),
+                ("BsaI_HF", "BsaI-HF-v2", "RestrictionEnzyme".to_owned()),
+            ],
+            "each name is its own declaration, and an identity is written only where it differs"
+        );
+    }
+
+    /// A parameterized type is catalogued when its head is, which is a separate
+    /// question from whether the whole type packs into `any Role`.
+    #[test]
+    fn a_parameterized_catalogued_type_may_be_declared_by_name() {
+        let module = compile_module(
+            "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.parts\n\nbuy promoter pLac: Promoter<Tetracycline>\n",
+        )
+        .expect("a promoter of anything is catalogued");
+        assert!(module.declarations.iter().any(|declaration| matches!(
+            declaration,
+            CheckedDeclaration::Catalog { name, .. } if name == "pLac"
+        )));
     }
 
     #[test]
@@ -1336,17 +1645,18 @@ workflow read_out(
 
     const OPTIONAL_CLAUSE: &str = r#"
 use std.bio.build
-use std.bio.inventory
+use std.bio.designs
+use std.bio.golden_gate
 
-J23101 = part("J23101")
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
+buy part J23101
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
 
 plasmid p_gfp:
-  sequence: dna("ACGT")
-  backbone: pSB1C3
-  components: [J23101]
-  restriction_enzyme: BsaI
+  sequence = dna("ACGT")
+  backbone = pSB1C3
+  components = [J23101]
+  restriction_enzyme = BsaI
   require topology == circular
   accept sequence == design.sequence
 
@@ -1435,7 +1745,9 @@ workflow assemble() -> Material<Plasmid>:
     #[test]
     fn checks_durable_action_operand_types() {
         let error = compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
+use std.bio.designs
+use std.bio.golden_gate
 
 workflow invalid(image: Image) -> Evidence:
   evidence <- quantify image
@@ -1453,7 +1765,9 @@ workflow invalid(image: Image) -> Evidence:
     #[test]
     fn lowers_action_capability_ownership_and_result_contract() {
         let module = compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
+use std.bio.designs
+use std.bio.golden_gate
 
 workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
   plasmid <- store plasmid at -20 C
@@ -1468,7 +1782,7 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         let CheckedStatement::Effect { action, .. } = &body[0] else {
             panic!("expected effect")
         };
-        assert_eq!(action.operation, "std.lab.plasmid_actions.store");
+        assert_eq!(action.operation, "std.lab.plasmid.store");
         assert_eq!(action.capability.as_deref(), Some("cold_storage"));
         assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
         assert_eq!(action.results[0].name, "material");
@@ -1527,6 +1841,461 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
             error
                 .to_string()
                 .contains("state declarations must appear before workflow statements")
+        );
+    }
+
+    /// A catalogued item states what its type says it states — the enzyme
+    /// carries its own working temperature rather than every design repeating
+    /// it.
+    const ENZYME: &str = r#"record Enzyme:
+  digest_temperature: Integer
+  supplier: String
+
+artifact Enzyme
+
+"#;
+
+    #[test]
+    fn a_catalogued_item_states_the_fields_of_its_type() {
+        let module = compile_module(&format!(
+            "{ENZYME}buy enzyme BsaI:\n  digest_temperature = 37\n  supplier = \"NEB\"\n"
+        ))
+        .unwrap();
+
+        let catalogued = module
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                CheckedDeclaration::Catalog {
+                    name, properties, ..
+                } if name == "BsaI" => Some(properties),
+                _ => None,
+            })
+            .expect("the catalogued enzyme is declared");
+        assert_eq!(catalogued.len(), 2);
+    }
+
+    #[test]
+    fn a_catalogued_item_states_every_field_of_its_type() {
+        let error = compile_module(&format!(
+            "{ENZYME}buy enzyme BsaI:\n  digest_temperature = 37\n"
+        ))
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("'BsaI' does not state 'supplier'"),
+            "the type's fields are the item's schema: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_catalogued_property_its_type_does_not_declare() {
+        let error = compile_module(&format!(
+            "{ENZYME}buy enzyme BsaI:\n  digest_temp = 37\n  supplier = \"NEB\"\n"
+        ))
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("Enzyme has no property 'digest_temp'"),
+            "an undeclared property is a mistake, not an extension: {error}"
+        );
+    }
+
+    /// A supplier's item is never built here, so nothing about building it —
+    /// a claim, or the evidentiary standard claims are believed on — may be
+    /// stated on it.
+    #[test]
+    fn rejects_build_facts_on_a_bought_item() {
+        for member in [
+            "accept sequence == dna(\"ACGT\")",
+            "across 3 biological replicates",
+        ] {
+            let error = compile_module(&format!(
+                "use std.bio.designs\nuse std.bio.golden_gate\n\nbuy plasmid carrier:\n  sequence = dna(\"ACGT\")\n  {member}\n"
+            ))
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("is bought, so nothing here builds it"),
+                "'{member}' describes a thing a laboratory makes: {error}"
+            );
+        }
+    }
+
+    /// A declaration sets the standard its claims are believed on, and a claim
+    /// may set its own instead. Three measurements of one colony are one
+    /// biological replicate, so this counts entities rather than measurements.
+    #[test]
+    fn a_claim_takes_the_declarations_evidence_unless_it_states_its_own() {
+        let module = compile_module(
+            r#"use std.bio.designs
+use std.bio.golden_gate
+
+plasmid p_gfp:
+  sequence = dna("ACGT")
+
+  across 3 biological replicates
+
+  accept concentration >= 100 ng/uL
+  accept volume >= 20 uL across 1 biological replicate
+"#,
+        )
+        .unwrap();
+
+        let acceptance = module
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                CheckedDeclaration::Artifact { acceptance, .. } => Some(acceptance),
+                _ => None,
+            })
+            .expect("the plasmid is declared");
+        assert_eq!(
+            acceptance[0].replicates,
+            Some(3),
+            "inherits the declaration"
+        );
+        assert_eq!(acceptance[1].replicates, Some(1), "states its own");
+    }
+
+    /// A standard written below the claims it governs still governs them, so
+    /// what a claim is believed on does not depend on where the standard sits.
+    #[test]
+    fn a_declarations_evidence_reaches_claims_written_above_it() {
+        let module = compile_module(
+            r#"use std.bio.designs
+use std.bio.golden_gate
+
+plasmid p_gfp:
+  sequence = dna("ACGT")
+
+  accept volume >= 20 uL
+
+  across 2 biological replicates
+"#,
+        )
+        .unwrap();
+
+        let acceptance = module
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                CheckedDeclaration::Artifact { acceptance, .. } => Some(acceptance),
+                _ => None,
+            })
+            .expect("the plasmid is declared");
+        assert_eq!(acceptance[0].replicates, Some(2));
+    }
+
+    #[test]
+    fn rejects_a_declaration_stating_its_evidence_twice() {
+        let error = compile_module(
+            r#"use std.bio.designs
+use std.bio.golden_gate
+
+plasmid p_gfp:
+  sequence = dna("ACGT")
+
+  across 3 biological replicates
+  across 2 biological replicates
+
+  accept volume >= 20 uL
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("states its evidence twice"),
+            "one declaration sets one standard: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_claim_believed_on_no_replicates() {
+        let error = compile_module(
+            r#"use std.bio.designs
+use std.bio.golden_gate
+
+plasmid p_gfp:
+  sequence = dna("ACGT")
+
+  accept volume >= 20 uL across 0 biological replicates
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("cannot be believed on zero biological replicates"),
+            "asking for no evidence is a mistake, not a way to opt out: {error}"
+        );
+    }
+
+    const REPORTER: &str = r#"use std.bio.designs
+use std.bio.golden_gate
+use std.bio.build
+use std.lab.plasmid
+
+plasmid p_reporter:
+  sequence = dna("ACGT")
+
+  accept volume >= 20 uL across 3 biological replicates
+
+"#;
+
+    /// Measuring one sample three times is one biological replicate, however
+    /// many measurements are taken.
+    #[test]
+    fn refuses_evidence_that_is_one_entity_measured_repeatedly() {
+        let error = compile_module(&format!(
+            "{REPORTER}{}",
+            r#"workflow measure() -> Material<Plasmid>:
+  product <- realize p_reporter
+  first <- quantify product
+  second <- quantify product
+  if accepts(p_reporter, [first, second]):
+    return product
+  return product
+"#
+        ))
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("accepted on 3 biological replicates, but this evidence spans 1"),
+            "two measurements of one sample are one replicate: {error}"
+        );
+    }
+
+    #[test]
+    fn accepts_evidence_from_enough_independent_lineages() {
+        compile_module(&format!(
+            "{REPORTER}{}",
+            r#"workflow measure() -> Material<Plasmid>:
+  a <- realize p_reporter
+  b <- realize p_reporter
+  c <- realize p_reporter
+  first <- quantify a
+  second <- quantify b
+  third <- quantify c
+  if accepts(p_reporter, [first, second, third]):
+    <- dispose b
+    <- dispose c
+    return a
+  <- dispose b
+  <- dispose c
+  return a
+"#
+        ))
+        .expect("three independent realizations are three biological replicates");
+    }
+
+    /// A judgement bound to a name is the same judgement as one written in a
+    /// condition, so it is held to the same standard.
+    #[test]
+    fn refuses_short_evidence_in_a_bound_judgement() {
+        let error = compile_module(&format!(
+            "{REPORTER}{}",
+            r#"workflow measure() -> Material<Plasmid>:
+  product <- realize p_reporter
+  first <- quantify product
+  second <- quantify product
+  ok = accepts(p_reporter, [first, second])
+  return product
+"#
+        ))
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("accepted on 3 biological replicates, but this evidence spans 1"),
+            "a bound judgement is still a judgement: {error}"
+        );
+    }
+
+    /// A sample that arrived from a caller could be anything, so the check says
+    /// nothing rather than refusing a program it cannot judge.
+    #[test]
+    fn says_nothing_where_provenance_is_not_known() {
+        compile_module(&format!(
+            "{REPORTER}{}",
+            r#"workflow measure(product: Material<Plasmid>) -> Material<Plasmid>:
+  first <- quantify product
+  second <- quantify product
+  if accepts(p_reporter, [first, second]):
+    return product
+  return product
+"#
+        ))
+        .expect("an unknown lineage is not a known-bad one");
+    }
+
+    /// A binding renames a contract's result, so lineage has to follow the name
+    /// the program bound rather than the one the contract declared.
+    #[test]
+    fn follows_a_result_bound_under_a_different_name() {
+        let error = compile_module(&format!(
+            "{REPORTER}{}",
+            r#"workflow measure() -> Material<Plasmid>:
+  product <- realize p_reporter
+  renamed <- quantify product
+  also <- quantify product
+  if accepts(p_reporter, [renamed, also]):
+    return product
+  return product
+"#
+        ))
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("this evidence spans 1"),
+            "the contract calls this result 'evidence'; the program does not: {error}"
+        );
+    }
+
+    #[test]
+    fn names_a_quantity_by_the_unit_it_is_measured_in() {
+        compile_module(
+            r#"record Reagent:
+  digest_temperature: Quantity<C>
+  concentration: Quantity<ng/uL>
+
+artifact Reagent
+
+buy reagent BsaI:
+  digest_temperature = 37 C
+  concentration = 100 ng/uL
+"#,
+        )
+        .expect("a compound unit is written the same way in a type as in a value");
+    }
+
+    /// Naming the type must not change what is checked: a unit still has to
+    /// match exactly, so microlitres and millilitres remain different types.
+    #[test]
+    fn a_quantity_type_still_checks_its_unit_exactly() {
+        let error = compile_module(
+            r#"record Reagent:
+  volume: Quantity<uL>
+
+artifact Reagent
+
+buy reagent BsaI:
+  volume = 20 mL
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("expects Quantity<uL>, found Quantity<mL>"),
+            "a thousandfold error on the bench is not a conversion: {error}"
+        );
+    }
+
+    #[test]
+    fn requires_every_field_a_schema_does_not_mark_optional() {
+        let error = compile_module(
+            r#"artifact Plasmid:
+  label: String
+  note?: String
+
+plasmid sample:
+  note = "thawed"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("plasmid 'sample' does not state 'label'"),
+            "a field without '?' is one every declaration states: {error}"
+        );
+    }
+
+    #[test]
+    fn accepts_a_declaration_that_omits_only_optional_fields() {
+        compile_module(
+            r#"artifact Plasmid:
+  label: String
+  note?: String
+
+plasmid sample:
+  label = "tube 1"
+"#,
+        )
+        .expect("an optional field may go unstated");
+    }
+
+    #[test]
+    fn rejects_a_rule_reading_a_property_this_declaration_omits() {
+        let error = compile_module(
+            r#"artifact Plasmid:
+  label: String
+  note?: String
+
+plasmid sample:
+  label = "tube 1"
+
+  accept note == "thawed"
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("plasmid 'sample' does not state 'note'"),
+            "an omitted optional is absent, not empty: {error}"
+        );
+    }
+
+    #[test]
+    fn a_rule_reads_the_produced_type_field_over_an_omitted_property() {
+        // A rule constrains the artifact that gets built. `Plasmid` carries its
+        // own `sequence`, so the rule reads the realized material's sequence
+        // and does not care that the declaration stated none.
+        compile_module(
+            r#"artifact Plasmid:
+  label: String
+  sequence?: DNA
+
+plasmid sample:
+  label = "tube 1"
+
+  accept sequence == dna("ACGT")
+"#,
+        )
+        .expect("a rule reads the produced type's field");
+    }
+
+    #[test]
+    fn rejects_a_completeness_rule_naming_a_required_field() {
+        let error = compile_module(
+            r#"artifact Plasmid:
+  label: String
+  note?: String
+
+  declares label or note
+"#,
+        )
+        .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("'label' is required, so a completeness rule cannot mention it"),
+            "requiredness and a completeness rule must not disagree: {error}"
         );
     }
 }

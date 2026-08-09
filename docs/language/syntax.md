@@ -51,27 +51,29 @@ The kernel keeps orchestration mechanics distinct from domain operations:
 | Role | Words or forms |
 | --- | --- |
 | Modules | `use` |
-| Biological declarations | `part`, `circuit`, `plasmid`, `strain` |
-| Laboratory data declarations | `record`, `material`, `observation`, `evidence`, `event`, `outcome` |
+| Declaration shapes | `record`, `circuit`, `artifact`, `workflow`, `state` |
 | Classification | `role`, `is`, `any` |
-| Orchestration declarations | `workflow`, `state` |
-| Signatures and contracts | `require`, `accept` |
+| Provenance | `build`, `buy` |
+| Schemas and contracts | `declares`, `require`, `accept`, `across` |
 | Control | `if`, `else`, `for`, `in`, `match`, `case`, `return` |
 | Reactive control | `when`, `every`, `after`, `emit` |
 | Boolean operators | `and`, `or`, `not` |
 
-Most of these are contextual. Circuits and workflows both declare a callable signature in their header, so neither has `input` or `output` lines. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
+These are the mechanics. The *vocabulary* — `plasmid`, `strain`, and any domain word a package declares with `artifact` — is not in this table and is not in the parser, which is the point of [0022](decisions/0022-fixed-grammar-open-vocabulary.md). Circuits and workflows both declare a callable signature in their header. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
 
 The core punctuation has one job each:
 
 | Form | Meaning |
 | --- | --- |
 | `:` plus indentation | declaration or control block |
-| `name: value` in a biological declaration | declarative property |
+| `name = value` in a declaration body | declarative property |
+| `name: Type` in a declaration body | a field, parameter, or annotation |
 | `{ name: value }` | construct or destructure typed data |
 | `(...)` | call or group |
 | `[...]` | collection literal |
 | `<...>` | type arguments |
+| `Quantity<uL>` | a measurement in a stated unit |
+| `name?:` in a schema | a field an instance may leave unstated |
 | `Name: Role` inside `<...>` | introduce a type parameter |
 | `any Role` inside `<...>` | a type argument deliberately forgotten |
 | `is` after a declaration name | the roles that type plays |
@@ -259,39 +261,95 @@ circuit regulated_expression(
 ## Laboratory declarations
 
 ```text
-role         a part types can play, such as Signal or Reporter
-part         reusable biological part
-circuit      reusable biological organization
-plasmid      physical artifact design
-strain       engineered organism: a chassis carrying named plasmids
-record       ordinary immutable structured data
-observation  recorded measurement or inspection
-evidence     information evaluated against a claim
-event        durable orchestration occurrence
-outcome      tagged workflow result
-workflow     durable orchestration definition
-state        durable mutable memory owned by one workflow instance
+role      a part types can play, such as Signal or Reporter
+record    structured data; roles say what it is for
+circuit   reusable biological organization, declared as a callable
+artifact  a kind of thing, and the schema its instances are checked against
+build     a thing this laboratory makes: it has a recipe and acceptance criteria
+buy       a thing a supplier lists: it has an identity to order against
+workflow  durable orchestration definition
+state     durable mutable memory owned by one workflow instance
 ```
 
-The declaration words are meaningful only if the compiler assigns different laws to their values.
+A word is meaningful only if the compiler assigns a law to it. `record` plus role membership replaced six words that mostly did not — see [0020](decisions/0020-laws-are-declared-roles.md).
+
+## Artifact kinds and their instances
+
+A package declares a kind; the compiler knows only the shape. The schema block
+uses `:` because it states types; the instance block uses `=` because it states
+values, so a reader can tell at a glance which they are looking at.
+
+```lab
+/** A DNA design a laboratory can build. */
+artifact Plasmid:
+  sequence?: DNA
+  backbone?: Backbone
+  cargo?: Circuit<any Signal, any Protein>
+
+  declares sequence or (backbone and cargo)
+```
+
+A kind names the type its instances have, which is what a workflow writes in
+`Material<Plasmid>` and what `require` and `accept` read fields from. The word
+those instances are written with is that type in snake_case — `Plasmid` gives
+`plasmid`, `RestrictionEnzyme` gives `restriction_enzyme`, and an acronym stays
+one word, so `DNA` gives `dna`. Neither name is written twice, and a word and
+its type cannot disagree.
+
+Every field is one an instance must state unless the schema marks it `?`. The
+mark sits on the name rather than the type, because absence is a property of the
+field: an optional `Backbone` field still holds a `Backbone` wherever it is
+stated, and Lab already spells a value that may be nothing `Backbone | None`.
+
+`declares` states which combinations of stated properties are complete. It is a
+predicate over presence, not over values: its whole vocabulary is property names
+combined with `and`, `or`, and `not`. It says what `?` cannot — that a plasmid
+needs a sequence *or* a backbone and cargo — so it names only optional
+properties. A kind whose properties are simply all required needs no `declares`,
+and naming a required property in one is an error rather than a redundancy.
+
+Five lines, each with its own subject and its own moment:
+
+| Line | Subject | Checked |
+| --- | --- | --- |
+| `backbone: Backbone` | which properties exist, and their types | when the schema is read |
+| `declares sequence or (backbone and cargo)` | which combinations are complete | when a declaration is written |
+| `require topology == circular` | the artifact, before it is built | before construction |
+| `accept concentration >= 100 ng/uL` | the artifact, after it is built | against runtime evidence |
+| `across 3 biological replicates` | how much independent evidence a claim needs | against the lineage of what was measured |
+
+A word no imported package declares is an error that names what is in scope:
+
+```
+error: unknown declaration kind 'reagent'
+  = help: kinds in scope: plasmid, strain
+```
 
 ## Declaration properties
 
-Inside a biological declaration, `name: value` records a typed property:
+Inside an artifact declaration, `name = value` records a typed property:
 
 ```lab
 plasmid reporter:
-  sequence: dna("ACGT")
-  backbone: pSB1C3
+  sequence = dna("ACGT")
+  backbone = pSB1C3
 ```
 
-A property is neither a type annotation nor a workflow assignment. Duplicate property names are rejected. Portable checked IR preserves the property name and typed value; a target may consume a documented subset without the core AST growing one field per backend.
+The value is a deterministic expression, evaluated once and never repeated: `=` contrasts with `<-`, which is the durable effect form, and a property is definitively not an effect. `:` is reserved for the other thing a declaration body can say — that a name has a type — so the two never collide:
+
+```lab
+record PlateObservation:
+  image: Image          // a field: the right side is a type
+  colonies: ColonyMap
+```
+
+Duplicate property names are rejected. Portable checked IR preserves the property name and typed value; a target may consume a documented subset without the core AST growing one field per backend.
 
 ## Plasmid requirements and acceptance
 
 ```lab
 plasmid p_sensor:
-  sequence: dna("ATGCGTACGTTAGCTA")
+  sequence = dna("ATGCGTACGTTAGCTA")
 
   require topology == circular
 
@@ -304,41 +362,40 @@ plasmid p_sensor:
 
 ## Typed inventory identities and target properties
 
-Inventory identities enter through typed standard-library constructors, and plasmid properties refer to those symbols. Properties are backend-neutral typed expressions—not executable bindings and not evidence that inventory is physically available:
+Inventory identities enter through `buy` declarations against imported kinds, and plasmid properties refer to those symbols. Properties are backend-neutral typed expressions—not executable bindings and not evidence that inventory is physically available:
 
 ```lab
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.lab.plasmid
 
-J23101 = part("J23101")
-B0034 = part("B0034")
-GFP = part("GFP")
-B0015 = part("B0015")
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
-DH5alpha = chassis("DH5alpha")
-chloramphenicol = antibiotic("chloramphenicol")
+buy part J23101
+buy part B0034
+buy part GFP
+buy part B0015
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
+buy chassis DH5alpha
+buy antibiotic chloramphenicol
 
 plasmid p_gfp:
-  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
-  backbone: pSB1C3
-  components: [J23101, B0034, GFP, B0015]
-  restriction_enzyme: BsaI
-  assembly_replicates: 1
+  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  backbone = pSB1C3
+  components = [J23101, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
 
   require topology == circular
   accept sequence == design.sequence
 
 strain reporter_host:
-  chassis: DH5alpha
-  plasmids: [p_gfp]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
+  chassis = DH5alpha
+  plasmids = [p_gfp]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 2
+  serial_dilutions = 2
 ```
 
-The string passed to an inventory constructor is an external inventory identity. Downstream declarations use the checked symbol, so renaming a source binding and changing an external identifier are distinct operations. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
+A bought item's external identity is what a supplier's order names. It defaults to the declared name and is stated as an `identity` property only where the two differ, so renaming a source symbol and changing an external identifier are distinct operations. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
 
 The OT-2 specialization interprets these properties after ordinary module checking. Another target may ignore them, interpret other metadata, or reject the module. Target-specific property names are not encoded in the core checker.
 
@@ -352,7 +409,7 @@ The union preserves the nominal alternatives; it does not convert the symbols to
 
 Multiple property-bearing artifacts and their realization workflows may be compiled by a compatible target. Replicate and dilution settings are currently interpreted by the initial OT-2 specialization, not by the core language.
 
-## Artifact kinds
+## Plasmids and strains
 
 A `plasmid` and a `strain` share one declaration shape and differ in what they name. A plasmid is a DNA design: a sequence, or the backbone and components a sequence is built from. A strain is an organism: a chassis together with the plasmid designs it carries.
 
@@ -360,14 +417,14 @@ The distinction matters because the same plasmid in two hosts is two artifacts, 
 
 ```lab
 strain reporter_dh5alpha:
-  chassis: DH5alpha
-  plasmids: [p_gfp]
-  selection: chloramphenicol
+  chassis = DH5alpha
+  plasmids = [p_gfp]
+  selection = chloramphenicol
 
 strain reporter_bl21:
-  chassis: BL21
-  plasmids: [p_gfp]
-  selection: chloramphenicol
+  chassis = BL21
+  plasmids = [p_gfp]
+  selection = chloramphenicol
 ```
 
 ## Reaction chemistry
@@ -376,14 +433,112 @@ Quantity-valued properties state the chemistry a design is built with. These are
 
 ```lab
 plasmid p_gfp:
-  reaction_volume: 20 uL
-  part_volume: 2 uL
-  assembly_cycles: 75
-  digest_temperature: 37 C
-  ligate_duration: 5 min
+  backbone = pSB1C3
+  cargo = gfp_circuit
+  reaction_volume = 20 uL
+  part_volume = 2 uL
+  assembly_cycles = 75
+  digest_temperature = 37 C
+  ligate_duration = 5 min
 ```
 
 Units are checked rather than assumed: `20 mL` where microlitres are expected is a diagnostic, not a thousandfold error on the bench. Water makes each reaction up to its stated volume, and reagents that over-subscribe that volume are rejected before any target sees the design.
+
+## Evidence a claim is believed on
+
+Three colonies picked from a plate are independent transformants; one culture
+measured three times is a single organism. The first measures biological
+variance and the second measures pipetting variance, so reporting the second as
+`n = 3` claims more than the experiment supports.
+
+An artifact says what its claims are believed on:
+
+```lab
+plasmid p_gfp:
+  sequence = dna("ACGT")
+
+  across 3 biological replicates
+
+  accept concentration >= 100 ng/uL
+  accept volume >= 20 uL across 1 biological replicate
+```
+
+A declaration sets the standard every claim in it takes. A claim may state its
+own instead, which replaces the declaration's rather than adding to it, so what
+any claim is believed on is written in one place. The declaration's standard is
+read before any claim, so one written below the claims it governs still governs
+them, and stating it twice is an error rather than something position resolves.
+
+`across 0 biological replicates` is refused: asking for no evidence is a mistake,
+not a way to opt out. Omitting `across` is how a claim accepts whatever evidence
+is offered.
+
+Which replicates are which is not a property of a sample — it is where the
+sample came from. Transformation establishes an organism and picking isolates
+independent transformants, while diluting, recovering, plating, and measuring
+carry on the lineage that went in. Two materials are biological replicates when
+they trace to different beginnings and technical replicates when they trace to
+the same one. See [`0026`](decisions/0026-lineage-and-replicates.md).
+
+## Where a thing came from
+
+A kind names a type; the word its instances are written with is that type in
+snake_case, so neither name is written twice. An instance states its provenance,
+because being built is a fact about a particular thing rather than about its
+type — a plasmid may be assembled here or ordered from a supplier.
+
+```lab
+artifact Plasmid:
+  sequence?: DNA
+  backbone?: Backbone
+
+build plasmid composite_plasmid_1:
+  backbone = pSB1C3
+  accept concentration >= 100 ng/uL
+
+buy backbone pSB1C3
+buy restriction_enzyme BsaI:
+  digest_temperature = 37 C
+```
+
+`require`, `accept`, and a place in the build order attach to `build`. An
+`identity` to order against attaches to `buy`, and belongs to buying rather than
+to any kind's schema. Claiming to build something bought is refused.
+
+A word whose kind takes no type arguments has already said what type its
+instances have. Where a kind is generic it cannot, and the instance names its
+own type:
+
+```lab
+buy promoter pTet: Promoter<Tetracycline>
+```
+
+## A schema several packages describe
+
+A kind's schema is everything every module in scope declares for it. What a
+plasmid *is* comes from one package; what a method needs to build one comes from
+another, and a design built by that method imports it.
+
+```lab
+use std.bio.designs      // sequence, backbone, components
+use std.bio.golden_gate  // reaction_volume, assembly_cycles, digest_temperature
+```
+
+Every field a method contributes is optional, because its standard values stand
+behind a design that states nothing, and a design's own value wins where a
+protocol departs from the datasheet. A digest runs at its enzyme's temperature
+unless the design says otherwise.
+
+A property no module in scope declares is a mistake rather than an extension:
+
+```
+error: Plasmid has no property 'reaction_volme'
+  |
+6 |   reaction_volme = 20 uL
+  |   ^^^^^^^^^^^^^^
+  |
+  = help: did you mean 'reaction_volume'?
+```
 
 ## Dependencies through workflow dataflow
 
@@ -391,7 +546,7 @@ Dependencies are expressed through workflow dataflow rather than string matching
 
 ```lab
 use std.bio.build
-use std.lab.plasmid_actions
+use std.lab.plasmid
 
 workflow assemble_promoter_carrier() -> Material<Plasmid>:
   product <- realize promoter_carrier

@@ -1,0 +1,16 @@
+/*!
+ * Stage 1: parts and backbone are cut and ligated into a circular product.
+ */
+
+use std.bio.build
+use golden_gate_extended.designs.plasmids
+
+/** Assemble the GFP reporter plasmid. */
+workflow assemble_composite_plasmid_1() -> Material<Plasmid>:
+  product <- realize composite_plasmid_1
+  return product
+
+/** Assemble the RFP reporter plasmid. */
+workflow assemble_composite_plasmid_2() -> Material<Plasmid>:
+  product <- realize composite_plasmid_2
+  return product

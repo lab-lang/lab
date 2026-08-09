@@ -35,9 +35,10 @@ pub(crate) fn new_project(path: PathBuf, name: Option<String>, output: &Output) 
     write_new(
         &programs.join("main.lab"),
         r#"use std.bio.build
+use std.bio.designs
 
 plasmid starter:
-  sequence: dna("ATGCGTACGTTAGCTA")
+  sequence = dna("ATGCGTACGTTAGCTA")
   require topology == circular
   accept sequence == design.sequence
 

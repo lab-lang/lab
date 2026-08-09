@@ -31,6 +31,7 @@ pub(super) fn build_interface(
                 callable,
                 fields,
                 roles: Vec::new(),
+                schema: None,
                 parameters: TypeParameters::default(),
                 documentation: documentation.clone().unwrap_or_default(),
             },
@@ -61,6 +62,17 @@ pub(super) fn build_interface(
 
     for declaration in declarations {
         match declaration {
+            CheckedDeclaration::Catalog {
+                doc, name, r#type, ..
+            } => insert(
+                &mut interface,
+                name,
+                ExportKind::Value,
+                Some(r#type),
+                None,
+                BTreeMap::new(),
+                doc,
+            ),
             CheckedDeclaration::Role { doc, name } => insert(
                 &mut interface,
                 name,
@@ -96,16 +108,39 @@ pub(super) fn build_interface(
                 );
                 generic(&mut interface, name, parameters, bounds);
             }
+            CheckedDeclaration::ArtifactKind {
+                doc,
+                name,
+                produces,
+                fields,
+                declares,
+            } => {
+                insert(
+                    &mut interface,
+                    name,
+                    ExportKind::ArtifactKind,
+                    None,
+                    None,
+                    BTreeMap::new(),
+                    doc,
+                );
+                interface
+                    .exports
+                    .get_mut(name)
+                    .expect("the kind export was just inserted")
+                    .schema = Some(crate::semantics::ArtifactSchema {
+                    produces: produces.clone(),
+                    fields: fields.clone(),
+                    declares: declares.clone(),
+                });
+            }
             CheckedDeclaration::Artifact {
                 doc,
-                artifact,
+                produces,
                 name,
                 ..
             } => {
-                let ty = CheckedType::Named {
-                    name: artifact.type_name().to_owned(),
-                    arguments: Vec::new(),
-                };
+                let ty = produces.clone();
                 insert(
                     &mut interface,
                     name,

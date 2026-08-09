@@ -4,7 +4,7 @@ This tutorial is a narrow lowering from explicit Lab source into one OT-2 use-ca
 
 ## Architectural boundary
 
-The source declares plasmid and strain artifacts with checked properties, imports `std.bio.inventory` to associate typed symbols with external inventory identities, then composes typed `realize` and `transform` effects in workflows. Dependencies are `Material<Plasmid>` values flowing into those effects. The dependency planner derives graph roots and build waves from checked workflow IR without biological level names. Generic compiler responsibilities stop at resolving library operations, type checking, ownership checking, and preserving that dataflow.
+The source declares plasmid and strain artifacts with checked properties, declares bought items with `buy` to associate typed symbols with external inventory identities, then composes typed `realize` and `transform` effects in workflows. Dependencies are `Material<Plasmid>` values flowing into those effects. The dependency planner derives graph roots and build waves from checked workflow IR without biological level names. Generic compiler responsibilities stop at resolving library operations, type checking, ownership checking, and preserving that dataflow.
 
 `lab-language` does not contain an OT-2 recipe AST or a build-specific parser entry point. Source declarations are lowered into verifier-valid Design and Workflow LAIR before a concrete biological protocol is selected. The OT-2 backend accepts only `ProtocolLairProgram`; it has no API that can consume `CheckedModule` or `PortableLairProgram` directly.
 

@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::ast::{DataKind, Path};
+use crate::ast::Path;
 use crate::checked::CheckedType;
 use crate::semantic_error::SemanticError;
 use crate::semantics::{DefinitionId, ExportKind, ModuleId, ModuleInterface, SemanticEnvironment};
@@ -40,7 +40,6 @@ pub(super) struct CircuitSignature {
 
 #[derive(Clone)]
 pub(super) struct DataSignature {
-    pub kind: DataKind,
     /// Type parameters in declaration order. Empty for an imported type, whose
     /// parameters the module interface does not yet carry, which leaves its
     /// arguments unchecked exactly as before.
@@ -48,6 +47,22 @@ pub(super) struct DataSignature {
     pub bounds: HashMap<String, Ty>,
     pub fields: BTreeMap<String, Ty>,
     pub cases: BTreeMap<String, BTreeMap<String, Ty>>,
+}
+
+/// A property an artifact kind declares, and whether an instance may omit it.
+#[derive(Clone)]
+pub(super) struct SchemaField {
+    pub ty: Ty,
+    pub optional: bool,
+}
+
+/// What a package's artifact word means: the type its instances have, the
+/// properties they may state, and which combinations are complete.
+#[derive(Clone)]
+pub(super) struct ArtifactKindSignature {
+    pub produces: Ty,
+    pub fields: BTreeMap<String, SchemaField>,
+    pub declares: Option<crate::checked::CheckedPresence>,
 }
 
 #[derive(Clone)]
@@ -75,6 +90,7 @@ pub(super) struct SemanticContext {
     pub cases: HashMap<String, String>,
     pub event_types: BTreeSet<String>,
     pub workflows: HashMap<String, WorkflowSignature>,
+    pub artifact_kinds: HashMap<String, ArtifactKindSignature>,
     /// Every role in scope. A role shares the type namespace so the two cannot
     /// collide, but it is not a type: it may only bound a type parameter.
     pub roles: BTreeSet<String>,
@@ -115,6 +131,7 @@ impl SemanticContext {
             cases: HashMap::new(),
             event_types: BTreeSet::new(),
             workflows: HashMap::new(),
+            artifact_kinds: HashMap::new(),
             roles: BTreeSet::new(),
             type_roles: HashMap::new(),
         }
@@ -265,7 +282,6 @@ impl SemanticContext {
             self.data.insert(
                 name.clone(),
                 DataSignature {
-                    kind: DataKind::Record,
                     parameters: export.parameters.names.clone(),
                     bounds: export
                         .parameters
@@ -288,6 +304,45 @@ impl SemanticContext {
                 // Types and roles are registered above, before anything that
                 // could refer to them.
                 ExportKind::Type | ExportKind::Role => {}
+                // A word a package supplies means nothing without its schema,
+                // so the two travel together.
+                ExportKind::ArtifactKind => {
+                    if let Some(schema) = &export.schema {
+                        let fields = schema.fields.iter().map(|field| {
+                            (
+                                field.name.clone(),
+                                SchemaField {
+                                    ty: from_checked_type(&field.r#type),
+                                    optional: field.optional,
+                                },
+                            )
+                        });
+                        // Several packages describe one kind: what a plasmid is
+                        // comes from one, and what a method needs to build one
+                        // from another. Importing both gives a schema carrying
+                        // everything either says, and a rule from whichever
+                        // states it.
+                        match self.artifact_kinds.get_mut(name) {
+                            Some(existing) => {
+                                existing.fields.extend(fields);
+                                existing.declares = existing
+                                    .declares
+                                    .clone()
+                                    .or_else(|| schema.declares.clone());
+                            }
+                            None => {
+                                self.artifact_kinds.insert(
+                                    name.clone(),
+                                    ArtifactKindSignature {
+                                        produces: from_checked_type(&schema.produces),
+                                        fields: fields.collect(),
+                                        declares: schema.declares.clone(),
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
                 ExportKind::Value => {
                     self.insert_imported_name(interface.module.as_str(), name, span)?;
                     if let Some(ty) = &export.r#type {

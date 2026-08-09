@@ -1,0 +1,47 @@
+/*!
+ * The four-strain characterization panel.
+ *
+ * The entry point calls the workflows the panel is made of. The compiler
+ * derives the build order from the material each call consumes rather than from
+ * the order written here.
+ */
+
+use std.lab.plasmid
+use golden_gate_extended.workflows.assemble
+use golden_gate_extended.workflows.build_strains
+use golden_gate_extended.workflows.observe
+
+workflow main() -> (
+  cloning_gfp: Material<Strain>,
+  cloning_rfp: Material<Strain>,
+  expressing_gfp: Material<Strain>,
+  reference: Material<Strain>,
+):
+  composite_plasmid_1 <- assemble_composite_plasmid_1
+  composite_plasmid_2 <- assemble_composite_plasmid_2
+
+  // One plasmid goes into two chassis. Material is affine, so a transformation
+  // consumes an aliquot of its own rather than the same value twice.
+  for_cloning, for_expression <- split composite_plasmid_1
+
+  cloning_gfp, plate_1 <- build_composite_strain_1 for_cloning
+  cloning_rfp, plate_2 <- build_composite_strain_2 composite_plasmid_2
+  expressing_gfp, plate_3 <- build_expression_strain for_expression
+  reference, plate_4 <- build_reference_strain
+
+  // Every plate is watched the same way, and what watching produced decides
+  // whether there is anything worth picking.
+  growth <- await_colonies plate_1
+
+  match growth:
+    case Ready:
+      <- dispose growth.plate
+
+    case TimedOut:
+      <- dispose growth.plate
+
+  <- dispose plate_2
+  <- dispose plate_3
+  <- dispose plate_4
+
+  return cloning_gfp, cloning_rfp, expressing_gfp, reference

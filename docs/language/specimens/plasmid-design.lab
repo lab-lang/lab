@@ -1,3 +1,5 @@
+use std.bio.designs
+
 use std.bio.parts
 use std.bio.backbones
 
@@ -14,8 +16,8 @@ circuit regulated_expression(
 tet_reporter = regulated_expression(pTet, sfGFP)
 
 plasmid p_tet_reporter:
-  backbone: p15A_kan
-  cargo: tet_reporter
+  backbone = p15A_kan
+  cargo = tet_reporter
 
   require topology == circular
   require sites(BsaI) == 0

@@ -1,0 +1,25 @@
+/*!
+ * Named biological parts and the roles they play.
+ *
+ * A catalogued name says only that a supplier lists the item. It is not a claim
+ * that a suitable lot is on the shelf; that remains an inventory resolution and
+ * a runtime evidence question.
+ */
+
+use std.bio.designs
+
+/** The inducer a tetracycline-responsive promoter answers to. */
+record Tetracycline is Signal
+
+/** The inducer an arabinose-responsive promoter answers to. */
+record Arabinose is Signal
+
+/** A reporter protein read as green fluorescence. */
+record GreenFluorescentProtein is Protein
+
+buy promoter pTet: Promoter<Tetracycline>
+buy promoter pBAD: Promoter<Arabinose>
+buy cds sfGFP: CDS<GreenFluorescentProtein>
+buy part B0034
+buy part B0015
+buy restriction_enzyme BsaI

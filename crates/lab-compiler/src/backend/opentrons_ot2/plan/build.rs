@@ -371,34 +371,35 @@ mod tests {
 
     const SOURCE: &str = r#"
 use std.bio.build
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.bio.designs
+use std.bio.golden_gate
+use std.lab.plasmid
 
-J23101 = part("J23101")
-B0034 = part("B0034")
-GFP = part("GFP")
-B0015 = part("B0015")
-pSB1C3 = backbone("pSB1C3")
-BsaI = restriction_enzyme("BsaI")
-DH5alpha = chassis("DH5alpha")
-chloramphenicol = antibiotic("chloramphenicol")
+buy part J23101
+buy part B0034
+buy part GFP
+buy part B0015
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
+buy chassis DH5alpha
+buy antibiotic chloramphenicol
 
 plasmid p_gfp:
-  sequence: dna("ACGT")
-  backbone: pSB1C3
-  components: [J23101, B0034, GFP, B0015]
-  restriction_enzyme: BsaI
-  assembly_replicates: 1
+  sequence = dna("ACGT")
+  backbone = pSB1C3
+  components = [J23101, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
   require topology == circular
   accept sequence == design.sequence
 
 strain reporter_host:
-  chassis: DH5alpha
-  plasmids: [p_gfp]
-  selection: chloramphenicol
-  transformation_replicates: 2
-  plating_replicates: 2
-  serial_dilutions: 2
+  chassis = DH5alpha
+  plasmids = [p_gfp]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 2
+  serial_dilutions = 2
 
 workflow assemble_p_gfp() -> Material<Plasmid>:
   dependencies = []
@@ -457,8 +458,8 @@ workflow build_reporter_host(
     #[test]
     fn source_chemistry_reaches_the_plan_and_rebalances_the_reaction() {
         let tuned = SOURCE.replace(
-            "  assembly_replicates: 1\n",
-            "  assembly_replicates: 1\n  reaction_volume: 30 uL\n  part_volume: 3 uL\n  assembly_cycles: 40\n",
+            "  assembly_replicates = 1\n",
+            "  assembly_replicates = 1\n  reaction_volume = 30 uL\n  part_volume = 3 uL\n  assembly_cycles = 40\n",
         );
         let plan = plan_build(&protocol(&tuned), &Ot2TargetProfile::default()).unwrap();
         let chemistry = &plan.assemblies[0].chemistry;
@@ -471,11 +472,44 @@ workflow build_reporter_host(
         );
     }
 
+    /// A digest runs at the temperature its enzyme works at, so a design that
+    /// says nothing about it still cuts correctly.
+    #[test]
+    fn chemistry_comes_from_the_item_that_owns_it() {
+        let owned = SOURCE.replace(
+            "buy restriction_enzyme BsaI\n",
+            "buy restriction_enzyme BsaI:\n  digest_temperature = 55 C\n  digest_duration = 7 min\n",
+        );
+        let plan = plan_build(&protocol(&owned), &Ot2TargetProfile::default()).unwrap();
+        let chemistry = &plan.assemblies[0].chemistry;
+
+        assert_eq!(chemistry.digest_temperature_c, 55);
+        assert_eq!(chemistry.digest_minutes, 7);
+    }
+
+    /// A protocol may depart from the datasheet, so a value the design states
+    /// wins over the one its enzyme supplies.
+    #[test]
+    fn a_design_overrides_what_its_enzyme_supplies() {
+        let owned = SOURCE
+            .replace(
+                "buy restriction_enzyme BsaI\n",
+                "buy restriction_enzyme BsaI:\n  digest_temperature = 55 C\n",
+            )
+            .replace(
+                "  assembly_replicates = 1\n",
+                "  assembly_replicates = 1\n  digest_temperature = 30 C\n",
+            );
+        let plan = plan_build(&protocol(&owned), &Ot2TargetProfile::default()).unwrap();
+
+        assert_eq!(plan.assemblies[0].chemistry.digest_temperature_c, 30);
+    }
+
     #[test]
     fn rejects_a_reaction_whose_reagents_exceed_its_volume() {
         let over = SOURCE.replace(
-            "  assembly_replicates: 1\n",
-            "  assembly_replicates: 1\n  reaction_volume: 10 uL\n",
+            "  assembly_replicates = 1\n",
+            "  assembly_replicates = 1\n  reaction_volume = 10 uL\n",
         );
         let checked = compile_module(&over).unwrap();
         let error = PortableLairProgram::lower(&checked)
@@ -484,22 +518,28 @@ workflow build_reporter_host(
         assert!(error.to_string().contains("reaction volume"), "{error}");
     }
 
+    /// A method declares the unit each of its quantities is measured in, so a
+    /// thousandfold error is caught where it is written rather than when a
+    /// target reads it.
     #[test]
     fn rejects_a_chemistry_quantity_in_the_wrong_unit() {
         let wrong = SOURCE.replace(
-            "  assembly_replicates: 1\n",
-            "  assembly_replicates: 1\n  reaction_volume: 20 mL\n",
+            "  assembly_replicates = 1\n",
+            "  assembly_replicates = 1\n  reaction_volume = 20 mL\n",
         );
-        let checked = compile_module(&wrong).unwrap();
-        let error = PortableLairProgram::lower(&checked)
-            .err()
-            .expect("a millilitre reaction volume is not a microlitre one");
-        assert!(error.to_string().contains("expects unit 'uL'"), "{error}");
+        let error = compile_module(&wrong)
+            .expect_err("a millilitre reaction volume is not a microlitre one");
+        assert!(
+            error
+                .to_string()
+                .contains("expects Quantity<uL>, found Quantity<mL>"),
+            "{error}"
+        );
     }
 
     #[test]
     fn a_second_agar_plate_raises_capacity_without_touching_the_program() {
-        let crowded = SOURCE.replace("  plating_replicates: 2", "  plating_replicates: 8");
+        let crowded = SOURCE.replace("  plating_replicates = 2", "  plating_replicates = 8");
         let protocol = protocol(&crowded);
 
         let mut single = Ot2TargetProfile::default();

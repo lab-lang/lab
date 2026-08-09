@@ -19,6 +19,8 @@ pub(crate) struct TypeSpec {
     /// Whether this name classifies types rather than describing values. A role
     /// may bound a type parameter and may not be the type of anything.
     pub role: bool,
+    /// Whether this role is one the compiler enforces a rule for.
+    pub law: bool,
     pub documentation: &'static str,
 }
 
@@ -30,6 +32,7 @@ impl TypeSpec {
             fields: BTreeMap::new(),
             implements: Vec::new(),
             role: false,
+            law: false,
             documentation: "",
         }
     }
@@ -39,6 +42,16 @@ impl TypeSpec {
         Self {
             role: true,
             ..Self::nominal(name)
+        }
+    }
+
+    /// A role the compiler enforces a rule for, such as `Event`, which is what
+    /// `emit` and `when` resolve against. There is no source form for declaring
+    /// one: a law no checker reads would mean nothing.
+    pub(crate) fn law(name: &'static str) -> Self {
+        Self {
+            law: true,
+            ..Self::role(name)
         }
     }
 
@@ -295,8 +308,16 @@ impl StandardModule {
 /// Standard modules written in Lab, in the order they compile. Each may import
 /// the ones before it and nothing after, so the bootstrap is a straight line
 /// rather than a graph to resolve.
-const AUTHORED_SOURCES: &[(&str, &str)] =
-    &[("std.bio.reporters", include_str!("authored/reporters.lab"))];
+const AUTHORED_SOURCES: &[(&str, &str)] = &[
+    ("std.bio.designs", include_str!("authored/designs.lab")),
+    ("std.bio.parts", include_str!("authored/parts.lab")),
+    ("std.bio.backbones", include_str!("authored/backbones.lab")),
+    ("std.bio.reporters", include_str!("authored/reporters.lab")),
+    (
+        "std.bio.golden_gate",
+        include_str!("authored/golden_gate.lab"),
+    ),
+];
 
 static AUTHORED: OnceLock<Arc<BTreeMap<&'static str, ModuleInterface>>> = OnceLock::new();
 
@@ -401,6 +422,14 @@ impl StandardLibrary {
         self.modules.values().filter(|module| module.prelude)
     }
 
+    /// Every durable action contract, across modules. The lineage analysis
+    /// reads results from these rather than from any one module.
+    pub(crate) fn action_specs(&self) -> impl Iterator<Item = &ActionContractSpec> {
+        self.modules
+            .values()
+            .flat_map(|module| module.actions.iter())
+    }
+
     pub(crate) fn action_providers(&self, name: &str) -> Vec<&'static str> {
         self.modules
             .values()
@@ -461,7 +490,15 @@ impl StandardLibrary {
                 output.push_str("\n\n");
             }
             for spec in &module.types {
-                output.push_str(&format!("- type `{}`", spec.name));
+                // A law is a role the compiler enforces a rule for, and there is
+                // no source form for declaring one — so the reference is where
+                // that privilege has to be visible.
+                let kind = match (spec.law, spec.role) {
+                    (true, _) => "law",
+                    (_, true) => "role",
+                    _ => "type",
+                };
+                output.push_str(&format!("- {kind} `{}`", spec.name));
                 if spec.parameters != 0 {
                     output.push_str(&format!(" ({} type parameter(s))", spec.parameters));
                 }
@@ -586,18 +623,15 @@ mod tests {
                 .any(|function| { function.name == "dna" && function.operation == "std.bio.dna" })
         );
 
-        let inventory = library.module("std.bio.inventory").unwrap();
-        assert!(
-            inventory
-                .functions
-                .iter()
-                .any(|function| function.name == "backbone")
-        );
+        // Catalogs are written in Lab; what stays in Rust is the half with
+        // no source declaration form.
+        assert!(library.module("std.bio.parts").is_none());
+        assert!(library.authored_module("std.bio.parts").is_some());
         assert!(library.module("std.bio.build").is_some());
-        let plasmid_actions = library.module("std.lab.plasmid_actions").unwrap();
-        assert!(plasmid_actions.actions.iter().any(|action| {
+        let plasmid = library.module("std.lab.plasmid").unwrap();
+        assert!(plasmid.actions.iter().any(|action| {
             action.source_name() == Some("transform")
-                && action.operation == "std.lab.plasmid_actions.transform"
+                && action.operation == "std.lab.plasmid.transform"
         }));
         assert_eq!(library.prelude_modules().count(), 1);
     }

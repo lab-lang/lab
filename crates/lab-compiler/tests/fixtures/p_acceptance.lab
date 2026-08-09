@@ -10,8 +10,10 @@
  * compiler and is not a qualified construct or laboratory protocol.
  */
 
+use std.bio.designs
+
 plasmid p_acceptance:
-  sequence: dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT")
+  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT")
   require topology == circular
 
   // These are acceptance obligations, not claims about the eventual artifact.

@@ -3,13 +3,14 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::{DefinitionId, ModuleId};
-use crate::checked::{CheckedField, CheckedType};
+use crate::checked::{CheckedField, CheckedSchemaField, CheckedType};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExportKind {
     Type,
     Role,
+    ArtifactKind,
     Value,
     Function,
     Action,
@@ -28,6 +29,10 @@ pub struct ModuleExport {
     /// public surface: an importer cannot satisfy a bound without it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<String>,
+    /// For an artifact-kind export, the schema its declarations are checked
+    /// against. A word means nothing to an importer without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<ArtifactSchema>,
     /// Type parameters and their bounds, for a type or a callable alike.
     ///
     /// Without these an importer cannot tell a parameter apart from a nominal
@@ -36,6 +41,15 @@ pub struct ModuleExport {
     #[serde(default, skip_serializing_if = "TypeParameters::is_empty")]
     pub parameters: TypeParameters,
     pub documentation: String,
+}
+
+/// What a package's artifact word means to a module that imports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactSchema {
+    pub produces: CheckedType,
+    pub fields: Vec<CheckedSchemaField>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declares: Option<crate::checked::CheckedPresence>,
 }
 
 /// The type parameters a declaration takes, in declaration order, with whatever

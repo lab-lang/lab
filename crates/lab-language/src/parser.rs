@@ -4,6 +4,41 @@ use crate::lexer::lex;
 use crate::source::{Identifier, Span, Spanned};
 use crate::token::{Token, TokenKind};
 
+/// The word instances of a type are written with: the type's own name, in
+/// snake_case. `Plasmid` gives `plasmid`, `RestrictionEnzyme` gives
+/// `restriction_enzyme`.
+fn instance_word(produces: &TypeExpr) -> Result<String, ParseError> {
+    let TypeExpr::Path { path, span, .. } = produces else {
+        return Err(syntax_span(
+            produces.span(),
+            "an artifact kind names a type its instances have",
+        ));
+    };
+    let [segment] = path.segments.as_slice() else {
+        return Err(syntax_span(
+            *span,
+            "an artifact kind names a type declared here or imported, not a path",
+        ));
+    };
+    // A break belongs where a word does: after a lowercase run, or at the end
+    // of an acronym. `RestrictionEnzyme` gives `restriction_enzyme` and `DNA`
+    // gives `dna` rather than `d_n_a`.
+    let characters = segment.value.chars().collect::<Vec<_>>();
+    let mut word = String::new();
+    for (index, character) in characters.iter().enumerate() {
+        let previous = index.checked_sub(1).map(|index| characters[index]);
+        let next = characters.get(index + 1).copied();
+        let opens_word = previous.is_some_and(|previous| !previous.is_uppercase());
+        let ends_acronym = previous.is_some_and(char::is_uppercase)
+            && next.is_some_and(|next| next.is_lowercase());
+        if character.is_uppercase() && (opens_word || ends_acronym) {
+            word.push('_');
+        }
+        word.extend(character.to_lowercase());
+    }
+    Ok(word)
+}
+
 /// Parse a complete Lab source module without lowering it.
 pub fn parse_module(source: &str) -> Result<Module, ParseError> {
     Parser::new(source, lex(source)?).parse_module()
@@ -46,18 +81,26 @@ impl<'a> Parser<'a> {
                 let mut declaration = self.parse_circuit()?;
                 declaration.doc = doc;
                 Item::Circuit(declaration)
-            } else if let Some(kind) = self.artifact_kind() {
-                let mut declaration = self.parse_artifact(kind)?;
+            } else if self.check_word("artifact") {
+                let mut declaration = self.parse_artifact_kind()?;
                 declaration.doc = doc;
-                Item::Artifact(declaration)
-            } else if let Some(kind) = self.data_kind() {
-                let mut declaration = self.parse_data(kind)?;
+                Item::ArtifactKind(declaration)
+            } else if self.check_word("record") {
+                let mut declaration = self.parse_data()?;
                 declaration.doc = doc;
                 Item::Data(declaration)
             } else if self.check_word("workflow") {
                 let mut declaration = self.parse_workflow()?;
                 declaration.doc = doc;
                 Item::Workflow(declaration)
+            } else if self.opens_artifact() {
+                // A word this parser has never heard of, followed by a name and
+                // a block, is an artifact instance. Which kind it names is a
+                // question for the checker, so the grammar stays closed while
+                // the vocabulary stays open.
+                let mut declaration = self.parse_artifact()?;
+                declaration.doc = doc;
+                Item::Artifact(declaration)
             } else {
                 let mut declaration = self.parse_binding()?;
                 declaration.doc = doc;
@@ -135,19 +178,172 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn parse_artifact(&mut self, kind: ArtifactKind) -> Result<ArtifactDecl, ParseError> {
-        let start = self.expect_word(kind.keyword())?.span;
-        let name = self.take_identifier("an artifact name")?;
+    /// Whether the next item is `word Name:` — the shape every artifact
+    /// instance has, whichever package supplied the word.
+    fn opens_artifact(&self) -> bool {
+        // A verb says outright that this declares a thing, so nothing further
+        // is needed to tell it apart. Without one, the colon is what separates
+        // `plasmid p_gfp:` from an ordinary binding.
+        if self.opens_provenance() {
+            return matches!(self.peek_kind(1), Some(TokenKind::Identifier(_)))
+                && matches!(self.peek_kind(2), Some(TokenKind::Identifier(_)));
+        }
+        matches!(self.peek_kind(0), Some(TokenKind::Identifier(_)))
+            && matches!(self.peek_kind(1), Some(TokenKind::Identifier(_)))
+            && self.peek_kind(2) == Some(&TokenKind::Colon)
+    }
+
+    /// Whether the next word states where a thing came from.
+    fn opens_provenance(&self) -> bool {
+        self.check_word("build") || self.check_word("buy")
+    }
+
+    /// `artifact plasmid:` — the schema a package declares for its own kind.
+    fn parse_artifact_kind(&mut self) -> Result<ArtifactKindDecl, ParseError> {
+        let start = self.expect_word("artifact")?.span;
+        // A kind names the type its instances have. The word those instances
+        // are written with is that type in snake_case, so neither is written
+        // twice and the two can never disagree.
+        let produces = self.parse_type()?;
+        let name = Identifier::new(instance_word(&produces)?, produces.span());
+        // A kind whose instances state nothing beyond their name needs no
+        // block, the way a role needs none.
+        if !self.check(&TokenKind::Colon) {
+            let end = self.expect_line_end()?;
+            return Ok(ArtifactKindDecl {
+                doc: None,
+                name,
+                produces,
+                fields: Vec::new(),
+                declares: None,
+                span: start.join(end),
+            });
+        }
         self.open_block()?;
-        let mut members = Vec::new();
+        let mut fields = Vec::new();
+        let mut declares = None;
         while !self.check(&TokenKind::Dedent) {
-            if self.check_word("require") || self.check_word("accept") {
+            if self.check_word("declares") {
+                let keyword = self.next().expect("checked");
+                if declares.is_some() {
+                    return Err(syntax_span(
+                        keyword.span,
+                        "a kind states which combinations are complete once",
+                    ));
+                }
+                declares = Some(self.parse_expr()?);
+                self.expect_line_end()?;
+            } else {
+                fields.push(self.parse_field_line(true)?);
+            }
+        }
+        let end = self.expect(TokenKind::Dedent)?.span;
+        Ok(ArtifactKindDecl {
+            doc: None,
+            name,
+            produces,
+            fields,
+            declares,
+            span: start.join(end),
+        })
+    }
+
+    /// `across 3 biological replicates` — the evidence a claim is believed on.
+    ///
+    /// The word "biological" is written out because the distinction it draws is
+    /// the whole point: measuring one colony three times is not three
+    /// replicates, and a reader should not have to guess which is meant.
+    fn parse_replication(&mut self) -> Result<Replication, ParseError> {
+        let start = self.expect_word("across")?.span;
+        let token = self
+            .next()
+            .ok_or_else(|| syntax_span(self.current_span(), "expected a number of replicates"))?;
+        let TokenKind::Integer(count) = token.kind else {
+            return Err(syntax_span(token.span, "expected a number of replicates"));
+        };
+        self.expect_word("biological")?;
+        if !self.check_word("replicates") && !self.check_word("replicate") {
+            return Err(syntax_span(self.current_span(), "expected 'replicates'"));
+        }
+        let end = self.next().expect("checked").span;
+        Ok(Replication {
+            count,
+            span: start.join(end),
+        })
+    }
+
+    fn parse_artifact(&mut self) -> Result<ArtifactDecl, ParseError> {
+        let verb = self
+            .opens_provenance()
+            .then(|| self.next().expect("checked"));
+        let provenance = match verb.as_ref().map(|token| &token.kind) {
+            Some(TokenKind::Identifier(word)) if word == "buy" => Provenance::Buy,
+            _ => Provenance::Build,
+        };
+        let kind = self.take_identifier("an artifact kind")?;
+        let start = verb.map_or(kind.span, |token| token.span);
+        let name = self.take_identifier("an artifact name")?;
+        // A generic kind cannot say from its word alone which arguments an
+        // instance has, so the instance names its own type. A word whose kind
+        // takes no arguments already said it, and repeating it says nothing.
+        // As everywhere else, a ':' ending the header opens a block:
+        // `buy enzyme BsaI:` opens one directly, and an ascribed instance
+        // opens one after its type, the way a workflow does after its result.
+        let mut opens_block = false;
+        let ascribed = if self.consume(&TokenKind::Colon).is_some() {
+            if self.check(&TokenKind::Newline) {
+                opens_block = true;
+                None
+            } else {
+                let ascribed = self.parse_type()?;
+                opens_block = self.consume(&TokenKind::Colon).is_some();
+                Some(ascribed)
+            }
+        } else {
+            None
+        };
+        // A block is optional: an item that states nothing about itself is a
+        // name and a kind, and that is the common case for something bought.
+        let mut end = self.expect_line_end()?;
+        let mut members = Vec::new();
+        if !opens_block {
+            if self.check(&TokenKind::Indent) {
+                return Err(syntax_span(
+                    self.current_span(),
+                    "a declaration block is opened by ':' at the end of the line above",
+                ));
+            }
+            return Ok(ArtifactDecl {
+                doc: None,
+                provenance,
+                kind,
+                name,
+                ascribed,
+                members,
+                span: start.join(end),
+            });
+        }
+        self.expect(TokenKind::Indent)?;
+        while !self.check(&TokenKind::Dedent) {
+            if self.check_word("across") {
+                let replication = self.parse_replication()?;
+                self.expect_line_end()?;
+                members.push(ArtifactMember::Replication(replication));
+            } else if self.check_word("require") || self.check_word("accept") {
                 let acceptance = self.check_word("accept");
                 let keyword = self.next().expect("checked");
                 let predicate = self.parse_expr()?;
+                // A claim may state its own standard, which is what it is
+                // believed on rather than what the declaration asks for.
+                let replicates = if self.check_word("across") {
+                    Some(self.parse_replication()?)
+                } else {
+                    None
+                };
                 let end = self.expect_line_end()?;
                 let claim = ClaimStmt {
                     predicate,
+                    replicates,
                     span: keyword.span.join(end),
                 };
                 members.push(if acceptance {
@@ -155,26 +351,26 @@ impl<'a> Parser<'a> {
                 } else {
                     ArtifactMember::Requirement(claim)
                 });
-            } else if self.peek_kind(1) == Some(&TokenKind::Colon)
-                && self.peek_kind(2) != Some(&TokenKind::Newline)
-            {
+            } else if self.peek_kind(1) == Some(&TokenKind::Equal) {
                 members.push(ArtifactMember::Property(self.parse_property()?));
             } else {
                 members.push(ArtifactMember::Section(self.parse_section()?));
             }
         }
-        let end = self.expect(TokenKind::Dedent)?.span;
+        end = self.expect(TokenKind::Dedent)?.span;
         Ok(ArtifactDecl {
             doc: None,
+            provenance,
             kind,
             name,
+            ascribed,
             members,
             span: start.join(end),
         })
     }
 
-    fn parse_data(&mut self, kind: DataKind) -> Result<DataDecl, ParseError> {
-        let keyword = self.next().expect("data kind was checked");
+    fn parse_data(&mut self) -> Result<DataDecl, ParseError> {
+        let keyword = self.expect_word("record")?;
         let name = self.take_identifier("a declaration name")?;
         let parameters = self.parse_type_parameters()?;
         let roles = self.parse_roles_clause()?;
@@ -185,7 +381,6 @@ impl<'a> Parser<'a> {
             let end = self.expect_line_end()?;
             return Ok(DataDecl {
                 doc: None,
-                kind,
                 name,
                 parameters,
                 roles,
@@ -201,13 +396,12 @@ impl<'a> Parser<'a> {
             if self.check_word("case") {
                 cases.push(self.parse_case_decl()?);
             } else {
-                fields.push(self.parse_field_line()?);
+                fields.push(self.parse_field_line(false)?);
             }
         }
         let end = self.expect(TokenKind::Dedent)?.span;
         Ok(DataDecl {
             doc: None,
-            kind,
             name,
             parameters,
             roles,
@@ -225,7 +419,7 @@ impl<'a> Parser<'a> {
             self.expect(TokenKind::Newline)?;
             self.expect(TokenKind::Indent)?;
             while !self.check(&TokenKind::Dedent) {
-                fields.push(self.parse_field_line()?);
+                fields.push(self.parse_field_line(false)?);
             }
             self.expect(TokenKind::Dedent)?.span
         } else {
@@ -281,10 +475,21 @@ impl<'a> Parser<'a> {
         let mut fields = Vec::new();
         while !self.check(&TokenKind::RightParen) {
             let name = self.take_identifier(expected_name)?;
+            if let Some(token) = self.consume(&TokenKind::Question) {
+                return Err(syntax_span(
+                    token.span,
+                    "every caller supplies every parameter, so a parameter is never optional",
+                ));
+            }
             self.expect(TokenKind::Colon)?;
             let ty = self.parse_type()?;
             let span = name.span.join(ty.span());
-            fields.push(FieldDecl { name, ty, span });
+            fields.push(FieldDecl {
+                name,
+                ty,
+                optional: false,
+                span,
+            });
             if self.consume(&TokenKind::Comma).is_none() {
                 break;
             }
@@ -375,10 +580,16 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// `name = value` inside a declaration.
+    ///
+    /// A property associates a name with a value, and `:` is reserved for the
+    /// other thing a declaration body can say — that a name has a type. One
+    /// token after the name decides which, with no need to know the word that
+    /// opened the block.
     fn parse_property(&mut self) -> Result<PropertyDecl, ParseError> {
         let name = self.take_identifier("a property name")?;
         let start = name.span;
-        self.expect(TokenKind::Colon)?;
+        self.expect(TokenKind::Equal)?;
         let value = self.parse_expr()?;
         let end = self.expect_line_end()?;
         Ok(PropertyDecl {
@@ -587,8 +798,22 @@ impl<'a> Parser<'a> {
         Ok(Pattern::Constructor { path, fields, span })
     }
 
-    fn parse_field_line(&mut self) -> Result<FieldDecl, ParseError> {
+    /// A typed field. `optional_allowed` is set where a field is something an
+    /// author may leave unstated, which is an artifact kind's schema and
+    /// nowhere else: a record's fields are all present in any value of it, and
+    /// a workflow's inputs are all supplied by every call.
+    fn parse_field_line(&mut self, optional_allowed: bool) -> Result<FieldDecl, ParseError> {
         let name = self.take_identifier("a field name")?;
+        let optional = match self.consume(&TokenKind::Question) {
+            Some(token) if !optional_allowed => {
+                return Err(syntax_span(
+                    token.span,
+                    "only an artifact kind's schema states optional fields",
+                ));
+            }
+            Some(_) => true,
+            None => false,
+        };
         self.expect(TokenKind::Colon)?;
         let ty = self.parse_type()?;
         let end = self.expect_line_end()?;
@@ -596,6 +821,7 @@ impl<'a> Parser<'a> {
             span: name.span.join(end),
             name,
             ty,
+            optional,
         })
     }
 
@@ -643,6 +869,17 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// A unit: a name, optionally over a denominator. One reader serves both
+    /// `100 ng/uL` and `Quantity<ng/uL>`, so the two can never drift apart.
+    fn parse_unit(&mut self) -> Result<String, ParseError> {
+        let mut unit = self.take_identifier("a unit")?.value;
+        if self.consume(&TokenKind::Slash).is_some() {
+            unit.push('/');
+            unit.push_str(&self.take_identifier("a unit denominator")?.value);
+        }
+        Ok(unit)
+    }
+
     fn parse_type_primary(&mut self) -> Result<TypeExpr, ParseError> {
         // `any Signal` names some type playing a role. That is only meaningful
         // as an argument to another type: a value cannot be a signal, only
@@ -654,6 +891,20 @@ impl<'a> Parser<'a> {
             ));
         }
         let path = self.parse_path()?;
+        // A quantity is measured in a unit, not parameterized by a type, so
+        // `Quantity<ng/uL>` reads its argument exactly as `100 ng/uL` does.
+        if path.segments.len() == 1
+            && path.segments[0].value == "Quantity"
+            && self.check(&TokenKind::Less)
+        {
+            self.next();
+            let unit = self.parse_unit()?;
+            let end = self.expect(TokenKind::Greater)?.span;
+            return Ok(TypeExpr::Quantity {
+                unit,
+                span: path.span.join(end),
+            });
+        }
         let mut arguments = Vec::new();
         let mut end = path.span;
         if self.consume(&TokenKind::Less).is_some() {
@@ -811,14 +1062,8 @@ impl<'a> Parser<'a> {
                 };
             } else if is_numeric(&expression) && self.peek_identifier().is_some() {
                 let unit_start = self.current_span();
-                let mut unit = self.take_identifier("a unit")?.value;
-                let mut end = self.previous_span();
-                if self.consume(&TokenKind::Slash).is_some() {
-                    unit.push('/');
-                    let denominator = self.take_identifier("a unit denominator")?;
-                    unit.push_str(&denominator.value);
-                    end = denominator.span;
-                }
+                let unit = self.parse_unit()?;
+                let end = self.previous_span();
                 let span = expression.span().join(end);
                 debug_assert!(unit_start.start < span.end);
                 expression = Expr::Quantity {
@@ -920,27 +1165,6 @@ impl<'a> Parser<'a> {
             TokenKind::Minus => Some((BinaryOp::Subtract, 5)),
             TokenKind::Star => Some((BinaryOp::Multiply, 6)),
             TokenKind::Slash => Some((BinaryOp::Divide, 6)),
-            _ => None,
-        }
-    }
-
-    fn artifact_kind(&self) -> Option<ArtifactKind> {
-        match self.peek_identifier()? {
-            "plasmid" => Some(ArtifactKind::Plasmid),
-            "strain" => Some(ArtifactKind::Strain),
-            _ => None,
-        }
-    }
-
-    fn data_kind(&self) -> Option<DataKind> {
-        let word = self.peek_identifier()?;
-        match word {
-            "record" => Some(DataKind::Record),
-            "material" => Some(DataKind::Material),
-            "observation" => Some(DataKind::Observation),
-            "evidence" => Some(DataKind::Evidence),
-            "event" => Some(DataKind::Event),
-            "outcome" => Some(DataKind::Outcome),
             _ => None,
         }
     }
@@ -1133,9 +1357,9 @@ mod tests {
     #[test]
     fn parses_reactive_workflows_without_pretending_to_lower_them() {
         let source = r#"
-use std.lab.plasmid_actions
+use std.lab.plasmid
 
-outcome ColonyGrowth:
+record ColonyGrowth:
   plate: Material<Plate>
   case Ready:
     colonies: ColonyMap
@@ -1261,13 +1485,107 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
         );
     }
 
+    /// A property associates a name with a value and a field gives a name a
+    /// type. One token after the name decides which, without knowing the word
+    /// that opened the block — which is what lets a declaration's shape be
+    /// parsed before its meaning is resolved.
     #[test]
-    fn rejects_executable_binding_syntax_for_plasmid_properties() {
+    fn a_property_and_a_field_are_distinguished_without_keyword_context() {
+        let module = parse_module("plasmid p:\n  sequence = dna(\"ACGT\")\n").unwrap();
+        let Item::Artifact(artifact) = &module.items[0] else {
+            panic!("expected the artifact")
+        };
+        assert!(matches!(artifact.members[0], ArtifactMember::Property(_)));
+
+        let module = parse_module("record Plate:\n  colonies: ColonyMap\n").unwrap();
+        let Item::Data(data) = &module.items[0] else {
+            panic!("expected the record")
+        };
+        assert_eq!(data.fields[0].name.value, "colonies");
+    }
+
+    #[test]
+    fn rejects_type_annotation_syntax_for_a_property() {
         let error = parse_module(
-            "plasmid legacy:\n  sequence = dna(\"ACGT\")\n  require topology == circular\n  accept sequence == design.sequence\n",
+            "use std.bio.designs\n\nplasmid legacy:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n",
         )
         .unwrap_err();
-        assert!(error.to_string().contains("expected ':'"), "{error}");
+        assert!(
+            error.to_string().contains("expected a newline"),
+            "a property takes a value, so ':' opens a section instead: {error}"
+        );
+    }
+
+    #[test]
+    fn derives_the_instance_word_from_the_type_name() {
+        for (type_name, word) in [
+            ("Plasmid", "plasmid"),
+            ("RestrictionEnzyme", "restriction_enzyme"),
+            // An acronym is one word, not one word per letter.
+            ("DNA", "dna"),
+            ("CDS", "cds"),
+            ("DNASequence", "dna_sequence"),
+        ] {
+            let module =
+                parse_module(&format!("artifact {type_name}:\n  label: String\n")).unwrap();
+            let Item::ArtifactKind(kind) = &module.items[0] else {
+                panic!("the item is an artifact kind");
+            };
+            assert_eq!(kind.name.value, word, "instances of {type_name}");
+        }
+    }
+
+    #[test]
+    fn marks_an_optional_schema_field_on_its_name() {
+        let module = parse_module("artifact Plasmid:\n  label: String\n  note?: String\n").unwrap();
+        let Item::ArtifactKind(kind) = &module.items[0] else {
+            panic!("the item is an artifact kind");
+        };
+        assert!(!kind.fields[0].optional);
+        assert!(kind.fields[1].optional);
+    }
+
+    #[test]
+    fn rejects_an_optional_record_field() {
+        let error = parse_module("record Sample:\n  label?: String\n").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("only an artifact kind's schema states optional fields"),
+            "every value of a record carries every field: {error}"
+        );
+    }
+
+    #[test]
+    fn rejects_an_optional_workflow_parameter() {
+        let error =
+            parse_module("workflow run(sample?: String) -> None:\n  return None\n").unwrap_err();
+        assert!(
+            error.to_string().contains("a parameter is never optional"),
+            "every call supplies every parameter: {error}"
+        );
+    }
+
+    /// A ':' ending the header opens a block, on an artifact instance as
+    /// everywhere else, and an ascribed instance opens one after its type the
+    /// way a workflow does after its result.
+    #[test]
+    fn an_artifact_block_is_opened_by_a_colon() {
+        let error = parse_module("buy enzyme BsaI\n  digest_temperature = 37 C\n").unwrap_err();
+        assert!(
+            error.to_string().contains("opened by ':'"),
+            "an indented block without ':' is refused: {error}"
+        );
+
+        let module = parse_module(
+            "buy promoter pTet: Promoter<Tetracycline>:\n  identity = \"BBa_R0040\"\n",
+        )
+        .unwrap();
+        let Item::Artifact(artifact) = &module.items[0] else {
+            panic!("the item is an artifact instance");
+        };
+        assert!(artifact.ascribed.is_some());
+        assert_eq!(artifact.members.len(), 1);
     }
 
     #[test]
@@ -1293,7 +1611,7 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
     #[test]
     fn documentation_reaches_every_kind_of_declaration() {
         let module = parse_module(
-            "/** A reporter. */\nplasmid reporter:\n  sequence: dna(\"ACGT\")\n\n/** A count. */\ntotal = 3\n",
+            "/** A reporter. */\nplasmid reporter:\n  sequence = dna(\"ACGT\")\n\n/** A count. */\ntotal = 3\n",
         )
         .unwrap();
         let Item::Artifact(artifact) = &module.items[0] else {
@@ -1309,7 +1627,7 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
     #[test]
     fn module_documentation_opens_the_file_and_belongs_to_the_module() {
         let module = parse_module(
-            "/*!\n * Four engineered organisms.\n */\n\nuse golden_gate.designs.plasmids\n\n/** The first. */\nstrain first:\n  chassis: DH5alpha\n",
+            "/*!\n * Four engineered organisms.\n */\n\nuse golden_gate.designs.plasmids\n\n/** The first. */\nstrain first:\n  chassis = DH5alpha\n",
         )
         .unwrap();
 
@@ -1327,7 +1645,7 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
     #[test]
     fn rejects_module_documentation_that_does_not_open_the_file() {
         let error = parse_module(
-            "use std.bio.build\n\n/*! Too late. */\nstrain first:\n  chassis: DH5alpha\n",
+            "use std.bio.build\nuse std.bio.designs\n\n/*! Too late. */\nstrain first:\n  chassis = DH5alpha\n",
         )
         .unwrap_err();
         assert!(error.to_string().contains("opens its file"), "{error}");

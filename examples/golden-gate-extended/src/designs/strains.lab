@@ -1,0 +1,86 @@
+/*!
+ * The organisms this panel characterizes.
+ *
+ * The same plasmid in two chassis is two artifacts. DH5alpha holds the design;
+ * BL21 expresses it, and the reference strain gives every reading something to
+ * be compared against.
+ */
+
+use std.bio.designs
+use std.bio.golden_gate
+
+use golden_gate_extended.designs.inventory
+use golden_gate_extended.designs.plasmids
+
+/** The GFP reporter carried in the DH5alpha cloning strain. */
+strain composite_strain_1:
+  chassis = DH5alpha
+  plasmids = [composite_plasmid_1]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
+
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL
+
+/** The RFP reporter in the same cloning strain. */
+strain composite_strain_2:
+  chassis = DH5alpha
+  plasmids = [composite_plasmid_2]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
+
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL
+
+/** The GFP reporter in BL21, where it is expressed rather than stored. */
+strain expression_strain:
+  chassis = BL21
+  plasmids = [composite_plasmid_1]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
+
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL
+
+/**
+ * The reference, built from a plasmid nobody here assembled.
+ *
+ * A strain does not care whether the DNA it carries was made or ordered, which
+ * is the point of stating provenance on the thing rather than on its type.
+ */
+strain reference_strain:
+  chassis = BL21
+  plasmids = [reference_gfp]
+  selection = chloramphenicol
+  transformation_replicates = 2
+  plating_replicates = 1
+  serial_dilutions = 2
+
+  cell_volume = 20 uL
+  dna_volume = 2 uL
+  recovery_volume = 60 uL
+  heat_shock_duration = 1 min
+  medium_volume = 18 uL
+  culture_volume = 2 uL
+  colony_volume = 4 uL

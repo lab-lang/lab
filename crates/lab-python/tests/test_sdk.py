@@ -7,7 +7,7 @@ class CompilationTests(unittest.TestCase):
     def test_compiles_to_checked_module(self) -> None:
         source = """
 plasmid p_python:
-  sequence: dna("ACGT")
+  sequence = dna("ACGT")
   accept sequence == design.sequence
         """
 

@@ -272,7 +272,7 @@ mod package_tests {
         workspace.set_document(
             source.clone(),
             1,
-            "plasmid p:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n".to_owned(),
+            "use std.bio.designs\n\nplasmid p:\n  sequence = dna(\"ACGT\")\n  require topology == circular\n".to_owned(),
         );
 
         assert!(workspace.diagnostics(&source).is_empty());
@@ -287,10 +287,8 @@ mod notification_tests {
 
     use super::*;
 
-    const DONOR: &str =
-        "plasmid donor:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n";
-    const RENAMED: &str =
-        "plasmid renamed:\n  sequence: dna(\"ACGT\")\n  require topology == circular\n";
+    const DONOR: &str = "use std.bio.designs\n\nplasmid donor:\n  sequence = dna(\"ACGT\")\n  require topology == circular\n";
+    const RENAMED: &str = "use std.bio.designs\n\nplasmid renamed:\n  sequence = dna(\"ACGT\")\n  require topology == circular\n";
 
     /// A fresh single-package fixture on disk. Each test names its own
     /// package so parallel tests never share a directory.

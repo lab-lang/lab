@@ -46,14 +46,21 @@ pub(in crate::backend::opentrons_ot2) fn protocol_build_graph(
         );
     }
 
+    // What this build assembles. A strain names the DNA that went into it
+    // whether that DNA was made here or fetched off the shelf, and only the
+    // former is something to wait for.
+    let assembled = nodes.keys().cloned().collect::<BTreeSet<_>>();
+
     for trace in &traces.strains {
-        let dependencies = trace
-            .dependencies(context)
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let mut required_materials = trace
-            .plasmids(context)
+        let named = trace.dependencies(context).into_iter().collect::<Vec<_>>();
+        let dependencies = named
             .iter()
+            .filter(|plasmid| assembled.contains(*plasmid))
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        let mut required_materials = named
+            .iter()
+            .chain(trace.plasmids(context).iter())
             .filter(|plasmid| !dependencies.contains(*plasmid))
             .cloned()
             .collect::<BTreeSet<_>>();

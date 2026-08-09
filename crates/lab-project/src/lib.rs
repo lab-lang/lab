@@ -517,8 +517,10 @@ mod tests {
         }
     }
 
-    const DONOR: &str = r#"plasmid donor:
-  sequence: dna("ACGT")
+    const DONOR: &str = r#"use std.bio.designs
+
+plasmid donor:
+  sequence = dna("ACGT")
   require topology == circular
   accept sequence == design.sequence
 "#;
@@ -534,9 +536,10 @@ mod tests {
                 (
                     "main.lab",
                     r#"use app.parts
+use std.bio.designs
 
 plasmid derived:
-  sequence: donor.sequence
+  sequence = donor.sequence
   require topology == circular
   accept sequence == design.sequence
 "#,
@@ -570,9 +573,10 @@ shared = { path = "../shared", version = "^1.0" }
             &[(
                 "main.lab",
                 r#"use shared.values
+use std.bio.designs
 
 plasmid derived:
-  sequence: donor.sequence
+  sequence = donor.sequence
   require topology == circular
   accept sequence == design.sequence
 "#,
@@ -608,9 +612,10 @@ catalog = { path = "../catalog" }
             &[(
                 "main.lab",
                 r#"use catalog.values
+use std.bio.designs
 
 plasmid derived:
-  sequence: donor.sequence
+  sequence = donor.sequence
   require topology == circular
   accept sequence == design.sequence
 "#,

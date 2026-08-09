@@ -136,9 +136,11 @@ pub(crate) fn compatible(roles: &RoleTable, actual: &Ty, expected: &Ty) -> bool 
         return true;
     }
     // A value that is one of several things fits wherever every one of them
-    // fits. This is what lets an inferred union settle into an existential.
+    // fits. This is what lets an inferred union settle into an existential, and
+    // it is what makes a union a set rather than a sequence: `Plasmid | Part`
+    // and `Part | Plasmid` describe the same values, so each satisfies the
+    // other.
     if let Ty::Union(alternatives) = actual
-        && !matches!(expected, Ty::Union(_))
         && alternatives
             .iter()
             .all(|alternative| compatible(roles, alternative, expected))

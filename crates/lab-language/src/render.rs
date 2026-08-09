@@ -27,23 +27,30 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
                 ..
             } => output.push_str(&format!(
                 "  - {} {name} ({} requirements, {} acceptance claims)\n",
-                artifact.keyword(),
+                artifact,
                 requirements.len(),
                 acceptance.len()
             )),
             CheckedDeclaration::Role { name, .. } => output.push_str(&format!("  - role {name}\n")),
-            CheckedDeclaration::Data {
-                category,
+            CheckedDeclaration::ArtifactKind { name, produces, .. } => {
+                output.push_str(&format!("  - artifact {name} -> {produces}\n"))
+            }
+            CheckedDeclaration::Catalog {
                 name,
-                roles,
+                r#type,
+                identity,
                 ..
-            } => {
+            } => output.push_str(&format!(
+                "  - catalog {name}: {type} (\"{identity}\")\n",
+                r#type = r#type
+            )),
+            CheckedDeclaration::Data { name, roles, .. } => {
                 let played = if roles.is_empty() {
                     String::new()
                 } else {
                     format!(" is {}", roles.join(", "))
                 };
-                output.push_str(&format!("  - {category} {name}{played}\n"))
+                output.push_str(&format!("  - record {name}{played}\n"))
             }
             CheckedDeclaration::Workflow { name, outputs, .. } => {
                 let rendered = if let [result] = outputs.as_slice()

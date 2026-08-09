@@ -32,11 +32,11 @@ keeps building a checker from re-entering the bootstrap. Every later
 An importer resolves such a module through its `ModuleInterface`, exactly as it
 resolves a module from a package, so nothing in the checker distinguishes them.
 
-What a module must stay in Rust for: pure functions, durable action contracts,
-and inventory constructors have no source declaration form. That is why
-`std.bio.parts` has not moved — three of its five values are expressible as
-`part("B0034")`, but `pTet: Promoter<Tetracycline>` needs a typed constructor
-Lab cannot yet declare.
+What a module must stay in Rust for: pure functions and durable action
+contracts have no source declaration form. Catalogued items do —
+`buy part B0034`, and `buy promoter pTet: Promoter<Tetracycline>` where the
+kind is generic — which is why `std.bio.parts` and its siblings live in
+`authored/`.
 
 A `StandardModule` owns all of its exported type specifications, values, pure
 functions, constructors, and durable actions. Type specifications carry

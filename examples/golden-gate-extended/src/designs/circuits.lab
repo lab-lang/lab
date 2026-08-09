@@ -1,0 +1,90 @@
+/*!
+ * One circuit, many sensors.
+ *
+ * `regulated_expression` is written once and works for any signal. The circuits
+ * built from it respond to different inducers and express the same product,
+ * which is exactly what makes their readings comparable: the trigger varies,
+ * the product does not.
+ */
+
+use std.bio.designs
+use std.bio.parts
+use std.bio.reporters
+
+/** An inducer this laboratory keeps on the shelf. */
+role Inducible
+
+/**
+ * A signal the standard library does not know about. Declaring it here is all
+ * it takes for the rest of the language to work with it: a promoter for it can
+ * be bought, a circuit can respond to it, and the compiler will refuse to
+ * induce that circuit with anything else.
+ */
+record Isopropylthiogalactoside is Signal, Inducible
+
+buy promoter pLac: Promoter<Isopropylthiogalactoside>
+
+/**
+ * A promoter driving a coding sequence through a shared RBS and terminator.
+ *
+ * `Trigger` and `Product` are introduced where they are first needed. Naming
+ * them is what lets the result say that this circuit responds to the promoter's
+ * signal and expresses the coding sequence's product.
+ */
+circuit regulated_expression(
+  promoter: Promoter<Trigger: Signal>,
+  coding: CDS<Product: Protein>,
+) -> Circuit<Trigger, Product>:
+  layout:
+    promoter
+    B0034
+    coding
+    B0015
+
+tet_reporter = regulated_expression(pTet, sfGFP)
+ara_reporter = regulated_expression(pBAD, sfGFP)
+lac_reporter = regulated_expression(pLac, sfGFP)
+
+/**
+ * The panel. `any Signal` discards which inducer each circuit answers to; the
+ * product stays pinned, because two readings only mean something side by side
+ * when they measure the same thing.
+ */
+panel: List<Circuit<any Signal, GreenFluorescentProtein>> = [
+  tet_reporter,
+  ara_reporter,
+  lac_reporter,
+]
+
+/** One number an instrument recorded, and the kind of light it was. */
+record Reading<Of: Reporter> is Evidential:
+  value: Decimal
+  gain: Integer
+
+/**
+ * Characterization keeps the signal named.
+ *
+ * `S` links the circuit to the inducer poured onto it, so the compiler enforces
+ * that they match. Inducing a tetracycline-responsive strain with arabinose is a
+ * type error rather than a wasted plate — which is the whole reason the panel
+ * forgets its triggers one step later than feels natural.
+ */
+workflow characterize(
+  design: Circuit<S: Signal, GreenFluorescentProtein>,
+  inducer: Material<S>,
+) -> (
+  design: Circuit<S, GreenFluorescentProtein>,
+  inducer: Material<S>,
+):
+  return design, inducer
+
+/**
+ * What a run of the panel produced. Readings, not designs, are what goes in a
+ * list at the end: they are comparable because the product was pinned.
+ */
+workflow summarize(
+  from_tet: Reading<Fluorescence>,
+  from_ara: Reading<Fluorescence>,
+  from_lac: Reading<Fluorescence>,
+) -> List<Reading<Fluorescence>>:
+  return [from_tet, from_ara, from_lac]

@@ -5,45 +5,16 @@ use lab_language::{Span, ast};
 use crate::{DocumentSymbol, SemanticToken, SemanticTokenKind, SymbolKind};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "use",
-    "role",
-    "is",
-    "any",
-    "circuit",
-    "plasmid",
-    "strain",
-    "record",
-    "material",
-    "observation",
-    "evidence",
-    "event",
-    "outcome",
-    "workflow",
-    "input",
-    "output",
-    "state",
-    "require",
-    "accept",
-    "if",
-    "else",
-    "for",
-    "in",
-    "match",
-    "case",
-    "return",
-    "when",
-    "every",
-    "after",
-    "emit",
-    "and",
-    "or",
-    "not",
+    "use", "role", "build", "buy", "is", "any", "circuit", "artifact", "record", "workflow",
+    "state", "require", "accept", "across", "declares", "if", "else", "for", "in", "match", "case",
+    "return", "when", "every", "after", "emit", "and", "or", "not",
 ];
 
 pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> {
     match item {
         ast::Item::Use(_) => None,
         ast::Item::Role(item) => Some((&item.name.value, SymbolKind::Role, item.name.span)),
+        ast::Item::ArtifactKind(item) => Some((&item.name.value, SymbolKind::Data, item.name.span)),
         ast::Item::Circuit(item) => Some((&item.name.value, SymbolKind::Circuit, item.name.span)),
         ast::Item::Artifact(item) => Some((&item.name.value, SymbolKind::Artifact, item.name.span)),
         ast::Item::Data(item) => Some((&item.name.value, SymbolKind::Data, item.name.span)),
@@ -59,6 +30,7 @@ pub(crate) fn documentation(item: &ast::Item) -> Option<&str> {
     match item {
         ast::Item::Use(_) => None,
         ast::Item::Role(item) => item.doc.as_deref(),
+        ast::Item::ArtifactKind(item) => item.doc.as_deref(),
         ast::Item::Circuit(item) => item.doc.as_deref(),
         ast::Item::Artifact(item) => item.doc.as_deref(),
         ast::Item::Data(item) => item.doc.as_deref(),
@@ -218,6 +190,8 @@ fn collect_bound_names(ty: &ast::TypeExpr, out: &mut BTreeSet<String>) {
                 collect_bound_names(alternative, out);
             }
         }
+        // A quantity is measured in a unit, which introduces no name.
+        ast::TypeExpr::Quantity { .. } => {}
     }
 }
 
@@ -232,6 +206,11 @@ fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
             // A role is highlighted as a type: it lives in the type namespace
             // and only ever appears in type position.
             ast::Item::Role(declaration) => {
+                names.types.insert(declaration.name.value.clone());
+            }
+            // A kind's word introduces declarations, so an editor colors it
+            // like the keyword it behaves as.
+            ast::Item::ArtifactKind(declaration) => {
                 names.types.insert(declaration.name.value.clone());
             }
             ast::Item::Circuit(declaration) => {

@@ -2,7 +2,9 @@
 
 use crate::checked::OwnershipMode;
 use crate::standard_library::catalog::StandardModule;
-use crate::standard_library::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
+use crate::standard_library::contract::{
+    ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec,
+};
 use crate::type_system::Ty;
 
 pub(in crate::standard_library::bio) fn module() -> StandardModule {
@@ -30,9 +32,12 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
                 },
             ]),
         ],
+        // Realizing a design assembles DNA rather than establishing an
+        // organism, so the product carries the lineage of what went into it.
         results: vec![ResultSpec {
             name: "product",
             r#type: concrete(material(named("Plasmid"))),
+            lineage: Lineage::Continues,
         }],
     };
     StandardModule::new("std.bio.build").with_actions([action])

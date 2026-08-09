@@ -10,6 +10,7 @@ use std::fmt;
 use thiserror::Error;
 
 use crate::checked::*;
+use crate::semantics::SemanticEnvironment;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[error("affine material-flow error in workflow '{workflow}' at {location}: {message}")]
@@ -62,6 +63,38 @@ struct MaterialShapes {
 }
 
 impl MaterialShapes {
+    /// The record shapes a module can see: its own, and those of every module it
+    /// imports.
+    ///
+    /// A record declared elsewhere still has material inside it, and a caller
+    /// that cannot see where would either miss a leak or refuse a program that
+    /// never had one.
+    fn new(module: &CheckedModule, environment: &SemanticEnvironment) -> Self {
+        let mut shapes = Self::from_module(module);
+        for import in &module.imports {
+            let Some(interface) = environment.module(&import.module) else {
+                continue;
+            };
+            for (name, export) in &interface.exports {
+                if shapes.data.contains_key(name) || export.fields.is_empty() {
+                    continue;
+                }
+                shapes.data.insert(
+                    name.clone(),
+                    export
+                        .fields
+                        .iter()
+                        .map(|(field, r#type)| CheckedField {
+                            name: field.clone(),
+                            r#type: r#type.clone(),
+                        })
+                        .collect(),
+                );
+            }
+        }
+        shapes
+    }
+
     fn from_module(module: &CheckedModule) -> Self {
         let mut data = HashMap::new();
         for declaration in &module.declarations {
@@ -157,8 +190,11 @@ impl MaterialShapes {
     }
 }
 
-pub(crate) fn verify_module(module: &CheckedModule) -> Result<(), MaterialFlowError> {
-    let shapes = MaterialShapes::from_module(module);
+pub(crate) fn verify_module(
+    module: &CheckedModule,
+    environment: &SemanticEnvironment,
+) -> Result<(), MaterialFlowError> {
+    let shapes = MaterialShapes::new(module, environment);
     for declaration in &module.declarations {
         let CheckedDeclaration::Workflow {
             name,
@@ -710,7 +746,7 @@ mod tests {
     #[test]
     fn rejects_use_after_take() {
         let error = compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
 
 workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
   <- dispose sample
@@ -768,7 +804,7 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
                 })],
             }],
         };
-        let error = verify_module(&module).unwrap_err();
+        let error = verify_module(&module, &SemanticEnvironment::default()).unwrap_err();
 
         assert!(
             error
@@ -781,7 +817,7 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
     #[test]
     fn rejects_branch_dependent_material_loss() {
         let error = compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
 
 workflow invalid(
   should_dispose: Bool,
@@ -805,7 +841,7 @@ workflow invalid(
     #[test]
     fn permits_repeated_borrows_before_transfer() {
         compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
 
 workflow valid(sample: Material<Plasmid>) -> Material<Plasmid>:
   first <- quantify sample
@@ -819,9 +855,9 @@ workflow valid(sample: Material<Plasmid>) -> Material<Plasmid>:
     #[test]
     fn tracks_material_projections_without_poisoning_sibling_data() {
         compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
 
-outcome Inspection:
+record Inspection:
   sample: Material<Plasmid>
   observations: List<Evidence>
   case Complete
@@ -854,7 +890,7 @@ workflow valid(inspection: Inspection) -> List<Evidence>:
     #[test]
     fn rejects_replacing_captured_material_in_a_repeating_handler() {
         let error = compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
 
 workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
   when every 1 h:
@@ -876,7 +912,7 @@ workflow invalid(sample: Material<Plasmid>) -> Material<Plasmid>:
     #[test]
     fn permits_replacing_material_held_in_explicit_state() {
         compile_module(
-            r#"use std.lab.plasmid_actions
+            r#"use std.lab.plasmid
 
 workflow valid(initial: Material<Plasmid>) -> Material<Plasmid>:
   state sample: Material<Plasmid> = initial

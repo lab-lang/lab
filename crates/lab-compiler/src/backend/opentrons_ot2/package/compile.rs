@@ -141,38 +141,39 @@ mod tests {
 
     const SOURCE: &str = r#"
 use std.bio.build
-use std.bio.inventory
-use std.lab.plasmid_actions
+use std.bio.designs
+use std.bio.golden_gate
+use std.lab.plasmid
 
-terminal_part = part("terminal_part")
-source_part = part("source_part")
-receiver = backbone("receiver")
-carrier = backbone("carrier")
-BsaI = restriction_enzyme("BsaI")
-BsmBI = restriction_enzyme("BsmBI")
-DH5alpha = chassis("DH5alpha")
-chloramphenicol = antibiotic("chloramphenicol")
+buy part terminal_part
+buy part source_part
+buy backbone receiver
+buy backbone carrier
+buy restriction_enzyme BsaI
+buy restriction_enzyme BsmBI
+buy chassis DH5alpha
+buy antibiotic chloramphenicol
 
 plasmid intermediate:
-  sequence: dna("TGCA")
-  backbone: carrier
-  components: [source_part]
-  restriction_enzyme: BsmBI
+  sequence = dna("TGCA")
+  backbone = carrier
+  components = [source_part]
+  restriction_enzyme = BsmBI
   require topology == circular
   accept sequence == design.sequence
 
 plasmid final_artifact:
-  sequence: dna("ACGT")
-  backbone: receiver
-  components: [intermediate, terminal_part]
-  restriction_enzyme: BsaI
+  sequence = dna("ACGT")
+  backbone = receiver
+  components = [intermediate, terminal_part]
+  restriction_enzyme = BsaI
   require topology == circular
   accept sequence == design.sequence
 
 strain final_host:
-  chassis: DH5alpha
-  plasmids: [final_artifact]
-  selection: chloramphenicol
+  chassis = DH5alpha
+  plasmids = [final_artifact]
+  selection = chloramphenicol
 
 workflow assemble_intermediate() -> Material<Plasmid>:
   dependencies = []

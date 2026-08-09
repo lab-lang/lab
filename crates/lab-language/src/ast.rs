@@ -19,6 +19,7 @@ pub struct Module {
 pub enum Item {
     Use(UseDecl),
     Role(RoleDecl),
+    ArtifactKind(ArtifactKindDecl),
     Circuit(CircuitDecl),
     Artifact(ArtifactDecl),
     Data(DataDecl),
@@ -31,6 +32,7 @@ impl Item {
         match self {
             Self::Use(item) => item.span,
             Self::Role(item) => item.span,
+            Self::ArtifactKind(item) => item.span,
             Self::Circuit(item) => item.span,
             Self::Artifact(item) => item.span,
             Self::Data(item) => item.span,
@@ -76,42 +78,58 @@ pub struct TypeParameter {
     pub span: Span,
 }
 
-/// A named physical artifact a laboratory can build. Every artifact kind shares
-/// one declaration shape: typed declarative properties, pre-construction
-/// requirements, and acceptance claims. The kind selects which nominal type the
-/// declaration's properties are checked against.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ArtifactKind {
-    Plasmid,
-    Strain,
-}
-
-impl ArtifactKind {
-    /// The source word introducing the declaration, which is also the nominal
-    /// type of the value it declares.
-    pub fn keyword(self) -> &'static str {
-        match self {
-            Self::Plasmid => "plasmid",
-            Self::Strain => "strain",
-        }
-    }
-
-    pub fn type_name(self) -> &'static str {
-        match self {
-            Self::Plasmid => "Plasmid",
-            Self::Strain => "Strain",
-        }
-    }
+/// A kind of artifact a package declares, such as `plasmid`.
+///
+/// The word introducing the declaration is the vocabulary; the block is the
+/// schema its instances are checked against. A package supplies both, so the
+/// parser never learns a new production — an unknown word followed by a name
+/// and a block is always an artifact instance.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactKindDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: Identifier,
+    /// The type instances of this kind have, which is what a workflow names in
+    /// `Material<Plasmid>` and what `require` and `accept` read fields from.
+    pub produces: TypeExpr,
+    pub fields: Vec<FieldDecl>,
+    /// Which combinations of stated properties make a declaration complete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declares: Option<Expr>,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ArtifactDecl {
     pub doc: Option<String>,
-    pub kind: ArtifactKind,
+    /// How this one came to exist. Being built is a fact about a particular
+    /// thing rather than about its type: a plasmid may be assembled here or
+    /// ordered from a supplier, and the same kind covers both.
+    #[serde(default)]
+    pub provenance: Provenance,
+    /// The word that introduced this declaration, resolved to a kind while
+    /// checking rather than while parsing.
+    pub kind: Identifier,
     pub name: Identifier,
+    /// The type this instance has, where its kind is generic and the word alone
+    /// cannot say. `buy promoter pTet: Promoter<Tetracycline>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ascribed: Option<TypeExpr>,
     pub members: Vec<ArtifactMember>,
     pub span: Span,
+}
+
+/// Where a declared thing came from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Provenance {
+    /// A laboratory makes it. It has a recipe, acceptance criteria, and a place
+    /// in a build order.
+    #[default]
+    Build,
+    /// A supplier lists it. It has an identity to order against and is never
+    /// built.
+    Buy,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -120,6 +138,9 @@ pub enum ArtifactMember {
     Property(PropertyDecl),
     Requirement(ClaimStmt),
     Acceptance(ClaimStmt),
+    /// The evidentiary standard every claim in this declaration takes unless it
+    /// states one of its own.
+    Replication(Replication),
     Section(Section),
 }
 
@@ -130,21 +151,9 @@ pub struct PropertyDecl {
     pub span: Span,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DataKind {
-    Record,
-    Material,
-    Observation,
-    Evidence,
-    Event,
-    Outcome,
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DataDecl {
     pub doc: Option<String>,
-    pub kind: DataKind,
     pub name: Identifier,
     pub parameters: Vec<TypeParameter>,
     /// Roles this type plays, declared with `is`.
@@ -166,6 +175,15 @@ pub struct CaseDecl {
 pub struct FieldDecl {
     pub name: Identifier,
     pub ty: TypeExpr,
+    /// Whether a declaration may leave this field unstated, written `name?:`.
+    ///
+    /// The mark sits on the name because absence is a property of the field
+    /// rather than of the type: an optional `Antibiotic` field still holds an
+    /// `Antibiotic` whenever it is stated. Only an artifact kind's schema
+    /// admits the mark, since only there is a field something an author may
+    /// omit.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
     pub span: Span,
 }
 
@@ -206,6 +224,24 @@ pub struct Section {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ClaimStmt {
     pub predicate: Expr,
+    /// How many independent biological lineages the evidence for this claim
+    /// must span, when the claim states its own standard rather than taking
+    /// the declaration's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replicates: Option<Replication>,
+    pub span: Span,
+}
+
+/// `across 3 biological replicates` — how much independent evidence a claim
+/// needs before it is believed.
+///
+/// Written on a declaration it sets the standard for every claim in it, and
+/// written on one claim it sets the standard for that claim alone. Three
+/// measurements of one colony are one biological replicate however many times
+/// they are repeated, so this counts entities rather than measurements.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Replication {
+    pub count: u64,
     pub span: Span,
 }
 
@@ -376,12 +412,19 @@ pub enum TypeExpr {
         alternatives: Vec<TypeExpr>,
         span: Span,
     },
+    /// `Quantity<uL>` — a measurement in a stated unit.
+    ///
+    /// The argument is a unit rather than a type, so it is written the way a
+    /// unit is written everywhere else: a name, optionally over a denominator.
+    Quantity { unit: String, span: Span },
 }
 
 impl TypeExpr {
     pub fn span(&self) -> Span {
         match self {
-            Self::Path { span, .. } | Self::Union { span, .. } => *span,
+            Self::Path { span, .. } | Self::Union { span, .. } | Self::Quantity { span, .. } => {
+                *span
+            }
         }
     }
 }
