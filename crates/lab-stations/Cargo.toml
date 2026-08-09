@@ -1,0 +1,22 @@
+[package]
+name = "lab-stations"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lab's instrument-capability implementations over vendor driver crates"
+
+[features]
+# The Byonoy station's device-opening constructors need the native HID
+# library; everything else, including the adapter itself, works without it.
+hid = ["lab-byonoy/hid"]
+
+[dependencies]
+lab-byonoy = { workspace = true }
+lab-inheco-odtc.workspace = true
+lab-instruments.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

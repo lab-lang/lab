@@ -12,6 +12,7 @@ members = [
     "crates/lab-language-server",
     "crates/lab-package",
     "crates/lab-project",
+    "crates/lab-stations",
     "crates/lab-python",
 ]
 
@@ -61,6 +62,7 @@ lab-language-server = { path = "crates/lab-language-server", version = "0.1.0" }
 opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.0" }
 lab-project = { path = "crates/lab-project", version = "0.1.0" }
+lab-stations = { path = "crates/lab-stations", version = "0.1.0" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -324,7 +324,7 @@ pub(crate) fn render_dry_run(loaded: &LoadedWorkcell) -> String {
 /// stays open for the wave.
 struct Sessions {
     star: Option<hamilton_star::Star>,
-    odtc: Option<lab_inheco_odtc::Odtc>,
+    odtc: Option<lab_stations::OdtcStation>,
 }
 
 /// Bench context the walk carries: which station is the cycler, and where
@@ -455,7 +455,7 @@ fn ensure_odtc<'sessions>(
     sessions: &'sessions mut Sessions,
     bench: &Bench,
     station: &str,
-) -> Result<&'sessions mut lab_inheco_odtc::Odtc> {
+) -> Result<&'sessions mut lab_stations::OdtcStation> {
     if sessions.odtc.is_none() {
         let address = bench.addresses.get(station).with_context(|| {
             format!(
@@ -466,13 +466,8 @@ fn ensure_odtc<'sessions>(
             format!("'{address}' is not an <ip:port> address for station '{station}'")
         })?;
         println!("connecting to {station} at {socket}");
-        let transport = lab_inheco_odtc::HttpSoapTransport::connect(socket)
-            .with_context(|| format!("station '{station}' did not answer at {socket}"))?;
-        let session = lab_inheco_odtc::Odtc::connect(
-            std::sync::Arc::new(transport),
-            lab_inheco_odtc::OdtcOptions::default(),
-        )
-        .with_context(|| format!("the {station} connection handshake failed"))?;
+        let session = lab_stations::OdtcStation::connect(socket)
+            .with_context(|| format!("the {station} connection handshake failed at {socket}"))?;
         println!("connected; {station} is idle");
         sessions.odtc = Some(session);
     }
@@ -559,7 +554,7 @@ fn execute_node(node: &LoadedNode, sessions: &mut Sessions, bench: &Bench) -> Re
             let odtc = ensure_odtc(sessions, bench, station)?;
             document
                 .profile
-                .validate(&lab_inheco_odtc::odtc_limits())
+                .validate(&lab_stations::odtc_thermal_limits())
                 .with_context(|| format!("'{}' is outside the {station} envelope", document.id))?;
             println!(
                 "\n{station}: {} ({} plateaus)",

@@ -599,7 +599,6 @@ name = "lab-byonoy"
 version = "0.1.0"
 dependencies = [
  "hidapi",
- "lab-instruments",
  "thiserror",
 ]
 
@@ -612,10 +611,10 @@ dependencies = [
  "flate2",
  "hamilton-star",
  "lab-compiler",
- "lab-inheco-odtc",
  "lab-instruments",
  "lab-package",
  "lab-project",
+ "lab-stations",
  "self-replace",
  "semver",
  "serde",
@@ -668,7 +667,6 @@ dependencies = [
 name = "lab-inheco-odtc"
 version = "0.1.0"
 dependencies = [
- "lab-instruments",
  "quick-xml",
  "thiserror",
  "ureq",
@@ -733,6 +731,16 @@ dependencies = [
  "lab-compiler",
  "pyo3",
  "serde_json",
+]
+
+[[package]]
+name = "lab-stations"
+version = "0.1.0"
+dependencies = [
+ "lab-byonoy",
+ "lab-inheco-odtc",
+ "lab-instruments",
+ "thiserror",
 ]
 
 [[package]]
