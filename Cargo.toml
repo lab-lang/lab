@@ -1,12 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lab-byonoy",
     "crates/lab-cli",
     "crates/lab-compiler",
     "crates/lab-hamilton-star",
     "crates/lab-ide",
-    "crates/lab-instruments",
     "crates/lab-ide-wasm",
+    "crates/lab-instruments",
     "crates/lab-language",
     "crates/lab-language-server",
     "crates/lab-opentrons-protocol",
@@ -25,6 +26,7 @@ repository = "https://github.com/lab-lang/lab"
 [workspace.dependencies]
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }
+hidapi = "2"
 pyo3 = { version = "0.28.3", features = ["abi3-py311"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -40,13 +42,16 @@ serde-wasm-bindgen = "0.6"
 # Pin the post-0.16 pass infrastructure until it is available in a release.
 pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1a18a0c0e64a0f1137f091b91" }
 
+# Default features stay off at the workspace level so pure protocol use
+# never links the native HID library; a runner re-enables `hid`.
+lab-byonoy = { path = "crates/lab-byonoy", version = "0.1.0", default-features = false }
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
 # Default features stay off at the workspace level so the compiler's pure
 # protocol use never links libusb; the CLI runner re-enables `usb`.
 lab-hamilton-star = { path = "crates/lab-hamilton-star", version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
-lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
+lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }
 lab-language-server = { path = "crates/lab-language-server", version = "0.1.0" }
 lab-opentrons-protocol = { path = "crates/lab-opentrons-protocol", version = "0.1.0" }

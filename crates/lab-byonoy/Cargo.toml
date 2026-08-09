@@ -1,0 +1,23 @@
+[package]
+name = "lab-byonoy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed Byonoy Absorbance 96 HID report protocol and plate-reader session."
+
+[dependencies]
+hidapi = { workspace = true, optional = true }
+lab-instruments.workspace = true
+thiserror.workspace = true
+
+[features]
+# The `hid` feature carries the hidapi-backed transport. Consumers that only
+# encode and decode reports disable default features so they never link the
+# native HID library; a runner enables it.
+default = ["hid"]
+hid = ["dep:hidapi"]
+
+[lints]
+workspace = true
