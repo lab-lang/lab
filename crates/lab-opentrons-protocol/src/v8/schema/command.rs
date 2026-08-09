@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::schema::{
+use crate::v8::schema::{
     Coordinates, DropTipWellLocation, LabwareLocation, LabwareMovementStrategy, ModuleModel,
     MotorAxis, Mount, MovementAxis, NozzleLayoutConfiguration, PipetteName, StatusBarAnimation,
     TipPresenceState, WellLocation, WellOffset,
@@ -221,7 +221,7 @@ pub struct LoadModuleParams {
     pub model: ModuleModel,
     /// The module's deck slot. A thermocycler names its front-most slot:
     /// `B1` on a Flex, `7` on an OT-2.
-    pub location: crate::schema::DeckSlotLocation,
+    pub location: crate::v8::schema::DeckSlotLocation,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module_id: Option<String>,
 }
@@ -636,7 +636,7 @@ pub struct AbsorbanceReaderMeasureParams {
 
 #[cfg(test)]
 mod tests {
-    use crate::schema::command::*;
+    use crate::v8::schema::command::*;
 
     #[test]
     fn a_command_serializes_to_the_tagged_envelope() {
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn labware_locations_cover_every_wire_shape() {
-        use crate::schema::LabwareLocation;
+        use crate::v8::schema::LabwareLocation;
         assert_eq!(
             serde_json::to_value(LabwareLocation::slot("B1")).unwrap(),
             serde_json::json!({"slotName": "B1"})

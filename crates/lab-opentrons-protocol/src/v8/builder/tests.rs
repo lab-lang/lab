@@ -1,7 +1,7 @@
 //! Construction-time enforcement of every semantic rule the protocol engine
 //! checks during analysis. Each rejection asserts the exact error.
 
-use crate::builder::*;
+use crate::v8::builder::*;
 
 const TIPRACK_50: &str = "opentrons_flex_96_tiprack_50ul";
 const TIPRACK_1000: &str = "opentrons_flex_96_tiprack_1000ul";

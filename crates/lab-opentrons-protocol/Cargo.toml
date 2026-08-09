@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Typed, validating authoring interface for Opentrons JSON protocols."
+description = "A Rust implementation of the Opentrons JSON protocol format, with typed authoring and construction-time validation."
 
 [dependencies]
 serde.workspace = true

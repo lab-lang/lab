@@ -2,7 +2,7 @@
 //!
 //! Everything here serializes to exactly the shape the protocol schema
 //! accepts; nothing here validates semantics. The checked authoring API in
-//! [`crate::builder`] produces these types, and hand-authoring them directly
+//! [`crate::v8::builder`] produces these types, and hand-authoring them directly
 //! is the escape hatch for anything the builder does not model.
 
 mod command;
@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::schema::command::{
+pub use crate::v8::schema::command::{
     AbsorbanceReaderMeasureParams, AspirateInPlaceParams, AspirateParams, BlowOutInPlaceParams,
     BlowoutParams, Command, CommandAction, CommentParams, ConfigureForVolumeParams,
     ConfigureNozzleLayoutParams, DispenseInPlaceParams, DispenseParams, DropTipInPlaceParams,

@@ -10,7 +10,7 @@
 //!
 //! The builder is Flex-specific: slots, pipettes, and modules use Flex
 //! vocabulary, so an OT-2 instrument in a Flex protocol is unrepresentable.
-//! OT-2 protocols are authored through [`crate::schema`] directly.
+//! OT-2 protocols are authored through [`crate::v8::schema`] directly.
 
 use std::collections::BTreeMap;
 use std::marker::PhantomData;
@@ -18,7 +18,7 @@ use std::marker::PhantomData;
 use thiserror::Error;
 
 use crate::labware::{LabwareDefinition, standard_definition};
-use crate::schema::{
+use crate::v8::schema::{
     self, Command, CommandAction, DropTipInPlaceParams, LabwareLocation, LabwareMovementStrategy,
     Liquid, LoadLabwareParams, LoadLiquidParams, LoadModuleParams, LoadPipetteParams, Metadata,
     ModuleModel, ModuleOnlyParams, MoveLabwareParams, MoveToAddressableAreaForDropTipParams,
