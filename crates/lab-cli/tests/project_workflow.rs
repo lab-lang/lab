@@ -339,20 +339,21 @@ fn a_target_build_rejects_a_backend_this_toolchain_does_not_provide() {
     .unwrap();
     std::fs::create_dir_all(project.join("targets")).unwrap();
     std::fs::write(
-        project.join("targets/hamilton.toml"),
-        "[target]\nbackend = \"hamilton.star\"\n",
+        project.join("targets/evo.toml"),
+        "[target]\nbackend = \"tecan.evo\"\n",
     )
     .unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args(["build", project.to_str().unwrap(), "--target", "hamilton"])
+        .args(["build", project.to_str().unwrap(), "--target", "evo"])
         .output()
         .unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("hamilton.star"), "{stderr}");
+    assert!(stderr.contains("tecan.evo"), "{stderr}");
     assert!(stderr.contains("opentrons.flex"), "{stderr}");
+    assert!(stderr.contains("hamilton.star"), "{stderr}");
 
     std::fs::remove_dir_all(project).unwrap();
 }

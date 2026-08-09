@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use lab_compiler::backend::hamilton::star::StarTargetProfile;
 use lab_compiler::backend::opentrons::flex::FlexTargetProfile;
 use lab_compiler::backend::opentrons::ot2::Ot2TargetProfile;
 use lab_compiler::planning::BuildInventory;
@@ -256,6 +257,7 @@ struct TargetBuild {
 enum TargetProfile {
     Ot2(Ot2TargetProfile),
     Flex(FlexTargetProfile),
+    Star(StarTargetProfile),
 }
 
 fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
@@ -272,8 +274,11 @@ fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
         "opentrons.flex" => Ok(TargetProfile::Flex(FlexTargetProfile::parse(
             name, contents,
         )?)),
+        "hamilton.star" => Ok(TargetProfile::Star(StarTargetProfile::parse(
+            name, contents,
+        )?)),
         other => bail!(
-            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2' and 'opentrons.flex'"
+            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2', 'opentrons.flex', and 'hamilton.star'"
         ),
     }
 }
@@ -283,7 +288,11 @@ fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
 fn is_robot_protocol(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with("_protocol.py") || name.ends_with("_protocol.json"))
+        .is_some_and(|name| {
+            name.ends_with("_protocol.py")
+                || name.ends_with("_protocol.json")
+                || name.ends_with(".star.json")
+        })
 }
 
 /// Lower the program the default member forms, together with everything it
@@ -339,6 +348,14 @@ fn build_for_target(
         }
         TargetProfile::Flex(profile) => {
             lab_compiler::backend::opentrons::flex::compile_dependency_build(
+                &protocol, profile, &inventory,
+            )
+            .with_context(|| format!("failed to compile the {target} build"))?
+            .artifacts()
+            .clone()
+        }
+        TargetProfile::Star(profile) => {
+            lab_compiler::backend::hamilton::star::compile_dependency_build(
                 &protocol, profile, &inventory,
             )
             .with_context(|| format!("failed to compile the {target} build"))?

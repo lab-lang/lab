@@ -79,6 +79,22 @@ protocol (schema 8) rather than Python. Verify them with:
 scripts/analyze-opentrons-flex.sh examples/golden-gate/.lab/build/opentrons-flex
 ```
 
+`targets/hamilton-star.toml` describes a Hamilton STARlet. Its
+`backend = "hamilton.star"` selects the firmware-protocol backend:
+
+```bash
+lab build --target hamilton-star
+```
+
+Each wave then contains `*.star.json` run documents — ordered, reviewable
+Hamilton firmware frames with an operator description per step — plus the
+manual protocol that interleaves the off-deck thermal work. Review a wave
+without hardware, or execute it on the connected machine:
+
+```bash
+lab run examples/golden-gate/.lab/build/hamilton-star/wave-001 --dry-run
+```
+
 ## See the deck
 
 Open the Opentrons app, go to **Protocols**, and either drag one of those

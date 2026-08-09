@@ -1,4 +1,5 @@
 mod commands;
+mod run;
 mod update;
 
 use std::path::PathBuf;
@@ -55,6 +56,22 @@ enum Command {
         /// target.
         #[arg(long, conflicts_with = "target")]
         no_target: bool,
+    },
+    /// Execute an emitted Hamilton STAR run package on the connected
+    /// machine, or review it with --dry-run.
+    Run {
+        /// A run directory produced by `lab build` for a hamilton.star
+        /// target (the target output directory, or one wave directory of a
+        /// dependency build).
+        path: PathBuf,
+        /// Validate and print the full step table without touching
+        /// hardware.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the initial confirmation. Manual steps between runs still
+        /// require the operator.
+        #[arg(long)]
+        yes: bool,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -117,6 +134,7 @@ fn run() -> Result<()> {
             target,
             no_target,
         } => commands::build(path, out_dir, target, no_target, &output),
+        Command::Run { path, dry_run, yes } => run::run(path, dry_run, yes, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }

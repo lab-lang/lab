@@ -1,0 +1,114 @@
+# The Hamilton STARlet bench this workspace can compile for. Its filename is
+# its name: this is `hamilton-star`, built by `lab build --target
+# hamilton-star`, and the emitted run documents execute with `lab run`.
+#
+# Everything here describes the laboratory, not the science: which catalog
+# carriers sit on which rails, which labware sits on which carrier site, and
+# where each build stage draws tips and liquid from. Another laboratory
+# running the same programs supplies its own profile and changes no Lab
+# source.
+#
+# Every field has a default matching the reference bench, so a profile
+# states only what differs. This one is written out in full because it is
+# the example's subject. Sites are addressed as "<carrier>/<site>" with
+# 1-based site numbers; carriers and labware come from the backend's
+# vendored Hamilton catalog.
+
+[target]
+backend = "hamilton.star"
+
+[machine]
+# A 32-rail STARlet with the standard 8-channel arm.
+variant = "starlet"
+channels = 8
+
+# One tip carrier feeds every stage: its five sites hold one rack per
+# stage/size pairing.
+[deck.carriers.tips]
+catalog = "tip_carrier_480"
+rail = 1
+
+# The 24-tube sample carrier both liquid stages draw sources from; the
+# operator reloads it between the assembly and transformation runs.
+[deck.carriers.sources]
+catalog = "tube_carrier_24"
+rail = 7
+
+# The trough carrier holding the recovery-medium supply for plating.
+[deck.carriers.media]
+catalog = "trough_carrier_5"
+rail = 8
+
+[deck.carriers.plates_a]
+catalog = "plate_carrier_l5"
+rail = 9
+
+[deck.carriers.plates_b]
+catalog = "plate_carrier_l5"
+rail = 15
+
+[deck.source_rack]
+site = "sources/1"
+labware = "sample_tubes_24"
+capacity = 24
+
+# The reaction plate carries reactions from assembly through plating; the
+# operator stages a fresh plate after moving the assembly products to the
+# DNA plate.
+[deck.reaction_plate]
+site = "plates_a/1"
+labware = "pcr_plate_96"
+capacity = 96
+
+[stages.assembly.small_tips]
+labware = "tip_rack_50ul_filter"
+slots = ["tips/1"]
+capacity = 96
+
+[stages.transformation.dna_plate]
+labware = "pcr_plate_96"
+slots = ["plates_a/2"]
+capacity = 96
+
+[stages.transformation.small_tips]
+labware = "tip_rack_50ul_filter"
+slots = ["tips/2"]
+capacity = 96
+
+[stages.transformation.large_tips]
+labware = "tip_rack_1000ul_filter"
+slots = ["tips/3"]
+capacity = 96
+
+# Two dilution plates. Declaring a second site raises the batch size this
+# bench can hold without editing a single program.
+[stages.plating.dilution_plate]
+labware = "pcr_plate_96"
+slots = ["plates_a/3", "plates_a/4"]
+capacity = 96
+
+[stages.plating.agar_plate]
+labware = "pcr_plate_96"
+slots = ["plates_b/1", "plates_b/2"]
+capacity = 96
+
+[stages.plating.media_rack]
+labware = "trough_60ml"
+slot = "media/1"
+medium_well = "A1"
+
+[stages.plating.small_tips]
+labware = "tip_rack_50ul_filter"
+slots = ["tips/4"]
+capacity = 96
+
+[stages.plating.large_tips]
+labware = "tip_rack_1000ul_filter"
+slots = ["tips/5"]
+capacity = 96
+
+[run]
+# Planning computes every liquid height deterministically; a bench may
+# additionally opt into capacitive detection with lld = "gamma".
+lld = "off"
+traverse_height_mm = 245.0

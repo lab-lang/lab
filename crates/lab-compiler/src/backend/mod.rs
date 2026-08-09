@@ -20,6 +20,7 @@ mod constraints;
 mod descriptor;
 mod error;
 mod graph;
+pub mod hamilton;
 pub mod opentrons;
 mod package;
 mod profile;
