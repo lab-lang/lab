@@ -501,9 +501,15 @@ fn a_workcell_target_lifts_thermal_work_onto_its_cycler_station() {
     );
     assert!(
         target_root
-            .join("wave-001/stations/star-1/manual_protocol.md")
+            .join("wave-001/stations/star-1/manual_protocol.typ")
             .is_file(),
         "deck and source loading stay with the handler's own manual"
+    );
+    let station_manual =
+        std::fs::read(target_root.join("wave-001/stations/star-1/manual_protocol.pdf")).unwrap();
+    assert!(
+        station_manual.starts_with(b"%PDF-"),
+        "every emitted document is typeset beside its source"
     );
 
     // Later waves carry the transformation thermal programs.

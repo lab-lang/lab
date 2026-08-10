@@ -464,9 +464,9 @@ workflow build_reporter_host(
         assert!(
             bundle
                 .manual_protocol()
-                .contains("Stage 3 — Serial dilution and plating")
+                .contains("Stage 3: Serial dilution and plating")
         );
-        assert_eq!(bundle.artifacts().len(), 5);
+        assert_eq!(bundle.artifacts().len(), 6);
     }
 
     #[test]

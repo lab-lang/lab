@@ -97,7 +97,8 @@ mod tests {
             "transformation_recovery_run.star.json",
             "plating_run.star.json",
             "automation_manifest.json",
-            "manual_protocol.md",
+            "manual_protocol.typ",
+            "lab-style.typ",
         ] {
             assert!(artifacts.get(path).is_some(), "missing {path}");
         }

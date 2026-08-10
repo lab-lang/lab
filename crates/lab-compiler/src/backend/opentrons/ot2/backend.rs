@@ -95,7 +95,7 @@ mod tests {
         assert_eq!(program.strains.len(), 4);
 
         let artifacts = backend.emit(&program).unwrap();
-        assert_eq!(artifacts.len(), 5);
+        assert_eq!(artifacts.len(), 6);
         assert!(artifacts.get("assembly_protocol.py").is_some());
     }
 }

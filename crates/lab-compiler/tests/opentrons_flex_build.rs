@@ -124,7 +124,8 @@ fn writes_a_complete_flex_automation_bundle_of_json_protocols() {
     for name in [
         "assembly_protocol.json",
         "automation_manifest.json",
-        "manual_protocol.md",
+        "lab-style.typ",
+        "manual_protocol.typ",
         "plating_protocol.json",
         "transformation_protocol.json",
     ] {
@@ -282,11 +283,14 @@ fn writes_a_complete_flex_automation_bundle_of_json_protocols() {
     assert_eq!(spotting["params"]["wellLocation"]["origin"], "top");
     assert_eq!(spotting["params"]["wellLocation"]["offset"]["z"], -8.0);
 
-    let manual = std::fs::read_to_string(output_dir.join("manual_protocol.md")).unwrap();
-    assert!(manual.contains("p_gfp"));
-    assert!(manual.contains("p_rfp"));
+    let manual = std::fs::read_to_string(output_dir.join("manual_protocol.typ")).unwrap();
+    assert!(
+        manual.contains("`p_gfp`"),
+        "identifiers render in the code face"
+    );
+    assert!(manual.contains("`p_rfp`"));
     assert!(manual.contains("Opentrons JSON protocol (schema 8)"));
-    assert!(manual.contains("Execution boundary"));
+    assert!(manual.contains("= Execution boundary"));
 
     analyze_if_requested(&output_dir);
 
@@ -334,11 +338,12 @@ fn packages_a_dependency_driven_flex_build_by_wave() {
         !output_dir.join("wave-001/plating_protocol.json").exists(),
         "an assembly-only wave emits no plating protocol"
     );
-    assert!(output_dir.join("dependency_report.md").is_file());
+    assert!(output_dir.join("dependency_report.typ").is_file());
+    assert!(output_dir.join("lab-style.typ").is_file());
 
-    let instructions = std::fs::read_to_string(output_dir.join("manual_protocol.md")).unwrap();
-    assert!(instructions.contains("## Execution order"));
-    assert!(instructions.contains("## Run 004 — `reporter_host`"));
+    let instructions = std::fs::read_to_string(output_dir.join("manual_protocol.typ")).unwrap();
+    assert!(instructions.contains("= Execution order"));
+    assert!(instructions.contains("= #hl(\"Run 004\")`reporter_host`"));
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }

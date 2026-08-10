@@ -9,12 +9,16 @@ use serde::Serialize;
 
 use crate::{ArtifactBundle, ProtocolLairProgram};
 
-use crate::backend::hamilton::star::emit::manual::render_manual_protocol;
+use crate::backend::document::Doc;
+use crate::backend::hamilton::star::emit::manual::{
+    bench_blocks, render_manual_protocol, run_blocks,
+};
 use crate::backend::hamilton::star::emit::runs::render_run;
 use crate::backend::hamilton::star::plan::{
     StarBuildError, StarEmissionError, StarExecutionPlan, plan_build,
 };
 use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::{markdown, typst};
 
 pub use crate::backend::hamilton::star::emit::runs::RunStep;
 
@@ -22,6 +26,7 @@ pub use crate::backend::hamilton::star::emit::runs::RunStep;
 #[derive(Clone, Debug)]
 pub struct StarBundle {
     manifest: StarExecutionPlan,
+    manual: Doc,
     artifacts: ArtifactBundle,
 }
 
@@ -29,6 +34,7 @@ impl StarBundle {
     pub(in crate::backend) fn from_plan(
         manifest: StarExecutionPlan,
     ) -> Result<Self, StarEmissionError> {
+        let manual = render_manual_protocol(&manifest);
         let mut artifacts = ArtifactBundle::new();
         artifacts.insert_text(
             "automation_manifest.json",
@@ -36,10 +42,11 @@ impl StarBundle {
             pretty_json(&manifest)?,
         )?;
         artifacts.insert_text(
-            "manual_protocol.md",
-            "text/markdown",
-            render_manual_protocol(&manifest),
+            "manual_protocol.typ",
+            "text/x-typst",
+            typst::render(&manual),
         )?;
+        artifacts.insert_text(typst::STYLE_PATH, "text/x-typst", typst::STYLE)?;
         // A batch emits a run document only for the stages its artifacts
         // actually reach; a frame sequence over an empty plan would fail on
         // the machine rather than at compile time.
@@ -52,6 +59,7 @@ impl StarBundle {
         }
         Ok(Self {
             manifest,
+            manual,
             artifacts,
         })
     }
@@ -64,8 +72,22 @@ impl StarBundle {
         Ok(self.artifact_text("automation_manifest.json").to_owned())
     }
 
-    pub fn manual_protocol(&self) -> &str {
-        self.artifact_text("manual_protocol.md")
+    /// The operator manual as markdown, for terminal display. The bundle's
+    /// typeset form is the `manual_protocol.typ` artifact.
+    pub fn manual_protocol(&self) -> String {
+        markdown::render(&self.manual)
+    }
+
+    /// The bench sections, which hold for any run on this profile. The
+    /// stitched full-build document renders them once instead of repeating
+    /// them under every wave.
+    pub(in crate::backend) fn bench_blocks(&self) -> Vec<crate::backend::document::Block> {
+        bench_blocks(&self.manifest.deck)
+    }
+
+    /// This run's own sections: source fills, tips, and the run sequence.
+    pub(in crate::backend) fn run_blocks(&self) -> Vec<crate::backend::document::Block> {
+        run_blocks(&self.manifest)
     }
 
     /// The run document for a run id the batch reached, e.g.

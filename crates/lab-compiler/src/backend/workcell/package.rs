@@ -13,12 +13,14 @@ use crate::runfmt::{
 };
 use crate::{ArtifactBundle, ArtifactError, ProtocolLairProgram};
 
+use crate::backend::document::{Column, Doc, DocMeta, code, text};
 use crate::backend::hamilton::star::StarBundle;
 use crate::backend::hamilton::star::plan::{
     StarBuildError, StarExecutionPlan, ThermalRequirement, plan_selected_build,
 };
 use crate::backend::hamilton::star::profile::StarTargetProfile;
 use crate::backend::package::{render_full_build_instructions, render_report};
+use crate::backend::typst;
 use crate::backend::workcell::profile::WorkcellProfile;
 use crate::planning::{BuildInventory, DependencyBuildManifest};
 use crate::planning::{DependencyGraphError, resolve_dependency_graph};
@@ -102,10 +104,19 @@ pub fn compile_dependency_build(
         pretty_json(&manifest)?,
     )?;
     artifacts.insert_text(
-        "dependency_report.md",
-        "text/markdown",
-        render_report(&manifest),
+        "dependency_report.typ",
+        "text/x-typst",
+        typst::render(&render_report(
+            DocMeta::new(
+                "Dependency report",
+                "Artifact graph, wave schedule, and blockers",
+                &profile.target.name,
+                "Workcell",
+            ),
+            &manifest,
+        )),
     )?;
+    artifacts.insert_text(typst::STYLE_PATH, "text/x-typst", typst::STYLE)?;
 
     let mut instruction_batches = Vec::new();
     for (index, (iteration, selected)) in waves.into_iter().enumerate() {
@@ -163,19 +174,45 @@ pub fn compile_dependency_build(
             "application/json",
             pretty_json(&coordination)?,
         )?;
-        let wave_manual = render_wave_manual(&coordination, &assignment.narrative, &handler);
+        let wave_manual = render_wave_manual(
+            DocMeta::new(
+                "Workcell wave",
+                "Coordination plan for one wave across the cell",
+                &profile.target.name,
+                "Workcell",
+            ),
+            &coordination,
+            &assignment.narrative,
+            &handler,
+        );
         artifacts.insert_text(
-            format!("{directory}/manual_protocol.md"),
-            "text/markdown",
-            wave_manual.clone(),
+            format!("{directory}/manual_protocol.typ"),
+            "text/x-typst",
+            typst::render(&wave_manual),
         )?;
-        instruction_batches.push((index + 1, iteration, label, directory, wave_manual));
+        artifacts.insert_text(
+            format!("{directory}/{}", typst::STYLE_PATH),
+            "text/x-typst",
+            typst::STYLE,
+        )?;
+        instruction_batches.push((index + 1, iteration, label, directory, wave_manual.blocks));
     }
 
     artifacts.insert_text(
-        "manual_protocol.md",
-        "text/markdown",
-        render_full_build_instructions(&manifest, &instruction_batches),
+        "manual_protocol.typ",
+        "text/x-typst",
+        typst::render(&render_full_build_instructions(
+            DocMeta::new(
+                "Automated plasmid build",
+                "Operator instructions for the full dependency-driven build",
+                &profile.target.name,
+                "Workcell",
+            ),
+            &manifest,
+            Vec::new(),
+            &instruction_batches,
+            Vec::new(),
+        )),
     )?;
 
     Ok(WorkcellDependencyBuildBundle {
@@ -222,7 +259,7 @@ fn assign_wave(plan: &mut StarExecutionPlan, profile: &WorkcellProfile) -> WaveA
                     document: format!("stations/{handler}/{}.star.json", run.id),
                 },
             },
-            format!("[{handler}] {} — run `{}.star.json`", run.title, run.id),
+            format!("[{handler}] {}: run {}.star.json", run.title, run.id),
             &mut previous,
         );
 
@@ -270,7 +307,7 @@ fn assign_wave(plan: &mut StarExecutionPlan, profile: &WorkcellProfile) -> WaveA
                         },
                     },
                     format!(
-                        "[{cycler_name}] {} — run `{}.odtc.json`",
+                        "[{cycler_name}] {}: run {}.odtc.json",
                         requirement.title, requirement.id
                     ),
                     &mut previous,
@@ -334,36 +371,59 @@ fn assign_wave(plan: &mut StarExecutionPlan, profile: &WorkcellProfile) -> WaveA
 /// source fills stay in the liquid handler's own manual under its station
 /// directory; this document owns only the order of work.
 fn render_wave_manual(
+    meta: DocMeta,
     coordination: &WorkcellRunDocument,
     narrative: &[String],
     handler: &str,
-) -> String {
-    use std::fmt::Write;
-    let mut text = String::new();
-    let _ = writeln!(text, "# Lab workcell wave — coordination\n");
-    let _ = writeln!(
-        text,
-        "Load the {handler} deck and sources first: see `stations/{handler}/manual_protocol.md`.\n"
+) -> Doc {
+    let mut doc = Doc::new(meta);
+    doc.para([
+        text(format!("Load the {handler} deck and sources first: see ")),
+        code(format!("stations/{handler}/manual_protocol.pdf")),
+        text("."),
+    ]);
+    doc.heading(1, [text("Running this wave")]);
+    doc.para([
+        text("This wave is coordinated by "),
+        code("plan.workcell.json"),
+        text(", generated by "),
+        code("lab build"),
+        text(" together with every station program in "),
+        code("stations/"),
+        text(". Start it with "),
+        code("lab run <this directory>"),
+        text(": the runner validates the plan, prints the full step table, asks for confirmation, then walks the sequence below node by node, dispatching each station program to its instrument and prompting the operator for every handoff and manual step before the next node starts. "),
+        code("lab run --dry-run"),
+        text(" prints the table without touching hardware."),
+    ]);
+    doc.para_text(
+        "Handoffs are the only points where labware moves between stations, and they always come with explicit instructions: seal, carry, or return exactly as prompted, and confirm only after the physical move is done.",
     );
-    let _ = writeln!(text, "## Stations\n");
-    let _ = writeln!(text, "| Station | Kind | Programs |");
-    let _ = writeln!(text, "|---|---|---|");
-    for station in &coordination.stations {
-        let _ = writeln!(
-            text,
-            "| {} | {} | `{}/` |",
-            station.name, station.kind, station.program_dir
-        );
-    }
-    let _ = writeln!(text, "\n## Sequence\n");
-    for (index, line) in narrative.iter().enumerate() {
-        let _ = writeln!(text, "{}. {line}", index + 1);
-    }
-    let _ = writeln!(
-        text,
-        "\nEvery handoff and manual step is confirmed by the operator before the next node starts; `lab run` walks this same sequence."
+    doc.heading(1, [text("Stations")]);
+    doc.table(
+        [
+            Column::left("Station"),
+            Column::left("Kind"),
+            Column::left("Programs"),
+        ],
+        coordination.stations.iter().map(|station| {
+            vec![
+                vec![text(station.name.as_str())],
+                vec![text(station.kind.as_str())],
+                vec![code(format!("{}/", station.program_dir))],
+            ]
+        }),
     );
-    text
+    doc.heading(1, [text("Sequence")]);
+    doc.numbered(narrative.iter().map(|line| vec![text(line.as_str())]));
+    doc.para([
+        text(
+            "Every handoff and manual step is confirmed by the operator before the next node starts; ",
+        ),
+        code("lab run"),
+        text(" walks this same sequence."),
+    ]);
+    doc
 }
 
 #[cfg(test)]

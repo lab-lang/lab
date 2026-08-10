@@ -223,10 +223,16 @@ pub(crate) fn build(
                 human.push_str(&format!("\n  {}", protocol.display()));
             }
         }
+        if !built.documents.is_empty() {
+            human.push_str("\n\nDocuments:");
+            for document in &built.documents {
+                human.push_str(&format!("\n  {}", document.display()));
+            }
+        }
     }
-    let (target_output, protocols) = match built {
-        Some(built) => (Some(built.directory), built.protocols),
-        None => (None, Vec::new()),
+    let (target_output, protocols, documents) = match built {
+        Some(built) => (Some(built.directory), built.protocols, built.documents),
+        None => (None, Vec::new(), Vec::new()),
     };
     output.success(
         "built",
@@ -238,16 +244,18 @@ pub(crate) fn build(
             target,
             target_output,
             protocols,
+            documents,
         },
         human,
     )
 }
 
-/// What a target build produced: its package directory and every protocol a
-/// robot application can open.
+/// What a target build produced: its package directory, every protocol a
+/// robot application can open, and the typeset operator documents.
 struct TargetBuild {
     directory: PathBuf,
     protocols: Vec<PathBuf>,
+    documents: Vec<PathBuf>,
 }
 
 /// A target profile parsed for whichever backend it declares. The `backend`
@@ -403,6 +411,7 @@ fn build_for_target(
     };
     let target_root = output_root.join(target);
     let mut protocols = Vec::new();
+    let mut typst_sources = Vec::new();
     for artifact in artifacts.iter() {
         let path = target_root.join(artifact.path());
         if let Some(parent) = path.parent() {
@@ -414,12 +423,39 @@ fn build_for_target(
         if is_robot_protocol(&path) {
             protocols.push(path);
         }
+        if artifact.media_type() == "text/x-typst" && is_typeset_document(artifact.path()) {
+            typst_sources.push(artifact.path().to_owned());
+        }
     }
     protocols.sort();
+    typst_sources.sort();
+
+    // Typeset every emitted document to a PDF beside its source. A failure
+    // here is a bug in the emitters — the sources are generated — so the
+    // build stops rather than shipping a package with missing documents.
+    let mut documents = Vec::new();
+    let typesetter = crate::typeset::Typesetter::new();
+    for source in &typst_sources {
+        let pdf_bytes = typesetter
+            .compile_pdf(&target_root, source)
+            .with_context(|| format!("failed to typeset {source}"))?;
+        let pdf_path = target_root.join(source).with_extension("pdf");
+        fs::write(&pdf_path, pdf_bytes)
+            .with_context(|| format!("failed to write {}", pdf_path.display()))?;
+        documents.push(pdf_path);
+    }
+
     Ok(TargetBuild {
         directory: target_root,
         protocols,
+        documents,
     })
+}
+
+/// A `text/x-typst` artifact is a complete document unless it is the shared
+/// style sheet the documents import.
+fn is_typeset_document(path: &str) -> bool {
+    !path.ends_with("lab-style.typ")
 }
 
 pub(crate) fn metadata(path: PathBuf, output: &Output) -> Result<()> {
@@ -510,6 +546,7 @@ struct BuildCompleted {
     target: Option<String>,
     target_output: Option<PathBuf>,
     protocols: Vec<PathBuf>,
+    documents: Vec<PathBuf>,
 }
 
 #[derive(Serialize)]

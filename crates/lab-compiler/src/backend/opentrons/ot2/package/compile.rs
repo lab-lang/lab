@@ -13,9 +13,11 @@ use crate::planning::{DependencyGraphError, resolve_dependency_graph};
 use crate::backend::opentrons::ot2::plan::{plan_selected_build, protocol_build_graph};
 use crate::backend::opentrons::ot2::{Ot2BuildError, Ot2Bundle};
 
+use crate::backend::document::DocMeta;
 use crate::backend::opentrons::ot2::package::report::{
     pretty_json, render_full_build_instructions, render_report,
 };
+use crate::backend::typst;
 
 #[derive(Clone, Debug)]
 pub struct DependencyBuildBundle {
@@ -88,11 +90,21 @@ pub fn compile_dependency_build(
         pretty_json(&manifest)?,
     )?;
     artifacts.insert_text(
-        "dependency_report.md",
-        "text/markdown",
-        render_report(&manifest),
+        "dependency_report.typ",
+        "text/x-typst",
+        typst::render(&render_report(
+            DocMeta::new(
+                "Dependency report",
+                "Artifact graph, wave schedule, and blockers",
+                &profile.target.name,
+                "Opentrons OT-2",
+            ),
+            &manifest,
+        )),
     )?;
+    artifacts.insert_text(typst::STYLE_PATH, "text/x-typst", typst::STYLE)?;
     let mut instruction_batches = Vec::new();
+    let mut bench = Vec::new();
     for (index, (iteration, selected)) in waves.into_iter().enumerate() {
         let label = selected.iter().cloned().collect::<Vec<_>>().join(", ");
         let plan = plan_selected_build(protocol, profile, Some(&selected)).map_err(|source| {
@@ -107,12 +119,15 @@ pub fn compile_dependency_build(
                 source: Ot2BuildError::Emission(source),
             })?;
         let directory = format!("wave-{:03}", index + 1);
+        if bench.is_empty() {
+            bench = automation.bench_blocks();
+        }
         instruction_batches.push((
             index + 1,
             iteration,
             label,
             directory.clone(),
-            automation.manual_protocol().to_owned(),
+            automation.run_blocks(),
         ));
         for generated in automation.artifacts().iter() {
             artifacts.insert(crate::GeneratedArtifact::bytes(
@@ -123,9 +138,20 @@ pub fn compile_dependency_build(
         }
     }
     artifacts.insert_text(
-        "manual_protocol.md",
-        "text/markdown",
-        render_full_build_instructions(&manifest, &instruction_batches),
+        "manual_protocol.typ",
+        "text/x-typst",
+        typst::render(&render_full_build_instructions(
+            DocMeta::new(
+                "Automated plasmid build",
+                "Operator instructions for the full dependency-driven build",
+                &profile.target.name,
+                "Opentrons OT-2",
+            ),
+            &manifest,
+            bench,
+            &instruction_batches,
+            crate::backend::opentrons::ot2::emit::boundary_blocks(),
+        )),
     )?;
 
     Ok(DependencyBuildBundle {
@@ -275,16 +301,20 @@ workflow build_final_host(
                 .get("wave-003/transformation_protocol.py")
                 .is_some()
         );
-        assert!(bundle.artifacts().get("dependency_report.md").is_some());
+        assert!(bundle.artifacts().get("dependency_report.typ").is_some());
+        assert!(bundle.artifacts().get("lab-style.typ").is_some());
         let instructions = bundle
             .artifacts()
-            .get("manual_protocol.md")
+            .get("manual_protocol.typ")
             .unwrap()
             .text_contents()
             .unwrap();
-        assert!(instructions.contains("## Execution order"));
-        assert!(instructions.contains("## Run 001 — `intermediate`"));
-        assert!(instructions.contains("### Stage 1 — Golden Gate assembly"));
+        assert!(instructions.contains("= Execution order"));
+        assert!(instructions.contains("= #hl(\"Run 001\")`intermediate`"));
+        // The wave manual is spliced in one heading level down.
+        assert!(instructions.contains("== #hl(\"Stage 1\")Golden Gate assembly"));
+        // Bench setup is rendered once above the runs, not per wave.
+        assert_eq!(instructions.matches("= Machine setup").count(), 1);
     }
 
     #[test]

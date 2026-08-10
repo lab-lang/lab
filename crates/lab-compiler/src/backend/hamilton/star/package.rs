@@ -7,12 +7,14 @@ use thiserror::Error;
 
 use crate::{ArtifactBundle, ArtifactError, ProtocolLairProgram};
 
+use crate::backend::document::DocMeta;
 use crate::backend::hamilton::star::emit::StarBundle;
 use crate::backend::hamilton::star::plan::{
     StarBuildError, plan_selected_build, protocol_build_graph,
 };
 use crate::backend::hamilton::star::profile::StarTargetProfile;
 use crate::backend::package::{render_full_build_instructions, render_report};
+use crate::backend::typst;
 use crate::planning::{BuildInventory, DependencyBuildManifest};
 use crate::planning::{DependencyGraphError, resolve_dependency_graph};
 
@@ -98,11 +100,21 @@ pub fn compile_dependency_build(
             .map_err(|error| StarDependencyBuildError::Serialization(error.to_string()))?,
     )?;
     artifacts.insert_text(
-        "dependency_report.md",
-        "text/markdown",
-        render_report(&manifest),
+        "dependency_report.typ",
+        "text/x-typst",
+        typst::render(&render_report(
+            DocMeta::new(
+                "Dependency report",
+                "Artifact graph, wave schedule, and blockers",
+                &profile.target.name,
+                "Hamilton STAR",
+            ),
+            &manifest,
+        )),
     )?;
+    artifacts.insert_text(typst::STYLE_PATH, "text/x-typst", typst::STYLE)?;
     let mut instruction_batches = Vec::new();
+    let mut bench = Vec::new();
     for (index, (iteration, selected)) in waves.into_iter().enumerate() {
         let label = selected.iter().cloned().collect::<Vec<_>>().join(", ");
         let plan = plan_selected_build(protocol, profile, Some(&selected)).map_err(|source| {
@@ -117,12 +129,15 @@ pub fn compile_dependency_build(
                 source: StarBuildError::Emission(source),
             })?;
         let directory = format!("wave-{:03}", index + 1);
+        if bench.is_empty() {
+            bench = automation.bench_blocks();
+        }
         instruction_batches.push((
             index + 1,
             iteration,
             label,
             directory.clone(),
-            automation.manual_protocol().to_owned(),
+            automation.run_blocks(),
         ));
         for generated in automation.artifacts().iter() {
             artifacts.insert(crate::GeneratedArtifact::bytes(
@@ -133,9 +148,20 @@ pub fn compile_dependency_build(
         }
     }
     artifacts.insert_text(
-        "manual_protocol.md",
-        "text/markdown",
-        render_full_build_instructions(&manifest, &instruction_batches),
+        "manual_protocol.typ",
+        "text/x-typst",
+        typst::render(&render_full_build_instructions(
+            DocMeta::new(
+                "Automated plasmid build",
+                "Operator instructions for the full dependency-driven build",
+                &profile.target.name,
+                "Hamilton STAR",
+            ),
+            &manifest,
+            bench,
+            &instruction_batches,
+            Vec::new(),
+        )),
     )?;
 
     Ok(StarDependencyBuildBundle {

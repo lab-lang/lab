@@ -40,6 +40,19 @@ lsp-types = "0.97"
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 
+# Pure-Rust typesetter linked as a library: `lab build` compiles the .typ
+# protocol documents to PDF in-process, with fonts embedded in the binary —
+# no system TeX, no network, no native libraries. Only the CLI links these;
+# the compiler emits .typ sources and stays lean for lab-python.
+typst = "0.15"
+typst-layout = "0.15"
+typst-pdf = "0.15"
+typst-kit = { version = "0.15", default-features = false, features = [
+    "datetime",
+    "embedded-fonts",
+    "emit-diagnostics",
+] }
+
 # Pin the post-0.16 pass infrastructure until it is available in a release.
 pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1a18a0c0e64a0f1137f091b91" }
 

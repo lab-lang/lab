@@ -2,61 +2,133 @@
 //! report and the stitched human instruction document.
 
 use std::collections::BTreeSet;
-use std::fmt::Write;
 
+use crate::backend::document::{Block, Column, Doc, DocMeta, code, text};
 use crate::planning::{ArtifactResolution, DependencyBuildManifest};
 
-pub(in crate::backend) fn render_full_build_instructions(
-    manifest: &DependencyBuildManifest,
-    batches: &[(usize, usize, String, String, String)],
-) -> String {
-    let mut output = String::new();
-    writeln!(
-        output,
-        "# Lab dependency-driven build — human instructions\n"
-    )
-    .unwrap();
-    writeln!(output, "> Generated concept protocol. Review and qualify every run for the actual laboratory before execution. Planning success is not physical-build or acceptance evidence.\n").unwrap();
-    writeln!(output, "## Build overview\n").unwrap();
-    writeln!(output, "- Planning status: `{:?}`", manifest.status).unwrap();
-    writeln!(output, "- Root artifacts: {}", manifest.roots.join(", ")).unwrap();
-    writeln!(output, "- Robot runs: {}", batches.len()).unwrap();
-    writeln!(
-        output,
-        "- Existing artifacts reused: {}\n",
-        if manifest.existing_artifacts.is_empty() {
-            "none".to_owned()
-        } else {
-            manifest.existing_artifacts.join(", ")
-        }
-    )
-    .unwrap();
-    writeln!(output, "Consult `dependency_manifest.json` for the machine-readable plan and `dependency_report.md` for dependency and blocker details. Every artifact in one wave is dependency-independent of the others, so a wave is a single robot run over a single deck. Do not begin a wave until every artifact the previous waves produce has been physically made or retrieved and accepted as a suitable input.\n").unwrap();
-    writeln!(output, "This package does not automate DNA recovery or preparation between waves. Before a generated artifact is used downstream, prepare it in the form and concentration required by the later wave and record the corresponding acceptance evidence.\n").unwrap();
+/// One robot run in execution order: run index, planning iteration, artifact
+/// label, package directory, and the run's own manual content, spliced into
+/// this document one heading level down.
+pub(in crate::backend) type InstructionBatch = (usize, usize, String, String, Vec<Block>);
 
-    writeln!(output, "## Execution order\n").unwrap();
+/// Sections that hold for every run in the build, rendered once above the
+/// runs rather than repeated under each one.
+pub(in crate::backend) fn render_full_build_instructions(
+    meta: DocMeta,
+    manifest: &DependencyBuildManifest,
+    bench: Vec<Block>,
+    batches: &[InstructionBatch],
+    boundary: Vec<Block>,
+) -> Doc {
+    let mut doc = Doc::new(meta);
+    doc.notice([text(
+        "Generated concept protocol. Review and qualify every run for the actual laboratory before execution. Planning success is not physical-build or acceptance evidence.",
+    )]);
+
+    let profile_name = doc.meta.target.clone();
+    doc.heading(1, [text("How this package fits together")]);
+    doc.para([
+        text("The Lab toolchain compiled this package from the project's "),
+        code(".lab"),
+        text(" sources against the "),
+        code(profile_name),
+        text(" bench profile. Every artifact volume, well address, and deck position in this document was planned at compile time, and the robot files, the machine-readable manifests, and this document are all projections of the same execution plan, so they cannot disagree with one another. Nothing here is meant to be edited by hand: to change what a run does, change the sources or the target profile and run "),
+        code("lab build"),
+        text(" again."),
+    ]);
+    doc.bullets([
+        vec![
+            code("dependency_manifest.json"),
+            text(": the machine-readable dependency graph, wave schedule, and blockers."),
+        ],
+        vec![
+            code("dependency_report.pdf"),
+            text(": the human dependency summary. Consult it before starting if the planning status below is not complete."),
+        ],
+        vec![
+            code("wave-NNN/"),
+            text(
+                ": one directory per robot session, holding that wave's robot files and a standalone copy of its run manual.",
+            ),
+        ],
+        vec![
+            text("This document: every wave's manual stitched into execution order, with the between-wave handling that no robot performs."),
+        ],
+    ]);
+    doc.para_text(
+        "Work through the runs in the order listed below, and treat the boundary between waves as a hard stop: a later wave assumes every artifact from the earlier waves physically exists, has been prepared in the required form, and has passed acceptance.",
+    );
+
+    doc.heading(1, [text("Build overview")]);
+    doc.bullets([
+        vec![
+            text("Planning status: "),
+            code(format!("{:?}", manifest.status)),
+        ],
+        vec![text(format!(
+            "Root artifacts: {}",
+            manifest.roots.join(", ")
+        ))],
+        vec![text(format!("Robot runs: {}", batches.len()))],
+        vec![text(format!(
+            "Existing artifacts reused: {}",
+            if manifest.existing_artifacts.is_empty() {
+                "none".to_owned()
+            } else {
+                manifest.existing_artifacts.join(", ")
+            }
+        ))],
+    ]);
+    doc.para([
+        text("Consult "),
+        code("dependency_manifest.json"),
+        text(" for the machine-readable plan and "),
+        code("dependency_report.pdf"),
+        text(" for dependency and blocker details. Every artifact in one wave is dependency-independent of the others, so a wave is a single robot run over a single deck. Do not begin a wave until every artifact the previous waves produce has been physically made or retrieved and accepted as a suitable input."),
+    ]);
+    doc.para_text(
+        "This package does not automate DNA recovery or preparation between waves. Before a generated artifact is used downstream, prepare it in the form and concentration required by the later wave and record the corresponding acceptance evidence.",
+    );
+
+    doc.heading(1, [text("Execution order")]);
     if batches.is_empty() {
-        writeln!(output, "No robot run is scheduled. The requested roots are either already available or unresolved; inspect the dependency report before proceeding.\n").unwrap();
+        doc.para_text(
+            "No robot run is scheduled. The requested roots are either already available or unresolved; inspect the dependency report before proceeding.",
+        );
     } else {
-        writeln!(
-            output,
-            "| Run | Planning wave | Artifacts | Package directory |"
-        )
-        .unwrap();
-        writeln!(output, "| ---: | ---: | --- | --- |").unwrap();
-        for (batch, iteration, artifact, directory, _) in batches {
-            writeln!(
-                output,
-                "| {batch:03} | {iteration} | `{artifact}` | `{directory}/` |"
-            )
-            .unwrap();
-        }
-        writeln!(output).unwrap();
+        doc.table(
+            [
+                Column::right("Run"),
+                Column::right("Planning wave"),
+                Column::left("Artifacts"),
+                Column::left("Package directory"),
+            ],
+            batches
+                .iter()
+                .map(|(batch, iteration, artifact, directory, _)| {
+                    vec![
+                        vec![text(format!("{batch:03}"))],
+                        vec![text(iteration.to_string())],
+                        vec![code(artifact)],
+                        vec![code(format!("{directory}/"))],
+                    ]
+                }),
+        );
     }
 
+    // The bench holds for every run in this build, so its sections are
+    // rendered once here rather than repeated under each wave.
+    doc.blocks.extend(bench);
+
     for (batch, iteration, artifact, directory, manual) in batches {
-        writeln!(output, "## Run {batch:03} — `{artifact}`\n").unwrap();
-        writeln!(output, "Planning wave: {iteration}. Robot protocols, the Lab automation manifest, and the standalone run manual are in `{directory}/`.\n").unwrap();
+        doc.labeled_heading(1, format!("Run {batch:03}"), [code(artifact)]);
+        doc.para([
+            text(format!(
+                "Planning wave: {iteration}. Robot protocols, the Lab automation manifest, and the standalone run manual are in "
+            )),
+            code(format!("{directory}/")),
+            text("."),
+        ]);
         let inputs = manifest
             .nodes
             .iter()
@@ -64,16 +136,15 @@ pub(in crate::backend) fn render_full_build_instructions(
             .flat_map(|node| node.dependencies.iter())
             .collect::<BTreeSet<_>>();
         if !inputs.is_empty() {
-            writeln!(
-                output,
-                "Required generated or retrieved artifact inputs: {}.\n",
-                inputs
-                    .iter()
-                    .map(|dependency| format!("`{dependency}`"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-            .unwrap();
+            let mut content = vec![text("Required generated or retrieved artifact inputs: ")];
+            for (index, dependency) in inputs.iter().enumerate() {
+                if index > 0 {
+                    content.push(text(", "));
+                }
+                content.push(code(dependency.as_str()));
+            }
+            content.push(text("."));
+            doc.para(content);
         }
         let steps = manifest
             .nodes
@@ -81,64 +152,60 @@ pub(in crate::backend) fn render_full_build_instructions(
             .filter(|node| artifact.split(", ").any(|name| node.artifact == name))
             .flat_map(|node| node.steps.iter())
             .collect::<BTreeSet<_>>();
-        writeln!(
-            output,
-            "Requested abstract steps: {}.\n",
-            steps
-                .iter()
-                .map(|step| format!("`{step}`"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-        .unwrap();
+        let mut content = vec![text("Requested abstract steps: ")];
+        for (index, step) in steps.iter().enumerate() {
+            if index > 0 {
+                content.push(text(", "));
+            }
+            content.push(code(step.as_str()));
+        }
+        content.push(text("."));
+        doc.para(content);
         if manifest
             .edges
             .iter()
             .any(|edge| artifact.split(", ").any(|name| edge.depends_on == name))
         {
-            writeln!(output, "After completing this run, retain, prepare, and verify the material it produced before treating it as an input to a later run.\n").unwrap();
+            doc.para_text(
+                "After completing this run, retain, prepare, and verify the material it produced before treating it as an input to a later run.",
+            );
         } else {
-            writeln!(output, "After completing this batch, retain and verify the requested root artifact `{artifact}` and record its acceptance evidence.\n").unwrap();
+            doc.para([
+                text("After completing this batch, retain and verify the requested root artifact "),
+                code(artifact),
+                text(" and record its acceptance evidence."),
+            ]);
         }
-        for (line_index, line) in manual.lines().enumerate() {
-            if line_index == 0 && line.starts_with("# ") {
-                continue;
-            }
-            if line.starts_with('#') {
-                writeln!(output, "#{line}").unwrap();
-            } else {
-                writeln!(output, "{line}").unwrap();
-            }
-        }
-        writeln!(output).unwrap();
+        doc.extend_nested(manual.iter().cloned(), 1);
     }
 
-    output
+    doc.blocks.extend(boundary);
+    doc
 }
 
-pub(in crate::backend) fn render_report(manifest: &DependencyBuildManifest) -> String {
-    let mut output = String::new();
-    writeln!(output, "# Dependency-driven build\n").unwrap();
-    writeln!(output, "Status: `{:?}`\n", manifest.status).unwrap();
-    writeln!(output, "Roots: {}\n", manifest.roots.join(", ")).unwrap();
-    writeln!(
-        output,
-        "| Artifact | Dependencies | Resolution | Iteration |"
-    )
-    .unwrap();
-    writeln!(output, "| --- | --- | --- | ---: |").unwrap();
-    for node in &manifest.nodes {
-        writeln!(
-            output,
-            "| {} | {} | {:?} | {} |",
-            node.artifact,
-            node.dependencies.join(", "),
-            node.resolution,
-            node.generated_in_iteration
-                .map_or_else(|| "-".into(), |value| value.to_string())
-        )
-        .unwrap();
-    }
+pub(in crate::backend) fn render_report(meta: DocMeta, manifest: &DependencyBuildManifest) -> Doc {
+    let mut doc = Doc::new(meta);
+    doc.para([text("Status: "), code(format!("{:?}", manifest.status))]);
+    doc.para_text(format!("Roots: {}", manifest.roots.join(", ")));
+    doc.table(
+        [
+            Column::left("Artifact"),
+            Column::left("Dependencies"),
+            Column::left("Resolution"),
+            Column::right("Iteration"),
+        ],
+        manifest.nodes.iter().map(|node| {
+            vec![
+                vec![text(node.artifact.as_str())],
+                vec![text(node.dependencies.join(", "))],
+                vec![text(format!("{:?}", node.resolution))],
+                vec![text(
+                    node.generated_in_iteration
+                        .map_or_else(|| "-".into(), |value| value.to_string()),
+                )],
+            ]
+        }),
+    );
     let blockers = manifest
         .nodes
         .iter()
@@ -150,20 +217,22 @@ pub(in crate::backend) fn render_report(manifest: &DependencyBuildManifest) -> S
         })
         .collect::<Vec<_>>();
     if !blockers.is_empty() {
-        writeln!(output, "\n## Unresolved inputs\n").unwrap();
-        for node in blockers {
-            writeln!(
-                output,
-                "- `{}`: dependencies [{}]; materials [{}]; resolution `{:?}`",
-                node.artifact,
-                node.missing_dependencies.join(", "),
-                node.missing_materials.join(", "),
-                node.resolution
-            )
-            .unwrap();
-        }
+        doc.heading(1, [text("Unresolved inputs")]);
+        doc.bullets(blockers.iter().map(|node| {
+            vec![
+                code(node.artifact.as_str()),
+                text(format!(
+                    ": dependencies [{}]; materials [{}]; resolution ",
+                    node.missing_dependencies.join(", "),
+                    node.missing_materials.join(", "),
+                )),
+                code(format!("{:?}", node.resolution)),
+            ]
+        }));
     }
-    writeln!(output, "\n## Execution boundary\n").unwrap();
-    writeln!(output, "Each generated artifact is packaged as an independently reviewable assembly, transformation, and plating batch. A product is added to the planning inventory only after its batch is scheduled; physical execution and acceptance evidence remain laboratory responsibilities.").unwrap();
-    output
+    doc.heading(1, [text("Execution boundary")]);
+    doc.para_text(
+        "Each generated artifact is packaged as an independently reviewable assembly, transformation, and plating batch. A product is added to the planning inventory only after its batch is scheduled; physical execution and acceptance evidence remain laboratory responsibilities.",
+    );
+    doc
 }

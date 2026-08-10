@@ -40,7 +40,8 @@ fn writes_a_complete_multi_construct_automation_bundle() {
     let expected = [
         "assembly_protocol.py",
         "automation_manifest.json",
-        "manual_protocol.md",
+        "lab-style.typ",
+        "manual_protocol.typ",
         "plating_protocol.py",
         "transformation_protocol.py",
     ];
@@ -73,10 +74,13 @@ fn writes_a_complete_multi_construct_automation_bundle() {
         2
     );
 
-    let manual = std::fs::read_to_string(output_dir.join("manual_protocol.md")).unwrap();
-    assert!(manual.contains("p_gfp"));
-    assert!(manual.contains("p_rfp"));
-    assert!(manual.contains("Execution boundary"));
+    let manual = std::fs::read_to_string(output_dir.join("manual_protocol.typ")).unwrap();
+    assert!(
+        manual.contains("`p_gfp`"),
+        "identifiers render in the code face"
+    );
+    assert!(manual.contains("`p_rfp`"));
+    assert!(manual.contains("= Execution boundary"));
 
     std::fs::remove_dir_all(output_dir).unwrap();
 }
@@ -153,13 +157,18 @@ fn derives_and_packages_a_dependency_driven_full_build() {
         !output_dir.join("wave-001/plating_protocol.py").exists(),
         "an assembly-only wave emits no plating protocol"
     );
-    assert!(output_dir.join("dependency_report.md").is_file());
-    let instructions = std::fs::read_to_string(output_dir.join("manual_protocol.md")).unwrap();
-    assert!(instructions.contains("## Execution order"));
-    assert!(instructions.contains("## Run 001 — `promoter_carrier, regulator_region`"));
-    assert!(instructions.contains("## Run 004 — `reporter_host`"));
+    assert!(output_dir.join("dependency_report.typ").is_file());
+    assert!(output_dir.join("lab-style.typ").is_file());
+    assert!(output_dir.join("wave-001/lab-style.typ").is_file());
+    let instructions = std::fs::read_to_string(output_dir.join("manual_protocol.typ")).unwrap();
+    assert!(instructions.contains("= Execution order"));
+    assert!(instructions.contains("= #hl(\"Run 001\")`promoter_carrier, regulator_region`"));
+    assert!(instructions.contains("= #hl(\"Run 004\")`reporter_host`"));
     assert!(instructions.contains("Required generated or retrieved artifact inputs"));
-    assert!(instructions.contains("### Stage 3 — Serial dilution and plating"));
+    // The wave manual is spliced in one heading level down.
+    assert!(instructions.contains("== #hl(\"Stage 3\")Serial dilution and plating"));
+    // Bench setup is rendered once above the runs rather than per wave.
+    assert_eq!(instructions.matches("= Machine setup").count(), 1);
 
     if let Ok(simulator) = std::env::var("LAB_OPENTRONS_SIMULATOR") {
         let simulator = PathBuf::from(simulator);

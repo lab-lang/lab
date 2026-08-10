@@ -19,15 +19,18 @@
 
 mod constraints;
 mod descriptor;
+mod document;
 mod error;
 mod graph;
 pub mod hamilton;
+mod markdown;
 pub mod opentrons;
 mod package;
 mod profile;
 mod resources;
 mod trace;
 mod traits;
+mod typst;
 pub mod workcell;
 
 pub use constraints::TargetConstraintError;

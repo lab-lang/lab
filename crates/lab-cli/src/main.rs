@@ -1,5 +1,6 @@
 mod commands;
 mod run;
+mod typeset;
 mod update;
 mod workcell_run;
 

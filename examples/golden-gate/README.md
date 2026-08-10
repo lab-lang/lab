@@ -52,10 +52,16 @@ It writes those under `.lab/build/opentrons-ot2/`, one directory per planning wa
 | Path | Contents |
 | --- | --- |
 | `dependency_manifest.json` | machine-readable graph, waves, and blockers |
-| `dependency_report.md` | human dependency and blocker summary |
-| `manual_protocol.md` | consolidated bench instructions in execution order |
+| `dependency_report.pdf` | typeset dependency and blocker summary (`.typ` source beside it) |
+| `manual_protocol.pdf` | typeset bench instructions in execution order (`.typ` source beside it) |
+| `lab-style.typ` | the shared document style; every directory holding a document carries a copy |
 | `wave-001/` | assembly of both plasmids: one deck, one run |
 | `wave-002/` | transformation and plating of all four strains |
+
+Each output directory is a self-contained [Typst](https://typst.app) project:
+`lab build` typesets the PDFs in-process (fonts embedded, no network), and
+anyone with the `typst` CLI can restyle `lab-style.typ` and re-typeset a
+document without the Lab toolchain.
 
 Artifacts in the same wave have no ordering constraint between them, so a wave
 is a single robot run over a single deck. Wave 2 cannot start until wave 1's

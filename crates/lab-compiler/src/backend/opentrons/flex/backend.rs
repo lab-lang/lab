@@ -91,13 +91,14 @@ mod tests {
         assert_eq!(program.strains.len(), 4);
 
         let artifacts = backend.emit(&program).unwrap();
-        assert_eq!(artifacts.len(), 5);
+        assert_eq!(artifacts.len(), 6);
         for path in [
             "assembly_protocol.json",
             "transformation_protocol.json",
             "plating_protocol.json",
             "automation_manifest.json",
-            "manual_protocol.md",
+            "manual_protocol.typ",
+            "lab-style.typ",
         ] {
             assert!(artifacts.get(path).is_some(), "missing {path}");
         }
