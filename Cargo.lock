@@ -627,7 +627,6 @@ dependencies = [
  "lab-instruments",
  "lab-package",
  "lab-project",
- "lab-stations",
  "self-replace",
  "semver",
  "serde",
@@ -680,6 +679,8 @@ dependencies = [
 name = "lab-instruments"
 version = "0.1.0"
 dependencies = [
+ "byonoy-hid",
+ "inheco-sila",
  "serde",
  "serde_json",
  "thiserror",
@@ -735,16 +736,6 @@ dependencies = [
  "lab-compiler",
  "pyo3",
  "serde_json",
-]
-
-[[package]]
-name = "lab-stations"
-version = "0.1.0"
-dependencies = [
- "byonoy-hid",
- "inheco-sila",
- "lab-instruments",
- "thiserror",
 ]
 
 [[package]]

@@ -1,4 +1,8 @@
-//! Plate measurements and the plate-reader interface.
+//! Plate measurements, the plate-reader interface, and its stations.
+
+mod byonoy;
+
+pub use byonoy::{ByonoyStation, ByonoyStationError};
 
 use std::time::Duration;
 

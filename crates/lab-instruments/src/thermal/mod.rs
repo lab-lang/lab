@@ -1,4 +1,8 @@
-//! Thermal profiles and the thermocycler interface.
+//! Thermal profiles, the thermocycler interface, and its stations.
+
+mod inheco_odtc;
+
+pub use inheco_odtc::{OdtcStation, OdtcStationError, odtc_thermal_limits};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

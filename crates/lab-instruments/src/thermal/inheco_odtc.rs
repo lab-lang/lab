@@ -1,10 +1,10 @@
 //! The Inheco ODTC as a workcell thermocycler station.
 
-use inheco_sila::{ActualTemperatures, MethodRun, Odtc, OdtcError, ThermalProgram};
-use lab_instruments::{
+use crate::{
     ProfileProgress, RunHandle, SensorReading, ThermalLimits, ThermalProfile, ThermalReadings,
     Thermocycler,
 };
+use inheco_sila::{ActualTemperatures, MethodRun, Odtc, OdtcError, ThermalProgram};
 use thiserror::Error;
 
 /// The ODTC's envelope in Lab's vocabulary, for validating profiles
@@ -172,7 +172,7 @@ impl Thermocycler for OdtcStation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lab_instruments::{ThermalStage, ThermalStep};
+    use crate::{ThermalStage, ThermalStep};
 
     #[test]
     fn a_profile_translates_field_for_field_into_the_vendor_program() {
