@@ -14,8 +14,9 @@
 //! - **Session** ([`session`]) — an [`Absorbance96`] handle owning the
 //!   transport: discovery and open-by-path, the mandatory reference
 //!   measurement and wavelength query on setup, the chunk-reassembling
-//!   measurement engine, the post-measurement status gate, and abort. It
-//!   implements [`lab_instruments::PlateReader`].
+//!   measurement engine, the post-measurement status gate, and abort.
+//!   Measurements come back in the device's own vocabulary:
+//!   [`AbsorbanceMeasurement`] rows of `f32` optical density.
 //!
 //! There is no vendor library anywhere in the stack: the wire protocol is
 //! implemented directly over the OS HID layer. The protocol knowledge

@@ -19,9 +19,8 @@
 //!   transport: the connect handshake, door control, method upload and
 //!   execution, temperature readout, and completion resolved by the
 //!   device's `ResponseEvent` callback with a `GetStatus` polling
-//!   fallback so a firewall never wedges a run. It implements
-//!   [`lab_instruments::Thermocycler`]; `progress()` stays `None`
-//!   because the ODTC cannot report where a running method stands.
+//!   fallback so a firewall never wedges a run. The device reports no
+//!   run progress, and nothing here pretends otherwise.
 //!
 //! The protocol knowledge here derives from PyLabRobot's ODTC backend
 //! and SiLA interface (MIT licensed) and from the Inheco ODTC user
