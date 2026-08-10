@@ -1,4 +1,5 @@
 /target
+/.cargo/
 .lab/
 .venv/
 *.rs.bk
