@@ -13,7 +13,7 @@ use golden_gate_extended.designs.inventory
 use golden_gate_extended.designs.plasmids
 
 /** The GFP reporter carried in the DH5alpha cloning strain. */
-strain composite_strain_1:
+build strain composite_strain_1:
   chassis = DH5alpha
   plasmids = [composite_plasmid_1]
   selection = chloramphenicol
@@ -30,7 +30,7 @@ strain composite_strain_1:
   colony_volume = 4 uL
 
 /** The RFP reporter in the same cloning strain. */
-strain composite_strain_2:
+build strain composite_strain_2:
   chassis = DH5alpha
   plasmids = [composite_plasmid_2]
   selection = chloramphenicol
@@ -47,7 +47,7 @@ strain composite_strain_2:
   colony_volume = 4 uL
 
 /** The GFP reporter in BL21, where it is expressed rather than stored. */
-strain expression_strain:
+build strain expression_strain:
   chassis = BL21
   plasmids = [composite_plasmid_1]
   selection = chloramphenicol
@@ -69,7 +69,7 @@ strain expression_strain:
  * A strain does not care whether the DNA it carries was made or ordered, which
  * is the point of stating provenance on the thing rather than on its type.
  */
-strain reference_strain:
+build strain reference_strain:
   chassis = BL21
   plasmids = [reference_gfp]
   selection = chloramphenicol

@@ -19,7 +19,7 @@ use golden_gate_extended.designs.inventory
  * carry a measurement: the sequence has to be what was designed, and the yield
  * has to clear a bar on enough independent clones to mean something.
  */
-plasmid composite_plasmid_1:
+build plasmid composite_plasmid_1:
   sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
@@ -49,7 +49,7 @@ plasmid composite_plasmid_1:
  * A weaker promoter yields less, so this one clears a lower bar. The standard
  * is a property of the design rather than of the protocol that built it.
  */
-plasmid composite_plasmid_2:
+build plasmid composite_plasmid_2:
   sequence = dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]

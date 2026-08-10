@@ -17,7 +17,7 @@ use golden_gate.designs.inventory
 use golden_gate.designs.plasmids
 
 /** The GFP reporter carried in the DH5alpha cloning strain. */
-strain composite_strain_1:
+build strain composite_strain_1:
   chassis = DH5alpha
   plasmids = [composite_plasmid_1]
   selection = chloramphenicol
@@ -34,7 +34,7 @@ strain composite_strain_1:
   colony_volume = 4 uL
 
 /** The RFP reporter carried in the DH5alpha cloning strain. */
-strain composite_strain_2:
+build strain composite_strain_2:
   chassis = DH5alpha
   plasmids = [composite_plasmid_2]
   selection = chloramphenicol
@@ -51,7 +51,7 @@ strain composite_strain_2:
   colony_volume = 4 uL
 
 /** The GFP reporter carried in the BL21 expression strain. */
-strain composite_strain_3:
+build strain composite_strain_3:
   chassis = BL21
   plasmids = [composite_plasmid_1]
   selection = chloramphenicol
@@ -68,7 +68,7 @@ strain composite_strain_3:
   colony_volume = 4 uL
 
 /** The RFP reporter carried in the BL21 expression strain. */
-strain composite_strain_4:
+build strain composite_strain_4:
   chassis = BL21
   plasmids = [composite_plasmid_2]
   selection = chloramphenicol

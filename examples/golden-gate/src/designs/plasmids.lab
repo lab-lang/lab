@@ -19,7 +19,7 @@ use golden_gate.designs.inventory
  * J23101 drives GFP through the shared RBS and terminator, assembled by Golden
  * Gate with BsaI. Accepted only if the built sequence matches the design.
  */
-plasmid composite_plasmid_1:
+build plasmid composite_plasmid_1:
   sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
@@ -45,7 +45,7 @@ plasmid composite_plasmid_1:
  * J23106 promoter, so the panel reports two promoter strengths against two
  * reporters.
  */
-plasmid composite_plasmid_2:
+build plasmid composite_plasmid_2:
   sequence = dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]

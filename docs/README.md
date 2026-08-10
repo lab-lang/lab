@@ -42,6 +42,24 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0012: Named workflow results](language/decisions/0012-named-workflow-results.md) | explicit named result fields and direct comma-separated returns without synthetic wrapper records |
 | [0013: Strain artifacts](language/decisions/0013-strain-artifacts.md) | engineered organisms as first-class artifacts rather than a host property on a plasmid |
 | [0014: Target profiles and workspaces](language/decisions/0014-target-profiles-and-workspaces.md) | benches configured by target profile, science stated in source, packages grouped by workspace |
+| [0015: Roles classify types](language/decisions/0015-roles-classify-types.md) | types gain capabilities through declared roles rather than hardcoded bounds |
+| [0016: Callable circuit signatures](language/decisions/0016-callable-circuit-signatures.md) | circuits declare callable signatures with inline type parameters |
+| [0017: Forgotten type arguments](language/decisions/0017-forgotten-type-arguments.md) | a type argument may be deliberately forgotten with `any Role` |
+| [0018: Standard modules in Lab](language/decisions/0018-standard-modules-written-in-lab.md) | standard modules may be written in Lab itself rather than Rust |
+| [0019: Properties written with `=`](language/decisions/0019-properties-are-written-with-equals.md) | `name = value` for properties, disambiguating property from field |
+| [0020: Laws are declared roles](language/decisions/0020-laws-are-declared-roles.md) | compiler-enforced laws as a closed, prelude-only set of roles |
+| [0021: Typed external identities](language/decisions/0021-typed-external-identities.md) | catalogued identities as declarations rather than constructor calls |
+| [0022: Fixed grammar, open vocabulary](language/decisions/0022-fixed-grammar-open-vocabulary.md) | domain nouns leave the parser; packages supply the vocabulary |
+| [0023: Required fields and optional marks](language/decisions/0023-required-fields-and-optional-marks.md) | schema fields are required unless marked optional with `?` |
+| [0024: Catalogued items carry properties](language/decisions/0024-catalogued-items-carry-properties.md) | a catalogued item states the fields of its type, like a datasheet |
+| [0025: Quantity types](language/decisions/0025-quantity-types.md) | a quantity type names the unit it is measured in |
+| [0026: Lineage and replicates](language/decisions/0026-lineage-and-replicates.md) | replicate class is lineage recovered from dataflow, not a property |
+| [0027: Provenance is stated per thing](language/decisions/0027-provenance-is-stated-per-thing.md) | provenance is a fact about a thing, not about its type |
+| [0028: Schemas are contributed to](language/decisions/0028-schemas-are-contributed-to.md) | several packages describe one artifact kind |
+| [0029: Backend dispatch](language/decisions/0029-backend-dispatch.md) | a profile's `backend` key selects its backend; a registry stays deferred |
+| [0030: Reviewed frames are the execution boundary](language/decisions/0030-reviewed-frames-are-the-execution-boundary.md) | the runtime interprets reviewed run documents and never plans |
+| [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | a workcell target composes stations; assignment is planning, not language |
+| [0032: Provenance blocks](language/decisions/0032-provenance-blocks.md) | a provenance verb can open a block |
 
 ## Implementation and embedding
 
