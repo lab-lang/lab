@@ -29,14 +29,14 @@
 //! The one synchronization primitive every device supports — and the only
 //! one a compiled plan may rely on — is awaiting profile completion.
 
-mod plate;
-mod thermal;
+mod plate_reader;
+mod thermocycler;
 
-pub use plate::{
+pub use plate_reader::{
     ByonoyStation, ByonoyStationError, MeasurementUnit, PlateData, PlateDataError, PlateReader,
     ReaderCapabilities, WavelengthSupport,
 };
-pub use thermal::{
+pub use thermocycler::{
     OdtcStation, OdtcStationError, ProfileProgress, RunHandle, SensorReading, ThermalLimits,
     ThermalProfile, ThermalProfileError, ThermalReadings, ThermalStage, ThermalStep, Thermocycler,
     odtc_thermal_limits,
