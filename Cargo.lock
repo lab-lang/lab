@@ -194,6 +194,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
+name = "byonoy-hid"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28d86554d8c7475a38d1fb8dca269e90451a79f2360b54480d70e1e7bdeb19aa"
+dependencies = [
+ "hidapi",
+ "thiserror",
+]
+
+[[package]]
 name = "bytemuck"
 version = "1.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -563,6 +573,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "inheco-sila"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "adfdad39f7eee22ed109fbb09d6e4492ff4d0a49d96421f86d4d274a91faafec"
+dependencies = [
+ "quick-xml",
+ "thiserror",
+ "ureq",
+]
+
+[[package]]
 name = "inventory"
 version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,14 +613,6 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "lab-byonoy"
-version = "0.1.0"
-dependencies = [
- "hidapi",
- "thiserror",
 ]
 
 [[package]]
@@ -661,15 +674,6 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "lab-inheco-odtc"
-version = "0.1.0"
-dependencies = [
- "quick-xml",
- "thiserror",
- "ureq",
 ]
 
 [[package]]
@@ -737,8 +741,8 @@ dependencies = [
 name = "lab-stations"
 version = "0.1.0"
 dependencies = [
- "lab-byonoy",
- "lab-inheco-odtc",
+ "byonoy-hid",
+ "inheco-sila",
  "lab-instruments",
  "thiserror",
 ]

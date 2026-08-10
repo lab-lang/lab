@@ -10,11 +10,11 @@ description = "Lab's instrument-capability implementations over vendor driver cr
 [features]
 # The Byonoy station's device-opening constructors need the native HID
 # library; everything else, including the adapter itself, works without it.
-hid = ["lab-byonoy/hid"]
+hid = ["byonoy-hid/hid"]
 
 [dependencies]
-lab-byonoy = { workspace = true }
-lab-inheco-odtc.workspace = true
+byonoy-hid = { workspace = true }
+inheco-sila.workspace = true
 lab-instruments.workspace = true
 thiserror.workspace = true
 

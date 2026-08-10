@@ -1,6 +1,6 @@
 //! The Inheco ODTC as a workcell thermocycler station.
 
-use lab_inheco_odtc::{ActualTemperatures, MethodRun, Odtc, OdtcError, ThermalProgram};
+use inheco_sila::{ActualTemperatures, MethodRun, Odtc, OdtcError, ThermalProgram};
 use lab_instruments::{
     ProfileProgress, RunHandle, SensorReading, ThermalLimits, ThermalProfile, ThermalReadings,
     Thermocycler,
@@ -11,11 +11,11 @@ use thiserror::Error;
 /// before a device is even connected.
 pub fn odtc_thermal_limits() -> ThermalLimits {
     ThermalLimits {
-        block_min_celsius: lab_inheco_odtc::BLOCK_MIN_CELSIUS,
-        block_max_celsius: lab_inheco_odtc::BLOCK_MAX_CELSIUS,
-        lid_min_celsius: lab_inheco_odtc::LID_MIN_CELSIUS,
-        lid_max_celsius: lab_inheco_odtc::LID_MAX_CELSIUS,
-        ramp_max_c_per_s: lab_inheco_odtc::MAX_SLOPE_C_PER_S,
+        block_min_celsius: inheco_sila::BLOCK_MIN_CELSIUS,
+        block_max_celsius: inheco_sila::BLOCK_MAX_CELSIUS,
+        lid_min_celsius: inheco_sila::LID_MIN_CELSIUS,
+        lid_max_celsius: inheco_sila::LID_MAX_CELSIUS,
+        ramp_max_c_per_s: inheco_sila::MAX_SLOPE_C_PER_S,
         per_step_lid: true,
     }
 }
@@ -46,11 +46,11 @@ impl OdtcStation {
 
     /// Connects to the device at an address and wraps the session.
     pub fn connect(device: std::net::SocketAddr) -> Result<OdtcStation, OdtcStationError> {
-        let transport = lab_inheco_odtc::HttpSoapTransport::connect(device)
+        let transport = inheco_sila::HttpSoapTransport::connect(device)
             .map_err(|error| OdtcStationError::Device(OdtcError::Transport(error)))?;
         let session = Odtc::connect(
             std::sync::Arc::new(transport),
-            lab_inheco_odtc::OdtcOptions::default(),
+            inheco_sila::OdtcOptions::default(),
         )?;
         Ok(OdtcStation::new(session))
     }
@@ -75,11 +75,11 @@ fn program_from(profile: &ThermalProfile) -> ThermalProgram {
         stages: profile
             .stages
             .iter()
-            .map(|stage| lab_inheco_odtc::ProgramStage {
+            .map(|stage| inheco_sila::ProgramStage {
                 steps: stage
                     .steps
                     .iter()
-                    .map(|step| lab_inheco_odtc::ProgramStep {
+                    .map(|step| inheco_sila::ProgramStep {
                         plateau_celsius: step.celsius,
                         hold_seconds: step.hold_seconds,
                         slope_c_per_s: step.ramp_c_per_s,
@@ -222,7 +222,7 @@ mod tests {
         let readings = readings_from(ActualTemperatures {
             mount_celsius: 37.0,
             lid_celsius: Some(105.0),
-            sensors: vec![lab_inheco_odtc::SensorValue {
+            sensors: vec![inheco_sila::SensorValue {
                 name: "Heatsink".to_string(),
                 celsius: 29.0,
             }],

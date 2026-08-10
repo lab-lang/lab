@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use lab_byonoy::{Absorbance96, Absorbance96Error, AbsorbanceMeasurement, SlotState};
+use byonoy_hid::{Absorbance96, Absorbance96Error, AbsorbanceMeasurement, SlotState};
 use lab_instruments::{
     MeasurementUnit, PlateData, PlateReader, ReaderCapabilities, WavelengthSupport,
 };

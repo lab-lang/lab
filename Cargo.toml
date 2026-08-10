@@ -1,12 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/lab-byonoy",
     "crates/lab-cli",
     "crates/lab-compiler",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
-    "crates/lab-inheco-odtc",
     "crates/lab-instruments",
     "crates/lab-language",
     "crates/lab-language-server",
@@ -48,13 +46,13 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 
 # Default features stay off at the workspace level so pure protocol use
 # never links the native HID library; a runner re-enables `hid`.
-lab-byonoy = { path = "crates/lab-byonoy", version = "0.1.0", default-features = false }
+byonoy-hid = { version = "0.1.0", default-features = false }
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
 # Default features stay off at the workspace level so the compiler's pure
 # protocol use never links libusb; the CLI runner re-enables `usb`.
 hamilton-star = { version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
-lab-inheco-odtc = { path = "crates/lab-inheco-odtc", version = "0.1.0" }
+inheco-sila = "0.1.0"
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
 lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
 lab-language = { path = "crates/lab-language", version = "0.1.0" }
