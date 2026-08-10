@@ -3,13 +3,14 @@ use std.bio.golden_gate
 
 use std.lab.plasmid
 
-buy chassis competent_ecoli
-buy antibiotic kanamycin
-buy restriction_enzyme BsaI
-buy backbone p15A_kan
-buy part GFP
+buy:
+  chassis competent_ecoli
+  antibiotic kanamycin
+  restriction_enzyme BsaI
+  backbone p15A_kan
+  part GFP
 
-plasmid p_reporter:
+build plasmid p_reporter:
   sequence = dna("ACGTACGT")
   backbone = p15A_kan
   components = [GFP]
@@ -18,7 +19,7 @@ plasmid p_reporter:
   require topology == circular
   accept sequence == design.sequence
 
-strain reporter_host:
+build strain reporter_host:
   chassis = competent_ecoli
   plasmids = [p_reporter]
   selection = kanamycin

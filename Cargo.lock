@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "lab-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "lab-compiler"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "cargo-husky",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "lab-ide"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "lab-language",
  "serde",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "lab-ide-wasm"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "lab-ide",
  "lab-language",
@@ -677,7 +677,7 @@ dependencies = [
 
 [[package]]
 name = "lab-instruments"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "byonoy-hid",
  "inheco-sila",
@@ -688,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "lab-language"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "serde",
  "thiserror",
@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "lab-language-server"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "lab-ide",
  "lab-language",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "lab-package"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "semver",
  "serde",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "lab-project"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "lab-language",
  "lab-package",
@@ -731,7 +731,7 @@ dependencies = [
 
 [[package]]
 name = "lab-sdk-python"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "lab-compiler",
  "pyo3",

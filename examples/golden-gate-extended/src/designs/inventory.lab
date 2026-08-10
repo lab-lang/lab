@@ -8,35 +8,36 @@
 
 use std.bio.designs
 
-// Constitutive promoters, the shared ribosome binding site and terminator, and
-// the fluorescent reporters.
-buy part J23101
-buy part J23106
-buy part B0034
-buy part B0015
-buy part GFP
-buy part RFP
+buy:
+  // Constitutive promoters, the shared ribosome binding site and terminator,
+  // and the fluorescent reporters.
+  part J23101
+  part J23106
+  part B0034
+  part B0015
+  part GFP
+  part RFP
 
-buy backbone pSB1C3
+  backbone pSB1C3
 
-/** BsaI cuts at 37 C, so every plasmid it opens digests the same way. */
-buy restriction_enzyme BsaI:
-  identity = "NEB-R0535"
-  digest_temperature = 37 C
-  digest_duration = 2 min
+  /** BsaI cuts at 37 C, so every plasmid it opens digests the same way. */
+  restriction_enzyme BsaI:
+    identity = "NEB-R0535"
+    digest_temperature = 37 C
+    digest_duration = 2 min
 
-// Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
-// Both are transformed the way competent cells are: chilled, shocked, recovered.
-buy chassis DH5alpha:
-  heat_shock_temperature = 42 C
-  cold_incubation = 30 min
-  recovery_temperature = 37 C
-  recovery_duration = 60 min
+  // Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
+  // Both are transformed the way competent cells are: chilled, shocked, recovered.
+  chassis DH5alpha:
+    heat_shock_temperature = 42 C
+    cold_incubation = 30 min
+    recovery_temperature = 37 C
+    recovery_duration = 60 min
 
-buy chassis BL21:
-  heat_shock_temperature = 42 C
-  cold_incubation = 30 min
-  recovery_temperature = 37 C
-  recovery_duration = 60 min
+  chassis BL21:
+    heat_shock_temperature = 42 C
+    cold_incubation = 30 min
+    recovery_temperature = 37 C
+    recovery_duration = 60 min
 
-buy antibiotic chloramphenicol
+  antibiotic chloramphenicol

@@ -93,6 +93,21 @@ impl<'a> Parser<'a> {
                 let mut declaration = self.parse_workflow()?;
                 declaration.doc = doc;
                 Item::Workflow(declaration)
+            } else if self.opens_provenance_block() {
+                // A provenance verb followed by a block states one origin over
+                // everything inside, so a program reads as its inventory and
+                // its recipes rather than as a verb repeated per line.
+                if doc.is_some() {
+                    return Err(syntax_span(
+                        self.current_span(),
+                        "documentation describes one declaration; document each thing inside the block",
+                    ));
+                }
+                for declaration in self.parse_provenance_block()? {
+                    items.push(Item::Artifact(declaration));
+                }
+                self.skip_newlines();
+                continue;
             } else if self.opens_artifact() {
                 // A word this parser has never heard of, followed by a name and
                 // a block, is an artifact instance. Which kind it names is a
@@ -198,6 +213,41 @@ impl<'a> Parser<'a> {
         self.check_word("build") || self.check_word("buy")
     }
 
+    /// Whether the next item is `buy:` or `build:` — a provenance verb whose
+    /// block states where everything inside it came from.
+    fn opens_provenance_block(&self) -> bool {
+        self.opens_provenance() && self.peek_kind(1) == Some(&TokenKind::Colon)
+    }
+
+    /// `buy:` — one provenance over a block of instances. Each line inside is
+    /// an instance without a verb, and each lowers to its own declaration; the
+    /// block is surface grouping, not a node.
+    fn parse_provenance_block(&mut self) -> Result<Vec<ArtifactDecl>, ParseError> {
+        let verb = self.next().expect("checked");
+        let provenance = match &verb.kind {
+            TokenKind::Identifier(word) if word == "buy" => Provenance::Buy,
+            _ => Provenance::Build,
+        };
+        self.open_block()?;
+        let mut declarations = Vec::new();
+        while !self.check(&TokenKind::Dedent) {
+            let doc = self.take_doc()?;
+            if self.opens_provenance() {
+                return Err(syntax_span(
+                    self.current_span(),
+                    "the block already states where everything in it came from; write the thing without a verb",
+                ));
+            }
+            // Each declaration's span is its own lines: a diagnostic about one
+            // instance has no business underlining the whole block.
+            let mut declaration = self.parse_artifact_instance(provenance, None)?;
+            declaration.doc = doc;
+            declarations.push(declaration);
+        }
+        self.expect(TokenKind::Dedent)?;
+        Ok(declarations)
+    }
+
     /// `artifact plasmid:` — the schema a package declares for its own kind.
     fn parse_artifact_kind(&mut self) -> Result<ArtifactKindDecl, ParseError> {
         let start = self.expect_word("artifact")?.span;
@@ -280,8 +330,18 @@ impl<'a> Parser<'a> {
             Some(TokenKind::Identifier(word)) if word == "buy" => Provenance::Buy,
             _ => Provenance::Build,
         };
+        self.parse_artifact_instance(provenance, verb.map(|token| token.span))
+    }
+
+    /// The instance itself — everything after the verb, which a standalone
+    /// declaration writes inline and a provenance block writes once above.
+    fn parse_artifact_instance(
+        &mut self,
+        provenance: Provenance,
+        verb: Option<Span>,
+    ) -> Result<ArtifactDecl, ParseError> {
         let kind = self.take_identifier("an artifact kind")?;
-        let start = verb.map_or(kind.span, |token| token.span);
+        let start = verb.unwrap_or(kind.span);
         let name = self.take_identifier("an artifact name")?;
         // A generic kind cannot say from its word alone which arguments an
         // instance has, so the instance names its own type. A word whose kind
@@ -1586,6 +1646,85 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
         };
         assert!(artifact.ascribed.is_some());
         assert_eq!(artifact.members.len(), 1);
+    }
+
+    /// `buy:` states one provenance over a block of instances. Each line
+    /// inside is the instance form without a verb, and each becomes its own
+    /// declaration — the block is grouping, not a node.
+    #[test]
+    fn a_provenance_block_states_one_origin_over_every_instance_inside() {
+        let module = parse_module(
+            "buy:\n  part J23101\n  part B0034\n  backbone pSB1C3\n  restriction_enzyme BsaI:\n    digest_temperature = 37 C\n\nbuild plasmid reporter:\n  backbone = pSB1C3\n",
+        )
+        .unwrap();
+        assert_eq!(module.items.len(), 5);
+        for (index, name) in ["J23101", "B0034", "pSB1C3", "BsaI"].iter().enumerate() {
+            let Item::Artifact(artifact) = &module.items[index] else {
+                panic!("expected an artifact instance for {name}");
+            };
+            assert_eq!(artifact.provenance, Provenance::Buy);
+            assert_eq!(artifact.name.value, *name);
+        }
+        let Item::Artifact(enzyme) = &module.items[3] else {
+            panic!("expected the enzyme");
+        };
+        assert_eq!(enzyme.members.len(), 1, "an instance keeps its own block");
+        let Item::Artifact(reporter) = &module.items[4] else {
+            panic!("expected the plasmid");
+        };
+        assert_eq!(reporter.provenance, Provenance::Build);
+    }
+
+    #[test]
+    fn a_build_block_and_an_ascribed_instance_work_inside_a_provenance_block() {
+        let module = parse_module(
+            "buy:\n  promoter pTet: Promoter<Tetracycline>\n\nbuild:\n  plasmid p:\n    sequence = dna(\"ACGT\")\n",
+        )
+        .unwrap();
+        let Item::Artifact(promoter) = &module.items[0] else {
+            panic!("expected the promoter");
+        };
+        assert_eq!(promoter.provenance, Provenance::Buy);
+        assert!(promoter.ascribed.is_some());
+        let Item::Artifact(plasmid) = &module.items[1] else {
+            panic!("expected the plasmid");
+        };
+        assert_eq!(plasmid.provenance, Provenance::Build);
+        assert_eq!(plasmid.members.len(), 1);
+    }
+
+    #[test]
+    fn a_verb_inside_a_provenance_block_is_refused() {
+        let error = parse_module("buy:\n  buy part J23101\n").unwrap_err();
+        assert!(
+            error.to_string().contains("without a verb"),
+            "the block already states the provenance: {error}"
+        );
+    }
+
+    #[test]
+    fn documentation_inside_a_provenance_block_attaches_per_instance() {
+        let module = parse_module(
+            "buy:\n  /** The strong constitutive promoter. */\n  part J23101\n  part B0034\n",
+        )
+        .unwrap();
+        let Item::Artifact(first) = &module.items[0] else {
+            panic!("expected the first part");
+        };
+        assert_eq!(
+            first.doc.as_deref(),
+            Some("The strong constitutive promoter.")
+        );
+        let Item::Artifact(second) = &module.items[1] else {
+            panic!("expected the second part");
+        };
+        assert!(second.doc.is_none());
+
+        let error = parse_module("/** Everything bought. */\nbuy:\n  part J23101\n").unwrap_err();
+        assert!(
+            error.to_string().contains("each thing inside the block"),
+            "{error}"
+        );
     }
 
     #[test]

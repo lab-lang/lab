@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.95"
 license = "Apache-2.0"
@@ -46,19 +46,19 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 # Default features stay off at the workspace level so pure protocol use
 # never links the native HID library; a runner re-enables `hid`.
 byonoy-hid = { version = "0.1.0", default-features = false }
-lab-compiler = { path = "crates/lab-compiler", version = "0.1.0" }
+lab-compiler = { path = "crates/lab-compiler", version = "0.1.2" }
 # Default features stay off at the workspace level so the compiler's pure
 # protocol use never links libusb; the CLI runner re-enables `usb`.
 hamilton-star = { version = "0.1.0", default-features = false }
-lab-ide = { path = "crates/lab-ide", version = "0.1.0" }
+lab-ide = { path = "crates/lab-ide", version = "0.1.2" }
 inheco-sila = "0.1.0"
-lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.0" }
-lab-instruments = { path = "crates/lab-instruments", version = "0.1.0" }
-lab-language = { path = "crates/lab-language", version = "0.1.0" }
-lab-language-server = { path = "crates/lab-language-server", version = "0.1.0" }
+lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.2" }
+lab-instruments = { path = "crates/lab-instruments", version = "0.1.2" }
+lab-language = { path = "crates/lab-language", version = "0.1.2" }
+lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }
 opentrons-protocol = "0.1.0"
-lab-package = { path = "crates/lab-package", version = "0.1.0" }
-lab-project = { path = "crates/lab-project", version = "0.1.0" }
+lab-package = { path = "crates/lab-package", version = "0.1.2" }
+lab-project = { path = "crates/lab-project", version = "0.1.2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

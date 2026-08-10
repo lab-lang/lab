@@ -4,19 +4,20 @@ use std.bio.golden_gate
 use std.bio.build
 use std.lab.plasmid
 
-buy part J23101
-buy part J23106
-buy part B0034
-buy part GFP
-buy part TetR
-buy part B0015
-buy backbone part_receiver
-buy backbone region_receiver
-buy backbone final_receiver
-buy restriction_enzyme BsaI
-buy restriction_enzyme BsmBI
-buy chassis DH5alpha
-buy antibiotic kanamycin
+buy:
+  part J23101
+  part J23106
+  part B0034
+  part GFP
+  part TetR
+  part B0015
+  backbone part_receiver
+  backbone region_receiver
+  backbone final_receiver
+  restriction_enzyme BsaI
+  restriction_enzyme BsmBI
+  chassis DH5alpha
+  antibiotic kanamycin
 
 // A three-wave build expressed through typed workflow material dependencies.
 //

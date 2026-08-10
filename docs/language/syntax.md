@@ -367,14 +367,15 @@ Inventory identities enter through `buy` declarations against imported kinds, an
 ```lab
 use std.lab.plasmid
 
-buy part J23101
-buy part B0034
-buy part GFP
-buy part B0015
-buy backbone pSB1C3
-buy restriction_enzyme BsaI
-buy chassis DH5alpha
-buy antibiotic chloramphenicol
+buy:
+  part J23101
+  part B0034
+  part GFP
+  part B0015
+  backbone pSB1C3
+  restriction_enzyme BsaI
+  chassis DH5alpha
+  antibiotic chloramphenicol
 
 plasmid p_gfp:
   sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
@@ -504,6 +505,24 @@ buy restriction_enzyme BsaI:
 `require`, `accept`, and a place in the build order attach to `build`. An
 `identity` to order against attaches to `buy`, and belongs to buying rather than
 to any kind's schema. Claiming to build something bought is refused.
+
+A provenance verb followed by `:` opens a block, and states one origin over
+everything inside. Each line is the instance form without a verb — with its own
+block or type ascription where it has one — and each is its own declaration, so
+a program reads as its inventory and its recipes rather than as a verb repeated
+per line:
+
+```lab
+buy:
+  part J23101
+  part B0034
+  backbone pSB1C3
+  restriction_enzyme BsaI:
+    digest_temperature = 37 C
+```
+
+A verb on a line inside the block is refused: the block has already said where
+everything in it came from.
 
 A word whose kind takes no type arguments has already said what type its
 instances have. Where a kind is generic it cannot, and the instance names its

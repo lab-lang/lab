@@ -9,16 +9,17 @@ use std.bio.golden_gate
 use std.bio.build
 use std.lab.plasmid
 
-buy part J23101
-buy part B0034
-buy part GFP
-buy part B0015
-buy backbone pSB1C3
-buy restriction_enzyme BsaI
-buy chassis DH5alpha
-buy antibiotic chloramphenicol
+buy:
+  part J23101
+  part B0034
+  part GFP
+  part B0015
+  backbone pSB1C3
+  restriction_enzyme BsaI
+  chassis DH5alpha
+  antibiotic chloramphenicol
 
-plasmid reporter:
+build plasmid reporter:
   sequence = dna("ACGTACGT")
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
@@ -28,7 +29,7 @@ plasmid reporter:
   require topology == circular
   accept sequence == design.sequence
 
-strain reporter_host:
+build strain reporter_host:
   chassis = DH5alpha
   plasmids = [reporter]
   selection = chloramphenicol

@@ -73,5 +73,9 @@ The latest accepted design records are:
 - [`0024`](decisions/0024-catalogued-items-carry-properties.md): a catalogued item states the fields of its type;
 - [`0025`](decisions/0025-quantity-types.md): a quantity type names the unit it is measured in;
 - [`0026`](decisions/0026-lineage-and-replicates.md): replicate class is lineage, not a property;
-- [`0027`](decisions/0027-provenance-is-stated-per-thing.md): provenance is a fact about a thing, not about its type; and
-- [`0028`](decisions/0028-schemas-are-contributed-to.md): several packages describe one kind.
+- [`0027`](decisions/0027-provenance-is-stated-per-thing.md): provenance is a fact about a thing, not about its type;
+- [`0028`](decisions/0028-schemas-are-contributed-to.md): several packages describe one kind;
+- [`0029`](decisions/0029-backend-dispatch.md): a profile's backend key selects its backend;
+- [`0030`](decisions/0030-reviewed-frames-are-the-execution-boundary.md): reviewed frames are the execution boundary;
+- [`0031`](decisions/0031-workcell-targets.md): a workcell target composes stations, and assignment is planning rather than language; and
+- [`0032`](decisions/0032-provenance-blocks.md): a provenance verb can open a block.

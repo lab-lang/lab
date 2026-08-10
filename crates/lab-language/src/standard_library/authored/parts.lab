@@ -17,9 +17,10 @@ record Arabinose is Signal
 /** A reporter protein read as green fluorescence. */
 record GreenFluorescentProtein is Protein
 
-buy promoter pTet: Promoter<Tetracycline>
-buy promoter pBAD: Promoter<Arabinose>
-buy cds sfGFP: CDS<GreenFluorescentProtein>
-buy part B0034
-buy part B0015
-buy restriction_enzyme BsaI
+buy:
+  promoter pTet: Promoter<Tetracycline>
+  promoter pBAD: Promoter<Arabinose>
+  cds sfGFP: CDS<GreenFluorescentProtein>
+  part B0034
+  part B0015
+  restriction_enzyme BsaI

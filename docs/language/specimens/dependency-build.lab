@@ -9,18 +9,19 @@ use std.bio.golden_gate
 use std.bio.build
 use std.lab.plasmid
 
-buy part J23101
-buy part B0034
-buy part GFP
-buy part B0015
-buy backbone part_receiver
-buy backbone region_receiver
-buy restriction_enzyme BsaI
-buy restriction_enzyme BsmBI
-buy chassis DH5alpha
-buy antibiotic chloramphenicol
+buy:
+  part J23101
+  part B0034
+  part GFP
+  part B0015
+  backbone part_receiver
+  backbone region_receiver
+  restriction_enzyme BsaI
+  restriction_enzyme BsmBI
+  chassis DH5alpha
+  antibiotic chloramphenicol
 
-plasmid promoter_carrier:
+build plasmid promoter_carrier:
   sequence = dna("ACGT")
   backbone = part_receiver
   components = [J23101]
@@ -30,7 +31,7 @@ plasmid promoter_carrier:
   require topology == circular
   accept sequence == design.sequence
 
-plasmid reporter_region:
+build plasmid reporter_region:
   sequence = dna("ACGTACGT")
   backbone = region_receiver
   components = [promoter_carrier, B0034, GFP, B0015]
@@ -40,7 +41,7 @@ plasmid reporter_region:
   require topology == circular
   accept sequence == design.sequence
 
-strain reporter_host:
+build strain reporter_host:
   chassis = DH5alpha
   plasmids = [reporter_region]
   selection = chloramphenicol
