@@ -577,3 +577,165 @@ fn a_workcell_wave_dry_runs_through_the_coordination_plan() {
 
     std::fs::remove_dir_all(&out_dir).unwrap();
 }
+
+#[test]
+fn a_workcell_wave_simulates_with_attended_and_walkaway_time() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-simulate-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "workcell target build failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let wave = out_dir.join("workcell-star/wave-001");
+
+    let simulated = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["simulate", wave.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        simulated.status.success(),
+        "simulate failed: {}",
+        String::from_utf8_lossy(&simulated.stderr)
+    );
+    let report: Value = serde_json::from_slice(&simulated.stdout).unwrap();
+    assert_eq!(report["status"], "simulate");
+    let trace = &report["result"];
+    assert_eq!(trace["format"], "lab.sim-trace.v0");
+
+    let summary = &trace["summary"];
+    let total = summary["total_seconds"].as_f64().unwrap();
+    let attended = summary["attended_seconds"].as_f64().unwrap();
+    assert!(total > 0.0, "simulated work takes time");
+    assert!(
+        attended > 0.0 && attended < total,
+        "handoffs are attended, machine time is not: attended {attended} of {total}"
+    );
+    assert!(
+        summary["stations"].get("odtc-1").is_some(),
+        "the cycler reports busy time"
+    );
+
+    // Simulation interprets the same plan the dry run narrates: one
+    // started node per coordination node, in the same order.
+    let dry = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", wave.to_str().unwrap(), "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(dry.status.success());
+    let dry_report: Value = serde_json::from_slice(&dry.stdout).unwrap();
+    let plan: Value =
+        serde_json::from_str(&std::fs::read_to_string(wave.join("plan.workcell.json")).unwrap())
+            .unwrap();
+    let plan_ids: Vec<&str> = plan["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|node| node["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        dry_report["result"]["nodes"].as_u64().unwrap() as usize,
+        plan_ids.len()
+    );
+    let started: Vec<&str> = trace["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["event"] == "node-started")
+        .map(|event| event["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(started, plan_ids, "simulate walks the plan in plan order");
+
+    // The trace document landed beside the plan, and no ledger did.
+    assert!(wave.join("sim-trace.json").is_file());
+    assert!(
+        !wave.join("run-ledger.jsonl").exists(),
+        "simulation writes a trace, never a ledger"
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}
+
+#[test]
+fn a_built_wave_renders_as_a_scene_with_exact_well_positions() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-scene-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let wave = out_dir.join("workcell-star/wave-001");
+
+    let rendered = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["scene", wave.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        rendered.status.success(),
+        "scene failed: {}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let report: Value = serde_json::from_slice(&rendered.stdout).unwrap();
+    assert_eq!(report["status"], "scene");
+    assert!(report["result"]["nodes"].as_u64().unwrap() > 100);
+
+    let scene: Value =
+        serde_json::from_str(&std::fs::read_to_string(wave.join("scene.json")).unwrap()).unwrap();
+    assert_eq!(scene["format"], "lab.scene.v0");
+    // Both plan stations render, and the reaction plate keeps its plan
+    // resource name so trace events bind to it.
+    let text = std::fs::read_to_string(wave.join("scene.json")).unwrap();
+    assert!(text.contains("\"reaction_plate\""));
+    assert!(text.contains("odtc-1"));
+
+    let gltf: Value =
+        serde_json::from_str(&std::fs::read_to_string(wave.join("scene.gltf")).unwrap()).unwrap();
+    assert_eq!(gltf["asset"]["version"], "2.0");
+    let usda = std::fs::read_to_string(wave.join("scene.usda")).unwrap();
+    assert!(usda.starts_with("#usda 1.0"));
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}

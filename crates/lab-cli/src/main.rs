@@ -1,5 +1,7 @@
 mod commands;
 mod run;
+mod scene;
+mod simulate;
 mod typeset;
 mod update;
 mod workcell_run;
@@ -86,6 +88,33 @@ enum Command {
         #[arg(long = "station", value_name = "NAME=ADDRESS")]
         station: Vec<String>,
     },
+    /// Simulate an emitted run package on a virtual clock: how long the
+    /// work takes, when an operator must be present, and how long each
+    /// walk-away window lasts. Touches no hardware and writes no ledger;
+    /// the full record lands in a `lab.sim-trace.v0` trace file.
+    Simulate {
+        /// A run directory produced by `lab build`, workcell wave or
+        /// Hamilton STAR package.
+        path: PathBuf,
+        /// Where to write the trace; defaults to `sim-trace.json` beside
+        /// the plan.
+        #[arg(long)]
+        trace: Option<PathBuf>,
+        /// Facility description to simulate against: the plan's stations
+        /// must exist there, and its transport times drive the handoffs.
+        #[arg(long)]
+        facility: Option<PathBuf>,
+    },
+    /// Render a built run package as a 3D scene: a `lab.scene.v0`
+    /// document plus glTF and USD projections of it.
+    Scene {
+        /// A run directory produced by `lab build`, workcell wave or
+        /// Hamilton STAR package.
+        path: PathBuf,
+        /// Where to write scene files; defaults to the run directory.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
     /// Print resolved package metadata and source-module names.
     Metadata {
         /// Package directory or any path inside a package.
@@ -155,7 +184,7 @@ fn run() -> Result<()> {
             station,
         } => {
             if workcell_run::is_workcell_directory(&path) {
-                workcell_run::run_workcell(path, dry_run, yes, resume, station, &output)
+                workcell_run::run_workcell_command(path, dry_run, yes, resume, station, &output)
             } else if resume || !station.is_empty() {
                 anyhow::bail!(
                     "--resume and --station apply to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
@@ -164,6 +193,12 @@ fn run() -> Result<()> {
                 run::run(path, dry_run, yes, &output)
             }
         }
+        Command::Simulate {
+            path,
+            trace,
+            facility,
+        } => simulate::simulate(path, trace, facility, &output),
+        Command::Scene { path, out_dir } => scene::scene(path, out_dir, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }

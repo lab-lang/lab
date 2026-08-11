@@ -15,3 +15,5 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+viewer/node_modules/
+viewer/dist/

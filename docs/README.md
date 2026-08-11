@@ -60,6 +60,9 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0030: Reviewed frames are the execution boundary](language/decisions/0030-reviewed-frames-are-the-execution-boundary.md) | the runtime interprets reviewed run documents and never plans |
 | [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | a workcell target composes stations; assignment is planning, not language |
 | [0032: Provenance blocks](language/decisions/0032-provenance-blocks.md) | a provenance verb can open a block |
+| [0033: Typeset protocol documents](language/decisions/0033-typeset-protocol-documents.md) | protocol documents are typeset PDFs emitted beside their sources |
+| [0034: The simulator is an interpreter](language/decisions/0034-the-simulator-is-an-interpreter.md) | `lab simulate` interprets the same run documents `lab run` executes; the trace is the visualization contract |
+| [0035: Facility files](language/decisions/0035-facility-files.md) | a facility is its own file under `facilities/`; the manifest carries at most a pointer |
 
 ## Implementation and embedding
 

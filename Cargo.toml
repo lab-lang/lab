@@ -11,6 +11,9 @@ members = [
     "crates/lab-package",
     "crates/lab-project",
     "crates/lab-python",
+    "crates/lab-runfmt",
+    "crates/lab-runtime",
+    "crates/lab-scene",
 ]
 
 [workspace.package]
@@ -72,6 +75,9 @@ lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }
 opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.2" }
 lab-project = { path = "crates/lab-project", version = "0.1.2" }
+lab-runfmt = { path = "crates/lab-runfmt", version = "0.1.2" }
+lab-runtime = { path = "crates/lab-runtime", version = "0.1.2" }
+lab-scene = { path = "crates/lab-scene", version = "0.1.2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

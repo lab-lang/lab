@@ -1,0 +1,34 @@
+# The lab this package usually runs in: the workcell-star bench plus the
+# cold storage its stock lives in. One facility serves every package that
+# runs here; a package's manifest carries at most a pointer to it, and
+# `lab simulate --facility` compares candidate facilities by simulating the
+# same build against each.
+
+[facility]
+name = "main-bench"
+
+[[station]]
+name = "star-1"
+kind = "hamilton.star"
+profile = "hamilton-star"
+
+[[station]]
+name = "odtc-1"
+kind = "inheco.odtc"
+address = "169.254.10.40:8080"
+
+[[storage]]
+name = "fridge-a"
+kind = "fridge"
+temperature_c = 4.0
+materials = ["assembly_mix", "miniprep_kit"]
+
+[[storage]]
+name = "freezer-a"
+kind = "freezer"
+temperature_c = -20.0
+materials = ["BsaI", "T4_ligase", "competent_cells"]
+
+[transport]
+between = "human"
+walk_seconds = 45.0

@@ -1,10 +1,16 @@
 //! Run-document formats: the schemas shared between the emitters that write
-//! executable artifacts and the runner that replays them.
+//! executable artifacts and the runners that replay them.
 //!
 //! Every format here is a reviewed execution boundary: the document is what
-//! an operator approves, and the runner adds nothing but ids, timing, and
+//! an operator approves, and a runner adds nothing but ids, timing, and
 //! confirmations. Each format is versioned by its `format` string; a change
 //! to what a document means is a new format version, not an edit.
+//!
+//! Every interpreter of these documents loads them through the checked
+//! loaders in this crate, so a wrong or missing format string fails the same
+//! way everywhere.
+
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +25,87 @@ pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 
 /// The format string every `lab.workcell-run.v0` document declares.
 pub const WORKCELL_RUN_FORMAT: &str = "lab.workcell-run.v0";
+
+/// The file name a wave directory's coordination plan is stored under.
+pub const WORKCELL_PLAN_FILE: &str = "plan.workcell.json";
+
+/// Why a run document failed to load.
+#[derive(Debug, thiserror::Error)]
+pub enum RunDocumentError {
+    #[error("cannot read {path}: {source}")]
+    Io {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{path} is not a valid document: {source}")]
+    Parse {
+        path: String,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("{path} declares format '{found}', but this reader expects '{expected}'")]
+    WrongFormat {
+        path: String,
+        expected: &'static str,
+        found: String,
+    },
+}
+
+fn load_document<T>(path: &Path) -> Result<T, RunDocumentError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let text = std::fs::read_to_string(path).map_err(|source| RunDocumentError::Io {
+        path: path.display().to_string(),
+        source,
+    })?;
+    serde_json::from_str(&text).map_err(|source| RunDocumentError::Parse {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+fn check_format(path: &Path, expected: &'static str, found: &str) -> Result<(), RunDocumentError> {
+    if found == expected {
+        Ok(())
+    } else {
+        Err(RunDocumentError::WrongFormat {
+            path: path.display().to_string(),
+            expected,
+            found: found.to_string(),
+        })
+    }
+}
+
+/// Load and format-check one `lab.star-run.v0` document.
+pub fn load_star_run(path: &Path) -> Result<StarRunDocument, RunDocumentError> {
+    let document: StarRunDocument = load_document(path)?;
+    check_format(path, STAR_RUN_FORMAT, &document.format)?;
+    Ok(document)
+}
+
+/// Load and format-check one `lab.thermocycle-run.v0` document.
+pub fn load_thermocycle(path: &Path) -> Result<ThermocycleRunDocument, RunDocumentError> {
+    let document: ThermocycleRunDocument = load_document(path)?;
+    check_format(path, THERMOCYCLE_RUN_FORMAT, &document.format)?;
+    Ok(document)
+}
+
+/// Load and format-check one `lab.plate-read.v0` document.
+pub fn load_plate_read(path: &Path) -> Result<PlateReadDocument, RunDocumentError> {
+    let document: PlateReadDocument = load_document(path)?;
+    check_format(path, PLATE_READ_FORMAT, &document.format)?;
+    Ok(document)
+}
+
+/// Load and format-check the coordination plan in a wave directory.
+pub fn load_workcell_plan(directory: &Path) -> Result<WorkcellRunDocument, RunDocumentError> {
+    let path = directory.join(WORKCELL_PLAN_FILE);
+    let document: WorkcellRunDocument = load_document(&path)?;
+    check_format(&path, WORKCELL_RUN_FORMAT, &document.format)?;
+    Ok(document)
+}
 
 /// One `lab.thermocycle-run.v0` document: a device-neutral thermal program
 /// for one plate. The station's kind decides which instrument executes it;
@@ -190,5 +277,34 @@ mod tests {
             document.manual_after.is_empty(),
             "absent manual steps mean none"
         );
+    }
+
+    #[test]
+    fn a_loader_rejects_a_document_with_the_wrong_format() {
+        let directory = tempfile::tempdir().expect("the test directory is creatable");
+        let path = directory.path().join("wrong.star.json");
+        std::fs::write(
+            &path,
+            r#"{ "format": "lab.star-run.v99", "run": "r", "title": "t",
+                 "machine": "STAR", "channels": 8, "steps": [] }"#,
+        )
+        .expect("the fixture writes");
+        let error = load_star_run(&path).expect_err("a wrong format string is rejected");
+        assert!(
+            matches!(error, RunDocumentError::WrongFormat { expected, .. } if expected == STAR_RUN_FORMAT),
+            "the error names the expected format: {error}"
+        );
+    }
+
+    #[test]
+    fn the_workcell_plan_loader_reads_from_its_well_known_file_name() {
+        let directory = tempfile::tempdir().expect("the test directory is creatable");
+        std::fs::write(
+            directory.path().join(WORKCELL_PLAN_FILE),
+            r#"{ "format": "lab.workcell-run.v0", "stations": [], "nodes": [] }"#,
+        )
+        .expect("the fixture writes");
+        let plan = load_workcell_plan(directory.path()).expect("the plan loads");
+        assert!(plan.nodes.is_empty(), "the empty plan round-trips");
     }
 }

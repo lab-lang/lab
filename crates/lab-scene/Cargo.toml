@@ -1,0 +1,19 @@
+[package]
+name = "lab-scene"
+description = "Scene graphs and 3D exports for Lab benches and workcells"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64 = "0.22"
+lab-compiler = { workspace = true }
+lab-runfmt = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
