@@ -10,6 +10,14 @@
 //! loaders in this crate, so a wrong or missing format string fails the same
 //! way everywhere.
 
+pub mod facility;
+mod trace;
+
+pub use trace::{
+    AttentionWindow, ProgramExtent, RunEvent, SIM_TRACE_FORMAT, SimSummary, SimTraceDocument,
+    StationSummary, TimedEvent, summarize,
+};
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

@@ -18,7 +18,7 @@
 pub mod clock;
 pub mod durations;
 pub mod events;
-pub mod facility;
+pub use lab_runfmt::facility;
 pub mod ledger;
 pub mod operator;
 pub mod simulate;

@@ -201,10 +201,7 @@ impl Facility {
 
     /// Checks that every station a plan needs exists here, by name and
     /// kind. A near-miss names the kind mismatch instead of a bare absence.
-    pub fn check_stations(
-        &self,
-        required: &[lab_runfmt::WorkcellStation],
-    ) -> Result<(), FacilityError> {
+    pub fn check_stations(&self, required: &[crate::WorkcellStation]) -> Result<(), FacilityError> {
         for needed in required {
             match self.station(&needed.name) {
                 Some(station) if station.kind == needed.kind => {}
@@ -281,12 +278,12 @@ walk_seconds = 45.0
         assert_eq!(facility.transport.walk_seconds, 45.0);
 
         let plan_stations = vec![
-            lab_runfmt::WorkcellStation {
+            crate::WorkcellStation {
                 name: "star-1".to_string(),
                 kind: "hamilton.star".to_string(),
                 program_dir: "stations/star-1".to_string(),
             },
-            lab_runfmt::WorkcellStation {
+            crate::WorkcellStation {
                 name: "odtc-1".to_string(),
                 kind: "inheco.odtc".to_string(),
                 program_dir: "stations/odtc-1".to_string(),
@@ -294,7 +291,7 @@ walk_seconds = 45.0
         ];
         facility.check_stations(&plan_stations).unwrap();
 
-        let elsewhere = vec![lab_runfmt::WorkcellStation {
+        let elsewhere = vec![crate::WorkcellStation {
             name: "reader-1".to_string(),
             kind: "byonoy.absorbance96".to_string(),
             program_dir: "stations/reader-1".to_string(),
@@ -309,7 +306,7 @@ walk_seconds = 45.0
     #[test]
     fn a_kind_mismatch_is_named_rather_than_reported_as_absence() {
         let facility = Facility::parse("main-bench.toml", MAIN_BENCH).unwrap();
-        let mismatched = vec![lab_runfmt::WorkcellStation {
+        let mismatched = vec![crate::WorkcellStation {
             name: "odtc-1".to_string(),
             kind: "byonoy.absorbance96".to_string(),
             program_dir: "stations/odtc-1".to_string(),

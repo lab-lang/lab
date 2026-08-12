@@ -1,103 +1,11 @@
 //! The event port: everything a run walk has to say goes through one sink.
 //! The live runner's sink prints human narration; the simulator's sink
 //! stamps virtual time on each event and accumulates the trace.
+//!
+//! The event vocabulary itself is trace schema and lives in `lab-runfmt`;
+//! this module owns the runtime ports that carry it.
 
-use serde::{Deserialize, Serialize};
-
-/// One observable moment in a run walk. Events carry facts, not phrasing;
-/// each sink decides how to present them.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "event", rename_all = "kebab-case")]
-pub enum RunEvent {
-    /// The walk is about to start `pending` nodes, skipping `completed`.
-    Planned {
-        pending: usize,
-        completed: usize,
-    },
-    Connecting {
-        station: String,
-        detail: String,
-    },
-    Connected {
-        station: String,
-    },
-    NodeStarted {
-        id: String,
-    },
-    NodeSkipped {
-        id: String,
-    },
-    NodeCompleted {
-        id: String,
-    },
-    /// A station program began: a STAR frame sequence or a thermal profile.
-    ProgramStarted {
-        station: String,
-        title: String,
-        #[serde(flatten)]
-        extent: ProgramExtent,
-    },
-    /// One STAR frame is about to execute. When the frame carries deck
-    /// coordinates, the first channel's target rides along so a viewer
-    /// can move a pipetting head to where the work happens.
-    Frame {
-        station: String,
-        index: usize,
-        description: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        x_mm: Option<f64>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        y_mm: Option<f64>,
-    },
-    /// The thermal profile is running to completion on its station.
-    ThermalRunning {
-        station: String,
-    },
-    ThermalWarning {
-        station: String,
-        warning: String,
-    },
-    /// The block holds a temperature until retrieval.
-    ThermalHold {
-        station: String,
-        celsius: f64,
-    },
-    DoorOpened {
-        station: String,
-    },
-    DoorClosed {
-        station: String,
-    },
-    /// The operator is needed, starting now.
-    AttentionRequired {
-        node: String,
-        prompt: String,
-    },
-    /// The operator's step is done; the walk is unattended again.
-    AttentionReleased {
-        node: String,
-    },
-    /// Labware physically moved between stations.
-    LabwareMoved {
-        labware: String,
-        from: String,
-        to: String,
-    },
-}
-
-/// How large a station program is, in the unit the station thinks in.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProgramExtent {
-    Frames {
-        frames: usize,
-    },
-    Plateaus {
-        plateaus: usize,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        final_hold_celsius: Option<f64>,
-    },
-}
+pub use lab_runfmt::{ProgramExtent, RunEvent};
 
 pub trait EventSink {
     fn emit(&mut self, event: RunEvent);
