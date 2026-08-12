@@ -841,3 +841,85 @@ fn a_facility_lays_out_the_scene_with_room_and_assets() {
 
     std::fs::remove_dir_all(&out_dir).unwrap();
 }
+
+#[test]
+fn an_animated_scene_plays_the_simulated_run_on_the_usd_timeline() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-animated-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let wave = out_dir.join("workcell-star/wave-001");
+
+    // Animation requires a trace; the error names the missing step.
+    let premature = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["scene", wave.to_str().unwrap(), "--animated"])
+        .output()
+        .unwrap();
+    assert!(!premature.status.success());
+    assert!(
+        String::from_utf8_lossy(&premature.stderr).contains("lab simulate"),
+        "the error points at the missing step"
+    );
+
+    let simulated = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["simulate", wave.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(simulated.status.success());
+
+    let rendered = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["scene", wave.to_str().unwrap(), "--animated", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        rendered.status.success(),
+        "scene --animated failed: {}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let usda = std::fs::read_to_string(wave.join("scene.usda")).unwrap();
+    let trace: Value =
+        serde_json::from_str(&std::fs::read_to_string(wave.join("sim-trace.json")).unwrap())
+            .unwrap();
+    let total = trace["summary"]["total_seconds"].as_f64().unwrap();
+    assert!(
+        usda.contains(&format!("endTimeCode = {total}")),
+        "the stage timeline spans the simulated run"
+    );
+    assert!(usda.contains("xformOp:translate.timeSamples"));
+    assert!(
+        usda.contains("def Xform \"pipetting_head\""),
+        "the liquid handler grows a head that follows its frames"
+    );
+    assert!(
+        usda.contains("token visibility.timeSamples"),
+        "the head hides between programs"
+    );
+    assert!(
+        usda.contains("def Material \"lab_plate\""),
+        "preview-surface materials ride along"
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}

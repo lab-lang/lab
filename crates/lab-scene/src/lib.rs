@@ -12,6 +12,7 @@
 //! dimensions from a side table, because the planning catalog carries
 //! anchor points, not bounding boxes.
 
+pub mod animate;
 pub mod assets;
 pub mod dims;
 pub mod gltf;

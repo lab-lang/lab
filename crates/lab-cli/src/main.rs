@@ -118,6 +118,10 @@ enum Command {
         /// the room shell, and real meshes from its assets directory.
         #[arg(long)]
         facility: Option<PathBuf>,
+        /// Animate the USD layer from this package's sim-trace.json, so
+        /// USD tools play the simulated run on their timeline.
+        #[arg(long)]
+        animated: bool,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -206,7 +210,8 @@ fn run() -> Result<()> {
             path,
             out_dir,
             facility,
-        } => scene::scene(path, out_dir, facility, &output),
+            animated,
+        } => scene::scene(path, out_dir, facility, animated, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }

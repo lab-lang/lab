@@ -115,10 +115,33 @@ fn build_scene(directory: &Path, context: Option<&FacilityContext>) -> Result<Sc
     }
 }
 
+/// The simulated run to animate a USD layer from, when asked.
+fn load_trace(directory: &Path) -> Result<lab_runfmt::SimTraceDocument> {
+    let path = directory.join("sim-trace.json");
+    let text = std::fs::read_to_string(&path).with_context(|| {
+        format!(
+            "no trace at {}; run `lab simulate` on this package first, then `lab scene --animated`",
+            path.display()
+        )
+    })?;
+    let trace: lab_runfmt::SimTraceDocument = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    if trace.format != lab_runfmt::SIM_TRACE_FORMAT {
+        bail!(
+            "{} declares format '{}'; this reader expects '{}'",
+            path.display(),
+            trace.format,
+            lab_runfmt::SIM_TRACE_FORMAT
+        );
+    }
+    Ok(trace)
+}
+
 pub(crate) fn scene(
     directory: PathBuf,
     out_dir: Option<PathBuf>,
     facility_path: Option<PathBuf>,
+    animated: bool,
     output: &Output,
 ) -> Result<()> {
     let context = facility_path
@@ -126,6 +149,7 @@ pub(crate) fn scene(
         .map(load_facility_context)
         .transpose()?;
     let mut scene = build_scene(&directory, context.as_ref())?;
+    let trace = animated.then(|| load_trace(&directory)).transpose()?;
     let out_dir = out_dir.unwrap_or_else(|| directory.clone());
     lab_scene::assets::bundle_assets(&mut scene, &out_dir)
         .context("failed to bundle scene assets")?;
@@ -139,7 +163,11 @@ pub(crate) fn scene(
     std::fs::write(&gltf_path, render_gltf(&scene))
         .with_context(|| format!("failed to write {}", gltf_path.display()))?;
     let usda_path = out_dir.join("scene.usda");
-    std::fs::write(&usda_path, render_usda(&scene))
+    let usda = match &trace {
+        Some(trace) => lab_scene::animate::render_usda_animated(&scene, trace)?,
+        None => render_usda(&scene),
+    };
+    std::fs::write(&usda_path, usda)
         .with_context(|| format!("failed to write {}", usda_path.display()))?;
 
     let mut nodes = 0usize;
