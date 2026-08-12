@@ -5,17 +5,21 @@
 
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 // ---------- document types ----------
 
 type Geometry =
   | { shape: "box"; x: number; y: number; z: number }
-  | { shape: "cylinder"; diameter: number; height: number };
+  | { shape: "cylinder"; diameter: number; height: number }
+  | { shape: "mesh"; gltf?: string; usd?: string; fallback: [number, number, number] };
 
 interface SceneNode {
   id: string;
   semantic: { kind: string; [key: string]: unknown };
   translation: [number, number, number];
+  rotation_z_deg?: number;
   geometry?: Geometry;
   children?: SceneNode[];
 }
@@ -59,10 +63,17 @@ const MATERIALS: Record<string, THREE.MeshStandardMaterial> = {
     opacity: 0.45,
   }),
   station: new THREE.MeshStandardMaterial({ color: 0x9ea3ab, roughness: 0.9 }),
+  // Walls render inside-out so the camera sees into the room from anywhere.
+  room: new THREE.MeshStandardMaterial({
+    color: 0xd1cfc7,
+    roughness: 0.95,
+    side: THREE.BackSide,
+  }),
 };
 
 function materialFor(node: SceneNode): THREE.MeshStandardMaterial {
   const kind = node.semantic.kind;
+  if (kind === "room") return MATERIALS.room;
   if (kind === "deck") return MATERIALS.deck;
   if (kind === "carrier") return MATERIALS.carrier;
   if (kind === "labware" || kind === "well") {
@@ -71,6 +82,30 @@ function materialFor(node: SceneNode): THREE.MeshStandardMaterial {
     return kind === "well" ? MATERIALS.well : MATERIALS.labware;
   }
   return MATERIALS.station;
+}
+
+const assetLoader = new GLTFLoader();
+
+/** Swaps a fallback box for its real asset once it loads; the box stays
+ * on failure, which is the registry's contract. */
+function loadAsset(url: string, group: THREE.Group, fallback: THREE.Mesh): void {
+  assetLoader.load(
+    url,
+    (loaded) => {
+      loaded.scene.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      group.remove(fallback);
+      group.add(loaded.scene);
+    },
+    undefined,
+    () => {
+      /* keep the fallback box */
+    },
+  );
 }
 
 const byId = new Map<string, THREE.Object3D>();
@@ -95,16 +130,25 @@ function buildNode(node: SceneNode): THREE.Object3D {
   const group = new THREE.Group();
   group.name = node.id;
   group.position.set(...node.translation);
+  if (node.rotation_z_deg) {
+    group.rotation.z = (node.rotation_z_deg * Math.PI) / 180;
+  }
   byId.set(node.id, group);
 
   if (node.geometry) {
     let mesh: THREE.Mesh;
-    if (node.geometry.shape === "box") {
-      const { x, y, z } = node.geometry;
+    if (node.geometry.shape === "box" || node.geometry.shape === "mesh") {
+      const [x, y, z] =
+        node.geometry.shape === "box"
+          ? [node.geometry.x, node.geometry.y, node.geometry.z]
+          : node.geometry.fallback;
       mesh = new THREE.Mesh(new THREE.BoxGeometry(x, y, z), materialFor(node).clone());
       // The scene convention puts a box's minimum corner at the node
       // origin; three centers geometry.
       mesh.position.set(x / 2, y / 2, z / 2);
+      if (node.geometry.shape === "mesh" && node.geometry.gltf) {
+        loadAsset(node.geometry.gltf, group, mesh);
+      }
     } else {
       const { diameter, height } = node.geometry;
       mesh = new THREE.Mesh(
@@ -116,12 +160,20 @@ function buildNode(node: SceneNode): THREE.Object3D {
       mesh.rotation.x = Math.PI / 2;
       mesh.position.set(0, 0, height / 2);
     }
+    const isWell = node.semantic.kind === "well";
+    const isRoom = node.semantic.kind === "room";
+    mesh.castShadow = !isWell && !isRoom;
+    mesh.receiveShadow = true;
     group.add(mesh);
     if (node.semantic.kind === "station") {
       stationMeshes.set(node.id, mesh);
       stationHeights.set(
         node.id,
-        node.geometry.shape === "box" ? node.geometry.z : node.geometry.height,
+        node.geometry.shape === "box"
+          ? node.geometry.z
+          : node.geometry.shape === "cylinder"
+            ? node.geometry.height
+            : node.geometry.fallback[2],
       );
     }
   }
@@ -372,10 +424,17 @@ const app = document.getElementById("app")!;
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
 const three = new THREE.Scene();
 three.background = new THREE.Color(0x14161a);
+// Image-based lighting from a procedural room: zero external assets.
+const pmrem = new THREE.PMREMGenerator(renderer);
+three.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const camera = new THREE.PerspectiveCamera(
   50,
   window.innerWidth / window.innerHeight,
@@ -387,8 +446,16 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0.9, 1.0, -0.3);
 
 three.add(new THREE.AmbientLight(0xffffff, 0.6));
-const key = new THREE.DirectionalLight(0xffffff, 1.4);
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
 key.position.set(2, 4, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = -4;
+key.shadow.camera.right = 4;
+key.shadow.camera.top = 4;
+key.shadow.camera.bottom = -4;
+key.shadow.camera.far = 20;
+key.shadow.bias = -0.0004;
 three.add(key);
 const fill = new THREE.DirectionalLight(0xffffff, 0.5);
 fill.position.set(-3, 2, -2);
@@ -470,12 +537,32 @@ for (const button of document.querySelectorAll<HTMLButtonElement>("[data-speed]"
 
 // ---------- loading ----------
 
+/** Fits the camera to whatever was just built: benches and whole rooms
+ * both deserve a establishing shot. */
+function frameScene(): void {
+  const bounds = new THREE.Box3().setFromObject(labRoot);
+  if (bounds.isEmpty()) return;
+  const center = bounds.getCenter(new THREE.Vector3());
+  const size = bounds.getSize(new THREE.Vector3());
+  const radius = Math.max(size.x, size.y, size.z);
+  controls.target.copy(center);
+  camera.position.set(
+    center.x + radius * 0.55,
+    center.y + radius * 0.65,
+    center.z + radius * 0.9,
+  );
+  camera.near = radius / 100;
+  camera.far = radius * 20;
+  camera.updateProjectionMatrix();
+}
+
 function tryStart(): void {
   if (!sceneDoc || !trace) return;
   labRoot.clear();
   byId.clear();
   stationMeshes.clear();
   labRoot.add(buildNode(sceneDoc.root));
+  frameScene();
   rememberHomes();
   buildTimeline();
   applyUpTo(0, false);
