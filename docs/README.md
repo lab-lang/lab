@@ -63,6 +63,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0033: Typeset protocol documents](language/decisions/0033-typeset-protocol-documents.md) | protocol documents are typeset PDFs emitted beside their sources |
 | [0034: The simulator is an interpreter](language/decisions/0034-the-simulator-is-an-interpreter.md) | `lab simulate` interprets the same run documents `lab run` executes; the trace is the visualization contract |
 | [0035: Facility files](language/decisions/0035-facility-files.md) | a facility is its own file under `facilities/`; the manifest carries at most a pointer |
+| [0036: Photoreal projections](language/decisions/0036-photoreal-projections.md) | renderers are players of the scene and trace; assets are facility-owned references with box fallbacks |
 
 ## Implementation and embedding
 
