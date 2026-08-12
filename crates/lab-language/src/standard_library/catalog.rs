@@ -321,6 +321,32 @@ const AUTHORED_SOURCES: &[(&str, &str)] = &[
 
 static AUTHORED: OnceLock<Arc<BTreeMap<&'static str, ModuleInterface>>> = OnceLock::new();
 
+/// The modules a Lab-written standard module imports, in the order it writes
+/// them. A checked interface records what a module exports rather than what it
+/// depends on, so this reads the imports back from the source it compiled.
+pub(crate) fn authored_imports(path: &str) -> Vec<String> {
+    let Some((_, source)) = AUTHORED_SOURCES.iter().find(|(name, _)| *name == path) else {
+        return Vec::new();
+    };
+    let module = crate::parse_module(source).expect("bundled module must parse");
+    module
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            crate::ast::Item::Use(import) => Some(
+                import
+                    .path
+                    .segments
+                    .iter()
+                    .map(|segment| segment.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("."),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Compile the Lab-written standard modules once for the life of the process.
 ///
 /// A checker is built for every module compiled, so doing this eagerly on each
@@ -420,6 +446,18 @@ impl StandardLibrary {
 
     pub(crate) fn prelude_modules(&self) -> impl Iterator<Item = &StandardModule> {
         self.modules.values().filter(|module| module.prelude)
+    }
+
+    /// Every module defined in Rust.
+    pub(crate) fn native_modules(&self) -> impl Iterator<Item = &StandardModule> {
+        self.modules.values()
+    }
+
+    /// Every module written in Lab, with the interface it compiled to.
+    pub(crate) fn authored_interfaces(
+        &self,
+    ) -> impl Iterator<Item = (&&'static str, &ModuleInterface)> {
+        self.authored.iter()
     }
 
     /// Every durable action contract, across modules. The lineage analysis

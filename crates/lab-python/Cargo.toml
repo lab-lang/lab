@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 lab-compiler.workspace = true
 pyo3.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [lints]

@@ -38,11 +38,21 @@ pub use semantics::{
     ModuleInterface, SemanticEnvironment, TypeParameters,
 };
 pub use source::{Identifier, LineIndex, Span, Spanned};
+pub use standard_library::manifest;
 
 /// Generate reference documentation from the same Rust specifications used by
 /// name resolution and type checking.
 pub fn standard_library_markdown() -> String {
     standard_library::render_markdown()
+}
+
+/// Describe the bundled standard library for tooling outside the compiler.
+///
+/// An editor completing a word and a host-language SDK mirroring the library
+/// need the same answer name resolution gives, which is why this is derived
+/// from the catalog rather than maintained beside it.
+pub fn standard_library_manifest() -> standard_library::manifest::Library {
+    standard_library::manifest()
 }
 /// Parse, resolve, type-check, and lower a complete source module into the
 /// backend-neutral frontend IR.
