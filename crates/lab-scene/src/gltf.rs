@@ -61,18 +61,30 @@ fn emit_node(node: &SceneNode, nodes: &mut Vec<Value>) -> usize {
         "name": node.id,
         "translation": [node.translation[0], node.translation[1], node.translation[2]],
     }));
+    if node.rotation_z_deg != 0.0 {
+        let half = (node.rotation_z_deg.to_radians()) / 2.0;
+        nodes[index]["rotation"] = json!([0.0, 0.0, half.sin(), half.cos()]);
+    }
     let mut children: Vec<usize> = Vec::new();
     if let Some(geometry) = &node.geometry {
         let geometry_index = nodes.len();
-        let (mesh, scale) = match geometry {
-            Geometry::Box { x, y, z } => (0, [*x, *y, *z]),
-            Geometry::Cylinder { diameter, height } => (1, [*diameter, *diameter, *height]),
+        // Core glTF cannot reference external meshes, so a Mesh node ships
+        // its fallback box and records the asset path in extras for
+        // viewers that can load it themselves.
+        let (mesh, scale, asset_gltf) = match geometry {
+            Geometry::Box { x, y, z } => (0, [*x, *y, *z], None),
+            Geometry::Cylinder { diameter, height } => (1, [*diameter, *diameter, *height], None),
+            Geometry::Mesh { gltf, fallback, .. } => (0, *fallback, gltf.clone()),
         };
+        let mut extras = json!({ "material": material_index(&node.semantic, &node.id) });
+        if let Some(asset) = asset_gltf {
+            extras["asset_gltf"] = json!(asset);
+        }
         nodes.push(json!({
             "name": format!("{}#geometry", node.id),
             "mesh": mesh,
             "scale": scale,
-            "extras": { "material": material_index(&node.semantic, &node.id) },
+            "extras": extras,
         }));
         children.push(geometry_index);
     }

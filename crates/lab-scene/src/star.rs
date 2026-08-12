@@ -109,7 +109,10 @@ fn placements(profile: &StarTargetProfile) -> Vec<Placement> {
 
 /// Builds the deck node for one STAR bench: deck plate, carriers at their
 /// rails, sites, labware with every well as a child cylinder.
-pub fn star_deck_scene(profile: &StarTargetProfile) -> Result<SceneNode, SceneError> {
+pub fn star_deck_scene(
+    profile: &StarTargetProfile,
+    assets: Option<&crate::assets::AssetCatalog>,
+) -> Result<SceneNode, SceneError> {
     let rails = f64::from(profile.machine.variant.rails());
     let mut deck = SceneNode::new(
         "deck",
@@ -154,11 +157,11 @@ pub fn star_deck_scene(profile: &StarTargetProfile) -> Result<SceneNode, SceneEr
                 origin[2] - deck_origin[2],
             ],
         )
-        .with_geometry(Geometry::Box {
-            x: extent[0],
-            y: extent[1],
-            z: dims::CARRIER_HEIGHT_MM,
-        });
+        .with_geometry(crate::workcell::geometry_for(
+            assets,
+            &placement.catalog,
+            [extent[0], extent[1], dims::CARRIER_HEIGHT_MM],
+        ));
         carriers.insert(name.clone(), node);
     }
 
@@ -197,11 +200,11 @@ pub fn star_deck_scene(profile: &StarTargetProfile) -> Result<SceneNode, SceneEr
             },
             [site_offset.x, site_offset.y, site_offset.z],
         )
-        .with_geometry(Geometry::Box {
-            x: labware_extent[0],
-            y: labware_extent[1],
-            z: labware_extent[2],
-        });
+        .with_geometry(crate::workcell::geometry_for(
+            assets,
+            resolved.labware.id,
+            labware_extent,
+        ));
 
         // Well positions come from the catalog's own composition: the
         // absolute position minus the labware origin is the local offset.
@@ -267,7 +270,7 @@ mod tests {
     #[test]
     fn the_scene_reproduces_the_catalogs_well_positions_exactly() {
         let profile = StarTargetProfile::parse("hamilton-star", PROFILE).unwrap();
-        let deck = star_deck_scene(&profile).unwrap();
+        let deck = star_deck_scene(&profile, None).unwrap();
 
         // Find the reaction plate's A1 well by accumulating translations.
         let mut found = None;
@@ -302,7 +305,7 @@ mod tests {
     #[test]
     fn every_placement_renders_once_with_plan_resource_names() {
         let profile = StarTargetProfile::parse("hamilton-star", PROFILE).unwrap();
-        let deck = star_deck_scene(&profile).unwrap();
+        let deck = star_deck_scene(&profile, None).unwrap();
         let mut labware_ids = Vec::new();
         deck.walk(&mut |node, _| {
             if matches!(node.semantic, Semantic::Labware { .. }) {

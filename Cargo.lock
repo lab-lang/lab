@@ -1753,6 +1753,7 @@ dependencies = [
  "lab-runfmt",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 

@@ -47,6 +47,35 @@ fn indent(text: &mut String, depth: usize) {
     }
 }
 
+/// A USD Cube spans [-size/2, size/2]; scale a unit cube and seat its
+/// minimum corner on the node origin.
+fn emit_fallback_box(extent: &[f64; 3], depth: usize, text: &mut String) {
+    let (x, y, z) = (extent[0], extent[1], extent[2]);
+    indent(text, depth + 1);
+    let _ = writeln!(text, "def Cube \"geometry\"");
+    indent(text, depth + 1);
+    let _ = writeln!(text, "{{");
+    indent(text, depth + 2);
+    let _ = writeln!(text, "double size = 1");
+    indent(text, depth + 2);
+    let _ = writeln!(
+        text,
+        "double3 xformOp:translate = ({}, {}, {})",
+        x / 2.0,
+        y / 2.0,
+        z / 2.0
+    );
+    indent(text, depth + 2);
+    let _ = writeln!(text, "float3 xformOp:scale = ({x}, {y}, {z})");
+    indent(text, depth + 2);
+    let _ = writeln!(
+        text,
+        "uniform token[] xformOpOrder = [\"xformOp:translate\", \"xformOp:scale\"]"
+    );
+    indent(text, depth + 1);
+    let _ = writeln!(text, "}}");
+}
+
 fn emit_node(node: &SceneNode, depth: usize, text: &mut String) {
     indent(text, depth);
     let _ = writeln!(text, "def Xform \"{}\" (", prim_name(&node.id));
@@ -66,40 +95,26 @@ fn emit_node(node: &SceneNode, depth: usize, text: &mut String) {
         "double3 xformOp:translate = ({}, {}, {})",
         node.translation[0], node.translation[1], node.translation[2]
     );
-    indent(text, depth + 1);
-    let _ = writeln!(
-        text,
-        "uniform token[] xformOpOrder = [\"xformOp:translate\"]"
-    );
+    if node.rotation_z_deg != 0.0 {
+        indent(text, depth + 1);
+        let _ = writeln!(text, "double xformOp:rotateZ = {}", node.rotation_z_deg);
+        indent(text, depth + 1);
+        let _ = writeln!(
+            text,
+            "uniform token[] xformOpOrder = [\"xformOp:translate\", \"xformOp:rotateZ\"]"
+        );
+    } else {
+        indent(text, depth + 1);
+        let _ = writeln!(
+            text,
+            "uniform token[] xformOpOrder = [\"xformOp:translate\"]"
+        );
+    }
 
     if let Some(geometry) = &node.geometry {
         match geometry {
             Geometry::Box { x, y, z } => {
-                // A USD Cube spans [-size/2, size/2]; scale a unit cube and
-                // seat its minimum corner on the node origin.
-                indent(text, depth + 1);
-                let _ = writeln!(text, "def Cube \"geometry\"");
-                indent(text, depth + 1);
-                let _ = writeln!(text, "{{");
-                indent(text, depth + 2);
-                let _ = writeln!(text, "double size = 1");
-                indent(text, depth + 2);
-                let _ = writeln!(
-                    text,
-                    "double3 xformOp:translate = ({}, {}, {})",
-                    x / 2.0,
-                    y / 2.0,
-                    z / 2.0
-                );
-                indent(text, depth + 2);
-                let _ = writeln!(text, "float3 xformOp:scale = ({x}, {y}, {z})");
-                indent(text, depth + 2);
-                let _ = writeln!(
-                    text,
-                    "uniform token[] xformOpOrder = [\"xformOp:translate\", \"xformOp:scale\"]"
-                );
-                indent(text, depth + 1);
-                let _ = writeln!(text, "}}");
+                emit_fallback_box(&[*x, *y, *z], depth, text);
             }
             Geometry::Cylinder { diameter, height } => {
                 indent(text, depth + 1);
@@ -122,6 +137,27 @@ fn emit_node(node: &SceneNode, depth: usize, text: &mut String) {
                 indent(text, depth + 1);
                 let _ = writeln!(text, "}}");
             }
+            Geometry::Mesh { usd, fallback, .. } => match usd {
+                // The asset layer carries its own geometry and materials;
+                // referencing it composes it under this prim.
+                Some(path) => {
+                    indent(text, depth + 1);
+                    let _ = writeln!(text, "def Xform \"geometry\" (");
+                    indent(text, depth + 1);
+                    let _ = writeln!(text, "    prepend references = @{path}@");
+                    indent(text, depth + 1);
+                    let _ = writeln!(text, ")");
+                    indent(text, depth + 1);
+                    let _ = writeln!(text, "{{");
+                    indent(text, depth + 1);
+                    let _ = writeln!(text, "}}");
+                }
+                // No USD flavor of this asset: the fallback box, exactly
+                // as an un-assetted node renders.
+                None => {
+                    emit_fallback_box(fallback, depth, text);
+                }
+            },
         }
     }
 
@@ -146,6 +182,7 @@ mod tests {
                 id: "room".to_string(),
                 semantic: Semantic::Room,
                 translation: [0.0, 0.0, 0.0],
+                rotation_z_deg: 0.0,
                 geometry: None,
                 children: vec![
                     SceneNode::new(

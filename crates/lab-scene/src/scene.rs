@@ -39,10 +39,18 @@ pub struct SceneNode {
     pub semantic: Semantic,
     /// Millimeters, relative to the parent node.
     pub translation: [f64; 3],
+    /// Degrees counterclockwise about the node's Z axis, applied after
+    /// translation. Zero for everything except placed stations.
+    #[serde(default, skip_serializing_if = "rotation_is_zero")]
+    pub rotation_z_deg: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<Geometry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<SceneNode>,
+}
+
+fn rotation_is_zero(rotation: &f64) -> bool {
+    *rotation == 0.0
 }
 
 impl SceneNode {
@@ -51,6 +59,7 @@ impl SceneNode {
             id: id.into(),
             semantic,
             translation,
+            rotation_z_deg: 0.0,
             geometry: None,
             children: Vec::new(),
         }
@@ -62,6 +71,11 @@ impl SceneNode {
     }
 
     /// Depth-first traversal over the node and everything under it.
+    ///
+    /// Origins accumulate translations only: a node under a rotated
+    /// ancestor reports where it would sit unrotated. Renderers compose
+    /// full transforms natively; use this for counting and for scenes
+    /// whose rotated nodes have no children that need exact origins.
     pub fn walk(&self, visit: &mut dyn FnMut(&SceneNode, [f64; 3])) {
         fn inner(node: &SceneNode, origin: [f64; 3], visit: &mut dyn FnMut(&SceneNode, [f64; 3])) {
             let here = [
@@ -106,4 +120,14 @@ pub enum Geometry {
     Box { x: f64, y: f64, z: f64 },
     /// Standing on the node origin, centered on it.
     Cylinder { diameter: f64, height: f64 },
+    /// A real asset, resolved from the facility's assets directory. Paths
+    /// are relative to the scene file once bundled. The extents remain
+    /// the honest fallback for any consumer that cannot load the mesh.
+    Mesh {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gltf: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        usd: Option<String>,
+        fallback: [f64; 3],
+    },
 }

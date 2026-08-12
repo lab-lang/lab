@@ -73,7 +73,7 @@ fn build_scene(directory: &Path) -> Result<Scene> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "workcell".to_string());
-        Ok(workcell_scene(&name, stations)?)
+        Ok(workcell_scene(&name, stations, None)?)
     } else {
         let manifest = directory.join("automation_manifest.json");
         if !manifest.is_file() {
@@ -84,7 +84,7 @@ fn build_scene(directory: &Path) -> Result<Scene> {
         }
         let profile = deck_from_manifest(&manifest)?;
         let name = profile.target.name.clone();
-        Ok(star_bench_scene(&name, &profile)?)
+        Ok(star_bench_scene(&name, &profile, None)?)
     }
 }
 
