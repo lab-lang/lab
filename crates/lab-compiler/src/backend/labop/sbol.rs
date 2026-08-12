@@ -115,10 +115,14 @@ pub(super) fn top_level(
     object
 }
 
-/// Converts an arbitrary Lab identifier into a `displayId`, which SBOL3
-/// restricts to characters valid in an IRI path segment. Two distinct Lab names
-/// must not collapse onto one identifier, so any replaced character is encoded
-/// rather than dropped.
+/// Converts an arbitrary Lab identifier into a `displayId` satisfying SBOL rule
+/// sbol3-10201: an ASCII letter or underscore first, then ASCII alphanumerics
+/// and underscores.
+///
+/// `sbol3::sanitize_display_id` also satisfies that rule but replaces every
+/// invalid character with `_`, which maps `pUC19-A` and `pUC19_A` onto one
+/// identifier. Two artifacts sharing an IRI would silently become one object,
+/// so an invalid character is encoded here rather than replaced.
 pub(super) fn display_id(name: &str) -> String {
     let mut output = String::with_capacity(name.len());
     for character in name.chars() {
@@ -217,5 +221,19 @@ mod tests {
         assert_eq!(display_id("pUC19_A"), "pUC19_A");
         assert_ne!(display_id("pUC19-A"), display_id("pUC19_A"));
         assert_eq!(display_id("5prime"), "_5prime");
+    }
+
+    /// The encoding must still satisfy sbol3-10201, the rule the library's own
+    /// sanitizer enforces, even though it resolves collisions differently.
+    #[test]
+    fn encoded_identifiers_satisfy_the_display_id_rule() {
+        for name in ["pUC19-A", "5prime", "", "a b/c", "µL", "p.gfp:1"] {
+            let encoded = display_id(name);
+            assert_eq!(
+                encoded,
+                sbol3::design::sanitize_display_id(&encoded),
+                "'{name}' encoded as '{encoded}', which the spec rule would rewrite"
+            );
+        }
     }
 }

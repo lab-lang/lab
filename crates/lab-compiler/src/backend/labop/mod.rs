@@ -6,11 +6,14 @@
 //! vocabulary for and reports what it had to drop.
 //!
 //! Nothing here depends on the LabOP Python distribution. A LabOP document is
-//! SBOL3 RDF serialized as canonically sorted N-Triples, and the conventions a
-//! reader relies on are the SBOL3 identity rules, which [`sbol`] implements.
-//! The published primitive libraries are restated in [`library`] rather than
-//! vendored, so the emitted document carries the behavior definitions its
-//! actions reference.
+//! SBOL3 RDF serialized as canonically sorted N-Triples, built on the `sbol3`
+//! term model and serializer so the emitter cannot disagree with a real SBOL
+//! implementation about how a term is written. What that library does not
+//! supply is the identity convention LabOP inherits from pySBOL3 — per-parent
+//! `displayId` counters and nested child IRIs — which [`sbol`] implements, and
+//! the LabOP and UML vocabularies, which [`vocabulary`] names. The published
+//! primitive libraries are restated in [`library`] rather than vendored, so the
+//! emitted document carries the behavior definitions its actions reference.
 //!
 //! Where LabOP's libraries name no counterpart for a Lab operation, this
 //! backend defines a primitive in a Lab namespace. `labop:Primitive` is a

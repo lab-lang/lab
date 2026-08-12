@@ -37,9 +37,7 @@ thiserror = "2"
 toml = "0.8"
 lsp-server = "0.7"
 lsp-types = "0.97"
-# Independent SBOL 3.1.0 reader and validator, used only by tests: the LabOP
-# backend's output is checked against the spec's machine-checkable rules by a
-# library that shares no code with the emitter.
+# SBOL 3.1.0 term model, RDF serialization, and spec validator.
 sbol3 = "1"
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"

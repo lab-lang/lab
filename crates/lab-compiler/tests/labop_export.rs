@@ -1,10 +1,13 @@
-//! LabOP export checked against an independent SBOL 3.1.0 implementation.
+//! LabOP export checked against the SBOL 3.1.0 specification rules.
 //!
-//! The emitter and the checker share no code: `sbol3` parses the document and
-//! applies the machine-checkable rules of the specification, so a convention
-//! this backend gets wrong is caught by something that does not know how the
-//! document was produced. The activity-level structure the SBOL rules do not
-//! cover is asserted directly over the parsed statements.
+//! The emitter builds its terms with `sbol3` and the checks here read them back
+//! with the same library, so these tests do not independently confirm that a
+//! term is serialized correctly. What they do confirm is everything above the
+//! serializer: the machine-checkable rules of the specification, and the
+//! activity-level structure those rules do not reach — displayId agreement,
+//! reference resolution, pin-to-parameter agreement, fan-out through forks, and
+//! control-flow connectivity — none of which the emitter and the validator
+//! share any code for.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;

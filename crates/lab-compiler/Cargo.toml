@@ -30,13 +30,15 @@ lab-instruments.workspace = true
 lab-language.workspace = true
 opentrons-protocol.workspace = true
 pliron.workspace = true
+# SBOL 3 terms, serialization, and validation. The LabOP backend builds its
+# documents from this term model rather than writing RDF by hand, and SBOL is
+# expected to reach further into the compiler as parts and sequences become
+# first-class inputs.
+sbol3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
-
-[dev-dependencies]
-sbol3.workspace = true
 
 [dev-dependencies.cargo-husky]
 version = "1"
