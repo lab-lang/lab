@@ -51,12 +51,34 @@ pub enum FacilityError {
         kind: String,
         hint: String,
     },
+    #[error(
+        "facility '{facility}' places station '{station}' at ({x}, {y}) mm, outside its {width} x {depth} mm room"
+    )]
+    StationOutsideRoom {
+        facility: String,
+        station: String,
+        x: f64,
+        y: f64,
+        width: f64,
+        depth: f64,
+    },
+    #[error(
+        "facility '{facility}' declares a {width} x {depth} mm room; both extents must be positive"
+    )]
+    EmptyRoom {
+        facility: String,
+        width: f64,
+        depth: f64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Facility {
     pub facility: FacilityMetadata,
+    /// The room the stations stand in; absent for a bare bench.
+    #[serde(default)]
+    pub room: Option<Room>,
     #[serde(default, rename = "station")]
     pub stations: Vec<FacilityStation>,
     #[serde(default, rename = "storage")]
@@ -65,6 +87,25 @@ pub struct Facility {
     pub consumables: Vec<Consumable>,
     #[serde(default)]
     pub transport: FacilityTransport,
+}
+
+/// The room an idealized facility is laid out in: a floor plan for the
+/// scene and the bounds station positions are checked against.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Room {
+    pub width_mm: f64,
+    pub depth_mm: f64,
+    #[serde(default = "default_room_height")]
+    pub height_mm: f64,
+    /// An asset key for a modeled or scanned environment; without one the
+    /// scene renders a kit room (floor and walls) at these dimensions.
+    #[serde(default)]
+    pub environment: Option<String>,
+}
+
+fn default_room_height() -> f64 {
+    3000.0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -89,6 +130,13 @@ pub struct FacilityStation {
     /// compiled into artifacts.
     #[serde(default)]
     pub address: Option<String>,
+    /// Floor position of the station's origin, in room millimeters.
+    /// Stations without one are laid out in declaration order.
+    #[serde(default)]
+    pub position_mm: Option<[f64; 2]>,
+    /// Counterclockwise rotation about the station's origin.
+    #[serde(default)]
+    pub rotation_deg: Option<f64>,
 }
 
 /// One storage location and the stock it holds. Stock is inventory state,
@@ -146,12 +194,33 @@ impl Facility {
     }
 
     fn validate(&self) -> Result<(), FacilityError> {
+        if let Some(room) = &self.room
+            && (room.width_mm <= 0.0 || room.depth_mm <= 0.0)
+        {
+            return Err(FacilityError::EmptyRoom {
+                facility: self.facility.name.clone(),
+                width: room.width_mm,
+                depth: room.depth_mm,
+            });
+        }
         let mut station_names = BTreeSet::new();
         for station in &self.stations {
             if !station_names.insert(station.name.as_str()) {
                 return Err(FacilityError::DuplicateStation {
                     facility: self.facility.name.clone(),
                     station: station.name.clone(),
+                });
+            }
+            if let (Some(room), Some([x, y])) = (&self.room, &station.position_mm)
+                && (!(0.0..=room.width_mm).contains(x) || !(0.0..=room.depth_mm).contains(y))
+            {
+                return Err(FacilityError::StationOutsideRoom {
+                    facility: self.facility.name.clone(),
+                    station: station.name.clone(),
+                    x: *x,
+                    y: *y,
+                    width: room.width_mm,
+                    depth: room.depth_mm,
                 });
             }
         }
@@ -331,6 +400,31 @@ walk_seconds = 45.0
         assert!(matches!(
             Facility::parse("f.toml", &arm),
             Err(FacilityError::UnsupportedTransport { .. })
+        ));
+    }
+
+    #[test]
+    fn a_room_bounds_the_stations_placed_in_it() {
+        let placed = format!("{MAIN_BENCH}\n[room]\nwidth_mm = 8000.0\ndepth_mm = 6000.0\n");
+        let facility = Facility::parse("f.toml", &placed).expect("unplaced stations are fine");
+        assert_eq!(facility.room.as_ref().unwrap().height_mm, 3000.0);
+
+        let inside = placed.replace(
+            "name = \"star-1\"\nkind = \"hamilton.star\"",
+            "name = \"star-1\"\nkind = \"hamilton.star\"\nposition_mm = [1200.0, 2400.0]\nrotation_deg = 90.0",
+        );
+        let facility = Facility::parse("f.toml", &inside).unwrap();
+        let star = facility.station("star-1").unwrap();
+        assert_eq!(star.position_mm, Some([1200.0, 2400.0]));
+        assert_eq!(star.rotation_deg, Some(90.0));
+
+        let outside = placed.replace(
+            "name = \"star-1\"\nkind = \"hamilton.star\"",
+            "name = \"star-1\"\nkind = \"hamilton.star\"\nposition_mm = [9000.0, 2400.0]",
+        );
+        assert!(matches!(
+            Facility::parse("f.toml", &outside),
+            Err(FacilityError::StationOutsideRoom { .. })
         ));
     }
 

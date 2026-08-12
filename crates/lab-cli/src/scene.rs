@@ -50,9 +50,32 @@ fn deck_from_manifest(path: &Path) -> Result<StarTargetProfile> {
     Ok(profile)
 }
 
-fn build_scene(directory: &Path) -> Result<Scene> {
+/// A facility and the asset catalog rooted beside it.
+struct FacilityContext {
+    facility: lab_runfmt::facility::Facility,
+    assets: lab_scene::assets::AssetCatalog,
+}
+
+fn load_facility_context(path: &Path) -> Result<FacilityContext> {
+    let facility = lab_runfmt::facility::load_facility(path)?;
+    let assets_dir = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("assets");
+    Ok(FacilityContext {
+        facility,
+        assets: lab_scene::assets::AssetCatalog::new(assets_dir),
+    })
+}
+
+fn build_scene(directory: &Path, context: Option<&FacilityContext>) -> Result<Scene> {
+    let assets = context.map(|context| &context.assets);
+    let facility = context.map(|context| &context.facility);
     if lab_runtime::workcell::is_workcell_directory(directory) {
         let plan = lab_runfmt::load_workcell_plan(directory)?;
+        if let Some(facility) = facility {
+            facility.check_stations(&plan.stations)?;
+        }
         let mut stations = Vec::new();
         for station in &plan.stations {
             let star_profile = if station.kind == "hamilton.star" {
@@ -69,11 +92,15 @@ fn build_scene(directory: &Path) -> Result<Scene> {
                 star_profile,
             });
         }
-        let name = directory
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
+        let name = facility
+            .map(|facility| facility.facility.name.clone())
+            .or_else(|| {
+                directory
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
             .unwrap_or_else(|| "workcell".to_string());
-        Ok(workcell_scene(&name, stations, None)?)
+        Ok(workcell_scene(&name, stations, assets, facility)?)
     } else {
         let manifest = directory.join("automation_manifest.json");
         if !manifest.is_file() {
@@ -84,13 +111,24 @@ fn build_scene(directory: &Path) -> Result<Scene> {
         }
         let profile = deck_from_manifest(&manifest)?;
         let name = profile.target.name.clone();
-        Ok(star_bench_scene(&name, &profile, None)?)
+        Ok(star_bench_scene(&name, &profile, assets)?)
     }
 }
 
-pub(crate) fn scene(directory: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
-    let scene = build_scene(&directory)?;
+pub(crate) fn scene(
+    directory: PathBuf,
+    out_dir: Option<PathBuf>,
+    facility_path: Option<PathBuf>,
+    output: &Output,
+) -> Result<()> {
+    let context = facility_path
+        .as_deref()
+        .map(load_facility_context)
+        .transpose()?;
+    let mut scene = build_scene(&directory, context.as_ref())?;
     let out_dir = out_dir.unwrap_or_else(|| directory.clone());
+    lab_scene::assets::bundle_assets(&mut scene, &out_dir)
+        .context("failed to bundle scene assets")?;
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
 

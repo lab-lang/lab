@@ -739,3 +739,105 @@ fn a_built_wave_renders_as_a_scene_with_exact_well_positions() {
 
     std::fs::remove_dir_all(&out_dir).unwrap();
 }
+
+#[test]
+fn a_facility_lays_out_the_scene_with_room_and_assets() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-facility-scene-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let wave = out_dir.join("workcell-star/wave-001");
+
+    // A facility with a room, placed stations, and one stub asset.
+    let facility_dir = out_dir.join("facility");
+    std::fs::create_dir_all(facility_dir.join("assets")).unwrap();
+    std::fs::write(
+        facility_dir.join("assets/inheco.odtc.usda"),
+        "#usda 1.0\ndef Xform \"odtc\" {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        facility_dir.join("assets/inheco.odtc.glb"),
+        b"glTF-stub".as_slice(),
+    )
+    .unwrap();
+    let source = std::fs::read_to_string(example.join("facilities/main-bench.toml")).unwrap();
+    std::fs::write(facility_dir.join("main-bench.toml"), source).unwrap();
+
+    let rendered = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "scene",
+            wave.to_str().unwrap(),
+            "--facility",
+            facility_dir.join("main-bench.toml").to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rendered.status.success(),
+        "scene --facility failed: {}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+
+    let scene_text = std::fs::read_to_string(wave.join("scene.json")).unwrap();
+    assert!(
+        scene_text.contains("room:floor") && scene_text.contains("room:wall-back"),
+        "the kit room renders from [room]"
+    );
+    assert!(
+        scene_text.contains("rotation_z_deg"),
+        "a placed station's rotation lands in the scene"
+    );
+    assert!(
+        scene_text.contains("assets/inheco.odtc.glb"),
+        "asset paths are bundled relative to the scene"
+    );
+    assert!(
+        wave.join("assets/inheco.odtc.glb").is_file()
+            && wave.join("assets/inheco.odtc.usda").is_file(),
+        "referenced assets are copied beside the scene"
+    );
+    let usda = std::fs::read_to_string(wave.join("scene.usda")).unwrap();
+    assert!(
+        usda.contains("prepend references = @assets/inheco.odtc.usda@"),
+        "the USD layer composes the asset by reference:\n{}",
+        &usda[..usda.len().min(400)]
+    );
+
+    // Without a facility, the schematic scene renders exactly as before.
+    let bare = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["scene", wave.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    assert!(bare.status.success());
+    let bare_text = std::fs::read_to_string(wave.join("scene.json")).unwrap();
+    assert!(
+        !bare_text.contains("room:floor") && !bare_text.contains("asset_gltf"),
+        "no facility means no room shell and no meshes"
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}

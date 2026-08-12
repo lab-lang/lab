@@ -51,26 +51,80 @@ pub(crate) fn geometry_for(
     }
 }
 
-/// Builds the room scene for a set of stations, in declaration order.
+/// Kit-room slab thickness.
+const SLAB_MM: f64 = 80.0;
+
+/// The room shell an idealized facility renders: an environment asset
+/// when the facility names one, a kit floor and three walls otherwise
+/// (the front stays open so a default camera sees in).
+fn room_shell(room: &lab_runfmt::facility::Room, assets: Option<&AssetCatalog>) -> Vec<SceneNode> {
+    let (width, depth, height) = (room.width_mm, room.depth_mm, room.height_mm);
+    if let Some(key) = &room.environment {
+        return vec![
+            SceneNode::new("room:environment", Semantic::Room, [0.0, 0.0, 0.0])
+                .with_geometry(geometry_for(assets, key, [width, depth, height])),
+        ];
+    }
+    let slab = |id: &str, translation: [f64; 3], extent: [f64; 3]| {
+        SceneNode::new(id, Semantic::Room, translation).with_geometry(Geometry::Box {
+            x: extent[0],
+            y: extent[1],
+            z: extent[2],
+        })
+    };
+    vec![
+        slab("room:floor", [0.0, 0.0, -SLAB_MM], [width, depth, SLAB_MM]),
+        slab(
+            "room:wall-back",
+            [0.0, depth, 0.0],
+            [width, SLAB_MM, height],
+        ),
+        slab(
+            "room:wall-left",
+            [-SLAB_MM, 0.0, 0.0],
+            [SLAB_MM, depth, height],
+        ),
+        slab(
+            "room:wall-right",
+            [width, 0.0, 0.0],
+            [SLAB_MM, depth, height],
+        ),
+    ]
+}
+
+/// Builds the room scene for a set of stations. A facility supplies the
+/// layout: per-station floor positions and rotations, and the room shell.
+/// Without one, stations line up in declaration order on a bare floor.
 pub fn workcell_scene(
     name: &str,
     stations: Vec<StationScene>,
     assets: Option<&AssetCatalog>,
+    facility: Option<&lab_runfmt::facility::Facility>,
 ) -> Result<Scene, SceneError> {
     let mut room = SceneNode::new("room", Semantic::Room, [0.0, 0.0, 0.0]);
+    if let Some(shell) = facility.and_then(|facility| facility.room.as_ref()) {
+        room.children.extend(room_shell(shell, assets));
+    }
     for (index, station) in stations.into_iter().enumerate() {
+        let placed = facility.and_then(|facility| facility.station(&station.name));
+        let position = placed
+            .and_then(|declaration| declaration.position_mm)
+            .unwrap_or([index as f64 * STATION_PITCH_MM, 0.0]);
         let mut node = SceneNode::new(
             station.name.clone(),
             Semantic::Station {
                 station_kind: station.kind.clone(),
             },
-            [index as f64 * STATION_PITCH_MM, 0.0, BENCH_TOP_MM],
+            [position[0], position[1], BENCH_TOP_MM],
         )
         .with_geometry(geometry_for(
             assets,
             &station.kind,
             station_extent(&station.kind),
         ));
+        node.rotation_z_deg = placed
+            .and_then(|declaration| declaration.rotation_deg)
+            .unwrap_or(0.0);
         if let Some(profile) = &station.star_profile {
             // The deck scene is in the machine's own frame, which shares
             // the station node's origin.
@@ -99,5 +153,6 @@ pub fn star_bench_scene(
             star_profile: Some(profile.clone()),
         }],
         assets,
+        None,
     )
 }

@@ -114,6 +114,10 @@ enum Command {
         /// Where to write scene files; defaults to the run directory.
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        /// Facility description that lays out the room: station positions,
+        /// the room shell, and real meshes from its assets directory.
+        #[arg(long)]
+        facility: Option<PathBuf>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -198,7 +202,11 @@ fn run() -> Result<()> {
             trace,
             facility,
         } => simulate::simulate(path, trace, facility, &output),
-        Command::Scene { path, out_dir } => scene::scene(path, out_dir, &output),
+        Command::Scene {
+            path,
+            out_dir,
+            facility,
+        } => scene::scene(path, out_dir, facility, &output),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }
