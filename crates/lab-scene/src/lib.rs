@@ -16,6 +16,7 @@ pub mod animate;
 pub mod assets;
 pub mod dims;
 pub mod gltf;
+pub(crate) mod instruments;
 pub mod scene;
 pub mod star;
 pub mod usda;

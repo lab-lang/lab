@@ -18,13 +18,13 @@ pub const FACILITY_DIR: &str = "facilities";
 
 #[derive(Debug, thiserror::Error)]
 pub enum FacilityError {
-    #[error("cannot read {path}: {source}")]
+    #[error("cannot read {path}")]
     Io {
         path: String,
         #[source]
         source: std::io::Error,
     },
-    #[error("{path} is not a valid facility description: {source}")]
+    #[error("{path} is not a valid facility description")]
     Parse {
         path: String,
         #[source]

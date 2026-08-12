@@ -82,6 +82,8 @@ pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output
     command
         .arg("--background")
         .arg("--factory-startup")
+        .arg("--python-exit-code")
+        .arg("1")
         .arg("--python")
         .arg(&script_path)
         .arg("--")

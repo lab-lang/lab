@@ -69,10 +69,23 @@ const MATERIALS: Record<string, THREE.MeshStandardMaterial> = {
     roughness: 0.95,
     side: THREE.BackSide,
   }),
+  frame: new THREE.MeshStandardMaterial({ color: 0x2a2c33, roughness: 0.45, metalness: 0.8 }),
+  panel: new THREE.MeshStandardMaterial({ color: 0xcccfd4, roughness: 0.55, metalness: 0.3 }),
+  glass: new THREE.MeshPhysicalMaterial({
+    color: 0xa6c0cc,
+    roughness: 0.05,
+    metalness: 0.0,
+    transparent: true,
+    opacity: 0.22,
+  }),
+  accent: new THREE.MeshStandardMaterial({ color: 0x1a8cbf, roughness: 0.3 }),
 };
 
 function materialFor(node: SceneNode): THREE.MeshStandardMaterial {
   const kind = node.semantic.kind;
+  if (kind === "part") {
+    return MATERIALS[String(node.semantic.material)] ?? MATERIALS.station;
+  }
   if (kind === "room") return MATERIALS.room;
   if (kind === "deck") return MATERIALS.deck;
   if (kind === "carrier") return MATERIALS.carrier;
@@ -162,7 +175,8 @@ function buildNode(node: SceneNode): THREE.Object3D {
     }
     const isWell = node.semantic.kind === "well";
     const isRoom = node.semantic.kind === "room";
-    mesh.castShadow = !isWell && !isRoom;
+    const isGlass = node.semantic.kind === "part" && node.semantic.material === "glass";
+    mesh.castShadow = !isWell && !isRoom && !isGlass;
     mesh.receiveShadow = true;
     group.add(mesh);
     if (node.semantic.kind === "station") {

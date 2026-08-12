@@ -40,13 +40,13 @@ pub const WORKCELL_PLAN_FILE: &str = "plan.workcell.json";
 /// Why a run document failed to load.
 #[derive(Debug, thiserror::Error)]
 pub enum RunDocumentError {
-    #[error("cannot read {path}: {source}")]
+    #[error("cannot read {path}")]
     Io {
         path: String,
         #[source]
         source: std::io::Error,
     },
-    #[error("{path} is not a valid document: {source}")]
+    #[error("{path} is not a valid document")]
     Parse {
         path: String,
         #[source]

@@ -125,6 +125,17 @@ pub fn workcell_scene(
         node.rotation_z_deg = placed
             .and_then(|declaration| declaration.rotation_deg)
             .unwrap_or(0.0);
+        // A real asset carries its own body detail; the procedural
+        // assembly dresses the box tier so a bare facility still reads
+        // as a lab.
+        if !matches!(node.geometry, Some(Geometry::Mesh { .. })) {
+            let extent = station_extent(&station.kind);
+            node.children.extend(crate::instruments::assembly(
+                &station.name,
+                &station.kind,
+                [extent[0], extent[1]],
+            ));
+        }
         if let Some(profile) = &station.star_profile {
             // The deck scene is in the machine's own frame, which shares
             // the station node's origin.

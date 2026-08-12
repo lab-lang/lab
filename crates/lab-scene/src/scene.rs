@@ -109,6 +109,10 @@ pub enum Semantic {
     Labware { catalog: String },
     /// One well or tip position within its labware.
     Well { name: String },
+    /// A cosmetic piece of an instrument or bench, carrying its material
+    /// name: `frame`, `panel`, `glass`, or `accent`. Parts never bind to
+    /// trace events.
+    Part { material: String },
 }
 
 /// Extents in millimeters. Positions in the scene are exact; extents are

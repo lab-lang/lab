@@ -115,7 +115,11 @@ fn materials() -> Value {
         { "name": "plate",   "pbrMetallicRoughness": { "baseColorFactor": [0.92, 0.92, 0.94, 1.0], "roughnessFactor": 0.5 }, "doubleSided": true },
         { "name": "tips",    "pbrMetallicRoughness": { "baseColorFactor": [0.90, 0.60, 0.20, 1.0], "roughnessFactor": 0.6 }, "doubleSided": true },
         { "name": "well",    "pbrMetallicRoughness": { "baseColorFactor": [0.30, 0.55, 0.90, 0.45], "roughnessFactor": 0.3 }, "alphaMode": "BLEND", "doubleSided": true },
-        { "name": "station", "pbrMetallicRoughness": { "baseColorFactor": [0.62, 0.64, 0.68, 1.0], "roughnessFactor": 0.9 }, "doubleSided": true }
+        { "name": "station", "pbrMetallicRoughness": { "baseColorFactor": [0.62, 0.64, 0.68, 1.0], "roughnessFactor": 0.9 }, "doubleSided": true },
+        { "name": "frame",   "pbrMetallicRoughness": { "baseColorFactor": [0.16, 0.17, 0.20, 1.0], "roughnessFactor": 0.45, "metallicFactor": 0.8 }, "doubleSided": true },
+        { "name": "panel",   "pbrMetallicRoughness": { "baseColorFactor": [0.80, 0.81, 0.83, 1.0], "roughnessFactor": 0.55, "metallicFactor": 0.3 }, "doubleSided": true },
+        { "name": "glass",   "pbrMetallicRoughness": { "baseColorFactor": [0.65, 0.75, 0.82, 0.22], "roughnessFactor": 0.05 }, "alphaMode": "BLEND", "doubleSided": true },
+        { "name": "accent",  "pbrMetallicRoughness": { "baseColorFactor": [0.10, 0.55, 0.75, 1.0], "roughnessFactor": 0.3 }, "doubleSided": true }
     ])
 }
 
@@ -131,6 +135,13 @@ fn material_index(semantic: &Semantic, id: &str) -> usize {
         Semantic::Well { .. } if id.contains("tip") => 3,
         Semantic::Well { .. } => 4,
         Semantic::Room | Semantic::Station { .. } | Semantic::Site { .. } => 5,
+        Semantic::Part { material } => match material.as_str() {
+            "frame" => 6,
+            "panel" => 7,
+            "glass" => 8,
+            "accent" => 9,
+            _ => 5,
+        },
     }
 }
 

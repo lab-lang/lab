@@ -103,11 +103,18 @@ fn material_name(semantic: &Semantic, id: &str) -> &'static str {
         Semantic::Well { .. } => "lab_well",
         Semantic::Room => "lab_room",
         Semantic::Station { .. } | Semantic::Site { .. } => "lab_station",
+        Semantic::Part { material } => match material.as_str() {
+            "frame" => "lab_frame",
+            "panel" => "lab_panel",
+            "glass" => "lab_glass",
+            "accent" => "lab_accent",
+            _ => "lab_station",
+        },
     }
 }
 
 /// `(name, diffuse rgb, roughness, metallic, opacity)` per material.
-const MATERIALS: [(&str, [f64; 3], f64, f64, f64); 7] = [
+const MATERIALS: [(&str, [f64; 3], f64, f64, f64); 11] = [
     ("lab_deck", [0.55, 0.56, 0.58], 0.9, 0.4, 1.0),
     ("lab_carrier", [0.33, 0.34, 0.38], 0.55, 0.8, 1.0),
     ("lab_plate", [0.92, 0.92, 0.94], 0.5, 0.0, 1.0),
@@ -115,6 +122,10 @@ const MATERIALS: [(&str, [f64; 3], f64, f64, f64); 7] = [
     ("lab_well", [0.30, 0.55, 0.90], 0.3, 0.0, 0.45),
     ("lab_station", [0.62, 0.64, 0.68], 0.85, 0.3, 1.0),
     ("lab_room", [0.82, 0.82, 0.80], 0.95, 0.0, 1.0),
+    ("lab_frame", [0.16, 0.17, 0.20], 0.45, 0.8, 1.0),
+    ("lab_panel", [0.80, 0.81, 0.83], 0.55, 0.3, 1.0),
+    ("lab_glass", [0.65, 0.75, 0.82], 0.05, 0.0, 0.22),
+    ("lab_accent", [0.10, 0.55, 0.75], 0.3, 0.0, 1.0),
 ];
 
 struct Emitter<'context> {

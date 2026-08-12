@@ -66,6 +66,10 @@ MATERIALS = {
     "lab.station": ((0.55, 0.57, 0.60), 0.5, 0.4, 1.0),
     "lab.room": ((0.75, 0.74, 0.71), 0.9, 0.0, 1.0),
     "lab.head": ((0.08, 0.08, 0.10), 0.35, 0.6, 1.0),
+    "lab.frame": ((0.06, 0.065, 0.08), 0.4, 0.85, 1.0),
+    "lab.panel": ((0.58, 0.59, 0.62), 0.5, 0.3, 1.0),
+    "lab.glass": ((0.6, 0.72, 0.78), 0.03, 0.0, 0.15),
+    "lab.accent": ((0.02, 0.25, 0.45), 0.3, 0.0, 1.0),
 }
 
 
@@ -87,6 +91,11 @@ def build_materials():
 
 def material_for(node, materials):
     kind = node.get("semantic", {}).get("kind", "")
+    if kind == "part":
+        name = "lab." + str(node.get("semantic", {}).get("material", ""))
+        if name in materials:
+            return materials[name]
+        return materials["lab.station"]
     catalog = str(node.get("semantic", {}).get("catalog", "")) + node.get("id", "")
     if kind == "room":
         return materials["lab.room"]
@@ -219,7 +228,9 @@ class Builder:
                 "cylinder": lambda g: (g["diameter"], g["diameter"], g["height"]),
                 "mesh": lambda g: tuple(g["fallback"]),
             }[geometry["shape"]](geometry)
-            self.grow_bounds(here, extent)
+            # The room shell renders but never drives the camera framing.
+            if node.get("semantic", {}).get("kind") != "room":
+                self.grow_bounds(here, extent)
             if node.get("semantic", {}).get("kind") == "station":
                 self.station_heights[node["id"]] = extent[2]
             self.geometry_object(node, geometry, group)
@@ -250,10 +261,13 @@ class Animator:
         return 1 + max(0.0, t - self.from_t) / self.speedup * self.fps
 
     def key_location(self, obj, t, interpolation="LINEAR"):
+        # Interpolation rides the insert itself: the fcurve API changed
+        # shape across Blender 4/5, the new-keyframe preference did not.
+        prefs = bpy.context.preferences.edit
+        previous = prefs.keyframe_new_interpolation_type
+        prefs.keyframe_new_interpolation_type = interpolation
         obj.keyframe_insert(data_path="location", frame=self.frame(t))
-        action = obj.animation_data.action
-        for fcurve in action.fcurves:
-            fcurve.keyframe_points[-1].interpolation = interpolation
+        prefs.keyframe_new_interpolation_type = previous
 
     def head_for(self, station):
         if station in self.heads:
@@ -353,6 +367,9 @@ def build_camera(preset, bounds_min, bounds_max, frame_end, fps):
 
     camera_data = bpy.data.cameras.new("lab-camera")
     camera_data.lens = 35
+    # The scene is millimeters; the default clip range is meters-sized.
+    camera_data.clip_start = 5.0
+    camera_data.clip_end = max(100000.0, size * 30.0)
     camera_data.dof.use_dof = True
     camera_data.dof.focus_object = target
     camera_data.dof.aperture_fstop = 2.8
@@ -375,9 +392,6 @@ def build_camera(preset, bounds_min, bounds_max, frame_end, fps):
             camera.keyframe_insert(
                 data_path="location", frame=1 + step * (frame_end - 1) / steps
             )
-        for fcurve in camera.animation_data.action.fcurves:
-            for point in fcurve.keyframe_points:
-                point.interpolation = "LINEAR"
     else:  # dolly
         camera.location = (
             bounds_min[0] - size * 0.15,
@@ -391,9 +405,6 @@ def build_camera(preset, bounds_min, bounds_max, frame_end, fps):
             center[2] + size * 0.35,
         )
         camera.keyframe_insert(data_path="location", frame=frame_end)
-        for fcurve in camera.animation_data.action.fcurves:
-            for point in fcurve.keyframe_points:
-                point.interpolation = "LINEAR"
 
 
 def configure_render(args, out_dir):
@@ -408,7 +419,13 @@ def configure_render(args, out_dir):
         scene.cycles.samples = 512
         scene.cycles.use_denoising = True
     else:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
+        # EEVEE's identifier moved between Blender generations.
+        for engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
+            try:
+                scene.render.engine = engine
+                break
+            except TypeError:
+                continue
         scene.eevee.taa_render_samples = 64
 
 
@@ -422,6 +439,7 @@ def main():
         bpy.data.objects.remove(obj, do_unlink=True)
     bpy.context.scene.unit_settings.system = "METRIC"
     bpy.context.scene.unit_settings.scale_length = 0.001
+    bpy.context.preferences.edit.keyframe_new_interpolation_type = "LINEAR"
 
     materials = build_materials()
     builder = Builder(materials, os.path.dirname(os.path.abspath(args.scene)))
