@@ -1,4 +1,5 @@
 mod commands;
+mod render;
 mod run;
 mod scene;
 mod simulate;
@@ -123,6 +124,37 @@ enum Command {
         #[arg(long)]
         animated: bool,
     },
+    /// Render the simulated run as photographic frames (and a movie when
+    /// ffmpeg is present) through a headless Blender.
+    Render {
+        /// A run directory holding scene.json and sim-trace.json, from
+        /// `lab scene` and `lab simulate`.
+        path: PathBuf,
+        /// Camera preset.
+        #[arg(long, default_value = "dolly")]
+        camera: String,
+        /// Simulated seconds per wall-clock second of footage.
+        #[arg(long, default_value_t = 600.0)]
+        speedup: f64,
+        /// Frames per second of footage.
+        #[arg(long, default_value_t = 24)]
+        fps: u32,
+        /// `preview` (fast EEVEE) or `final` (path-traced Cycles).
+        #[arg(long, default_value = "preview")]
+        quality: String,
+        /// Render one frame at this simulated second instead of the run.
+        #[arg(long)]
+        still: Option<f64>,
+        /// Environment .hdr/.exr for lighting; the built-in sky otherwise.
+        #[arg(long)]
+        hdri: Option<PathBuf>,
+        /// The Blender executable; found on PATH or LAB_BLENDER otherwise.
+        #[arg(long)]
+        blender: Option<PathBuf>,
+        /// Where to write frames; defaults to `renders/` beside the scene.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
     /// Print resolved package metadata and source-module names.
     Metadata {
         /// Package directory or any path inside a package.
@@ -212,6 +244,30 @@ fn run() -> Result<()> {
             facility,
             animated,
         } => scene::scene(path, out_dir, facility, animated, &output),
+        Command::Render {
+            path,
+            camera,
+            speedup,
+            fps,
+            quality,
+            still,
+            hdri,
+            blender,
+            out_dir,
+        } => render::render(
+            path,
+            render::RenderOptions {
+                camera,
+                speedup,
+                fps,
+                quality,
+                still,
+                hdri,
+                blender,
+                out_dir,
+            },
+            &output,
+        ),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }

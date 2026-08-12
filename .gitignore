@@ -17,3 +17,4 @@ __pycache__/
 .ruff_cache/
 viewer/node_modules/
 viewer/dist/
+.claude/

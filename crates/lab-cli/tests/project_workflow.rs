@@ -923,3 +923,78 @@ fn an_animated_scene_plays_the_simulated_run_on_the_usd_timeline() {
 
     std::fs::remove_dir_all(&out_dir).unwrap();
 }
+
+/// Gated on a local Blender, the same pattern as the Opentrons simulator
+/// checks: `LAB_BLENDER=/path/to/blender cargo test -p lab-cli`.
+#[test]
+fn a_wave_renders_one_photographic_frame_through_blender() {
+    let Ok(blender) = std::env::var("LAB_BLENDER") else {
+        eprintln!("skipping: set LAB_BLENDER to run the render check");
+        return;
+    };
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-render-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    for args in [
+        vec![
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ],
+        vec![
+            "simulate",
+            out_dir.join("workcell-star/wave-001").to_str().unwrap(),
+        ],
+        vec![
+            "scene",
+            out_dir.join("workcell-star/wave-001").to_str().unwrap(),
+        ],
+    ] {
+        let step = Command::new(env!("CARGO_BIN_EXE_lab"))
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(step.status.success(), "step {args:?} failed");
+    }
+
+    let wave = out_dir.join("workcell-star/wave-001");
+    let rendered = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "render",
+            wave.to_str().unwrap(),
+            "--still",
+            "600",
+            "--quality",
+            "preview",
+            "--blender",
+            &blender,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        rendered.status.success(),
+        "render failed: {}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let still = wave.join("renders/frames/still.png");
+    assert!(still.is_file(), "the still frame exists");
+    assert!(
+        std::fs::metadata(&still).unwrap().len() > 10_000,
+        "the frame is a real image, not an empty file"
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}
