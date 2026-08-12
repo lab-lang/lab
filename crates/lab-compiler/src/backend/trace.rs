@@ -82,6 +82,25 @@ impl AssemblyTrace {
         )
     }
 
+    /// Acceptance thresholds are optional, so an artifact that declares none
+    /// yields `None` rather than a zero a backend could mistake for a limit.
+    pub(in crate::backend) fn minimum_concentration_ng_per_ul(
+        &self,
+        context: &Context,
+    ) -> Option<u32> {
+        self.design
+            .get_attr_acceptance_minimum_concentration_ng_per_ul(context)
+            .as_deref()
+            .map(u32_value)
+    }
+
+    pub(in crate::backend) fn minimum_volume_ul(&self, context: &Context) -> Option<u32> {
+        self.design
+            .get_attr_acceptance_minimum_volume_ul(context)
+            .as_deref()
+            .map(u32_value)
+    }
+
     /// One reaction parameter, read from the verified chemistry dictionary.
     pub(in crate::backend) fn chemistry(&self, context: &Context, key: &str) -> u16 {
         chemistry_entry(

@@ -16,6 +16,10 @@
 //! verified LAIR into a target IR, target validation and resource planning,
 //! and concrete emitters. The language frontend and generic output renderers
 //! deliberately do not depend on any target module.
+//!
+//! [`labop`] sits beside them as an interchange target rather than a bench. It
+//! consumes the same verified Protocol LAIR and writes an SBOL3 RDF document,
+//! reporting what the weaker representation could not carry.
 
 mod constraints;
 mod descriptor;
@@ -23,6 +27,7 @@ mod document;
 mod error;
 mod graph;
 pub mod hamilton;
+pub mod labop;
 mod markdown;
 pub mod opentrons;
 mod package;

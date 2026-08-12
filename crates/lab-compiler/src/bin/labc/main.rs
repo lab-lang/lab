@@ -45,6 +45,8 @@ enum Emit {
     AutomationBundle,
     DependencyPlan,
     FullBuildBundle,
+    Labop,
+    LabopBundle,
 }
 
 /// A target profile parsed for whichever backend it declares. The `backend`
@@ -227,6 +229,41 @@ fn emit_flex(cli: &Cli, protocol: &ProtocolLairProgram, profile: FlexTargetProfi
     Ok(())
 }
 
+fn emit_labop(cli: &Cli, protocol: &ProtocolLairProgram) -> Result<()> {
+    use lab_compiler::backend::labop::{LabopBackend, emit_program};
+
+    let backend = LabopBackend::new();
+    let program = backend
+        .compile(protocol)
+        .with_context(|| format!("failed to compile LabOP document {}", cli.source.display()))?;
+    match cli.emit {
+        Emit::Labop => print!("{}", program.document()),
+        Emit::LabopBundle => {
+            let output_dir = cli
+                .output_dir
+                .as_ref()
+                .context("--emit labop-bundle requires --output-dir <directory>")?;
+            let bundle = emit_program(&program)
+                .with_context(|| format!("failed to emit LabOP bundle {}", cli.source.display()))?;
+            write_bundle(&bundle, output_dir)?;
+            println!(
+                "Wrote LabOP document with {} statements across {} protocol(s) to {}",
+                program.statement_count(),
+                program.protocols().len(),
+                output_dir.display()
+            );
+            if !program.omissions().is_empty() {
+                println!(
+                    "{} omission(s) recorded in labop/omissions.md",
+                    program.omissions().len()
+                );
+            }
+        }
+        _ => unreachable!(),
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let text = std::fs::read_to_string(&cli.source)
@@ -260,6 +297,12 @@ fn main() -> Result<()> {
             cli.source.display()
         )
     })?;
+    // LabOP is an interchange target rather than a bench, so it is emitted
+    // from Protocol LAIR alone and never consults a target profile.
+    if matches!(cli.emit, Emit::Labop | Emit::LabopBundle) {
+        return emit_labop(&cli, &protocol);
+    }
+
     let profile = match &cli.target_profile {
         Some(path) => {
             let contents = std::fs::read_to_string(path)
