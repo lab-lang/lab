@@ -19,8 +19,8 @@
 use pliron::context::Context;
 
 use super::graph::{Document, ProtocolBuilder, Value};
+use super::identity;
 use super::library;
-use super::sbol;
 use super::vocabulary::Unit;
 use crate::backend::trace::{AssemblyTrace, ProtocolTraces, StrainTrace};
 
@@ -85,7 +85,7 @@ fn lower_assembly(
     let artifact = trace.artifact(context);
     let mut omissions = Vec::new();
     let mut protocol = document.protocol(
-        &format!("{}_assembly", sbol::display_id(&artifact)),
+        &format!("{}_assembly", identity::display_id(&artifact)),
         &format!("{artifact} assembly"),
         &format!(
             "Golden Gate assembly of {artifact} from {} and {} part(s).",
@@ -276,7 +276,7 @@ fn lower_strain(
     let selection = trace.selection(context);
 
     let mut protocol = document.protocol(
-        &format!("{}_strain", sbol::display_id(&artifact)),
+        &format!("{}_strain", identity::display_id(&artifact)),
         &format!("{artifact} construction"),
         &format!(
             "Heat-shock transformation of {host} with {}, recovery, dilution, and selection on {selection}.",

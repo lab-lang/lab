@@ -7,7 +7,7 @@
 //! the published LabOP ones with the parameters their library declares, and the
 //! Lab-defined ones for procedures the published libraries do not name.
 
-use super::sbol::{self, Kind, Object};
+use super::identity::{self, Kind, Object};
 use super::triples::{Graph, Term};
 use super::vocabulary as vocab;
 
@@ -104,7 +104,7 @@ impl Primitive {
     /// Writes this behavior and its parameter list into the document.
     pub(super) fn declare(&self, graph: &mut Graph) {
         let namespace = self.namespace();
-        let mut behavior = sbol::top_level(
+        let mut behavior = identity::top_level(
             graph,
             &namespace,
             self.name,
@@ -116,7 +116,7 @@ impl Primitive {
             let ordered = behavior.child(
                 graph,
                 "OrderedPropertyValue",
-                &format!("{}OrderedPropertyValue", vocab::UML),
+                vocab::UML_ORDERED_PROPERTY_VALUE,
                 Kind::Identified,
             );
             graph.push(
@@ -131,12 +131,7 @@ impl Primitive {
 }
 
 fn declare_parameter(graph: &mut Graph, mut ordered: Object, parameter: Parameter) {
-    let mut owned = ordered.child(
-        graph,
-        "Parameter",
-        &format!("{}Parameter", vocab::UML),
-        Kind::Identified,
-    );
+    let mut owned = ordered.child(graph, "Parameter", vocab::UML_PARAMETER, Kind::Identified);
     graph.link(ordered.iri(), vocab::UML_PROPERTY_VALUE, owned.iri());
     owned.set_name(graph, parameter.name);
     graph.link(owned.iri(), vocab::UML_TYPE, parameter.type_iri);
@@ -172,7 +167,7 @@ fn literal_integer(graph: &mut Graph, parent: &mut Object, value: i64) -> String
     let literal = parent.child(
         graph,
         "LiteralInteger",
-        &format!("{}LiteralInteger", vocab::UML),
+        vocab::UML_LITERAL_INTEGER,
         Kind::Identified,
     );
     graph.push(

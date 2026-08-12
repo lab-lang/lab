@@ -9,8 +9,8 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use super::identity::{self, Kind, Object};
 use super::library::Primitive;
-use super::sbol::{self, Kind, Object};
 use super::triples::{Graph, Term};
 use super::vocabulary::{self as vocab, Unit};
 
@@ -59,10 +59,10 @@ impl Document {
     /// A reagent, strain, or other material named by the build. Returns the IRI
     /// so callers can reference it from a pin.
     pub(super) fn component(&mut self, name: &str) -> String {
-        let display_id = sbol::display_id(name);
+        let display_id = identity::display_id(name);
         let iri = format!("{}/{display_id}", self.namespace);
         if self.resources.insert(iri.clone()) {
-            let object = sbol::top_level(
+            let object = identity::top_level(
                 &mut self.graph,
                 &self.namespace,
                 &display_id,
@@ -86,10 +86,10 @@ impl Document {
     /// expression LabOP resolves through an external reasoner. Emitting one is
     /// writing a string; only a consumer needs the reasoner.
     pub(super) fn container_spec(&mut self, id: &str, name: &str, query: &str) -> String {
-        let display_id = sbol::display_id(id);
+        let display_id = identity::display_id(id);
         let iri = format!("{}/{display_id}", self.namespace);
         if self.resources.insert(iri.clone()) {
-            let object = sbol::top_level(
+            let object = identity::top_level(
                 &mut self.graph,
                 &self.namespace,
                 &display_id,
@@ -122,7 +122,7 @@ impl Document {
         name: &str,
         description: &str,
     ) -> ProtocolBuilder {
-        let mut object = sbol::top_level(
+        let mut object = identity::top_level(
             &mut self.graph,
             &self.namespace,
             display_id,
@@ -135,13 +135,13 @@ impl Document {
         let initial = object.child(
             &mut self.graph,
             "InitialNode",
-            &format!("{}InitialNode", vocab::UML),
+            vocab::UML_INITIAL_NODE,
             Kind::Identified,
         );
         let terminal = object.child(
             &mut self.graph,
             "FinalNode",
-            &format!("{}FinalNode", vocab::UML),
+            vocab::UML_FINAL_NODE,
             Kind::Identified,
         );
         self.graph
@@ -186,7 +186,7 @@ impl ProtocolBuilder {
         let object = self.object.child(
             &mut document.graph,
             "CallBehaviorAction",
-            &format!("{}CallBehaviorAction", vocab::UML),
+            vocab::UML_CALL_BEHAVIOR_ACTION,
             Kind::Identified,
         );
         document
@@ -209,7 +209,7 @@ impl ProtocolBuilder {
         let pin = action.object.child(
             &mut document.graph,
             "ValuePin",
-            &format!("{}ValuePin", vocab::UML),
+            vocab::UML_VALUE_PIN,
             Kind::Identified,
         );
         pin.set_name(&mut document.graph, parameter);
@@ -239,7 +239,7 @@ impl ProtocolBuilder {
         let pin = action.object.child(
             &mut document.graph,
             "InputPin",
-            &format!("{}InputPin", vocab::UML),
+            vocab::UML_INPUT_PIN,
             Kind::Identified,
         );
         pin.set_name(&mut document.graph, parameter);
@@ -270,7 +270,7 @@ impl ProtocolBuilder {
         let fork = self.object.child(
             &mut document.graph,
             "ForkNode",
-            &format!("{}ForkNode", vocab::UML),
+            vocab::UML_FORK_NODE,
             Kind::Identified,
         );
         let fork_iri = fork.iri().to_owned();
@@ -292,7 +292,7 @@ impl ProtocolBuilder {
         let pin = action.object.child(
             &mut document.graph,
             "OutputPin",
-            &format!("{}OutputPin", vocab::UML),
+            vocab::UML_OUTPUT_PIN,
             Kind::Identified,
         );
         pin.set_name(&mut document.graph, parameter);
@@ -333,7 +333,7 @@ impl ProtocolBuilder {
         let edge = self.object.child(
             &mut document.graph,
             "ObjectFlow",
-            &format!("{}ObjectFlow", vocab::UML),
+            vocab::UML_OBJECT_FLOW,
             Kind::Identified,
         );
         document.graph.link(edge.iri(), vocab::UML_SOURCE, source);
@@ -347,7 +347,7 @@ impl ProtocolBuilder {
         let edge = self.object.child(
             &mut document.graph,
             "ControlFlow",
-            &format!("{}ControlFlow", vocab::UML),
+            vocab::UML_CONTROL_FLOW,
             Kind::Identified,
         );
         document.graph.link(edge.iri(), vocab::UML_SOURCE, source);
@@ -364,7 +364,7 @@ fn write_literal(graph: &mut Graph, pin: &mut Object, value: Value) -> String {
             let literal = pin.child(
                 graph,
                 "LiteralReference",
-                &format!("{}LiteralReference", vocab::UML),
+                vocab::UML_LITERAL_REFERENCE,
                 Kind::Identified,
             );
             graph.link(literal.iri(), vocab::UML_REFERENCE_VALUE, &target);
@@ -374,7 +374,7 @@ fn write_literal(graph: &mut Graph, pin: &mut Object, value: Value) -> String {
             let mut literal = pin.child(
                 graph,
                 "LiteralIdentified",
-                &format!("{}LiteralIdentified", vocab::UML),
+                vocab::UML_LITERAL_IDENTIFIED,
                 Kind::Identified,
             );
             let measure = literal.child(graph, "Measure", vocab::OM_MEASURE, Kind::Identified);
@@ -392,7 +392,7 @@ fn write_literal(graph: &mut Graph, pin: &mut Object, value: Value) -> String {
             let literal = pin.child(
                 graph,
                 "LiteralInteger",
-                &format!("{}LiteralInteger", vocab::UML),
+                vocab::UML_LITERAL_INTEGER,
                 Kind::Identified,
             );
             graph.push(
@@ -406,7 +406,7 @@ fn write_literal(graph: &mut Graph, pin: &mut Object, value: Value) -> String {
             let literal = pin.child(
                 graph,
                 "LiteralString",
-                &format!("{}LiteralString", vocab::UML),
+                vocab::UML_LITERAL_STRING,
                 Kind::Identified,
             );
             graph.push(literal.iri(), vocab::UML_STRING_VALUE, Term::string(text));

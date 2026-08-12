@@ -1,15 +1,25 @@
-//! SBOL3 object identity as pySBOL3 writes it.
+//! Naming of the objects a LabOP document is made of.
 //!
-//! Three conventions decide whether a document another tool reads resolves or
-//! silently dangles. A child's IRI is its parent's IRI extended by the child's
-//! `displayId`. A `displayId` is the class name followed by a counter that
-//! restarts within each parent, so the second pin of an action is `InputPin2`
-//! even though the previous action also has an `InputPin1`. And a class the
-//! LabOP ontology generates carries two `rdf:type` statements, its own class
-//! and the SBOL parent it specializes, while a native SBOL3 class carries only
-//! its own.
+//! `sbol3` validates and assembles identities — [`DisplayId`], [`Namespace`],
+//! and [`SbolIdentity`] are used here for exactly that — but its object
+//! builders cannot serve this backend. Each one is keyed to a variant of the
+//! closed `SbolClass` enum (`SubComponent`, `ComponentReference`, and the rest
+//! of the SBOL 3 vocabulary), and a LabOP document is built almost entirely
+//! from classes that enum does not contain: `labop:Protocol`,
+//! `uml:CallBehaviorAction`, `uml:ObjectFlow`. What remains here is only what
+//! the library has no representation for.
+//!
+//! Two conventions, inherited from pySBOL3, decide whether a document another
+//! tool reads resolves or dangles. A `displayId` is the class name followed by
+//! a counter that restarts within each parent, so the second pin of an action
+//! is `InputPin2` even though the previous action also has an `InputPin1`. And
+//! a class from an ontology layered over SBOL carries two `rdf:type`
+//! statements, its own and the SBOL class it specializes, while a native SBOL3
+//! class carries only its own.
 
 use std::collections::HashMap;
+
+use sbol3::{DisplayId, Namespace, SbolIdentity};
 
 use super::triples::{Graph, Term};
 use super::vocabulary as vocab;
@@ -46,6 +56,10 @@ impl Object {
 
     /// Allocates the next `displayId` for `class` within this parent and
     /// returns the child object, writing the child's identity statements.
+    ///
+    /// A child's IRI extends its parent's, so the parent stands in for a
+    /// namespace. `DisplayId` still validates the allocated name, which fails
+    /// only if a class name reaches here that is not a bare identifier.
     pub(super) fn child(
         &mut self,
         graph: &mut Graph,
@@ -55,11 +69,11 @@ impl Object {
     ) -> Object {
         let counter = self.counters.entry(class).or_insert(0);
         *counter += 1;
-        let display_id = format!("{class}{counter}");
-        let iri = format!("{}/{display_id}", self.iri);
+        let display_id = DisplayId::new(format!("{class}{counter}"))
+            .expect("a UML or LabOP class name is a valid displayId");
         let child = Object {
-            iri,
-            display_id,
+            iri: format!("{}/{}", self.iri, display_id.as_str()),
+            display_id: display_id.into_string(),
             counters: HashMap::new(),
         };
         child.declare(graph, class_iri, kind, None);
@@ -98,6 +112,10 @@ impl Object {
 
 /// A top-level object, whose IRI is its namespace extended by a caller-chosen
 /// `displayId` rather than a counter.
+///
+/// The identity is assembled by [`SbolIdentity`], so an invalid namespace or
+/// `displayId` is refused here rather than surfacing as a validation error
+/// against the finished document.
 pub(super) fn top_level(
     graph: &mut Graph,
     namespace: &str,
@@ -105,13 +123,16 @@ pub(super) fn top_level(
     class_iri: &str,
     kind: Kind,
 ) -> Object {
-    let iri = format!("{namespace}/{display_id}");
+    let namespace = Namespace::new(namespace).expect("backend namespaces are valid IRIs");
+    let display_id =
+        DisplayId::new(display_id).expect("display identifiers are encoded before they reach here");
+    let identity = SbolIdentity::new(namespace.clone(), display_id.clone());
     let object = Object {
-        iri,
-        display_id: display_id.to_owned(),
+        iri: identity.to_iri().into_string(),
+        display_id: display_id.into_string(),
         counters: HashMap::new(),
     };
-    object.declare(graph, class_iri, kind, Some(namespace));
+    object.declare(graph, class_iri, kind, Some(namespace.as_str()));
     object
 }
 

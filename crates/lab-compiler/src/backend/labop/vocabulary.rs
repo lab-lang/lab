@@ -22,8 +22,6 @@ pub(super) const SBOL_NAME: &str = "http://sbols.org/v3#name";
 pub(super) const SBOL_DESCRIPTION: &str = "http://sbols.org/v3#description";
 pub(super) const SBOL_TYPE: &str = "http://sbols.org/v3#type";
 
-pub(super) const UML: &str = "http://bioprotocols.org/uml#";
-
 pub(super) const LABOP_PROTOCOL: &str = "http://bioprotocols.org/labop#Protocol";
 pub(super) const LABOP_PRIMITIVE: &str = "http://bioprotocols.org/labop#Primitive";
 pub(super) const LABOP_CONTAINER_SPEC: &str = "http://bioprotocols.org/labop#ContainerSpec";
@@ -31,6 +29,27 @@ pub(super) const LABOP_SAMPLE_ARRAY: &str = "http://bioprotocols.org/labop#Sampl
 pub(super) const LABOP_SAMPLE_COLLECTION: &str = "http://bioprotocols.org/labop#SampleCollection";
 pub(super) const LABOP_QUERY_STRING: &str = "http://bioprotocols.org/labop#queryString";
 pub(super) const LABOP_PREFIX_MAP: &str = "http://bioprotocols.org/labop#prefixMap";
+
+/// UML classes an emitted activity is built from. A class name reaches the
+/// document as an `rdf:type`, where a misspelling produces a document that
+/// parses and references a class no reader knows, so each is named once here
+/// rather than spelled at the point of use.
+pub(super) const UML_INITIAL_NODE: &str = "http://bioprotocols.org/uml#InitialNode";
+pub(super) const UML_FINAL_NODE: &str = "http://bioprotocols.org/uml#FinalNode";
+pub(super) const UML_FORK_NODE: &str = "http://bioprotocols.org/uml#ForkNode";
+pub(super) const UML_CALL_BEHAVIOR_ACTION: &str = "http://bioprotocols.org/uml#CallBehaviorAction";
+pub(super) const UML_INPUT_PIN: &str = "http://bioprotocols.org/uml#InputPin";
+pub(super) const UML_OUTPUT_PIN: &str = "http://bioprotocols.org/uml#OutputPin";
+pub(super) const UML_VALUE_PIN: &str = "http://bioprotocols.org/uml#ValuePin";
+pub(super) const UML_OBJECT_FLOW: &str = "http://bioprotocols.org/uml#ObjectFlow";
+pub(super) const UML_CONTROL_FLOW: &str = "http://bioprotocols.org/uml#ControlFlow";
+pub(super) const UML_PARAMETER: &str = "http://bioprotocols.org/uml#Parameter";
+pub(super) const UML_ORDERED_PROPERTY_VALUE: &str =
+    "http://bioprotocols.org/uml#OrderedPropertyValue";
+pub(super) const UML_LITERAL_INTEGER: &str = "http://bioprotocols.org/uml#LiteralInteger";
+pub(super) const UML_LITERAL_STRING: &str = "http://bioprotocols.org/uml#LiteralString";
+pub(super) const UML_LITERAL_REFERENCE: &str = "http://bioprotocols.org/uml#LiteralReference";
+pub(super) const UML_LITERAL_IDENTIFIED: &str = "http://bioprotocols.org/uml#LiteralIdentified";
 
 pub(super) const UML_ACTIVITY_NODE: &str = "http://bioprotocols.org/uml#node";
 pub(super) const UML_ACTIVITY_EDGE: &str = "http://bioprotocols.org/uml#edge";
@@ -87,7 +106,8 @@ impl Unit {
 }
 
 /// The base of the published primitive libraries. Note the `https` scheme and
-/// the absence of a fragment separator, both of which differ from [`LABOP`].
+/// the absence of a fragment separator, both of which differ from the
+/// ontology host the `LABOP_*` classes are named under.
 pub(super) const PRIMITIVE_BASE: &str = "https://bioprotocols.org/labop/primitives";
 
 /// Namespace for the primitives Lab defines because LabOP's library has no
