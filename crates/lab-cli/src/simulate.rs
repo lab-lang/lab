@@ -5,7 +5,7 @@
 //! when an operator must be present, and how long each walk-away window
 //! lasts. The full record is written as a `lab.sim-trace.v0` trace.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use lab_runtime::clock::{Clock, WallClock};
@@ -20,22 +20,23 @@ use crate::Output;
 /// The trace file a simulation writes beside the package it simulated.
 const TRACE_FILE: &str = "sim-trace.json";
 
-pub(crate) fn simulate(
-    directory: PathBuf,
+/// Simulates one run directory and writes its trace beside the plan.
+/// The idempotent core `lab render` reuses.
+pub(crate) fn simulate_wave(
+    directory: &Path,
+    facility_path: Option<&Path>,
     trace_path: Option<PathBuf>,
-    facility_path: Option<PathBuf>,
-    output: &Output,
-) -> Result<()> {
+) -> Result<(SimTraceDocument, PathBuf)> {
     let mut durations = DurationModel::default();
     let facility = facility_path
-        .map(|path| lab_runtime::facility::load_facility(&path))
+        .map(lab_runtime::facility::load_facility)
         .transpose()?;
     if let Some(facility) = &facility {
         // The facility's transport time is the whole handoff: seal, carry,
         // seat, confirm.
         durations.handoff_seconds = facility.transport.walk_seconds;
-        if is_workcell_directory(&directory) {
-            let plan = lab_runfmt::load_workcell_plan(&directory)?;
+        if is_workcell_directory(directory) {
+            let plan = lab_runfmt::load_workcell_plan(directory)?;
             facility.check_stations(&plan.stations)?;
         }
     }
@@ -43,20 +44,51 @@ pub(crate) fn simulate(
         origin_unix: WallClock.now_unix(),
         durations,
     };
-    let trace = if is_workcell_directory(&directory) {
-        let loaded = load_workcell_directory(&directory)?;
+    let trace = if is_workcell_directory(directory) {
+        let loaded = load_workcell_directory(directory)?;
         simulate_workcell(&loaded, config)?
     } else {
-        simulate_star_package(&directory, config)?
+        simulate_star_package(directory, config)?
     };
 
     let trace_path = trace_path.unwrap_or_else(|| directory.join(TRACE_FILE));
     let text = serde_json::to_string_pretty(&trace)?;
     std::fs::write(&trace_path, text)
         .with_context(|| format!("failed to write {}", trace_path.display()))?;
+    Ok((trace, trace_path))
+}
 
-    let human = render_timeline(&trace, &trace_path);
-    output.success("simulate", &trace, human)
+pub(crate) fn simulate(
+    directory: PathBuf,
+    trace_path: Option<PathBuf>,
+    facility_path: Option<PathBuf>,
+    output: &Output,
+) -> Result<()> {
+    let flow = crate::flow::resolve(&directory, facility_path)?;
+
+    // One named run directory keeps its exact single-wave contract.
+    if let [wave] = flow.waves.as_slice() {
+        let (trace, written) = simulate_wave(wave, flow.facility.as_deref(), trace_path)?;
+        let human = render_timeline(&trace, &written);
+        return output.success("simulate", &trace, human);
+    }
+
+    let mut sections = Vec::new();
+    let mut reports = Vec::new();
+    for wave in &flow.waves {
+        let label = crate::flow::wave_label(wave);
+        let (trace, written) = simulate_wave(wave, flow.facility.as_deref(), None)?;
+        sections.push(format!(
+            "== {label} ==\n{}",
+            render_timeline(&trace, &written)
+        ));
+        reports.push(serde_json::json!({
+            "wave": label,
+            "trace": written.display().to_string(),
+            "summary": trace.summary,
+        }));
+    }
+    output.success("simulate", reports, sections.join("\n\n"))
 }
 
 fn hms(seconds: f64) -> String {

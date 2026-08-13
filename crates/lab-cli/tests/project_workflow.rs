@@ -209,10 +209,10 @@ fn the_manifest_target_builds_robot_protocols_without_naming_one() {
         String::from_utf8_lossy(&default_target.stderr)
     );
     let result: Value = serde_json::from_slice(&default_target.stdout).unwrap();
-    assert_eq!(result["result"]["target"], "opentrons-ot2");
+    assert_eq!(result["result"]["target"], "workcell-star");
     assert!(
         out_dir
-            .join("opentrons-ot2/wave-001/assembly_protocol.py")
+            .join("workcell-star/wave-001/plan.workcell.json")
             .is_file()
     );
 
@@ -237,7 +237,7 @@ fn the_manifest_target_builds_robot_protocols_without_naming_one() {
     let result: Value = serde_json::from_slice(&ir_only.stdout).unwrap();
     assert_eq!(result["result"]["target"], Value::Null);
     assert!(result["result"]["protocols"].as_array().unwrap().is_empty());
-    assert!(!out_dir.join("opentrons-ot2").exists());
+    assert!(!out_dir.join("workcell-star").exists());
     assert!(out_dir.join("package.json").is_file());
 
     std::fs::remove_dir_all(out_dir).unwrap();
@@ -783,7 +783,7 @@ fn a_facility_lays_out_the_scene_with_room_and_assets() {
         b"glTF-stub".as_slice(),
     )
     .unwrap();
-    let source = std::fs::read_to_string(example.join("facilities/main-bench.toml")).unwrap();
+    let source = std::fs::read_to_string(example.join("facility.toml")).unwrap();
     std::fs::write(facility_dir.join("main-bench.toml"), source).unwrap();
 
     let rendered = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -997,4 +997,103 @@ fn a_wave_renders_one_photographic_frame_through_blender() {
     );
 
     std::fs::remove_dir_all(&out_dir).unwrap();
+}
+
+#[test]
+fn the_zero_argument_flow_simulates_a_package_from_its_root() {
+    // Copy the example so the flow's .lab/build output stays out of the
+    // repository.
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let package = std::env::temp_dir().join(format!(
+        "lab-golden-gate-flow-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if package.exists() {
+        std::fs::remove_dir_all(&package).unwrap();
+    }
+    let copy = Command::new("cp")
+        .args(["-R", example.to_str().unwrap(), package.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(copy.status.success());
+    std::fs::remove_dir_all(package.join(".lab")).ok();
+
+    // `lab build` with no arguments, from the package directory: the
+    // manifest's workcell target lands under .lab/build/.
+    let build = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .current_dir(&package)
+        .arg("build")
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "package build failed: {}",
+        String::from_utf8_lossy(&build.stderr)
+    );
+    assert!(
+        package
+            .join(".lab/build/workcell-star/wave-001/plan.workcell.json")
+            .is_file()
+    );
+
+    // `lab simulate` with no arguments: every wave, facility by
+    // convention from facility.toml at the root.
+    let simulate = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .current_dir(&package)
+        .args(["simulate", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        simulate.status.success(),
+        "package simulate failed: {}",
+        String::from_utf8_lossy(&simulate.stderr)
+    );
+    let report: Value = serde_json::from_slice(&simulate.stdout).unwrap();
+    let waves = report["result"].as_array().unwrap();
+    assert_eq!(waves.len(), 2, "both waves simulate: {report}");
+    assert_eq!(waves[0]["wave"], "wave-001");
+    for wave in ["wave-001", "wave-002"] {
+        assert!(
+            package
+                .join(format!(".lab/build/workcell-star/{wave}/sim-trace.json"))
+                .is_file()
+        );
+    }
+    // The facility's 45 s walk shortened handoffs: the summary's attended
+    // time proves facility.toml was picked up without a flag (default
+    // handoffs would cost 90 s each).
+    let attended = waves[0]["summary"]["attended_seconds"].as_f64().unwrap();
+    assert!(
+        (attended - 90.0).abs() < 1.0,
+        "two 45 s facility handoffs, not two 90 s defaults: {attended}"
+    );
+
+    // `lab scene` with no arguments covers every wave too.
+    let scene = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .current_dir(&package)
+        .args(["scene", "--animated", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        scene.status.success(),
+        "package scene failed: {}",
+        String::from_utf8_lossy(&scene.stderr)
+    );
+    for wave in ["wave-001", "wave-002"] {
+        let usda = std::fs::read_to_string(
+            package.join(format!(".lab/build/workcell-star/{wave}/scene.usda")),
+        )
+        .unwrap();
+        assert!(usda.contains("timeSamples"), "{wave} is animated");
+        assert!(
+            usda.contains("room_floor") || usda.contains("room:floor"),
+            "{wave} renders the facility room"
+        );
+    }
+
+    std::fs::remove_dir_all(&package).unwrap();
 }

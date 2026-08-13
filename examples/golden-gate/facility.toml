@@ -1,8 +1,8 @@
 # The lab this package usually runs in: the workcell-star bench plus the
-# cold storage its stock lives in. One facility serves every package that
-# runs here; a package's manifest carries at most a pointer to it, and
-# `lab simulate --facility` compares candidate facilities by simulating the
-# same build against each.
+# cold storage its stock lives in. A single-facility package keeps the
+# description here at the root, where `lab simulate` and `lab render` find
+# it by convention; packages with several candidate facilities keep them
+# under `facilities/` and compare them with `--facility`.
 
 [facility]
 name = "main-bench"

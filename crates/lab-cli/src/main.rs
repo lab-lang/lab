@@ -1,4 +1,5 @@
 mod commands;
+mod flow;
 mod render;
 mod run;
 mod scene;
@@ -94,8 +95,10 @@ enum Command {
     /// walk-away window lasts. Touches no hardware and writes no ledger;
     /// the full record lands in a `lab.sim-trace.v0` trace file.
     Simulate {
-        /// A run directory produced by `lab build`, workcell wave or
-        /// Hamilton STAR package.
+        /// A run directory (workcell wave or Hamilton STAR package), or a
+        /// package directory whose built default target is simulated wave
+        /// by wave. Defaults to the current directory.
+        #[arg(default_value = ".")]
         path: PathBuf,
         /// Where to write the trace; defaults to `sim-trace.json` beside
         /// the plan.
@@ -109,8 +112,10 @@ enum Command {
     /// Render a built run package as a 3D scene: a `lab.scene.v0`
     /// document plus glTF and USD projections of it.
     Scene {
-        /// A run directory produced by `lab build`, workcell wave or
-        /// Hamilton STAR package.
+        /// A run directory, or a package directory whose built default
+        /// target is rendered wave by wave. Defaults to the current
+        /// directory.
+        #[arg(default_value = ".")]
         path: PathBuf,
         /// Where to write scene files; defaults to the run directory.
         #[arg(long)]
@@ -127,8 +132,10 @@ enum Command {
     /// Render the simulated run as photographic frames (and a movie when
     /// ffmpeg is present) through a headless Blender.
     Render {
-        /// A run directory holding scene.json and sim-trace.json, from
-        /// `lab scene` and `lab simulate`.
+        /// A run directory or package directory. The simulation and the
+        /// animated scene regenerate first, so this one command is the
+        /// whole flow. Defaults to the current directory.
+        #[arg(default_value = ".")]
         path: PathBuf,
         /// Camera preset.
         #[arg(long, default_value = "dolly")]
@@ -154,6 +161,10 @@ enum Command {
         /// Where to write frames; defaults to `renders/` beside the scene.
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        /// Facility description; defaults to the package's facility.toml
+        /// or its manifest's [build] facility pointer.
+        #[arg(long)]
+        facility: Option<PathBuf>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -254,6 +265,7 @@ fn run() -> Result<()> {
             hdri,
             blender,
             out_dir,
+            facility,
         } => render::render(
             path,
             render::RenderOptions {
@@ -265,6 +277,7 @@ fn run() -> Result<()> {
                 hdri,
                 blender,
                 out_dir,
+                facility,
             },
             &output,
         ),

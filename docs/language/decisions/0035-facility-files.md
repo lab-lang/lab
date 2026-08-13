@@ -29,10 +29,13 @@ takes in this facility. `lab simulate --facility` checks that every
 station a plan needs exists there by name and kind, and drives handoff
 durations from the facility's transport time.
 
-The manifest carries at most a pointer: `[build] facility = "main-bench"`,
-a bare name held to the same no-path-escape rule as `[build] target`. The
-description never lives in `lab.toml`, and station addresses stay runtime
-input either way.
+A single-facility package keeps the description at its root as
+`facility.toml`, where the simulation commands find it by convention.
+Packages comparing several candidate facilities keep them under
+`facilities/`, selected by `--facility` or by the manifest's pointer:
+`[build] facility = "main-bench"`, a bare name held to the same
+no-path-escape rule as `[build] target`. The description never lives in
+`lab.toml` itself, and station addresses stay runtime input either way.
 
 Stock is inventory state, not a declaration (0026's companion rule):
 storage units name materials and artifacts by their declared identities.

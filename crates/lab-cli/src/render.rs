@@ -26,6 +26,7 @@ pub(crate) struct RenderOptions {
     pub hdri: Option<PathBuf>,
     pub blender: Option<PathBuf>,
     pub out_dir: Option<PathBuf>,
+    pub facility: Option<PathBuf>,
 }
 
 /// Finds a Blender to run: the flag, the environment, the path, then the
@@ -54,23 +55,17 @@ fn find_blender(flag: Option<&Path>) -> Result<PathBuf> {
     );
 }
 
-pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output) -> Result<()> {
+/// Renders one run directory whose scene and trace already exist.
+/// Returns the movie path when ffmpeg assembled one.
+fn render_wave(
+    directory: &Path,
+    options: &RenderOptions,
+    out_dir_override: Option<PathBuf>,
+) -> Result<(PathBuf, Option<PathBuf>)> {
     let scene_path = directory.join("scene.json");
-    if !scene_path.is_file() {
-        bail!(
-            "no scene at {}; run `lab scene` on this package first",
-            scene_path.display()
-        );
-    }
     let trace_path = directory.join("sim-trace.json");
-    if !trace_path.is_file() {
-        bail!(
-            "no trace at {}; run `lab simulate` on this package first",
-            trace_path.display()
-        );
-    }
     let blender = find_blender(options.blender.as_deref())?;
-    let out_dir = options.out_dir.unwrap_or_else(|| directory.join("renders"));
+    let out_dir = out_dir_override.unwrap_or_else(|| directory.join("renders"));
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
 
@@ -138,19 +133,48 @@ pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output
         }
     }
 
-    output.success(
-        "render",
-        serde_json::json!({
-            "out": out_dir.display().to_string(),
-            "movie": movie.as_ref().map(|path| path.display().to_string()),
-        }),
-        format!(
-            "rendered under {}{}",
+    Ok((out_dir, movie))
+}
+
+/// The whole cinematic flow: simulate, build the animated scene, render.
+/// Every step is idempotent, so `lab render` alone is always enough.
+pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output) -> Result<()> {
+    let flow = crate::flow::resolve(&directory, options.facility.clone())?;
+    let single = flow.waves.len() == 1;
+
+    let mut sections = Vec::new();
+    let mut reports = Vec::new();
+    for wave in &flow.waves {
+        let label = crate::flow::wave_label(wave);
+        println!("== {label}: simulate ==");
+        crate::simulate::simulate_wave(wave, flow.facility.as_deref(), None)?;
+        println!("== {label}: scene ==");
+        crate::scene::generate_for(wave, flow.facility.as_deref(), true, None)?;
+        println!("== {label}: render ==");
+        let out_override = if single {
+            options.out_dir.clone()
+        } else {
+            None
+        };
+        let (out_dir, movie) = render_wave(wave, &options, out_override)?;
+        sections.push(format!(
+            "{label}: rendered under {}{}",
             out_dir.display(),
             match &movie {
                 Some(path) => format!("\nmovie: {}", path.display()),
                 None => String::new(),
             }
-        ),
-    )
+        ));
+        reports.push(serde_json::json!({
+            "wave": label,
+            "out": out_dir.display().to_string(),
+            "movie": movie.as_ref().map(|path| path.display().to_string()),
+        }));
+    }
+
+    if let [report] = reports.as_slice() {
+        let human = sections.remove(0);
+        return output.success("render", report, human);
+    }
+    output.success("render", reports, sections.join("\n"))
 }

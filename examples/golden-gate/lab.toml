@@ -5,7 +5,7 @@ edition = "2026"
 
 [build]
 entry = "src/programs/reporter_panel.lab"
-target = "opentrons-ot2"
+target = "workcell-star"
 
 # What this laboratory has on hand. A target build resolves every artifact
 # dependency against these names: a material listed here is available to a

@@ -137,20 +137,50 @@ fn load_trace(directory: &Path) -> Result<lab_runfmt::SimTraceDocument> {
     Ok(trace)
 }
 
-pub(crate) fn scene(
-    directory: PathBuf,
-    out_dir: Option<PathBuf>,
-    facility_path: Option<PathBuf>,
+/// What one scene generation produced, for reporting.
+pub(crate) struct SceneOutputs {
+    pub name: String,
+    pub nodes: usize,
+    pub scene: PathBuf,
+    pub gltf: PathBuf,
+    pub usda: PathBuf,
+}
+
+impl SceneOutputs {
+    fn report(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "nodes": self.nodes,
+            "scene": self.scene.display().to_string(),
+            "gltf": self.gltf.display().to_string(),
+            "usda": self.usda.display().to_string(),
+        })
+    }
+
+    fn human(&self) -> String {
+        format!(
+            "scene '{}': {} node(s)\n  {}\n  {}\n  {}",
+            self.name,
+            self.nodes,
+            self.scene.display(),
+            self.gltf.display(),
+            self.usda.display()
+        )
+    }
+}
+
+/// Builds and writes one run directory's scene bundle. Idempotent: the
+/// same inputs always regenerate the same files in place.
+pub(crate) fn generate_for(
+    directory: &Path,
+    facility_path: Option<&Path>,
     animated: bool,
-    output: &Output,
-) -> Result<()> {
-    let context = facility_path
-        .as_deref()
-        .map(load_facility_context)
-        .transpose()?;
-    let mut scene = build_scene(&directory, context.as_ref())?;
-    let trace = animated.then(|| load_trace(&directory)).transpose()?;
-    let out_dir = out_dir.unwrap_or_else(|| directory.clone());
+    out_dir: Option<PathBuf>,
+) -> Result<SceneOutputs> {
+    let context = facility_path.map(load_facility_context).transpose()?;
+    let mut scene = build_scene(directory, context.as_ref())?;
+    let trace = animated.then(|| load_trace(directory)).transpose()?;
+    let out_dir = out_dir.unwrap_or_else(|| directory.to_path_buf());
     lab_scene::assets::bundle_assets(&mut scene, &out_dir)
         .context("failed to bundle scene assets")?;
     std::fs::create_dir_all(&out_dir)
@@ -172,21 +202,36 @@ pub(crate) fn scene(
 
     let mut nodes = 0usize;
     scene.root.walk(&mut |_, _| nodes += 1);
-    output.success(
-        "scene",
-        serde_json::json!({
-            "name": scene.name,
-            "nodes": nodes,
-            "scene": scene_path.display().to_string(),
-            "gltf": gltf_path.display().to_string(),
-            "usda": usda_path.display().to_string(),
-        }),
-        format!(
-            "scene '{}': {nodes} node(s)\n  {}\n  {}\n  {}",
-            scene.name,
-            scene_path.display(),
-            gltf_path.display(),
-            usda_path.display()
-        ),
-    )
+    Ok(SceneOutputs {
+        name: scene.name,
+        nodes,
+        scene: scene_path,
+        gltf: gltf_path,
+        usda: usda_path,
+    })
+}
+
+pub(crate) fn scene(
+    directory: PathBuf,
+    out_dir: Option<PathBuf>,
+    facility_path: Option<PathBuf>,
+    animated: bool,
+    output: &Output,
+) -> Result<()> {
+    let flow = crate::flow::resolve(&directory, facility_path)?;
+
+    if let [wave] = flow.waves.as_slice() {
+        let outputs = generate_for(wave, flow.facility.as_deref(), animated, out_dir)?;
+        return output.success("scene", outputs.report(), outputs.human());
+    }
+
+    let mut sections = Vec::new();
+    let mut reports = Vec::new();
+    for wave in &flow.waves {
+        let label = crate::flow::wave_label(wave);
+        let outputs = generate_for(wave, flow.facility.as_deref(), animated, None)?;
+        sections.push(format!("== {label} ==\n{}", outputs.human()));
+        reports.push(outputs.report());
+    }
+    output.success("scene", reports, sections.join("\n\n"))
 }
