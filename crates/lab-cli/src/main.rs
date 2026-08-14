@@ -141,8 +141,10 @@ enum Command {
         /// Camera preset.
         #[arg(long, default_value = "dolly")]
         camera: String,
-        /// Simulated seconds per wall-clock second of footage.
-        #[arg(long, default_value_t = 600.0)]
+        /// Simulated seconds per footage second while something moves.
+        /// Holds between motions compress to --hold-seconds unless
+        /// --uniform keeps real proportions.
+        #[arg(long, default_value_t = 60.0)]
         speedup: f64,
         /// Frames per second of footage.
         #[arg(long, default_value_t = 24)]
@@ -171,6 +173,12 @@ enum Command {
         /// one process, which already saturates the GPU.
         #[arg(long)]
         jobs: Option<usize>,
+        /// Footage seconds each motionless hold plays for.
+        #[arg(long, default_value_t = 2.0)]
+        hold_seconds: f64,
+        /// Keep time linear at --speedup instead of condensing holds.
+        #[arg(long)]
+        uniform: bool,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -273,6 +281,8 @@ fn run() -> Result<()> {
             out_dir,
             facility,
             jobs,
+            hold_seconds,
+            uniform,
         } => render::render(
             path,
             render::RenderOptions {
@@ -286,6 +296,8 @@ fn run() -> Result<()> {
                 out_dir,
                 facility,
                 jobs,
+                hold_seconds,
+                uniform,
             },
             &output,
         ),
