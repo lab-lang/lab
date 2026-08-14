@@ -133,9 +133,9 @@ enum Command {
     /// Render the simulated run as photographic frames (and a movie when
     /// ffmpeg is present) through a headless Blender.
     Render {
-        /// A run directory or package directory. The simulation and the
-        /// animated scene regenerate first, so this one command is the
-        /// whole flow. Defaults to the current directory.
+        /// A run directory or package directory holding the outputs of
+        /// `lab simulate` and `lab scene`. Rendering never regenerates
+        /// them. Defaults to the current directory.
         #[arg(default_value = ".")]
         path: PathBuf,
         /// Camera preset.

@@ -20,8 +20,8 @@ use crate::Output;
 /// The trace file a simulation writes beside the package it simulated.
 const TRACE_FILE: &str = "sim-trace.json";
 
-/// Simulates one run directory and writes its trace beside the plan.
-/// The idempotent core `lab render` reuses.
+/// Simulates one run directory and writes its trace beside the plan,
+/// touching the file only when its content actually changed.
 pub(crate) fn simulate_wave(
     directory: &Path,
     facility_path: Option<&Path>,
@@ -78,7 +78,7 @@ pub(crate) fn simulate_wave(
     let custom_destination = trace_path.is_some();
     let trace_path = trace_path.unwrap_or_else(|| directory.join(TRACE_FILE));
     let text = serde_json::to_string_pretty(&trace)?;
-    std::fs::write(&trace_path, text)
+    crate::stamp::write_if_changed(&trace_path, &text)
         .with_context(|| format!("failed to write {}", trace_path.display()))?;
     if !custom_destination {
         crate::stamp::write(&stamp_path, &print);

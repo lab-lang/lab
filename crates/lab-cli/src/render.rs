@@ -242,7 +242,19 @@ fn render_wave(
     out_dir_override: Option<PathBuf>,
 ) -> Result<(PathBuf, Option<PathBuf>, bool)> {
     let scene_path = directory.join("scene.json");
+    if !scene_path.is_file() {
+        bail!(
+            "no scene at {}; run `lab scene` on this package first",
+            scene_path.display()
+        );
+    }
     let trace_path = directory.join("sim-trace.json");
+    if !trace_path.is_file() {
+        bail!(
+            "no trace at {}; run `lab simulate` on this package first",
+            trace_path.display()
+        );
+    }
     let out_dir = out_dir_override.unwrap_or_else(|| directory.join("renders"));
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
@@ -409,8 +421,10 @@ fn render_wave(
     Ok((out_dir, movie, false))
 }
 
-/// The whole cinematic flow: simulate, build the animated scene, render.
-/// Every step is idempotent, so `lab render` alone is always enough.
+/// Renders footage from the scene and trace that `lab scene` and
+/// `lab simulate` produced; it never regenerates them, so iterating on a
+/// simulation costs no frames. A stale or missing input is named, with
+/// the command that refreshes it.
 pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output) -> Result<()> {
     let flow = crate::flow::resolve(&directory, options.facility.clone())?;
     let single = flow.waves.len() == 1;
@@ -419,18 +433,6 @@ pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output
     let mut reports = Vec::new();
     for wave in &flow.waves {
         let label = crate::flow::wave_label(wave);
-        let (_, _, sim_fresh) =
-            crate::simulate::simulate_wave(wave, flow.facility.as_deref(), None)?;
-        println!(
-            "== {label}: simulate{} ==",
-            if sim_fresh { " (up to date)" } else { "" }
-        );
-        let (_, scene_fresh) =
-            crate::scene::generate_for(wave, flow.facility.as_deref(), true, None)?;
-        println!(
-            "== {label}: scene{} ==",
-            if scene_fresh { " (up to date)" } else { "" }
-        );
         let out_override = if single {
             options.out_dir.clone()
         } else {

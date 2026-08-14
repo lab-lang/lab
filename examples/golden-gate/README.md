@@ -45,8 +45,12 @@ zero-argument:
 
 ```bash
 lab simulate   # timeline, attended vs walk-away, sim-trace.json per wave
-lab render     # simulate + animated scene + Blender frames, per wave
+lab scene      # scene.json + glTF + USD per wave (--animated adds the timeline)
+lab render     # Blender frames and a movie from those outputs, per wave
 ```
+
+Each command skips work whose inputs have not changed, so rerunning any
+of them costs nothing until the build, the facility, or a setting moves.
 
 `facility.toml` at the package root describes the room the simulation runs
 in: station positions, storage, and transport times. `lab simulate` and

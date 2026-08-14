@@ -14,7 +14,12 @@ use std::path::{Path, PathBuf};
 /// hash as absent rather than erroring: their appearance later changes
 /// the fingerprint, which is exactly the point.
 pub(crate) fn fingerprint(inputs: &[PathBuf], settings: &str) -> String {
-    let mut paths: Vec<&PathBuf> = inputs.iter().collect();
+    // Canonical paths, so the fingerprint is the same file seen from any
+    // working directory.
+    let mut paths: Vec<PathBuf> = inputs
+        .iter()
+        .map(|path| path.canonicalize().unwrap_or_else(|_| path.clone()))
+        .collect();
     paths.sort();
     let mut hasher = DefaultHasher::new();
     settings.hash(&mut hasher);
@@ -43,6 +48,19 @@ pub(crate) fn is_fresh(stamp: &Path, fingerprint: &str) -> bool {
 pub(crate) fn write(stamp: &Path, fingerprint: &str) {
     // A failed stamp write only costs a rerun next time; never the run.
     let _ = std::fs::write(stamp, fingerprint);
+}
+
+/// Writes only when the bytes differ, preserving the modification time of
+/// an unchanged file. A step that re-runs but produces identical output
+/// then leaves every downstream step fresh.
+pub(crate) fn write_if_changed(path: &Path, text: &str) -> std::io::Result<bool> {
+    if let Ok(existing) = std::fs::read_to_string(path)
+        && existing == text
+    {
+        return Ok(false);
+    }
+    std::fs::write(path, text)?;
+    Ok(true)
 }
 
 /// The run documents a wave's simulation and scene derive from: the
@@ -108,5 +126,34 @@ mod tests {
         write(&stamp, &first);
         assert!(is_fresh(&stamp, &first));
         assert!(!is_fresh(&stamp, "something-else"));
+    }
+
+    #[test]
+    fn fingerprints_and_quiet_writes_survive_working_directory_games() {
+        let directory = tempfile::tempdir().unwrap();
+        let input = directory.path().join("plan.json");
+        std::fs::write(&input, "content").unwrap();
+        // The same file through an unnormalized path fingerprints alike.
+        let twisted = directory.path().join("subdir/../plan.json");
+        std::fs::create_dir_all(directory.path().join("subdir")).unwrap();
+        assert_eq!(
+            fingerprint(std::slice::from_ref(&input), "s"),
+            fingerprint(&[twisted], "s"),
+            "canonicalization erases the spelling of the path"
+        );
+
+        let output = directory.path().join("out.json");
+        assert!(write_if_changed(&output, "same").unwrap());
+        let modified = std::fs::metadata(&output).unwrap().modified().unwrap();
+        assert!(
+            !write_if_changed(&output, "same").unwrap(),
+            "identical bytes are not rewritten"
+        );
+        assert_eq!(
+            std::fs::metadata(&output).unwrap().modified().unwrap(),
+            modified,
+            "the modification time survives"
+        );
+        assert!(write_if_changed(&output, "different").unwrap());
     }
 }

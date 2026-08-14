@@ -226,17 +226,17 @@ pub(crate) fn generate_for(
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
 
     let scene_path = out_dir.join("scene.json");
-    std::fs::write(&scene_path, serde_json::to_string_pretty(&scene)?)
+    crate::stamp::write_if_changed(&scene_path, &serde_json::to_string_pretty(&scene)?)
         .with_context(|| format!("failed to write {}", scene_path.display()))?;
     let gltf_path = out_dir.join("scene.gltf");
-    std::fs::write(&gltf_path, render_gltf(&scene))
+    crate::stamp::write_if_changed(&gltf_path, &render_gltf(&scene))
         .with_context(|| format!("failed to write {}", gltf_path.display()))?;
     let usda_path = out_dir.join("scene.usda");
     let usda = match &trace {
         Some(trace) => lab_scene::animate::render_usda_animated(&scene, trace)?,
         None => render_usda(&scene),
     };
-    std::fs::write(&usda_path, usda)
+    crate::stamp::write_if_changed(&usda_path, &usda)
         .with_context(|| format!("failed to write {}", usda_path.display()))?;
 
     crate::stamp::write(&stamp_path, &print);

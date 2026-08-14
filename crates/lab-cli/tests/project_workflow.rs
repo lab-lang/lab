@@ -1097,3 +1097,56 @@ fn the_zero_argument_flow_simulates_a_package_from_its_root() {
 
     std::fs::remove_dir_all(&package).unwrap();
 }
+
+#[test]
+fn render_refuses_to_regenerate_what_simulate_and_scene_own() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-decoupled-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+    let build = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(build.status.success());
+    let wave = out_dir.join("workcell-star/wave-001");
+
+    // No scene yet: render names the command that makes one, and does not
+    // run it itself.
+    let simulated = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["simulate", wave.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(simulated.status.success());
+    let premature = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["render", wave.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(!premature.status.success());
+    let stderr = String::from_utf8_lossy(&premature.stderr);
+    assert!(
+        stderr.contains("lab scene"),
+        "the missing step is named: {stderr}"
+    );
+    assert!(
+        !wave.join("scene.json").exists(),
+        "render regenerated nothing"
+    );
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}
