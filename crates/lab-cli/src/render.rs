@@ -271,3 +271,21 @@ pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output
     }
     output.success("render", reports, sections.join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_chunks_cover_the_range_exactly_once() {
+        assert_eq!(frame_chunks(10, 4), [(1, 3), (4, 6), (7, 8), (9, 10)]);
+        assert_eq!(frame_chunks(2, 8), [(1, 1), (2, 2)], "jobs cap at frames");
+        assert_eq!(frame_chunks(315, 1), [(1, 315)]);
+        let chunks = frame_chunks(1351, 4);
+        assert_eq!(chunks.first().unwrap().0, 1);
+        assert_eq!(chunks.last().unwrap().1, 1351);
+        for pair in chunks.windows(2) {
+            assert_eq!(pair[1].0, pair[0].1 + 1, "no gap, no overlap");
+        }
+    }
+}
