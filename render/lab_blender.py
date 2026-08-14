@@ -37,6 +37,10 @@ def parse_args():
     parser.add_argument("--to-t", dest="to_t", type=float, default=None)
     parser.add_argument("--still", type=float, default=None,
                         help="render one frame at this simulated second")
+    parser.add_argument("--frame-start", dest="frame_start", type=int, default=None,
+                        help="first footage frame this process renders")
+    parser.add_argument("--frame-end", dest="frame_end", type=int, default=None,
+                        help="last footage frame this process renders")
     parser.add_argument("--hdri", default=None,
                         help="environment .hdr/.exr; the built-in sky otherwise")
     return parser.parse_args(argv)
@@ -73,11 +77,18 @@ MATERIALS = {
 }
 
 
+def ensure_node_tree(datablock):
+    """Newer Blenders build datablocks node-based from the start; only the
+    older ones still need (and still have) use_nodes."""
+    if getattr(datablock, "node_tree", None) is None and hasattr(datablock, "use_nodes"):
+        datablock.use_nodes = True
+
+
 def build_materials():
     built = {}
     for name, (rgb, roughness, metallic, alpha) in MATERIALS.items():
         material = bpy.data.materials.new(name)
-        material.use_nodes = True
+        ensure_node_tree(material)
         bsdf = material.node_tree.nodes["Principled BSDF"]
         bsdf.inputs["Base Color"].default_value = (*rgb, 1.0)
         bsdf.inputs["Roughness"].default_value = roughness
@@ -340,7 +351,7 @@ class Animator:
 
 def build_world(hdri):
     world = bpy.data.worlds.new("lab-world")
-    world.use_nodes = True
+    ensure_node_tree(world)
     nodes = world.node_tree.nodes
     background = nodes["Background"]
     if hdri and os.path.isfile(hdri):
@@ -452,8 +463,10 @@ def main():
     animator.play(trace)
 
     frame_end = max(2, math.ceil((to_t - args.from_t) / args.speedup * args.fps))
-    bpy.context.scene.frame_start = 1
-    bpy.context.scene.frame_end = frame_end
+    # A chunked render owns a slice of the full range; the timeline and
+    # keyframes are identical in every chunk, so frames line up exactly.
+    bpy.context.scene.frame_start = max(1, args.frame_start or 1)
+    bpy.context.scene.frame_end = min(frame_end, args.frame_end or frame_end)
 
     build_world(args.hdri)
     build_camera(args.camera, builder.bounds_min, builder.bounds_max, frame_end, args.fps)

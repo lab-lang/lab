@@ -27,6 +27,54 @@ pub(crate) struct RenderOptions {
     pub blender: Option<PathBuf>,
     pub out_dir: Option<PathBuf>,
     pub facility: Option<PathBuf>,
+    pub jobs: Option<usize>,
+}
+
+/// How many Blender processes render one wave. Previews are dominated by
+/// per-frame overhead, so several processes scale nearly linearly; a
+/// path-traced final already saturates the GPU, so it defaults to one.
+fn effective_jobs(options: &RenderOptions) -> usize {
+    if let Some(jobs) = options.jobs {
+        return jobs.max(1);
+    }
+    if options.quality == "final" {
+        return 1;
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|cores| cores.get())
+        .unwrap_or(4);
+    (cores / 2).clamp(1, 4)
+}
+
+/// Splits `1..=frame_end` into up to `jobs` contiguous slices.
+fn frame_chunks(frame_end: u32, jobs: usize) -> Vec<(u32, u32)> {
+    let jobs = (jobs as u32).clamp(1, frame_end);
+    let base = frame_end / jobs;
+    let remainder = frame_end % jobs;
+    let mut chunks = Vec::new();
+    let mut start = 1u32;
+    for index in 0..jobs {
+        let size = base + u32::from(index < remainder);
+        if size == 0 {
+            continue;
+        }
+        chunks.push((start, start + size - 1));
+        start += size;
+    }
+    chunks
+}
+
+/// The footage frame count the player computes for this trace, mirrored
+/// here so chunks can be assigned before Blender starts.
+fn footage_frames(trace_path: &Path, options: &RenderOptions) -> Result<u32> {
+    let text = std::fs::read_to_string(trace_path)
+        .with_context(|| format!("failed to read {}", trace_path.display()))?;
+    let trace: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("failed to parse {}", trace_path.display()))?;
+    let total = trace["summary"]["total_seconds"].as_f64().unwrap_or(0.0);
+    Ok((total / options.speedup * f64::from(options.fps))
+        .ceil()
+        .max(2.0) as u32)
 }
 
 /// Finds a Blender to run: the flag, the environment, the path, then the
@@ -73,42 +121,87 @@ fn render_wave(
     std::fs::write(&script_path, PLAYER)
         .with_context(|| format!("failed to write {}", script_path.display()))?;
 
-    let mut command = Command::new(&blender);
-    command
-        .arg("--background")
-        .arg("--factory-startup")
-        .arg("--python-exit-code")
-        .arg("1")
-        .arg("--python")
-        .arg(&script_path)
-        .arg("--")
-        .arg("--scene")
-        .arg(&scene_path)
-        .arg("--trace")
-        .arg(&trace_path)
-        .arg("--out")
-        .arg(&out_dir)
-        .arg("--camera")
-        .arg(&options.camera)
-        .arg("--speedup")
-        .arg(options.speedup.to_string())
-        .arg("--fps")
-        .arg(options.fps.to_string())
-        .arg("--quality")
-        .arg(&options.quality);
-    if let Some(still) = options.still {
-        command.arg("--still").arg(still.to_string());
-    }
-    if let Some(hdri) = &options.hdri {
-        command.arg("--hdri").arg(hdri);
-    }
+    let build_command = |frames: Option<(u32, u32)>| {
+        let mut command = Command::new(&blender);
+        command
+            .arg("--background")
+            .arg("--factory-startup")
+            .arg("--python-exit-code")
+            .arg("1")
+            .arg("--python")
+            .arg(&script_path)
+            .arg("--")
+            .arg("--scene")
+            .arg(&scene_path)
+            .arg("--trace")
+            .arg(&trace_path)
+            .arg("--out")
+            .arg(&out_dir)
+            .arg("--camera")
+            .arg(&options.camera)
+            .arg("--speedup")
+            .arg(options.speedup.to_string())
+            .arg("--fps")
+            .arg(options.fps.to_string())
+            .arg("--quality")
+            .arg(&options.quality);
+        if let Some(still) = options.still {
+            command.arg("--still").arg(still.to_string());
+        }
+        if let Some(hdri) = &options.hdri {
+            command.arg("--hdri").arg(hdri);
+        }
+        if let Some((start, stop)) = frames {
+            command
+                .arg("--frame-start")
+                .arg(start.to_string())
+                .arg("--frame-end")
+                .arg(stop.to_string());
+        }
+        command
+    };
 
-    println!("rendering with {}", blender.display());
-    let status = command
-        .status()
-        .with_context(|| format!("failed to run {}", blender.display()))?;
-    if !status.success() {
-        bail!("Blender exited with {status}");
+    let jobs = if options.still.is_some() {
+        1
+    } else {
+        effective_jobs(options)
+    };
+    if jobs == 1 {
+        println!("rendering with {}", blender.display());
+        let status = build_command(None)
+            .status()
+            .with_context(|| format!("failed to run {}", blender.display()))?;
+        if !status.success() {
+            bail!("Blender exited with {status}");
+        }
+    } else {
+        // Every process builds the identical timeline and renders its own
+        // slice of the frame range into the shared frames directory.
+        let chunks = frame_chunks(footage_frames(&trace_path, options)?, jobs);
+        println!(
+            "rendering with {} across {} process(es)",
+            blender.display(),
+            chunks.len()
+        );
+        let mut children = Vec::new();
+        for chunk in &chunks {
+            let child = build_command(Some(*chunk))
+                .spawn()
+                .with_context(|| format!("failed to run {}", blender.display()))?;
+            children.push((*chunk, child));
+        }
+        let mut failed = Vec::new();
+        for (chunk, mut child) in children {
+            let status = child
+                .wait()
+                .with_context(|| format!("failed to wait for frames {}..={}", chunk.0, chunk.1))?;
+            if !status.success() {
+                failed.push(format!("frames {}..={}: {status}", chunk.0, chunk.1));
+            }
+        }
+        if !failed.is_empty() {
+            bail!("Blender chunk(s) failed: {}", failed.join("; "));
+        }
     }
 
     // Assemble a movie when ffmpeg is around; the frames stay either way.

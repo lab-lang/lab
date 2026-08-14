@@ -165,6 +165,11 @@ enum Command {
         /// or its manifest's [build] facility pointer.
         #[arg(long)]
         facility: Option<PathBuf>,
+        /// Blender processes per wave, each rendering a slice of the frame
+        /// range. Defaults to half the cores (max 4) for previews and one
+        /// for path-traced finals, which already saturate the GPU.
+        #[arg(long)]
+        jobs: Option<usize>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -266,6 +271,7 @@ fn run() -> Result<()> {
             blender,
             out_dir,
             facility,
+            jobs,
         } => render::render(
             path,
             render::RenderOptions {
@@ -278,6 +284,7 @@ fn run() -> Result<()> {
                 blender,
                 out_dir,
                 facility,
+                jobs,
             },
             &output,
         ),
