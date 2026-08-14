@@ -4,6 +4,7 @@ mod render;
 mod run;
 mod scene;
 mod simulate;
+mod stamp;
 mod typeset;
 mod update;
 mod workcell_run;
@@ -166,8 +167,8 @@ enum Command {
         #[arg(long)]
         facility: Option<PathBuf>,
         /// Blender processes per wave, each rendering a slice of the frame
-        /// range. Defaults to half the cores (max 4) for previews and one
-        /// for path-traced finals, which already saturate the GPU.
+        /// range. Previews default to every core; path-traced finals to
+        /// one process, which already saturates the GPU.
         #[arg(long)]
         jobs: Option<usize>,
     },

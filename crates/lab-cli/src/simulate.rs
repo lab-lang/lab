@@ -26,7 +26,31 @@ pub(crate) fn simulate_wave(
     directory: &Path,
     facility_path: Option<&Path>,
     trace_path: Option<PathBuf>,
-) -> Result<(SimTraceDocument, PathBuf)> {
+) -> Result<(SimTraceDocument, PathBuf, bool)> {
+    // Nothing changed since the last run: reuse the trace on disk. An
+    // explicit --trace destination always regenerates.
+    let mut inputs = crate::stamp::run_document_inputs(directory);
+    if let Some(facility) = facility_path {
+        inputs.push(facility.to_path_buf());
+    }
+    let settings = format!(
+        "durations={};facility={:?}",
+        DurationModel::default().name,
+        facility_path
+    );
+    let print = crate::stamp::fingerprint(&inputs, &settings);
+    let stamp_path = directory.join(".sim-trace.stamp");
+    let default_trace = directory.join(TRACE_FILE);
+    if trace_path.is_none()
+        && default_trace.is_file()
+        && crate::stamp::is_fresh(&stamp_path, &print)
+        && let Ok(text) = std::fs::read_to_string(&default_trace)
+        && let Ok(trace) = serde_json::from_str::<SimTraceDocument>(&text)
+        && trace.format == lab_runfmt::SIM_TRACE_FORMAT
+    {
+        return Ok((trace, default_trace, true));
+    }
+
     let mut durations = DurationModel::default();
     let facility = facility_path
         .map(lab_runtime::facility::load_facility)
@@ -51,11 +75,15 @@ pub(crate) fn simulate_wave(
         simulate_star_package(directory, config)?
     };
 
+    let custom_destination = trace_path.is_some();
     let trace_path = trace_path.unwrap_or_else(|| directory.join(TRACE_FILE));
     let text = serde_json::to_string_pretty(&trace)?;
     std::fs::write(&trace_path, text)
         .with_context(|| format!("failed to write {}", trace_path.display()))?;
-    Ok((trace, trace_path))
+    if !custom_destination {
+        crate::stamp::write(&stamp_path, &print);
+    }
+    Ok((trace, trace_path, false))
 }
 
 pub(crate) fn simulate(
@@ -68,8 +96,14 @@ pub(crate) fn simulate(
 
     // One named run directory keeps its exact single-wave contract.
     if let [wave] = flow.waves.as_slice() {
-        let (trace, written) = simulate_wave(wave, flow.facility.as_deref(), trace_path)?;
-        let human = render_timeline(&trace, &written);
+        let (trace, written, fresh) = simulate_wave(wave, flow.facility.as_deref(), trace_path)?;
+        let mut human = render_timeline(&trace, &written);
+        if fresh {
+            human.push_str(
+                "
+(up to date; nothing re-simulated)",
+            );
+        }
         return output.success("simulate", &trace, human);
     }
 
@@ -77,9 +111,10 @@ pub(crate) fn simulate(
     let mut reports = Vec::new();
     for wave in &flow.waves {
         let label = crate::flow::wave_label(wave);
-        let (trace, written) = simulate_wave(wave, flow.facility.as_deref(), None)?;
+        let (trace, written, fresh) = simulate_wave(wave, flow.facility.as_deref(), None)?;
         sections.push(format!(
-            "== {label} ==\n{}",
+            "== {label}{} ==\n{}",
+            if fresh { " (up to date)" } else { "" },
             render_timeline(&trace, &written)
         ));
         reports.push(serde_json::json!({

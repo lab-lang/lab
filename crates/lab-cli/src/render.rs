@@ -31,8 +31,8 @@ pub(crate) struct RenderOptions {
 }
 
 /// How many Blender processes render one wave. Previews are dominated by
-/// per-frame overhead, so several processes scale nearly linearly; a
-/// path-traced final already saturates the GPU, so it defaults to one.
+/// per-frame overhead, so they use every core; a path-traced final
+/// already saturates the GPU, so it defaults to one.
 fn effective_jobs(options: &RenderOptions) -> usize {
     if let Some(jobs) = options.jobs {
         return jobs.max(1);
@@ -40,10 +40,9 @@ fn effective_jobs(options: &RenderOptions) -> usize {
     if options.quality == "final" {
         return 1;
     }
-    let cores = std::thread::available_parallelism()
+    std::thread::available_parallelism()
         .map(|cores| cores.get())
-        .unwrap_or(4);
-    (cores / 2).clamp(1, 4)
+        .unwrap_or(1)
 }
 
 /// Splits `1..=frame_end` into up to `jobs` contiguous slices.
@@ -109,13 +108,30 @@ fn render_wave(
     directory: &Path,
     options: &RenderOptions,
     out_dir_override: Option<PathBuf>,
-) -> Result<(PathBuf, Option<PathBuf>)> {
+) -> Result<(PathBuf, Option<PathBuf>, bool)> {
     let scene_path = directory.join("scene.json");
     let trace_path = directory.join("sim-trace.json");
-    let blender = find_blender(options.blender.as_deref())?;
     let out_dir = out_dir_override.unwrap_or_else(|| directory.join("renders"));
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
+
+    // Skip Blender entirely when the documents and the settings that
+    // shape the footage both match the last run.
+    let settings = format!(
+        "camera={};speedup={};fps={};quality={};still={:?};hdri={:?}",
+        options.camera, options.speedup, options.fps, options.quality, options.still, options.hdri
+    );
+    let print = crate::stamp::fingerprint(&[scene_path.clone(), trace_path.clone()], &settings);
+    let stamp_path = out_dir.join(".render.stamp");
+    let outputs_exist = match options.still {
+        Some(_) => out_dir.join("frames/still.png").is_file(),
+        None => out_dir.join("run.mp4").is_file() || out_dir.join("frames/0001.png").is_file(),
+    };
+    if outputs_exist && crate::stamp::is_fresh(&stamp_path, &print) {
+        let movie = out_dir.join("run.mp4");
+        return Ok((out_dir.clone(), movie.is_file().then_some(movie), true));
+    }
+    let blender = find_blender(options.blender.as_deref())?;
 
     let script_path = out_dir.join("lab_blender.py");
     std::fs::write(&script_path, PLAYER)
@@ -203,6 +219,7 @@ fn render_wave(
             bail!("Blender chunk(s) failed: {}", failed.join("; "));
         }
     }
+    crate::stamp::write(&stamp_path, &print);
 
     // Assemble a movie when ffmpeg is around; the frames stay either way.
     let mut movie = None;
@@ -226,7 +243,7 @@ fn render_wave(
         }
     }
 
-    Ok((out_dir, movie))
+    Ok((out_dir, movie, false))
 }
 
 /// The whole cinematic flow: simulate, build the animated scene, render.
@@ -239,17 +256,27 @@ pub(crate) fn render(directory: PathBuf, options: RenderOptions, output: &Output
     let mut reports = Vec::new();
     for wave in &flow.waves {
         let label = crate::flow::wave_label(wave);
-        println!("== {label}: simulate ==");
-        crate::simulate::simulate_wave(wave, flow.facility.as_deref(), None)?;
-        println!("== {label}: scene ==");
-        crate::scene::generate_for(wave, flow.facility.as_deref(), true, None)?;
-        println!("== {label}: render ==");
+        let (_, _, sim_fresh) =
+            crate::simulate::simulate_wave(wave, flow.facility.as_deref(), None)?;
+        println!(
+            "== {label}: simulate{} ==",
+            if sim_fresh { " (up to date)" } else { "" }
+        );
+        let (_, scene_fresh) =
+            crate::scene::generate_for(wave, flow.facility.as_deref(), true, None)?;
+        println!(
+            "== {label}: scene{} ==",
+            if scene_fresh { " (up to date)" } else { "" }
+        );
         let out_override = if single {
             options.out_dir.clone()
         } else {
             None
         };
-        let (out_dir, movie) = render_wave(wave, &options, out_override)?;
+        let (out_dir, movie, render_fresh) = render_wave(wave, &options, out_override)?;
+        if render_fresh {
+            println!("== {label}: render (up to date) ==");
+        }
         sections.push(format!(
             "{label}: rendered under {}{}",
             out_dir.display(),

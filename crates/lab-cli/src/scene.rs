@@ -176,7 +176,46 @@ pub(crate) fn generate_for(
     facility_path: Option<&Path>,
     animated: bool,
     out_dir: Option<PathBuf>,
-) -> Result<SceneOutputs> {
+) -> Result<(SceneOutputs, bool)> {
+    // The scene derives from the run documents, the trace (when
+    // animated), the facility, and its assets; skip when none changed.
+    let mut inputs = crate::stamp::run_document_inputs(directory);
+    if animated {
+        inputs.push(directory.join("sim-trace.json"));
+    }
+    if let Some(facility) = facility_path {
+        inputs.push(facility.to_path_buf());
+        let assets = facility.parent().unwrap_or(Path::new(".")).join("assets");
+        if let Ok(entries) = std::fs::read_dir(&assets) {
+            inputs.extend(entries.flatten().map(|entry| entry.path()));
+        }
+    }
+    let settings = format!("animated={animated};facility={facility_path:?}");
+    let print = crate::stamp::fingerprint(&inputs, &settings);
+    let target_dir = out_dir.clone().unwrap_or_else(|| directory.to_path_buf());
+    let stamp_path = target_dir.join(".scene.stamp");
+    let existing = ["scene.json", "scene.gltf", "scene.usda"]
+        .iter()
+        .all(|name| target_dir.join(name).is_file());
+    if existing
+        && crate::stamp::is_fresh(&stamp_path, &print)
+        && let Ok(text) = std::fs::read_to_string(target_dir.join("scene.json"))
+        && let Ok(scene) = serde_json::from_str::<Scene>(&text)
+    {
+        let mut nodes = 0usize;
+        scene.root.walk(&mut |_, _| nodes += 1);
+        return Ok((
+            SceneOutputs {
+                name: scene.name,
+                nodes,
+                scene: target_dir.join("scene.json"),
+                gltf: target_dir.join("scene.gltf"),
+                usda: target_dir.join("scene.usda"),
+            },
+            true,
+        ));
+    }
+
     let context = facility_path.map(load_facility_context).transpose()?;
     let mut scene = build_scene(directory, context.as_ref())?;
     let trace = animated.then(|| load_trace(directory)).transpose()?;
@@ -200,15 +239,19 @@ pub(crate) fn generate_for(
     std::fs::write(&usda_path, usda)
         .with_context(|| format!("failed to write {}", usda_path.display()))?;
 
+    crate::stamp::write(&stamp_path, &print);
     let mut nodes = 0usize;
     scene.root.walk(&mut |_, _| nodes += 1);
-    Ok(SceneOutputs {
-        name: scene.name,
-        nodes,
-        scene: scene_path,
-        gltf: gltf_path,
-        usda: usda_path,
-    })
+    Ok((
+        SceneOutputs {
+            name: scene.name,
+            nodes,
+            scene: scene_path,
+            gltf: gltf_path,
+            usda: usda_path,
+        },
+        false,
+    ))
 }
 
 pub(crate) fn scene(
@@ -221,16 +264,24 @@ pub(crate) fn scene(
     let flow = crate::flow::resolve(&directory, facility_path)?;
 
     if let [wave] = flow.waves.as_slice() {
-        let outputs = generate_for(wave, flow.facility.as_deref(), animated, out_dir)?;
-        return output.success("scene", outputs.report(), outputs.human());
+        let (outputs, fresh) = generate_for(wave, flow.facility.as_deref(), animated, out_dir)?;
+        let mut human = outputs.human();
+        if fresh {
+            human.push_str("\n(up to date; nothing regenerated)");
+        }
+        return output.success("scene", outputs.report(), human);
     }
 
     let mut sections = Vec::new();
     let mut reports = Vec::new();
     for wave in &flow.waves {
         let label = crate::flow::wave_label(wave);
-        let outputs = generate_for(wave, flow.facility.as_deref(), animated, None)?;
-        sections.push(format!("== {label} ==\n{}", outputs.human()));
+        let (outputs, fresh) = generate_for(wave, flow.facility.as_deref(), animated, None)?;
+        sections.push(format!(
+            "== {label}{} ==\n{}",
+            if fresh { " (up to date)" } else { "" },
+            outputs.human()
+        ));
         reports.push(outputs.report());
     }
     output.success("scene", reports, sections.join("\n\n"))
