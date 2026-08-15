@@ -1606,6 +1606,7 @@ dependencies = [
  "clap",
  "flate2",
  "lab-compiler",
+ "lab-compute",
  "lab-package",
  "lab-project",
  "lab-runfmt",
@@ -1643,6 +1644,16 @@ dependencies = [
  "serde_json",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "lab-compute"
+version = "0.1.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

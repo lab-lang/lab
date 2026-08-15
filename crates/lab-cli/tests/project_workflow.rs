@@ -741,6 +741,91 @@ fn a_built_wave_renders_as_a_scene_with_exact_well_positions() {
 }
 
 #[test]
+fn a_reviewed_handoff_projects_to_a_scene_checked_robot_task() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-robot-task-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let built = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--target",
+            "workcell-star",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let wave = out_dir.join("workcell-star/wave-001");
+
+    let rendered = run(&["scene", wave.to_str().unwrap(), "--json"]);
+    assert!(
+        rendered.status.success(),
+        "scene failed: {}",
+        String::from_utf8_lossy(&rendered.stderr)
+    );
+    let projected = run(&[
+        "robot",
+        "task",
+        wave.to_str().unwrap(),
+        "--node",
+        "assembly_thermocycle.to-odtc-1",
+        "--json",
+    ]);
+    assert!(
+        projected.status.success(),
+        "robot task failed: {}",
+        String::from_utf8_lossy(&projected.stderr)
+    );
+    let report: Value = serde_json::from_slice(&projected.stdout).unwrap();
+    assert_eq!(report["status"], "robot-task");
+    assert_eq!(report["result"]["object"], "reaction_plate");
+    assert_eq!(report["result"]["source"], "star-1");
+    assert_eq!(report["result"]["destination"], "odtc-1");
+
+    let task_path = wave
+        .join("robot-tasks")
+        .join("assembly_thermocycle-to-odtc-1.json");
+    let task: Value = serde_json::from_str(&std::fs::read_to_string(task_path).unwrap()).unwrap();
+    assert_eq!(task["format"], "lab.robot-task.v0");
+    assert_eq!(task["plan"], "../plan.workcell.json");
+    assert_eq!(task["scene"], "../scene.json");
+    assert_eq!(task["action"], "transfer");
+    assert_eq!(task["object"]["scene_node"], "reaction_plate");
+    assert_eq!(task["source"]["scene_node"], "star-1");
+    assert_eq!(task["destination"]["scene_node"], "odtc-1");
+    assert_eq!(task["completion"]["relation"], "object-at-station");
+
+    let not_a_handoff = run(&[
+        "robot",
+        "task",
+        wave.to_str().unwrap(),
+        "--node",
+        "assembly_run",
+    ]);
+    assert!(!not_a_handoff.status.success());
+    assert!(String::from_utf8_lossy(&not_a_handoff.stderr).contains("is not a handoff"));
+
+    std::fs::remove_dir_all(&out_dir).unwrap();
+}
+
+#[test]
 fn a_facility_lays_out_the_scene_with_room_and_assets() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")

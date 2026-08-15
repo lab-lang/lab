@@ -52,6 +52,19 @@ lab render     # Blender frames and a movie from those outputs, per wave
 Each command skips work whose inputs have not changed, so rerunning any
 of them costs nothing until the build, the facility, or a setting moves.
 
+The first machine-to-machine learning prototype projects wave 1's reviewed
+STAR-to-ODTC handoff into a backend-neutral robot task:
+
+```bash
+lab robot task .lab/build/workcell-star/wave-001 \
+  --node assembly_thermocycle.to-odtc-1
+```
+
+The command validates the source and destination stations and
+`reaction_plate` against the wave's semantic scene before writing the task.
+The [Isaac Lab adapter](../../integrations/isaac-lab/README.md) binds that
+portable intent to the initial Franka plate-transfer proxy.
+
 `facility.toml` at the package root describes the room the simulation runs
 in: station positions, storage, and transport times. `lab simulate` and
 `lab render` pick it up by convention; `--facility` names another one.

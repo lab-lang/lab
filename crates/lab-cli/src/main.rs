@@ -1,6 +1,8 @@
 mod commands;
+mod compute;
 mod flow;
 mod render;
+mod robot_task;
 mod run;
 mod scene;
 mod simulate;
@@ -130,6 +132,16 @@ enum Command {
         #[arg(long)]
         animated: bool,
     },
+    /// Inspect and operate finite remote compute jobs.
+    Compute {
+        #[command(subcommand)]
+        command: ComputeCommand,
+    },
+    /// Project, train, evaluate, and deploy laboratory robots.
+    Robot {
+        #[command(subcommand)]
+        command: RobotCommand,
+    },
     /// Render the simulated run as photographic frames (and a movie when
     /// ffmpeg is present) through a headless Blender.
     Render {
@@ -191,6 +203,40 @@ enum Command {
         /// Only report whether an update is available; don't install it.
         #[arg(long)]
         check: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ComputeCommand {
+    /// Verify C3 authentication and Isaac-compatible capacity without submitting a job.
+    Doctor {
+        /// Dotenv file holding C3_API_KEY; ignored when it does not exist.
+        #[arg(long, default_value = ".env")]
+        env_file: PathBuf,
+    },
+    /// Show C3's current public hardware catalog.
+    List {
+        /// Dotenv file holding C3_API_KEY; ignored when it does not exist.
+        #[arg(long, default_value = ".env")]
+        env_file: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RobotCommand {
+    /// Project one workcell handoff into a backend-neutral robot task.
+    Task {
+        /// A workcell wave holding plan.workcell.json and scene.json.
+        path: PathBuf,
+        /// The exact handoff node identity to project.
+        #[arg(long)]
+        node: String,
+        /// Semantic scene to validate; defaults to scene.json in the wave.
+        #[arg(long)]
+        scene: Option<PathBuf>,
+        /// Output file; defaults to robot-tasks/<node>.json in the wave.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -269,6 +315,18 @@ fn run() -> Result<()> {
             facility,
             animated,
         } => scene::scene(path, out_dir, facility, animated, &output),
+        Command::Compute { command } => match command {
+            ComputeCommand::Doctor { env_file } => compute::doctor(env_file, &output),
+            ComputeCommand::List { env_file } => compute::list(env_file, &output),
+        },
+        Command::Robot { command } => match command {
+            RobotCommand::Task {
+                path,
+                node,
+                scene,
+                out,
+            } => robot_task::robot_task(path, node, scene, out, &output),
+        },
         Command::Render {
             path,
             camera,
@@ -344,6 +402,41 @@ mod tests {
     fn accepts_global_json_after_the_subcommand() {
         let cli = Cli::try_parse_from(["lab", "check", "--json"]).unwrap();
         assert!(cli.json);
+    }
+
+    #[test]
+    fn parses_robot_task_command() {
+        let cli = Cli::try_parse_from([
+            "lab", "robot", "task", "wave-001", "--node", "handoff", "--json",
+        ])
+        .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Command::Robot {
+                command: RobotCommand::Task { path, node, scene: None, out: None }
+            } if path.as_path() == std::path::Path::new("wave-001") && node == "handoff"
+        ));
+    }
+
+    #[test]
+    fn parses_compute_doctor_command() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "compute",
+            "doctor",
+            "--env-file",
+            "credentials.env",
+            "--json",
+        ])
+        .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Command::Compute {
+                command: ComputeCommand::Doctor { env_file }
+            } if env_file.as_path() == std::path::Path::new("credentials.env")
+        ));
     }
 
     #[test]
