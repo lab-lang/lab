@@ -2,6 +2,7 @@
 /.cargo/
 .lab/
 .venv/
+.env
 *.rs.bk
 .DS_Store
 crates/lab-python/python/lab/_native.*
