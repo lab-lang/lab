@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lab-isaac-c3-runtime"
+version = "0.1.0"
+description = "Locked C3 runtime for the Lab Isaac capability gate"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "isaaclab[isaacsim,all]==2.3.2.post1",
+  "lab-isaac",
+  "rsl-rl-lib==3.0.1",
+  "torch==2.7.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "torchvision==0.22.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.uv.sources]
+lab-isaac = { path = "../..", editable = false }
+torch = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+torchvision = [
+  { index = "pytorch-cu128", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com"
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.hatch.build.targets.wheel]
+packages = []

@@ -1605,11 +1605,13 @@ dependencies = [
  "anyhow",
  "clap",
  "flate2",
- "hamilton-star",
  "lab-compiler",
- "lab-instruments",
+ "lab-compute",
  "lab-package",
  "lab-project",
+ "lab-runfmt",
+ "lab-runtime",
+ "lab-scene",
  "self-replace",
  "semver",
  "serde",
@@ -1635,12 +1637,23 @@ dependencies = [
  "hamilton-star",
  "lab-instruments",
  "lab-language",
+ "lab-runfmt",
  "opentrons-protocol",
  "pliron",
  "serde",
  "serde_json",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "lab-compute"
+version = "0.1.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
@@ -1714,6 +1727,45 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "lab-runfmt"
+version = "0.1.2"
+dependencies = [
+ "lab-instruments",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
+name = "lab-runtime"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "hamilton-star",
+ "lab-instruments",
+ "lab-runfmt",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "lab-scene"
+version = "0.1.2"
+dependencies = [
+ "base64",
+ "lab-compiler",
+ "lab-runfmt",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

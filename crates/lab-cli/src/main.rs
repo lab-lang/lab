@@ -1,5 +1,12 @@
 mod commands;
+mod compute;
+mod flow;
+mod render;
+mod robot_task;
 mod run;
+mod scene;
+mod simulate;
+mod stamp;
 mod typeset;
 mod update;
 mod workcell_run;
@@ -86,6 +93,105 @@ enum Command {
         #[arg(long = "station", value_name = "NAME=ADDRESS")]
         station: Vec<String>,
     },
+    /// Simulate an emitted run package on a virtual clock: how long the
+    /// work takes, when an operator must be present, and how long each
+    /// walk-away window lasts. Touches no hardware and writes no ledger;
+    /// the full record lands in a `lab.sim-trace.v0` trace file.
+    Simulate {
+        /// A run directory (workcell wave or Hamilton STAR package), or a
+        /// package directory whose built default target is simulated wave
+        /// by wave. Defaults to the current directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Where to write the trace; defaults to `sim-trace.json` beside
+        /// the plan.
+        #[arg(long)]
+        trace: Option<PathBuf>,
+        /// Facility description to simulate against: the plan's stations
+        /// must exist there, and its transport times drive the handoffs.
+        #[arg(long)]
+        facility: Option<PathBuf>,
+    },
+    /// Render a built run package as a 3D scene: a `lab.scene.v0`
+    /// document plus glTF and USD projections of it.
+    Scene {
+        /// A run directory, or a package directory whose built default
+        /// target is rendered wave by wave. Defaults to the current
+        /// directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Where to write scene files; defaults to the run directory.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Facility description that lays out the room: station positions,
+        /// the room shell, and real meshes from its assets directory.
+        #[arg(long)]
+        facility: Option<PathBuf>,
+        /// Animate the USD layer from this package's sim-trace.json, so
+        /// USD tools play the simulated run on their timeline.
+        #[arg(long)]
+        animated: bool,
+    },
+    /// Inspect and operate finite remote compute jobs.
+    Compute {
+        #[command(subcommand)]
+        command: ComputeCommand,
+    },
+    /// Project, train, evaluate, and deploy laboratory robots.
+    Robot {
+        #[command(subcommand)]
+        command: RobotCommand,
+    },
+    /// Render the simulated run as photographic frames (and a movie when
+    /// ffmpeg is present) through a headless Blender.
+    Render {
+        /// A run directory or package directory holding the outputs of
+        /// `lab simulate` and `lab scene`. Rendering never regenerates
+        /// them. Defaults to the current directory.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Camera preset.
+        #[arg(long, default_value = "dolly")]
+        camera: String,
+        /// Simulated seconds per footage second while something moves.
+        /// Holds between motions compress to --hold-seconds unless
+        /// --uniform keeps real proportions.
+        #[arg(long, default_value_t = 60.0)]
+        speedup: f64,
+        /// Frames per second of footage.
+        #[arg(long, default_value_t = 24)]
+        fps: u32,
+        /// `preview` (fast EEVEE) or `final` (path-traced Cycles).
+        #[arg(long, default_value = "preview")]
+        quality: String,
+        /// Render one frame at this simulated second instead of the run.
+        #[arg(long)]
+        still: Option<f64>,
+        /// Environment .hdr/.exr for lighting; the built-in sky otherwise.
+        #[arg(long)]
+        hdri: Option<PathBuf>,
+        /// The Blender executable; found on PATH or LAB_BLENDER otherwise.
+        #[arg(long)]
+        blender: Option<PathBuf>,
+        /// Where to write frames; defaults to `renders/` beside the scene.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Facility description; defaults to the package's facility.toml
+        /// or its manifest's [build] facility pointer.
+        #[arg(long)]
+        facility: Option<PathBuf>,
+        /// Blender processes per wave, each rendering a slice of the frame
+        /// range. Previews default to every core; path-traced finals to
+        /// one process, which already saturates the GPU.
+        #[arg(long)]
+        jobs: Option<usize>,
+        /// Footage seconds each motionless hold plays for.
+        #[arg(long, default_value_t = 2.0)]
+        hold_seconds: f64,
+        /// Keep time linear at --speedup instead of condensing holds.
+        #[arg(long)]
+        uniform: bool,
+    },
     /// Print resolved package metadata and source-module names.
     Metadata {
         /// Package directory or any path inside a package.
@@ -97,6 +203,40 @@ enum Command {
         /// Only report whether an update is available; don't install it.
         #[arg(long)]
         check: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ComputeCommand {
+    /// Verify C3 authentication and Isaac-compatible capacity without submitting a job.
+    Doctor {
+        /// Dotenv file holding C3_API_KEY; ignored when it does not exist.
+        #[arg(long, default_value = ".env")]
+        env_file: PathBuf,
+    },
+    /// Show C3's current public hardware catalog.
+    List {
+        /// Dotenv file holding C3_API_KEY; ignored when it does not exist.
+        #[arg(long, default_value = ".env")]
+        env_file: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RobotCommand {
+    /// Project one workcell handoff into a backend-neutral robot task.
+    Task {
+        /// A workcell wave holding plan.workcell.json and scene.json.
+        path: PathBuf,
+        /// The exact handoff node identity to project.
+        #[arg(long)]
+        node: String,
+        /// Semantic scene to validate; defaults to scene.json in the wave.
+        #[arg(long)]
+        scene: Option<PathBuf>,
+        /// Output file; defaults to robot-tasks/<node>.json in the wave.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 }
 
@@ -155,7 +295,7 @@ fn run() -> Result<()> {
             station,
         } => {
             if workcell_run::is_workcell_directory(&path) {
-                workcell_run::run_workcell(path, dry_run, yes, resume, station, &output)
+                workcell_run::run_workcell_command(path, dry_run, yes, resume, station, &output)
             } else if resume || !station.is_empty() {
                 anyhow::bail!(
                     "--resume and --station apply to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
@@ -164,6 +304,61 @@ fn run() -> Result<()> {
                 run::run(path, dry_run, yes, &output)
             }
         }
+        Command::Simulate {
+            path,
+            trace,
+            facility,
+        } => simulate::simulate(path, trace, facility, &output),
+        Command::Scene {
+            path,
+            out_dir,
+            facility,
+            animated,
+        } => scene::scene(path, out_dir, facility, animated, &output),
+        Command::Compute { command } => match command {
+            ComputeCommand::Doctor { env_file } => compute::doctor(env_file, &output),
+            ComputeCommand::List { env_file } => compute::list(env_file, &output),
+        },
+        Command::Robot { command } => match command {
+            RobotCommand::Task {
+                path,
+                node,
+                scene,
+                out,
+            } => robot_task::robot_task(path, node, scene, out, &output),
+        },
+        Command::Render {
+            path,
+            camera,
+            speedup,
+            fps,
+            quality,
+            still,
+            hdri,
+            blender,
+            out_dir,
+            facility,
+            jobs,
+            hold_seconds,
+            uniform,
+        } => render::render(
+            path,
+            render::RenderOptions {
+                camera,
+                speedup,
+                fps,
+                quality,
+                still,
+                hdri,
+                blender,
+                out_dir,
+                facility,
+                jobs,
+                hold_seconds,
+                uniform,
+            },
+            &output,
+        ),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }
@@ -207,6 +402,41 @@ mod tests {
     fn accepts_global_json_after_the_subcommand() {
         let cli = Cli::try_parse_from(["lab", "check", "--json"]).unwrap();
         assert!(cli.json);
+    }
+
+    #[test]
+    fn parses_robot_task_command() {
+        let cli = Cli::try_parse_from([
+            "lab", "robot", "task", "wave-001", "--node", "handoff", "--json",
+        ])
+        .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Command::Robot {
+                command: RobotCommand::Task { path, node, scene: None, out: None }
+            } if path.as_path() == std::path::Path::new("wave-001") && node == "handoff"
+        ));
+    }
+
+    #[test]
+    fn parses_compute_doctor_command() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "compute",
+            "doctor",
+            "--env-file",
+            "credentials.env",
+            "--json",
+        ])
+        .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Command::Compute {
+                command: ComputeCommand::Doctor { env_file }
+            } if env_file.as_path() == std::path::Path::new("credentials.env")
+        ));
     }
 
     #[test]
