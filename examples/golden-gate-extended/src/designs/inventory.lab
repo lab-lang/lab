@@ -1,5 +1,10 @@
 /*!
- * What this laboratory orders rather than makes.
+ * What this laboratory orders rather than makes, minus the DNA parts.
+ *
+ * The promoters, ribosome binding site, terminator, and reporters live in
+ * `parts.ttl` beside this file, written in SBOL. A design is a design whichever
+ * language states it, so the plasmids here name those parts exactly as if they
+ * had been written below.
  *
  * A bought item carries its own datasheet. The temperature a digest runs at
  * belongs to the enzyme, and the way competent cells are shocked belongs to the
@@ -9,15 +14,6 @@
 use std.bio.designs
 
 buy:
-  // Constitutive promoters, the shared ribosome binding site and terminator,
-  // and the fluorescent reporters.
-  part J23101
-  part J23106
-  part B0034
-  part B0015
-  part GFP
-  part RFP
-
   backbone pSB1C3
 
   /** BsaI cuts at 37 C, so every plasmid it opens digests the same way. */

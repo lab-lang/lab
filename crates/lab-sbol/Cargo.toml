@@ -1,21 +1,16 @@
 [package]
-name = "lab-project"
+name = "lab-sbol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Package-aware project loading and compilation for Lab."
+description = "SBOL as a source and target for Lab designs."
 
 [dependencies]
 lab-language.workspace = true
-lab-package.workspace = true
-lab-sbol.workspace = true
 sbol3.workspace = true
-semver.workspace = true
-serde.workspace = true
 thiserror.workspace = true
-toml.workspace = true
 
 [lints]
 workspace = true

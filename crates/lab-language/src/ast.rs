@@ -14,6 +14,33 @@ pub struct Module {
     pub span: Span,
 }
 
+/// The word instances of a type are written with: the type's own name, in
+/// snake_case.
+///
+/// A break belongs where a word does: after a lowercase run, or at the end of
+/// an acronym. `RestrictionEnzyme` gives `restriction_enzyme` and `DNA` gives
+/// `dna` rather than `d_n_a`.
+///
+/// A tool building declarations without parsing them needs this, because a kind
+/// names a type and an instance is written with the word. Deriving it anywhere
+/// else would let the two disagree.
+pub fn instance_word(type_name: &str) -> String {
+    let characters = type_name.chars().collect::<Vec<_>>();
+    let mut word = String::new();
+    for (index, character) in characters.iter().enumerate() {
+        let previous = index.checked_sub(1).map(|index| characters[index]);
+        let next = characters.get(index + 1).copied();
+        let opens_word = previous.is_some_and(|previous| !previous.is_uppercase());
+        let ends_acronym = previous.is_some_and(char::is_uppercase)
+            && next.is_some_and(|next| next.is_lowercase());
+        if character.is_uppercase() && (opens_word || ends_acronym) {
+            word.push('_');
+        }
+        word.extend(character.to_lowercase());
+    }
+    word
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "item", rename_all = "snake_case")]
 pub enum Item {
@@ -47,11 +74,18 @@ impl Item {
 /// A role classifies types; it has no values of its own. It carries no members
 /// because membership is declared by the type that plays it, which keeps a role
 /// open to types declared in other packages.
+///
+/// A role may name the ontology term it stands for. A role's whole content is
+/// its identity, so the term is written after `=` rather than as a property:
+/// `role Promoter = "https://identifiers.org/SO:0000167"`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RoleDecl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
     pub name: Identifier,
+    /// The ontology term this role stands for, where it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term: Option<Identifier>,
     pub span: Span,
 }
 
@@ -92,6 +126,11 @@ pub struct ArtifactKindDecl {
     /// The type instances of this kind have, which is what a workflow names in
     /// `Material<Plasmid>` and what `require` and `accept` read fields from.
     pub produces: TypeExpr,
+    /// The roles the produced type plays. A kind grounded in an ontology names
+    /// the terms it stands for this way, so grounding is ordinary membership
+    /// rather than a mechanism of its own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roles: Vec<Path>,
     pub fields: Vec<FieldDecl>,
     /// Which combinations of stated properties make a declaration complete.
     #[serde(default, skip_serializing_if = "Option::is_none")]

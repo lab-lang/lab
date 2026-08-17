@@ -254,6 +254,11 @@ impl Checker {
             }
             if let Item::Role(declaration) = item {
                 self.roles.insert(declaration.name.value.clone());
+                if let Some(term) = &declaration.term {
+                    let canonical = super::ontology::check_term(term)?;
+                    self.role_terms
+                        .insert(declaration.name.value.clone(), canonical);
+                }
             }
         }
 
@@ -286,6 +291,27 @@ impl Checker {
                 Item::Role(_) => {}
                 Item::ArtifactKind(declaration) => {
                     let produces = self.lower_kind_type(&declaration.produces)?;
+                    // A kind's roles classify the type it produces, because
+                    // that is the type a workflow names and a bound reads.
+                    let produced_name = match &produces {
+                        Ty::Named(name, _) => name.clone(),
+                        other => {
+                            return Err(SemanticError::new(
+                                declaration.produces.span(),
+                                format!("a kind must produce a named type, found '{other}'"),
+                            ));
+                        }
+                    };
+                    for role in &declaration.roles {
+                        let name = super::path_text(role);
+                        if !self.roles.contains(&name) {
+                            return Err(self.not_a_role(&name, role.span));
+                        }
+                        self.type_roles
+                            .entry(produced_name.clone())
+                            .or_default()
+                            .insert(name);
+                    }
                     // A kind that states no schema of its own takes the
                     // fields of the type it names, which is what a supplier's
                     // item fills in. Stating a schema replaces them.

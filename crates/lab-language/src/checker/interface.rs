@@ -31,6 +31,7 @@ pub(super) fn build_interface(
                 callable,
                 fields,
                 roles: Vec::new(),
+                term: None,
                 schema: None,
                 parameters: TypeParameters::default(),
                 documentation: documentation.clone().unwrap_or_default(),
@@ -73,15 +74,22 @@ pub(super) fn build_interface(
                 BTreeMap::new(),
                 doc,
             ),
-            CheckedDeclaration::Role { doc, name } => insert(
-                &mut interface,
-                name,
-                ExportKind::Role,
-                None,
-                None,
-                BTreeMap::new(),
-                doc,
-            ),
+            CheckedDeclaration::Role { doc, name, term } => {
+                insert(
+                    &mut interface,
+                    name,
+                    ExportKind::Role,
+                    None,
+                    None,
+                    BTreeMap::new(),
+                    doc,
+                );
+                interface
+                    .exports
+                    .get_mut(name)
+                    .expect("the role export was just inserted")
+                    .term = term.clone();
+            }
             CheckedDeclaration::Circuit {
                 doc,
                 name,
@@ -112,6 +120,7 @@ pub(super) fn build_interface(
                 doc,
                 name,
                 produces,
+                roles,
                 fields,
                 declares,
             } => {
@@ -124,11 +133,12 @@ pub(super) fn build_interface(
                     BTreeMap::new(),
                     doc,
                 );
-                interface
+                let export = interface
                     .exports
                     .get_mut(name)
-                    .expect("the kind export was just inserted")
-                    .schema = Some(crate::semantics::ArtifactSchema {
+                    .expect("the kind export was just inserted");
+                export.roles = roles.clone();
+                export.schema = Some(crate::semantics::ArtifactSchema {
                     produces: produces.clone(),
                     fields: fields.clone(),
                     declares: declares.clone(),
