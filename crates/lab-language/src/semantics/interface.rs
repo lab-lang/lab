@@ -27,8 +27,18 @@ pub struct ModuleExport {
     pub fields: BTreeMap<String, CheckedType>,
     /// For a type export, the roles it plays. Membership is part of a type's
     /// public surface: an importer cannot satisfy a bound without it.
+    ///
+    /// For an artifact-kind export these classify the type the kind produces,
+    /// because that is the type a workflow names and a bound reads.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub roles: Vec<String>,
+    /// For a role export, the ontology term it stands for.
+    ///
+    /// Grounding is part of a role's public surface for the same reason
+    /// membership is: an importer that cannot see the term cannot resolve a
+    /// type that plays the role to the terms a document states about it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term: Option<String>,
     /// For an artifact-kind export, the schema its declarations are checked
     /// against. A word means nothing to an importer without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -104,6 +114,12 @@ impl SemanticEnvironment {
 
     pub fn insert(&mut self, visible_name: impl Into<String>, interface: ModuleInterface) {
         self.modules.insert(visible_name.into(), interface);
+    }
+
+    /// Every interface in scope, for a consumer that has to look across all of
+    /// them rather than resolve one by name.
+    pub fn interfaces(&self) -> impl Iterator<Item = &ModuleInterface> {
+        self.modules.values()
     }
 
     pub fn extend(&mut self, other: &Self) {

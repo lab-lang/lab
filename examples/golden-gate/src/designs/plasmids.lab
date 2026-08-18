@@ -3,6 +3,10 @@
  * reporter through a shared RBS and terminator.
  *
  * Sequences are synthetic compiler fixtures, not qualified biological designs.
+ * Each composite sequence is exactly the concatenation of the parts listed
+ * under `components`, in that order, so the design stays true once the compiler
+ * computes an assembled sequence rather than taking one on trust.
+ *
  * The reaction chemistry in each design is scientific intent and travels with
  * the artifact; where the reaction physically happens is a target profile's
  * concern.
@@ -20,7 +24,7 @@ use golden_gate.designs.inventory
  * Gate with BsaI. Accepted only if the built sequence matches the design.
  */
 build plasmid composite_plasmid_1:
-  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI
@@ -46,7 +50,7 @@ build plasmid composite_plasmid_1:
  * reporters.
  */
 build plasmid composite_plasmid_2:
-  sequence = dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
+  sequence = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]
   restriction_enzyme = BsaI

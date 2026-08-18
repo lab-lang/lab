@@ -8,11 +8,51 @@ use crate::{
     WorkspaceManifest,
 };
 
+/// What language a source module is written in.
+///
+/// A laboratory writes its designs in Lab or in SBOL, so a package holds both
+/// and the module either is compiled the same way once it is checked. The
+/// distinction lives here rather than being re-derived from a file extension
+/// wherever a source is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceLanguage {
+    /// Lab source text.
+    Lab,
+    /// An SBOL document, in whichever RDF serialization its extension names.
+    Sbol(SbolSyntax),
+}
+
+/// The RDF serialization an SBOL document is written in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SbolSyntax {
+    Turtle,
+    NTriples,
+    JsonLd,
+    RdfXml,
+}
+
+impl SbolSyntax {
+    /// The syntax an extension names, for the extensions that name one
+    /// unambiguously. `.xml` and `.json` are deliberately absent: either could
+    /// be several things, and guessing wrong produces a parse error that blames
+    /// the document rather than the guess.
+    pub fn from_extension(extension: &str) -> Option<Self> {
+        match extension {
+            "ttl" => Some(Self::Turtle),
+            "nt" => Some(Self::NTriples),
+            "jsonld" => Some(Self::JsonLd),
+            "rdf" => Some(Self::RdfXml),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PackageSource {
     pub module: String,
     pub path: PathBuf,
     pub relative_path: PathBuf,
+    pub language: SourceLanguage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,6 +243,8 @@ impl LabPackage {
                 let module_path = path.strip_prefix(root.join("src")).unwrap_or(&path);
                 PackageSource {
                     module: module_name(&namespace, module_path),
+                    language: source_language(&path)
+                        .expect("discovery only collects files that name a language"),
                     path,
                     relative_path,
                 }
@@ -268,13 +310,20 @@ fn collect_sources(directory: &Path, files: &mut Vec<PathBuf>) -> Result<(), Pac
         })?;
         if file_type.is_dir() {
             collect_sources(&path, files)?;
-        } else if file_type.is_file()
-            && path.extension().is_some_and(|extension| extension == "lab")
-        {
+        } else if file_type.is_file() && source_language(&path).is_some() {
             files.push(path);
         }
     }
     Ok(())
+}
+
+/// What language a file is written in, or `None` if it is not a source module.
+fn source_language(path: &Path) -> Option<SourceLanguage> {
+    let extension = path.extension()?.to_str()?;
+    if extension == "lab" {
+        return Some(SourceLanguage::Lab);
+    }
+    SbolSyntax::from_extension(extension).map(SourceLanguage::Sbol)
 }
 
 fn module_name(namespace: &str, relative: &Path) -> String {
@@ -284,7 +333,13 @@ fn module_name(namespace: &str, relative: &Path) -> String {
             continue;
         };
         let mut segment = component.to_string_lossy().into_owned();
-        if let Some(stem) = segment.strip_suffix(".lab") {
+        // A module is named for its file, whichever language the file is
+        // written in, so moving a design from Lab to SBOL does not rename it.
+        if let Some(stem) = Path::new(&segment)
+            .file_stem()
+            .filter(|_| source_language(Path::new(&segment)).is_some())
+            .and_then(|stem| stem.to_str())
+        {
             segment = stem.to_owned();
         }
         segments.push(segment.replace('-', "_"));

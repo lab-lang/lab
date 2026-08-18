@@ -34,7 +34,7 @@ pub use parser::parse_module;
 pub use render::render_checked_module;
 pub use semantic_error::{ModuleError, RelatedSpan, SemanticError};
 pub use semantics::{
-    ArtifactSchema, CallableSignature, DefinitionId, ExportKind, ModuleExport, ModuleId,
+    ArtifactSchema, CallableSignature, DefinitionId, ExportKind, Grounding, ModuleExport, ModuleId,
     ModuleInterface, SemanticEnvironment, TypeParameters,
 };
 pub use source::{Identifier, LineIndex, Span, Spanned};
@@ -88,6 +88,22 @@ pub(crate) fn compile_module_with_library(
     )?;
     material_flow::verify_module(&checked, &SemanticEnvironment::default())?;
     Ok(checked)
+}
+
+/// Check a module that was built rather than parsed.
+///
+/// Designs read from an SBOL document arrive as declarations, not as text, and
+/// they still have to satisfy every rule a written module satisfies. Compiling
+/// them through the same checker is what makes that true by construction: an
+/// undeclared property, an incomplete schema, or a type that does not fit is
+/// rejected the same way whichever way the module was produced, and no second
+/// implementation of those rules exists to drift.
+pub fn compile_ast_module(
+    module_id: ModuleId,
+    environment: &SemanticEnvironment,
+    module: &ast::Module,
+) -> Result<CheckedModule, ModuleError> {
+    compile_parsed_module(module_id, environment, module)
 }
 
 fn compile_parsed_module(

@@ -306,7 +306,16 @@ fn lower_artifact(
     let flow = flow.ok_or_else(|| SourceLoweringError::MissingRealization(name.to_owned()))?;
     match kind {
         "plasmid" => {
-            let components = symbols("components", &["Part", "Plasmid"])?;
+            // Every kind a plasmid's schema admits as a component, which is
+            // every kind made of DNA. An assembly joins a promoter or a coding
+            // sequence exactly as it joins a bare part; to a liquid handler
+            // they are all named items to pipette. This list has to track the
+            // schema, and reading the kinds' grounding instead of naming them
+            // is what would stop it drifting.
+            let components = symbols(
+                "components",
+                &["Part", "Plasmid", "Promoter", "CDS", "Backbone"],
+            )?;
             let chemistry = AssemblyChemistryIntent {
                 reaction_volume_ul: quantity("reaction_volume", "uL", 20)?,
                 part_volume_ul: quantity("part_volume", "uL", 2)?,

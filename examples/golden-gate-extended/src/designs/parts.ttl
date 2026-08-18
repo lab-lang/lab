@@ -1,0 +1,105 @@
+# The parts this panel is assembled from, written in SBOL rather than in Lab.
+#
+# Nothing here is Lab-specific. This is an ordinary SBOL 3 document of the kind
+# a registry exports, and the compiler reads it as a module: each Component
+# becomes a catalogued design, typed by the terms it states about itself and
+# keeping its registry IRI as the identity an order is placed against.
+#
+# Sequences are synthetic compiler fixtures, not qualified biological designs.
+
+@prefix sbol: <http://sbols.org/v3#> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+
+<https://synbiohub.org/public/igem/J23101>
+    a sbol:Component ;
+    sbol:displayId "J23101" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    dcterms:description "Anderson constitutive promoter, strong" ;
+    sbol:type <https://identifiers.org/SBO:0000251> ;
+    sbol:role <https://identifiers.org/SO:0000167> ;
+    sbol:hasSequence <https://synbiohub.org/public/igem/J23101_sequence> .
+
+<https://synbiohub.org/public/igem/J23101_sequence>
+    a sbol:Sequence ;
+    sbol:displayId "J23101_sequence" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:encoding <https://identifiers.org/edam:format_1207> ;
+    sbol:elements "TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC" .
+
+<https://synbiohub.org/public/igem/J23106>
+    a sbol:Component ;
+    sbol:displayId "J23106" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    dcterms:description "Anderson constitutive promoter, medium" ;
+    sbol:type <https://identifiers.org/SBO:0000251> ;
+    sbol:role <https://identifiers.org/SO:0000167> ;
+    sbol:hasSequence <https://synbiohub.org/public/igem/J23106_sequence> .
+
+<https://synbiohub.org/public/igem/J23106_sequence>
+    a sbol:Sequence ;
+    sbol:displayId "J23106_sequence" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:encoding <https://identifiers.org/edam:format_1207> ;
+    sbol:elements "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC" .
+
+<https://synbiohub.org/public/igem/B0034>
+    a sbol:Component ;
+    sbol:displayId "B0034" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    dcterms:description "Ribosome binding site" ;
+    sbol:type <https://identifiers.org/SBO:0000251> ;
+    sbol:hasSequence <https://synbiohub.org/public/igem/B0034_sequence> .
+
+<https://synbiohub.org/public/igem/B0034_sequence>
+    a sbol:Sequence ;
+    sbol:displayId "B0034_sequence" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:encoding <https://identifiers.org/edam:format_1207> ;
+    sbol:elements "AAAGAGGAGAAA" .
+
+<https://synbiohub.org/public/igem/B0015>
+    a sbol:Component ;
+    sbol:displayId "B0015" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    dcterms:description "Double terminator" ;
+    sbol:type <https://identifiers.org/SBO:0000251> ;
+    sbol:hasSequence <https://synbiohub.org/public/igem/B0015_sequence> .
+
+<https://synbiohub.org/public/igem/B0015_sequence>
+    a sbol:Sequence ;
+    sbol:displayId "B0015_sequence" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:encoding <https://identifiers.org/edam:format_1207> ;
+    sbol:elements "CCAGGCATCAAATAAAACGAAAGGCTCAGTCG" .
+
+<https://synbiohub.org/public/igem/GFP>
+    a sbol:Component ;
+    sbol:displayId "GFP" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    dcterms:description "Green fluorescent protein coding sequence" ;
+    sbol:type <https://identifiers.org/SBO:0000251> ;
+    sbol:role <https://identifiers.org/SO:0000316> ;
+    sbol:hasSequence <https://synbiohub.org/public/igem/GFP_sequence> .
+
+<https://synbiohub.org/public/igem/GFP_sequence>
+    a sbol:Sequence ;
+    sbol:displayId "GFP_sequence" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:encoding <https://identifiers.org/edam:format_1207> ;
+    sbol:elements "ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC" .
+
+<https://synbiohub.org/public/igem/RFP>
+    a sbol:Component ;
+    sbol:displayId "RFP" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    dcterms:description "Red fluorescent protein coding sequence" ;
+    sbol:type <https://identifiers.org/SBO:0000251> ;
+    sbol:role <https://identifiers.org/SO:0000316> ;
+    sbol:hasSequence <https://synbiohub.org/public/igem/RFP_sequence> .
+
+<https://synbiohub.org/public/igem/RFP_sequence>
+    a sbol:Sequence ;
+    sbol:displayId "RFP_sequence" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:encoding <https://identifiers.org/edam:format_1207> ;
+    sbol:elements "ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG" .

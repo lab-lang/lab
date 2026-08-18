@@ -98,6 +98,12 @@ pub(super) struct SemanticContext {
     /// built into the standard library land here together, so a bound is
     /// satisfied the same way whichever it came from.
     pub type_roles: HashMap<String, BTreeSet<String>>,
+    /// The ontology term each role stands for, for the roles that name one.
+    ///
+    /// A role grounded this way is what lets a type be resolved to the terms an
+    /// SBOL document states about it. A role with no term classifies types and
+    /// says nothing about any ontology.
+    pub role_terms: HashMap<String, String>,
 }
 
 impl SemanticContext {
@@ -134,6 +140,7 @@ impl SemanticContext {
             artifact_kinds: HashMap::new(),
             roles: BTreeSet::new(),
             type_roles: HashMap::new(),
+            role_terms: HashMap::new(),
         }
     }
 
@@ -274,6 +281,9 @@ impl SemanticContext {
             }
             if export.kind == ExportKind::Role {
                 self.roles.insert(name.clone());
+                if let Some(term) = &export.term {
+                    self.role_terms.insert(name.clone(), term.clone());
+                }
                 continue;
             }
             for role in &export.roles {
@@ -308,6 +318,14 @@ impl SemanticContext {
                 // so the two travel together.
                 ExportKind::ArtifactKind => {
                     if let Some(schema) = &export.schema {
+                        // A kind's roles classify the type it produces, so an
+                        // importer sees the same membership the declaring
+                        // module did and grounds the type the same way.
+                        if let CheckedType::Named { name: produced, .. } = &schema.produces {
+                            for role in &export.roles {
+                                self.add_role(produced, role);
+                            }
+                        }
                         let fields = schema.fields.iter().map(|field| {
                             (
                                 field.name.clone(),

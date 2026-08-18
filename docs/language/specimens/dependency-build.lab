@@ -10,9 +10,9 @@ use std.bio.build
 use std.lab.plasmid
 
 buy:
-  part J23101
+  promoter J23101
   part B0034
-  part GFP
+  cds GFP
   part B0015
   backbone part_receiver
   backbone region_receiver

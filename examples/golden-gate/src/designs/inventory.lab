@@ -9,14 +9,26 @@
 use std.bio.designs
 
 buy:
-  // Constitutive promoters of differing strength, the shared ribosome binding
-  // site and terminator, and the fluorescent reporters.
-  part J23101
-  part J23106
-  part B0034
-  part B0015
-  part GFP
-  part RFP
+  // Constitutive promoters of differing strength. Each is a promoter rather
+  // than a bare part, so the compiler knows what it is without being told
+  // again wherever it is used.
+  promoter J23101:
+    sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC")
+  promoter J23106:
+    sequence = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC")
+
+  // The shared ribosome binding site and terminator. Neither has a narrower
+  // kind here, so both are parts; a package that declares one may say more.
+  part B0034:
+    sequence = dna("AAAGAGGAGAAA")
+  part B0015:
+    sequence = dna("CCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+
+  // The fluorescent reporters, each a coding sequence.
+  cds GFP:
+    sequence = dna("ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC")
+  cds RFP:
+    sequence = dna("ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG")
 
   // Assembly backbone and the type IIS enzyme that opens it.
   backbone pSB1C3
