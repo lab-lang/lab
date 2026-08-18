@@ -24,7 +24,9 @@ A standard module written in Lab can declare roles, membership, data types, arti
 
 ## Parts and biological catalogs
 
-A catalogued item is declared with `buy` against an imported kind, states the fields of its type, and names its own type where its kind is generic — `buy promoter pTet: Promoter<Tetracycline>` — so the biological catalog is written in Lab. This is not yet authoring syntax for declaring a part's sequence, provenance chain, version, or relationship to SBOL. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`.
+A catalogued item is declared with `buy` against an imported kind, states the fields of its type, and names its own type where its kind is generic — `buy promoter pTet: Promoter<Tetracycline>` — so the biological catalog is written in Lab.
+
+What a kind *is* now travels with it: a role may name an ontology term and a kind plays roles, so `Plasmid` states that it is a nucleic acid and an engineered region ([`0039`](decisions/0039-roles-carry-ontology-terms.md)). What remains open is the item rather than the kind. There is still no authoring syntax for a part's sequence, its provenance chain, or its version, and a catalogued item's `identity` is an opaque string that does not distinguish a resolvable registry record from a supplier's order number. It remains open how biological catalogs expose those richer declarations without reducing them to untyped properties or compiling changing catalog contents into `std`. The intended direction is recorded in [`sbol.md`](sbol.md).
 
 ## Target contracts
 

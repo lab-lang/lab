@@ -14,8 +14,14 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// written against an earlier version cannot read this one: `Catalog` is a
 /// declaration of its own and carries the properties its item states, `Data`
 /// carries no category, a schema field states whether an instance may omit it,
-/// and an acceptance claim carries the evidence it is believed on.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v3";
+/// an acceptance claim carries the evidence it is believed on, a role may name
+/// the ontology term it stands for, and an artifact kind carries the roles its
+/// produced type plays.
+///
+/// A consumer that ignores the last two reads a design with nothing said about
+/// what it is, which is exactly the silence grounding exists to end. That is
+/// why they raise the version rather than riding along as optional fields.
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v4";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -43,6 +49,12 @@ pub enum CheckedDeclaration {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         doc: Option<String>,
         name: String,
+        /// The ontology term this role stands for, in its expanded IRI form.
+        ///
+        /// A role that names one grounds every type that plays it, which is how
+        /// a Lab type resolves to the terms a document states about it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        term: Option<String>,
     },
     /// A name a supplier lists, and the Lab type it stands for.
     ///
@@ -79,6 +91,9 @@ pub enum CheckedDeclaration {
         doc: Option<String>,
         name: String,
         produces: CheckedType,
+        /// The roles the produced type plays, in declaration order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        roles: Vec<String>,
         fields: Vec<CheckedSchemaField>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         declares: Option<CheckedPresence>,

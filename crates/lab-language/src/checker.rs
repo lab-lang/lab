@@ -5,6 +5,7 @@ mod context;
 mod declarations;
 mod expr;
 mod interface;
+mod ontology;
 mod pattern;
 mod workflow;
 
@@ -75,6 +76,7 @@ impl Checker {
                     declarations.push(CheckedDeclaration::Role {
                         doc: declaration.doc.clone(),
                         name: declaration.name.value.clone(),
+                        term: self.role_terms.get(&declaration.name.value).cloned(),
                     });
                 }
                 Item::ArtifactKind(declaration) => {
@@ -86,6 +88,7 @@ impl Checker {
                         doc: declaration.doc.clone(),
                         name: declaration.name.value.clone(),
                         produces: to_checked_type(&signature.produces),
+                        roles: declaration.roles.iter().map(path_text).collect(),
                         fields: signature
                             .fields
                             .iter()
@@ -392,6 +395,116 @@ mod tests {
         ));
     }
 
+    /// Grounding is ordinary role membership, so a kind resolves to the terms
+    /// of every role it plays and a compact identifier reaches the checked IR
+    /// already expanded.
+    #[test]
+    fn a_grounded_kind_resolves_to_its_ontology_terms() {
+        let module = compile_module(concat!(
+            "role EngineeredRegion = \"SO:0000804\"\n",
+            "role NucleicAcid = \"https://identifiers.org/SBO:0000251\"\n",
+            "\n",
+            "artifact Plasmid is EngineeredRegion, NucleicAcid\n",
+        ))
+        .expect("a grounded kind compiles");
+
+        let term = module
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                CheckedDeclaration::Role {
+                    name,
+                    term: Some(term),
+                    ..
+                } if name == "EngineeredRegion" => Some(term.clone()),
+                _ => None,
+            })
+            .expect("the role carries its term");
+        assert_eq!(term, "https://identifiers.org/SO:0000804");
+
+        let roles = module
+            .declarations
+            .iter()
+            .find_map(|declaration| match declaration {
+                CheckedDeclaration::ArtifactKind { name, roles, .. } if name == "plasmid" => {
+                    Some(roles.clone())
+                }
+                _ => None,
+            })
+            .expect("the kind carries its roles");
+        assert_eq!(
+            roles,
+            vec!["EngineeredRegion".to_owned(), "NucleicAcid".to_owned()]
+        );
+    }
+
+    /// A role's term is part of its public surface. Without it an importing
+    /// module could satisfy a bound and still not know what the type is.
+    #[test]
+    fn grounding_survives_an_import() {
+        let mut environment = SemanticEnvironment::default();
+        let terms = compile_module_with_id(
+            ModuleId::new("vocab.so"),
+            "role EngineeredRegion = \"SO:0000804\"\n",
+        )
+        .expect("the vocabulary compiles");
+        environment.insert("vocab.so", terms.interface.clone());
+
+        let designs = compile_module_in_environment(
+            ModuleId::new("designs"),
+            "use vocab.so\n\nartifact Plasmid is EngineeredRegion\n",
+            &environment,
+        )
+        .expect("a kind grounded in an imported role compiles");
+
+        assert_eq!(
+            designs.interface.exports["plasmid"].roles,
+            vec!["EngineeredRegion".to_owned()]
+        );
+        assert_eq!(
+            terms.interface.exports["EngineeredRegion"].term.as_deref(),
+            Some("https://identifiers.org/SO:0000804")
+        );
+    }
+
+    /// A kind may only be grounded in a role that exists, the same rule a
+    /// record's `is` clause follows.
+    #[test]
+    fn rejects_a_kind_grounded_in_an_undeclared_role() {
+        let error = compile_module("artifact Plasmid is EngineeredRegion\n")
+            .expect_err("'EngineeredRegion' is not declared");
+        let ModuleError::Semantic(error) = error else {
+            panic!("expected a semantic error, found {error:?}");
+        };
+        assert!(error.message.contains("EngineeredRegion"), "{error:?}");
+    }
+
+    /// The term is checked where it is written rather than when a document is
+    /// emitted, so a typo names the line that made it.
+    #[test]
+    fn rejects_a_malformed_ontology_term() {
+        let error = compile_module("role EngineeredRegion = \"engineered region\"\n")
+            .expect_err("'engineered region' is not a term");
+        let ModuleError::Semantic(error) = error else {
+            panic!("expected a semantic error, found {error:?}");
+        };
+        assert!(
+            error.message.contains("neither an IRI nor a compact"),
+            "{error:?}"
+        );
+    }
+
+    /// A role that names no term still classifies types. Grounding is optional,
+    /// so every existing role keeps working unchanged.
+    #[test]
+    fn an_ungrounded_role_carries_no_term() {
+        let module = compile_module("role Inducible\n").expect("an ungrounded role compiles");
+        assert!(module.declarations.iter().any(|declaration| matches!(
+            declaration,
+            CheckedDeclaration::Role { name, term: None, .. } if name == "Inducible"
+        )));
+    }
+
     #[test]
     fn emits_stable_module_interfaces_and_resolved_definition_ids() {
         let module = compile_module_with_id(
@@ -512,6 +625,10 @@ mod tests {
         // A component list names inventory identities imported from another
         // module, and stays a structured list of references rather than
         // collapsing into strings.
+        //
+        // Each element keeps the kind its catalogue entry was declared with, so
+        // the list says a promoter drives a coding sequence rather than
+        // flattening every element to the one kind they have in common.
         let components = declarations
             .iter()
             .find_map(|declaration| {
@@ -529,7 +646,10 @@ mod tests {
                 })
             })
             .unwrap();
-        assert_eq!(components.value.r#type.display_name(), "List<Part>");
+        assert_eq!(
+            components.value.r#type.display_name(),
+            "List<Promoter | Part | CDS>"
+        );
         let CheckedExpression::List { elements } = &components.value.value else {
             panic!("components must remain a structured checked list");
         };

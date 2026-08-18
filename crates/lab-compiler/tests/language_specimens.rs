@@ -190,14 +190,22 @@ fn inventory_specimen_preserves_properties_and_resolved_operations() {
     assert_eq!(reporter["kind"], "artifact");
     assert_eq!(reporter["artifact"], "plasmid");
     assert!(reporter.get("bindings").is_none());
-    assert!(
-        reporter["properties"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|property| property["name"] == "components"
-                && property["value"]["type"]["element"]["name"] == "Part")
-    );
+    // Each component keeps the kind its catalogue entry was declared with, so
+    // the list records a promoter driving a coding sequence rather than
+    // flattening every element to the one kind they have in common.
+    let components = reporter["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|property| property["name"] == "components")
+        .expect("the design states what it is assembled from");
+    let alternatives = components["value"]["type"]["element"]["alternatives"]
+        .as_array()
+        .expect("a heterogeneous component list is a union of its kinds")
+        .iter()
+        .map(|alternative| alternative["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(alternatives, ["Promoter", "Part", "CDS"]);
 
     // A catalogued name carries its supplier's identifier as a field, so a
     // backend reads it directly rather than recognizing a call shape.
@@ -206,7 +214,7 @@ fn inventory_specimen_preserves_properties_and_resolved_operations() {
         .find(|declaration| declaration["kind"] == "catalog" && declaration["name"] == "J23101")
         .expect("the specimen catalogues its parts");
     assert_eq!(catalogued["identity"], "J23101");
-    assert_eq!(catalogued["type"]["name"], "Part");
+    assert_eq!(catalogued["type"]["name"], "Promoter");
 
     let serialized = serde_json::to_string(&module).unwrap();
     assert!(serialized.contains("std.bio.build.realize"));

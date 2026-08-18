@@ -9,6 +9,9 @@ fn copy_dir(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
     for entry in std::fs::read_dir(from).unwrap() {
         let entry = entry.unwrap();
+        if entry.file_name() == ".lab" {
+            continue;
+        }
         let target = to.join(entry.file_name());
         if entry.file_type().unwrap().is_dir() {
             copy_dir(&entry.path(), &target);
@@ -26,7 +29,12 @@ fn build_typesets_every_document_to_pdf() {
     copy_dir(&example, &project);
 
     let output = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args(["build", project.to_str().unwrap()])
+        .args([
+            "build",
+            project.to_str().unwrap(),
+            "--target",
+            "opentrons-ot2",
+        ])
         .output()
         .unwrap();
     assert!(

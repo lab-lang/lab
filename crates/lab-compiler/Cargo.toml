@@ -27,6 +27,7 @@ clap.workspace = true
 # features off).
 hamilton-star.workspace = true
 lab-instruments.workspace = true
+lab-runfmt.workspace = true
 lab-language.workspace = true
 opentrons-protocol.workspace = true
 pliron.workspace = true

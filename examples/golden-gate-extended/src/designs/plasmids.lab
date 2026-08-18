@@ -5,12 +5,19 @@
  * repository already made. Being built is a fact about a particular plasmid
  * rather than about plasmids, so both are the same kind of thing and only their
  * provenance differs.
+ *
+ * Sequences are synthetic compiler fixtures, not qualified biological designs.
+ * Each assembled sequence is exactly the concatenation of the parts listed
+ * under `components`, in that order, so the design stays true once the compiler
+ * computes an assembled sequence rather than taking one on trust.
  */
 
 use std.bio.designs
 use std.bio.golden_gate
 
 use golden_gate_extended.designs.inventory
+// The DNA parts, written in SBOL rather than in Lab.
+use golden_gate_extended.designs.parts
 
 /**
  * The GFP reporter under a strong constitutive promoter.
@@ -20,7 +27,7 @@ use golden_gate_extended.designs.inventory
  * has to clear a bar on enough independent clones to mean something.
  */
 build plasmid composite_plasmid_1:
-  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI
@@ -50,7 +57,7 @@ build plasmid composite_plasmid_1:
  * is a property of the design rather than of the protocol that built it.
  */
 build plasmid composite_plasmid_2:
-  sequence = dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC")
+  sequence = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]
   restriction_enzyme = BsaI
@@ -80,4 +87,4 @@ build plasmid composite_plasmid_2:
  */
 buy plasmid reference_gfp:
   identity = "Addgene-#134516"
-  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC")
+  sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")

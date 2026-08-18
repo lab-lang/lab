@@ -7,13 +7,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use lab_language::Grounding;
 use lab_language::{
     CheckedDeclaration, CheckedModule, ModuleId, SemanticEnvironment,
     compile_module_in_environment, parse_module,
 };
 use lab_package::{
     DependencySpec, DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource,
+    SbolSyntax, SourceLanguage,
 };
+use lab_sbol::KindIndex;
+use sbol3::{Document, RdfFormat};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -352,6 +356,60 @@ impl LabProject {
     }
 }
 
+/// Compiles one SBOL document into a checked module.
+///
+/// Components that no kind in scope describes are skipped rather than fatal.
+/// A registry export is large and partly outside any one program's vocabulary,
+/// and refusing a whole file over one unrecognized term would make writing
+/// designs in SBOL unusable against real registry data. What was skipped is
+/// reported through the module's diagnostics rather than discarded silently.
+fn compile_sbol_module(
+    name: &str,
+    text: &str,
+    syntax: SbolSyntax,
+    environment: &SemanticEnvironment,
+) -> Result<lab_language::CheckedModule, ProjectError> {
+    let format = match syntax {
+        SbolSyntax::Turtle => RdfFormat::Turtle,
+        SbolSyntax::NTriples => RdfFormat::NTriples,
+        SbolSyntax::JsonLd => RdfFormat::JsonLd,
+        SbolSyntax::RdfXml => RdfFormat::RdfXml,
+    };
+    let document = Document::read(text, format).map_err(|error| ProjectError::Parse {
+        module: name.to_owned(),
+        message: error.to_string(),
+    })?;
+
+    let mut grounding = Grounding::bundled();
+    for interface in environment.interfaces() {
+        grounding.add_interface(interface);
+    }
+    let kinds = KindIndex::new(&grounding);
+
+    let (module, skipped) = lab_sbol::read_module(
+        ModuleId::new(name.to_owned()),
+        &document,
+        &kinds,
+        environment,
+    );
+    let module = module.map_err(|error| ProjectError::Compile {
+        module: name.to_owned(),
+        message: error.to_string(),
+    })?;
+    if !skipped.is_empty() {
+        let detail = skipped
+            .iter()
+            .map(|skipped| skipped.reason.to_string())
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Err(ProjectError::Compile {
+            module: name.to_owned(),
+            message: format!("this document states designs Lab cannot read: {detail}"),
+        });
+    }
+    Ok(module)
+}
+
 fn compile_package(
     package: &LabPackage,
     mut environment: SemanticEnvironment,
@@ -367,27 +425,36 @@ fn compile_package(
             path: source.path.clone(),
             source: source_error,
         })?;
-        let syntax = parse_module(&text).map_err(|error| ProjectError::Parse {
-            module: source.module.clone(),
-            message: error.to_string(),
-        })?;
-        let local_imports = syntax
-            .items
-            .iter()
-            .filter_map(|item| {
-                let lab_language::ast::Item::Use(import) = item else {
-                    return None;
-                };
-                let path = import
-                    .path
-                    .segments
+        // A document names no sibling module. It describes components and the
+        // terms they stand for, and which package declares the kinds those
+        // terms name is derived when it is read, so it depends on nothing
+        // inside this package and is ready to compile from the start.
+        let local_imports = match source.language {
+            SourceLanguage::Sbol(_) => BTreeSet::new(),
+            SourceLanguage::Lab => {
+                let syntax = parse_module(&text).map_err(|error| ProjectError::Parse {
+                    module: source.module.clone(),
+                    message: error.to_string(),
+                })?;
+                syntax
+                    .items
                     .iter()
-                    .map(|segment| segment.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".");
-                local_names.contains(&path).then_some(path)
-            })
-            .collect::<BTreeSet<_>>();
+                    .filter_map(|item| {
+                        let lab_language::ast::Item::Use(import) = item else {
+                            return None;
+                        };
+                        let path = import
+                            .path
+                            .segments
+                            .iter()
+                            .map(|segment| segment.value.as_str())
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        local_names.contains(&path).then_some(path)
+                    })
+                    .collect::<BTreeSet<_>>()
+            }
+        };
         remaining.insert(source.module.clone(), (source.clone(), text, local_imports));
     }
 
@@ -406,12 +473,18 @@ fn compile_package(
         }
         for name in ready {
             let (source, text, _) = remaining.remove(&name).expect("ready module exists");
-            let module =
-                compile_module_in_environment(ModuleId::new(name.clone()), &text, &environment)
-                    .map_err(|error| ProjectError::Compile {
-                        module: name.clone(),
-                        message: error.to_string(),
-                    })?;
+            let module = match source.language {
+                SourceLanguage::Lab => {
+                    compile_module_in_environment(ModuleId::new(name.clone()), &text, &environment)
+                        .map_err(|error| ProjectError::Compile {
+                            module: name.clone(),
+                            message: error.to_string(),
+                        })?
+                }
+                SourceLanguage::Sbol(syntax) => {
+                    compile_sbol_module(&name, &text, syntax, &environment)?
+                }
+            };
             environment.insert(name.clone(), module.interface.clone());
             compiled_names.insert(name);
             result.push(CompiledModule {

@@ -1,0 +1,70 @@
+/*!
+ * The ontology terms a synthetic-biology design is described in.
+ *
+ * A role here names a term rather than classifying a Lab type on its own. A
+ * package grounds its kinds by playing these roles, so what a plasmid *is*
+ * travels in a vocabulary every SBOL tool already reads, and the compiler never
+ * has to guess whether a named item is DNA, a protein, or a reagent.
+ *
+ * Terms come from three ontologies, and each answers a different question.
+ * SBO says what kind of physical entity something is. SO says what part it
+ * plays in a sequence. EDAM says how a sequence is written down.
+ */
+
+// --- What kind of entity something is (SBO) -------------------------------
+
+/** A nucleic acid: DNA or RNA. */
+role NucleicAcid = "SBO:0000251"
+
+/** A protein, which is what a coding sequence expresses. */
+role Macromolecule = "SBO:0000252"
+
+/** A small molecule: an inducer, an antibiotic, a buffer component. */
+role SimpleChemical = "SBO:0000247"
+
+/**
+ * An entity described by what it does rather than what it is made of.
+ *
+ * This is the term SBOL falls back to when nothing more specific is known, so
+ * a kind that plays it is saying only that it participates in a design.
+ */
+role FunctionalEntity = "SBO:0000241"
+
+// --- What part of a sequence something is (SO) ----------------------------
+
+/** A region deliberately assembled rather than found. */
+role EngineeredRegion = "SO:0000804"
+
+/**
+ * A region transcription begins at.
+ *
+ * Named for the region rather than the part because roles and types share one
+ * namespace, and `Promoter` is already the kind a supplier lists.
+ */
+role PromoterRegion = "SO:0000167"
+
+/** A region translated into a protein. */
+role CodingSequence = "SO:0000316"
+
+/** Where a ribosome binds ahead of a coding sequence. */
+role RibosomeEntrySite = "SO:0000139"
+
+/** Where transcription stops. */
+role Terminator = "SO:0000141"
+
+/** A region a repressor or activator binds. */
+role Operator = "SO:0000057"
+
+/** A sequence with no free ends. */
+role CircularTopology = "SO:0000988"
+
+/** A sequence with two free ends. */
+role LinearTopology = "SO:0000987"
+
+// --- How a sequence is written down (EDAM) --------------------------------
+
+/** Nucleotides written in the IUPAC alphabet. */
+role IupacNucleicAcid = "EDAM:format_1207"
+
+/** Amino acids written in the IUPAC alphabet. */
+role IupacProtein = "EDAM:format_1208"

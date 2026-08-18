@@ -8,7 +8,7 @@ buy:
   antibiotic kanamycin
   restriction_enzyme BsaI
   backbone p15A_kan
-  part GFP
+  cds GFP
 
 build plasmid p_reporter:
   sequence = dna("ACGTACGT")

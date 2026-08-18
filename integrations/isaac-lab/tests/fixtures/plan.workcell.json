@@ -1,0 +1,26 @@
+{
+  "format": "lab.workcell-run.v0",
+  "stations": [
+    {
+      "name": "star-1",
+      "kind": "hamilton.star",
+      "program_dir": "stations/star-1"
+    },
+    {
+      "name": "odtc-1",
+      "kind": "inheco.odtc",
+      "program_dir": "stations/odtc-1"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "assembly_thermocycle.to-odtc-1",
+      "after": ["assembly_run"],
+      "action": "handoff",
+      "from": "star-1",
+      "to": "odtc-1",
+      "labware": "reaction_plate",
+      "instructions": "Seal and transfer the reaction plate."
+    }
+  ]
+}

@@ -20,23 +20,7 @@ fn instance_word(produces: &TypeExpr) -> Result<String, ParseError> {
             "an artifact kind names a type declared here or imported, not a path",
         ));
     };
-    // A break belongs where a word does: after a lowercase run, or at the end
-    // of an acronym. `RestrictionEnzyme` gives `restriction_enzyme` and `DNA`
-    // gives `dna` rather than `d_n_a`.
-    let characters = segment.value.chars().collect::<Vec<_>>();
-    let mut word = String::new();
-    for (index, character) in characters.iter().enumerate() {
-        let previous = index.checked_sub(1).map(|index| characters[index]);
-        let next = characters.get(index + 1).copied();
-        let opens_word = previous.is_some_and(|previous| !previous.is_uppercase());
-        let ends_acronym = previous.is_some_and(char::is_uppercase)
-            && next.is_some_and(|next| next.is_lowercase());
-        if character.is_uppercase() && (opens_word || ends_acronym) {
-            word.push('_');
-        }
-        word.extend(character.to_lowercase());
-    }
-    Ok(word)
+    Ok(crate::ast::instance_word(&segment.value))
 }
 
 /// Parse a complete Lab source module without lowering it.
@@ -147,10 +131,18 @@ impl<'a> Parser<'a> {
     fn parse_role(&mut self) -> Result<RoleDecl, ParseError> {
         let start = self.expect_word("role")?.span;
         let name = self.take_identifier("a role name")?;
+        // A role has no content but its identity, so an ontology term is
+        // written after `=` rather than as a property in a block.
+        let term = if self.consume(&TokenKind::Equal).is_some() {
+            Some(self.take_string("an ontology term")?)
+        } else {
+            None
+        };
         let end = self.expect_line_end()?;
         Ok(RoleDecl {
             doc: None,
             name,
+            term,
             span: start.join(end),
         })
     }
@@ -256,6 +248,9 @@ impl<'a> Parser<'a> {
         // twice and the two can never disagree.
         let produces = self.parse_type()?;
         let name = Identifier::new(instance_word(&produces)?, produces.span());
+        // The same `is` clause a record uses. A kind grounded in an ontology
+        // states the terms it stands for as roles it plays.
+        let roles = self.parse_roles_clause()?;
         // A kind whose instances state nothing beyond their name needs no
         // block, the way a role needs none.
         if !self.check(&TokenKind::Colon) {
@@ -264,6 +259,7 @@ impl<'a> Parser<'a> {
                 doc: None,
                 name,
                 produces,
+                roles,
                 fields: Vec::new(),
                 declares: None,
                 span: start.join(end),
@@ -292,6 +288,7 @@ impl<'a> Parser<'a> {
             doc: None,
             name,
             produces,
+            roles,
             fields,
             declares,
             span: start.join(end),
@@ -1329,6 +1326,22 @@ impl<'a> Parser<'a> {
         })?;
         match token.kind {
             TokenKind::Identifier(value) => Ok(Spanned::new(value, token.span)),
+            found => Err(syntax_span(
+                token.span,
+                format!("expected {expected}, found {found}"),
+            )),
+        }
+    }
+
+    fn take_string(&mut self, expected: &str) -> Result<Identifier, ParseError> {
+        let token = self.next().ok_or_else(|| {
+            syntax_span(
+                Span::at(self.source.len()),
+                format!("expected {expected}, found end of input"),
+            )
+        })?;
+        match token.kind {
+            TokenKind::String(value) => Ok(Spanned::new(value, token.span)),
             found => Err(syntax_span(
                 token.span,
                 format!("expected {expected}, found {found}"),

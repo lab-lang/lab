@@ -10,6 +10,8 @@ description = "Package-aware project loading and compilation for Lab."
 [dependencies]
 lab-language.workspace = true
 lab-package.workspace = true
+lab-sbol.workspace = true
+sbol3.workspace = true
 semver.workspace = true
 serde.workspace = true
 thiserror.workspace = true

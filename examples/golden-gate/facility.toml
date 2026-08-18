@@ -1,0 +1,45 @@
+# The lab this package usually runs in: the workcell-star bench plus the
+# cold storage its stock lives in. A single-facility package keeps the
+# description here at the root, where `lab simulate` and `lab render` find
+# it by convention; packages with several candidate facilities keep them
+# under `facilities/` and compare them with `--facility`.
+
+[facility]
+name = "main-bench"
+
+# The room the scene renders: a kit floor and walls at these dimensions.
+# An `environment` asset key would replace the kit with a modeled or
+# scanned room.
+[room]
+width_mm = 6000.0
+depth_mm = 4000.0
+height_mm = 3000.0
+
+[[station]]
+name = "star-1"
+kind = "hamilton.star"
+profile = "hamilton-star"
+position_mm = [1200.0, 2800.0]
+
+[[station]]
+name = "odtc-1"
+kind = "inheco.odtc"
+address = "169.254.10.40:8080"
+position_mm = [3400.0, 2900.0]
+rotation_deg = -15.0
+
+[[storage]]
+name = "fridge-a"
+kind = "fridge"
+temperature_c = 4.0
+materials = ["assembly_mix", "miniprep_kit"]
+
+[[storage]]
+name = "freezer-a"
+kind = "freezer"
+temperature_c = -20.0
+materials = ["BsaI", "T4_ligase", "competent_cells"]
+
+[transport]
+between = "human"
+walk_seconds = 45.0

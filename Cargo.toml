@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/lab-cli",
+    "crates/lab-compute",
     "crates/lab-compiler",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
@@ -10,7 +11,11 @@ members = [
     "crates/lab-language-server",
     "crates/lab-package",
     "crates/lab-project",
+    "crates/lab-sbol",
     "crates/lab-python",
+    "crates/lab-runfmt",
+    "crates/lab-runtime",
+    "crates/lab-scene",
 ]
 
 [workspace.package]
@@ -32,6 +37,10 @@ pyo3 = { version = "0.28.3", features = ["abi3-py311"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusb = "0.9"
+# SBOL 3 terms, serialization, and validation. Designs are read from and
+# written to SBOL documents, so the standard's object model is the compiler's
+# own rather than something a backend projects onto at the end.
+sbol3 = "1"
 semver = "1"
 thiserror = "2"
 toml = "0.8"
@@ -60,6 +69,7 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 # never links the native HID library; a runner re-enables `hid`.
 byonoy-hid = { version = "0.1.0", default-features = false }
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.2" }
+lab-compute = { path = "crates/lab-compute", version = "0.1.2" }
 # Default features stay off at the workspace level so the compiler's pure
 # protocol use never links libusb; the CLI runner re-enables `usb`.
 hamilton-star = { version = "0.1.0", default-features = false }
@@ -72,6 +82,10 @@ lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }
 opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.2" }
 lab-project = { path = "crates/lab-project", version = "0.1.2" }
+lab-runfmt = { path = "crates/lab-runfmt", version = "0.1.2" }
+lab-sbol = { path = "crates/lab-sbol", version = "0.1.2" }
+lab-runtime = { path = "crates/lab-runtime", version = "0.1.2" }
+lab-scene = { path = "crates/lab-scene", version = "0.1.2" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

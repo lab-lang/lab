@@ -68,4 +68,19 @@ lab metadata --json
 lab check --json
 ```
 
+Remote robot-learning compute is C3-first. A local `.env` may hold
+`C3_API_KEY`; it is ignored by Git and read as data rather than sourced as a
+shell script. The doctor is read-only: it validates authentication and the
+current L40-class catalog without submitting a job.
+
+```sh
+lab compute doctor
+lab compute list
+```
+
+Isaac Sim requires RTX hardware, so the doctor recognizes C3's L40/L40S class
+and does not present A100 or H100 capacity as Isaac-compatible. Actual training
+commands remain absent until the tracked C3 capability gate and a real PPO
+runner have passed.
+
 Path dependencies may optionally carry a semver requirement, which is checked against the dependency manifest. Registry dependencies remain explicitly unsupported and fail closed; adding them requires a registry protocol and integrity model rather than silent fallback. Workflow execution commands will be added only when the durable runtime has real run semantics.

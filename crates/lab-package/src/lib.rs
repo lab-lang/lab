@@ -9,6 +9,9 @@ pub use manifest::{
     BuildMetadata, DependencyDetail, DependencySpec, InventoryMetadata, LabManifest,
     PackageManifest, PackageMetadata, WorkspaceManifest, WorkspaceMetadata,
 };
-pub use package::{DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource};
+pub use package::{
+    DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource, SbolSyntax,
+    SourceLanguage,
+};
 
 pub const MANIFEST_FILE: &str = "lab.toml";

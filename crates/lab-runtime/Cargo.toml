@@ -1,0 +1,28 @@
+[package]
+name = "lab-runtime"
+description = "Interpreters for Lab's run documents: live execution and simulation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Live hardware access: USB transport for the Hamilton STAR. Simulation and
+# dry runs never need this, so a pure-simulation build links no libusb.
+hardware = ["hamilton-star/usb"]
+
+[dependencies]
+anyhow = { workspace = true }
+hamilton-star = { workspace = true }
+lab-instruments = { workspace = true }
+lab-runfmt = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

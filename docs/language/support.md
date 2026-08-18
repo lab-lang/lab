@@ -36,6 +36,8 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Registry dependency acquisition | n/a | rejected | no | no | no |
 | `role` declarations and `is` membership | yes | yes | bounds satisfied by role membership | `CheckedDeclaration::Role`, roles on type exports | n/a |
 | Roles crossing a module boundary | n/a | `ExportKind::Role` | membership restored from the interface | yes | n/a |
+| Ontology grounding | `role X = "SO:0000167"`, `artifact P is X` | role terms and kind membership | term shape checked where written | `Grounding` resolves a type to its terms | not yet read by a target |
+| Designs read from SBOL | an SBOL document in place of `.lab` designs | catalogued declarations built and then checked | the same rules a written design meets | `lab-sbol` reads components, sequences, and ordered parts | file discovery pending |
 | Circuit declarations and applications | yes | yes | yes | yes | no |
 | Callable circuit signatures with `-> T` | yes | yes | yes | yes | no |
 | Inline type parameters (`Promoter<S: Signal>`) | yes | yes | harvested in signature order, bounds checked at the call | `parameters` and `bounds` in the portable module and its interface | n/a |
@@ -73,7 +75,7 @@ The separate OT-2 specialization accepts plasmid properties (`backbone`, ordered
 
 Deck layout, labware, instruments, and per-stage capacity come from a target profile rather than from constants, and allocation spills across every plate a profile declares. The target validates reaction balance against each design's own stated volume, replicate and dilution bounds, plate capacity, source-rack capacity, and tip capacity. A batch emits a robot protocol only for the stages its artifacts reach, and artifacts sharing a planning wave share one run.
 
-It does not yet resolve SBOL, inventory lots, overhang compatibility, sequence redesign, concentration normalization, inter-wave DNA preparation, or runtime acceptance evidence. Generated instructions and scripts require laboratory review and qualification before physical execution. The complete specialization boundary is documented separately in [`../integrations/opentrons-build.md`](../integrations/opentrons-build.md).
+It does not yet read the ontology terms a kind is grounded in, nor resolve SBOL, inventory lots, overhang compatibility, sequence redesign, concentration normalization, inter-wave DNA preparation, or runtime acceptance evidence. Generated instructions and scripts require laboratory review and qualification before physical execution. The complete specialization boundary is documented separately in [`../integrations/opentrons-build.md`](../integrations/opentrons-build.md).
 
 ## Editor support
 

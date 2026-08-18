@@ -309,6 +309,7 @@ impl StandardModule {
 /// the ones before it and nothing after, so the bootstrap is a straight line
 /// rather than a graph to resolve.
 const AUTHORED_SOURCES: &[(&str, &str)] = &[
+    ("std.bio.ontology", include_str!("authored/ontology.lab")),
     ("std.bio.designs", include_str!("authored/designs.lab")),
     ("std.bio.parts", include_str!("authored/parts.lab")),
     ("std.bio.backbones", include_str!("authored/backbones.lab")),
@@ -345,6 +346,11 @@ pub(crate) fn authored_imports(path: &str) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// The compiled interfaces of the Lab-written standard modules.
+pub(crate) fn authored_interfaces() -> Arc<BTreeMap<&'static str, ModuleInterface>> {
+    authored_modules()
 }
 
 /// Compile the Lab-written standard modules once for the life of the process.

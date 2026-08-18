@@ -5,19 +5,35 @@
  * snake_case. The word is vocabulary a package supplies; the compiler only
  * knows the shape. Whether any one thing was built or bought is stated by the
  * declaration that names it, not by its kind.
+ *
+ * Each kind states the ontology terms it stands for, so what it is travels with
+ * it. A target reading a design knows a backbone is DNA and an antibiotic is a
+ * small molecule without being told separately.
  */
 
-/** A part a supplier lists, ordered rather than built. */
-artifact Part
+use std.bio.ontology
+
+/**
+ * A part a supplier lists, ordered rather than built.
+ *
+ * A part is made of DNA, so it may state the DNA it is made of. A catalogue
+ * that lists a part usually publishes its sequence, and a design that names the
+ * part is entitled to read it.
+ */
+artifact Part is NucleicAcid:
+  sequence?: DNA
 
 /** A promoter for some signal. */
-artifact Promoter
+artifact Promoter is NucleicAcid, PromoterRegion:
+  sequence?: DNA
 
 /** A coding sequence for some protein. */
-artifact CDS
+artifact CDS is NucleicAcid, CodingSequence:
+  sequence?: DNA
 
 /** An assembly backbone. */
-artifact Backbone
+artifact Backbone is NucleicAcid, EngineeredRegion:
+  sequence?: DNA
 
 /**
  * A type IIS enzyme that opens a backbone.
@@ -26,7 +42,7 @@ artifact Backbone
  * every plasmid cut with the same enzyme cuts the same way. A design may still
  * state its own where a protocol departs from the datasheet.
  */
-artifact RestrictionEnzyme:
+artifact RestrictionEnzyme is Macromolecule:
   digest_temperature?: Quantity<C>
   digest_duration?: Quantity<min>
 
@@ -37,14 +53,14 @@ artifact RestrictionEnzyme:
  * shock and recovery belong to the chassis rather than to each strain built in
  * it.
  */
-artifact Chassis:
+artifact Chassis is FunctionalEntity:
   heat_shock_temperature?: Quantity<C>
   cold_incubation?: Quantity<min>
   recovery_temperature?: Quantity<C>
   recovery_duration?: Quantity<min>
 
 /** A selection agent a transformed culture is plated on. */
-artifact Antibiotic
+artifact Antibiotic is SimpleChemical
 
 /**
  * A DNA design a laboratory can build.
@@ -52,11 +68,16 @@ artifact Antibiotic
  * A plasmid states its sequence directly, or states the backbone together with
  * what goes into it: the parts an assembly joins, or the circuit a sequence can
  * be derived from.
+ *
+ * What an assembly joins is anything made of DNA, which is what `any
+ * NucleicAcid` says. Naming the admissible kinds instead would be a list that
+ * every new kind of part has to be added to, and a promoter or a coding
+ * sequence is no less assemblable than a bare part.
  */
-artifact Plasmid:
+artifact Plasmid is NucleicAcid, EngineeredRegion:
   sequence?: DNA
   backbone?: Backbone
-  components?: List<Part | Plasmid>
+  components?: List<any NucleicAcid>
   cargo?: Circuit<any Signal, any Protein>
 
   declares sequence or (backbone and components) or (backbone and cargo)
@@ -67,7 +88,7 @@ artifact Plasmid:
  * The same plasmid in two hosts is two artifacts, each with its own acceptance
  * criteria and its own place in a build order.
  */
-artifact Strain:
+artifact Strain is FunctionalEntity:
   chassis: Chassis
   plasmids: List<Plasmid>
   selection?: Antibiotic

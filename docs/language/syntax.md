@@ -96,6 +96,19 @@ record Arabinose is Inducer
 record Tetracycline is Inducer
 ```
 
+A role may name the ontology term it stands for. A role's whole content is its
+identity, so the term is written after `=` rather than as a property:
+
+```lab
+role NucleicAcid = "SBO:0000251"
+role EngineeredRegion = "SO:0000804"
+```
+
+A term is an absolute IRI or a compact identifier, and the two spellings of one
+term mean the same thing. A type that plays a grounded role stands for its term,
+which is how a design says what it is in a vocabulary other tools read. A role
+that names no term classifies types and says nothing about any ontology.
+
 `Signal` and `Protein` are roles the prelude already declares, so a module
 declares its own rather than redeclaring those. A role takes no block. Its members are declared by the types that play it, so a
 package can classify its own types against a role it imported, and a role stays
@@ -281,13 +294,17 @@ values, so a reader can tell at a glance which they are looking at.
 
 ```lab
 /** A DNA design a laboratory can build. */
-artifact Plasmid:
+artifact Plasmid is NucleicAcid, EngineeredRegion:
   sequence?: DNA
   backbone?: Backbone
   cargo?: Circuit<any Signal, any Protein>
 
   declares sequence or (backbone and cargo)
 ```
+
+A kind may play roles, written with the same `is` clause a record uses. The
+roles classify the type the kind produces, so a kind grounded in an ontology
+states what its instances are.
 
 A kind names the type its instances have, which is what a workflow writes in
 `Material<Plasmid>` and what `require` and `accept` read fields from. The word
