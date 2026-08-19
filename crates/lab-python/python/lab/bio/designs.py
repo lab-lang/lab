@@ -12,10 +12,26 @@ small molecule without being told separately.
 
 # Generated from the Lab standard library by `python -m lab.codegen`. Do not edit.
 
-from .._vocabulary import ArtifactKind
+from .._vocabulary import ArtifactKind, Symbol
 
 LAB_MODULE = "std.bio.designs"
 """The Lab module these names come from."""
+
+Both = Symbol(name="Both", uses=("std.bio.designs",))
+"""A condition that is two signals at once.
+
+A promoter can integrate several inputs, and what it responds to is then no
+single molecule. Nesting states more than two, because a condition of
+several signals is itself a signal.
+"""
+
+Operon = Symbol(name="Operon", uses=("std.bio.designs",))
+"""Two products expressed from one promoter.
+
+A transcription unit may carry more than one coding sequence, and everything
+downstream of the promoter is expressed together. Nesting states more than
+two, the way `Both` does for the signals a promoter answers to.
+"""
 
 Antibiotic = ArtifactKind(
     word="antibiotic",
@@ -92,16 +108,22 @@ Plasmid = ArtifactKind(
 """A DNA design a laboratory can build.
 
 A plasmid states its sequence directly, or states the backbone together with
-what goes into it: the parts an assembly joins, or the circuit a sequence can
-be derived from.
+what goes into it: the parts an assembly joins, or the circuits a sequence
+can be derived from.
 
 What an assembly joins is anything made of DNA, which is what `any
 NucleicAcid` says. Naming the admissible kinds instead would be a list that
 every new kind of part has to be added to, and a promoter or a coding
 sequence is no less assemblable than a bare part.
 
-Properties: backbone?: Backbone, cargo?: Circuit<any Signal, any Protein>, components?:
-List<any NucleicAcid>, sequence?: DNA.
+Cargo is a list because a circuit is one transcription unit, and a network
+worth carrying is usually several of them wired together by the proteins
+they express. The triggers and products are forgotten because units with
+different triggers have no trigger in common; what each one responds to
+stays on the unit itself.
+
+Properties: backbone?: Backbone, cargo?: List<Circuit<any Signal, any Protein>>,
+components?: List<any NucleicAcid>, sequence?: DNA.
 
 Complete when it states either either sequence, or backbone and components, or backbone
 and cargo.
@@ -111,11 +133,17 @@ Promoter = ArtifactKind(
     word="promoter",
     produces="Promoter",
     uses=("std.bio.designs",),
-    properties=("sequence",),
+    properties=("regulation", "sequence"),
 )
 """A promoter for some signal.
 
-Properties: sequence?: DNA.
+The signal is what the promoter answers to; `regulation` is which way it
+answers. A promoter that expresses more in the presence of its signal is
+induced by it, and one that expresses less is repressed by it. The
+difference is the difference between a buffer and an inverter, so a
+catalogue that knows it says it.
+
+Properties: regulation?: Regulation, sequence?: DNA.
 """
 
 RestrictionEnzyme = ArtifactKind(

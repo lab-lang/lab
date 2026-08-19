@@ -45,6 +45,8 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("Promoter").parameters(1),
         TypeSpec::role("Protein").documented("A gene product a coding sequence expresses."),
         TypeSpec::nominal("Reason"),
+        TypeSpec::nominal("Regulation")
+            .documented("Which way a promoter answers the signal it responds to."),
         TypeSpec::nominal("Rejected").parameters(1),
         TypeSpec::nominal("RestrictionEnzyme"),
         TypeSpec::nominal("Screening").with_fields([("clones", named("CloneSet"))]),
@@ -61,6 +63,13 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
     ];
     let values = [
         ("circular", named("Topology")),
+        // A promoter that answers its signal by expressing more is induced by
+        // it; one that answers by expressing less is repressed. Which way a
+        // promoter runs is what separates an inverter from a buffer, so it is
+        // stated rather than inferred from the numbers a datasheet happens to
+        // carry.
+        ("induced", named("Regulation")),
+        ("repressed", named("Regulation")),
         ("None", Ty::None),
         ("no_colonies", named("Reason")),
         ("sequence_mismatch", named("Reason")),

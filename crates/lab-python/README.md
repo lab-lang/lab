@@ -91,9 +91,13 @@ reporter = golden_gate.Plasmid.build(
 
 Each referenced part becomes a catalogued declaration whose identity is the registry IRI, because an imported component is something a supplier lists, not something this laboratory built.
 
-## Circuits in LOICA
+## Networks in LOICA
 
-A circuit is a LOICA genetic network, which is how the field already designs circuits against SBOL. `lab.circuit` lowers the network to a Lab `circuit` declaration, and each call binds one instance. The trigger and the product are read off the network's own SBOL types, so `Circuit<Trigger, Product>` is never restated:
+A LOICA genetic network is how the field already designs circuits against SBOL, and it is not one circuit. It is a set of transcription units wired together by the gene products they express. Lab's `Circuit<Trigger, Product>` is one transcription unit, so `lab.circuit` lowers a network to one Lab circuit per operator, bound into a list.
+
+The wiring is carried by the types rather than by a separate graph. A regulator is expressed by one unit and induces another, so it becomes a record playing both `Protein` and `Signal`, and the compiler checks the cascade: the second unit's promoter must respond to the first unit's product. Wiring a cascade to the wrong regulator is a type error.
+
+The trigger and the product of each unit are read off the network, so `Circuit<Trigger, Product>` is never restated:
 
 ```python
 import loica
@@ -128,7 +132,20 @@ def regulated_expression() -> lab.Layout:
 tet_reporter = regulated_expression()
 ```
 
-`tet_reporter` checks as `Circuit<ATc, SfGFP>`: the supplement's component is a simple chemical, so it is the trigger; the reporter's is the coding sequence of the product. The receiver's Hill parameters (`alpha`, `K`, `n`) are characterization a catalogued promoter has no schema field for yet, so they stay on the binding as `tet_reporter.characterization` rather than lowering.
+`tet_reporter` is the list of units; its one unit checks as `Circuit<ATc, SfGFP>`. Each unit is reachable through `tet_reporter.units`, and a plasmid carries the whole network as `cargo=tet_reporter`.
+
+Everything LOICA can build lowers:
+
+| LOICA | Lab |
+| --- | --- |
+| `Source` (constitutive) | `Circuit<Constitutive, P>` |
+| `Receiver`, `Hill1` | `Circuit<S, P>`, with `regulation` read from the Hill parameters |
+| `Hill2`, `Sum` | `Promoter<Both<A, B>>`, nested for more than two inputs |
+| polycistronic output | `CDS<Operon<A, B>>`, nested for more than two products |
+| a regulator shared by two operators | one record playing `Protein` and `Signal` |
+| a ring of repressors | units whose triggers and products close the cycle |
+
+Polarity is not guesswork. LOICA states it in the Hill parameters, where a basal rate above the regulated rate means the promoter expresses less in the presence of its input, so the emitted promoter carries `regulation = repressed` or `regulation = induced`. The remaining Hill parameters (`alpha`, `K`, `n`) are characterization a catalogued promoter has no schema field for, so they stay on each unit as `unit.characterization` rather than lowering.
 
 Both readers are structural: neither `sbol3` nor `loica` is imported by the `lab` package, so anything with the right shape lowers and the package works without either installed. `pip install lab-sdk[bio]` brings in the pair the examples are written with.
 

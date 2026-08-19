@@ -452,7 +452,7 @@ Quantity-valued properties state the chemistry a design is built with. These are
 ```lab
 plasmid p_gfp:
   backbone = pSB1C3
-  cargo = gfp_circuit
+  cargo = [gfp_circuit]
   reaction_volume = 20 uL
   part_volume = 2 uL
   assembly_cycles = 75

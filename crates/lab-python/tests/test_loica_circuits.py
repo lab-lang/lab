@@ -1,8 +1,11 @@
-"""Circuits written as LOICA genetic networks.
+"""Networks written as LOICA genetic networks.
 
-The reporter example under `programs/reporter/circuit.py` is the LOICA form
-of `regulated_expression`; the hand-written Lab below is the same circuit in
-Lab's own syntax. The two must compile to the same checked module.
+A LOICA network is a set of transcription units wired by the gene products
+they express, so it lowers to one Lab circuit per unit bound into a list. The
+reporter example under `programs/reporter/` holds the single-unit form and the
+repressilator holds the three-unit ring; the hand-written Lab below is the
+same ring in Lab's own syntax, and the two must compile to the same checked
+module.
 
 The network is read structurally, so one class of tests runs against the real
 LOICA library and another against plain objects with a network's shape, which
@@ -19,27 +22,54 @@ import lab
 HAVE_BIO = bool(importlib.util.find_spec("sbol3")) and bool(importlib.util.find_spec("loica"))
 if HAVE_BIO:
     from programs.reporter import circuit as reporter_circuit
+    from programs.reporter import repressilator as reporter_ring
 
-HAND_WRITTEN = """\
+RING = """\
 /*!
- * The tet reporter circuit, written as a LOICA genetic network.
+ * The repressilator, written as a LOICA genetic network.
+ *
+ * Three transcription units in a ring, each repressor shutting off the next.
+ * Nothing induces it from outside and nothing reports out of it: the whole
+ * network is regulators wired to each other, which is what makes it the
+ * sharpest test that the wiring is carried by the types.
  */
 
 use std.bio.designs
 use std.bio.parts
 
-record ATc is Signal
+record TetR is Protein, Signal
 
-record SfGFP is Protein
+record LacI is Protein, Signal
+
+record CI is Protein, Signal
 
 buy:
-  promoter pTet_promoter: Promoter<ATc>:
-    identity = "https://synbiohub.org/user/marpaia/reporter/pTet"
-  cds sfGFP_cds: CDS<SfGFP>:
-    identity = "https://synbiohub.org/user/marpaia/reporter/sfGFP"
+  promoter pLac: Promoter<LacI>:
+    identity = "https://example.org/repressilator/pLac"
+    regulation = repressed
 
-/** A promoter driving a coding sequence through a shared RBS and terminator. */
-circuit regulated_expression(
+  cds TetR_cds: CDS<TetR>:
+    identity = "https://example.org/repressilator/TetR"
+
+  promoter pTet_promoter: Promoter<TetR>:
+    identity = "https://example.org/repressilator/pTet"
+    regulation = repressed
+
+  cds CI_cds: CDS<CI>:
+    identity = "https://example.org/repressilator/CI"
+
+  promoter pCI: Promoter<CI>:
+    identity = "https://example.org/repressilator/pCI"
+    regulation = repressed
+
+  cds LacI_cds: CDS<LacI>:
+    identity = "https://example.org/repressilator/LacI"
+
+/**
+ * One transcription unit: a promoter driving a coding sequence
+ * through the shared RBS and terminator.
+ */
+circuit repressilator_unit(
   promoter: Promoter<Trigger: Signal>,
   coding: CDS<Product: Protein>,
 ) -> Circuit<Trigger, Product>:
@@ -49,7 +79,16 @@ circuit regulated_expression(
     coding
     B0015
 
-tet_reporter = regulated_expression(pTet_promoter, sfGFP_cds)
+repressilator_1 = repressilator_unit(pLac, TetR_cds)
+
+repressilator_2 = repressilator_unit(pTet_promoter, CI_cds)
+
+repressilator_3 = repressilator_unit(pCI, LacI_cds)
+
+/**
+ * Three repressors in a ring, each shutting off the next.
+ */
+ring = [repressilator_1, repressilator_2, repressilator_3]
 """
 
 _OFFSET = re.compile(r"^(?P<name>.+)@\d+$")
@@ -69,78 +108,126 @@ def normalize(value: Any) -> Any:
     return value
 
 
+def bindings(checked: dict[str, Any]) -> dict[str, Any]:
+    """Every binding in a checked module, by the name it binds."""
+
+    found = {}
+    for declaration in checked["declarations"]:
+        if declaration["kind"] == "binding":
+            for target in declaration["targets"]:
+                found[target["name"]] = target["type"]
+    return found
+
+
+def arguments(ty: dict[str, Any]) -> list[str]:
+    return [argument["name"] for argument in ty["arguments"]]
+
+
 @unittest.skipUnless(HAVE_BIO, "sbol3 and loica are required")
-class LoicaCircuitTests(unittest.TestCase):
+class SingleUnitTests(unittest.TestCase):
     def test_the_circuit_module_checks(self) -> None:
         program = lab.check(reporter_circuit.module)
 
         self.assertIn("reporter.circuit", program.checked)
 
-    def test_the_binding_reads_trigger_and_product_off_the_network(self) -> None:
+    def test_the_unit_reads_trigger_and_product_off_the_network(self) -> None:
         program = lab.check(reporter_circuit.module)
 
-        checked = program.checked["reporter.circuit"]
-        binding = next(d for d in checked["declarations"] if d["kind"] == "binding")
-        target = binding["targets"][0]
-        self.assertEqual(target["name"], "tet_reporter")
-        self.assertEqual(target["type"]["name"], "Circuit")
-        self.assertEqual(
-            [argument["name"] for argument in target["type"]["arguments"]],
-            ["ATc", "SfGFP"],
-        )
+        bound = bindings(program.checked["reporter.circuit"])
+        self.assertEqual(arguments(bound["regulated_expression_1"]), ["ATc", "SfGFP"])
 
-    def test_the_network_matches_the_hand_written_lab(self) -> None:
-        written = lab.check_sources({"reporter.circuit": HAND_WRITTEN})
-        emitted = lab.check(reporter_circuit.module)
-
-        self.assertEqual(
-            normalize(emitted.checked["reporter.circuit"]),
-            normalize(written.checked["reporter.circuit"]),
-        )
-
-    def test_parts_carry_their_sbol_identities(self) -> None:
+    def test_a_one_unit_network_is_still_a_list(self) -> None:
         program = lab.check(reporter_circuit.module)
 
-        checked = program.checked["reporter.circuit"]
-        identities = {
-            d["name"]: d["identity"] for d in checked["declarations"] if d["kind"] == "catalog"
-        }
-        self.assertEqual(
-            identities,
-            {
-                "pTet_promoter": "https://synbiohub.org/user/marpaia/reporter/pTet",
-                "sfGFP_cds": "https://synbiohub.org/user/marpaia/reporter/sfGFP",
-            },
-        )
+        bound = bindings(program.checked["reporter.circuit"])
+        self.assertEqual(bound["tet_reporter"]["kind"], "list")
 
-    def test_characterization_rides_on_the_binding(self) -> None:
+    def test_a_receiver_is_induced_by_its_supplement(self) -> None:
+        source = reporter_circuit.module.source()
+
+        self.assertIn("regulation = induced", source)
+
+    def test_characterization_rides_on_each_unit(self) -> None:
         self.assertEqual(
             reporter_circuit.tet_reporter.characterization,
-            {"alpha": [0, 100], "K": 1, "n": 2},
+            [{"alpha": [0, 100], "K": 1, "n": 2}],
+        )
+
+
+@unittest.skipUnless(HAVE_BIO, "sbol3 and loica are required")
+class RepressilatorTests(unittest.TestCase):
+    """Three units in a ring: the case a single-unit lowering cannot state."""
+
+    def test_the_ring_checks(self) -> None:
+        program = lab.check(reporter_ring.module)
+
+        self.assertIn("reporter.repressilator", program.checked)
+
+    def test_the_ring_matches_the_hand_written_lab(self) -> None:
+        written = lab.check_sources({"reporter.repressilator": RING})
+        emitted = lab.check(reporter_ring.module)
+
+        self.assertEqual(
+            normalize(emitted.checked["reporter.repressilator"]),
+            normalize(written.checked["reporter.repressilator"]),
+        )
+
+    def test_each_unit_is_typed_by_the_regulator_it_answers_to(self) -> None:
+        program = lab.check(reporter_ring.module)
+
+        bound = bindings(program.checked["reporter.repressilator"])
+        self.assertEqual(arguments(bound["repressilator_1"]), ["LacI", "TetR"])
+        self.assertEqual(arguments(bound["repressilator_2"]), ["TetR", "CI"])
+        self.assertEqual(arguments(bound["repressilator_3"]), ["CI", "LacI"])
+
+    def test_a_regulator_is_both_a_protein_and_a_signal(self) -> None:
+        program = lab.check(reporter_ring.module)
+
+        checked = program.checked["reporter.repressilator"]
+        roles = {
+            declaration["name"]: declaration["roles"]
+            for declaration in checked["declarations"]
+            if declaration["kind"] == "data"
+        }
+        for regulator in ("TetR", "LacI", "CI"):
+            with self.subTest(regulator=regulator):
+                self.assertEqual(sorted(roles[regulator]), ["Protein", "Signal"])
+
+    def test_repression_is_read_from_the_hill_parameters(self) -> None:
+        source = reporter_ring.module.source()
+
+        self.assertEqual(source.count("regulation = repressed"), 3)
+        self.assertNotIn("regulation = induced", source)
+
+    def test_the_network_binds_every_unit(self) -> None:
+        self.assertEqual(
+            [unit.name for unit in reporter_ring.ring.units],
+            ["repressilator_1", "repressilator_2", "repressilator_3"],
         )
 
 
 class _Component:
     """The shape of an sbol3.Component, without sbol3."""
 
-    def __init__(self, display_id: str, types: list[str], roles: list[str] | None = None) -> None:
+    def __init__(self, display_id: str, roles: list[str] | None = None) -> None:
         self.display_id = display_id
         self.identity = f"https://example.org/parts/{display_id}"
-        self.types = types
+        self.types = ["https://identifiers.org/SBO:0000251"]
         self.roles = roles or []
 
 
 class _Part:
-    def __init__(self, name: str, sbol_comp: _Component | None = None) -> None:
+    def __init__(self, name: str) -> None:
         self.name = name
-        self.sbol_comp = sbol_comp
+        self.sbol_comp = _Component(name)
 
 
 class _Operator:
-    def __init__(self, input: object, output: object, sbol_comp: _Component | None) -> None:
+    def __init__(self, input: object, output: object, alpha: list[float] | None = None) -> None:
         self.input = input
         self.output = output
-        self.sbol_comp = sbol_comp
+        self.alpha = alpha
+        self.sbol_comp = None
 
 
 class _Network:
@@ -148,81 +235,106 @@ class _Network:
         self.operators = operators
 
 
-def _network() -> _Network:
-    inducer = _Part("iptg", _Component("iptg", ["https://identifiers.org/SBO:0000247"]))
-    product = _Part(
-        "mCherry",
-        _Component(
-            "mCherry",
-            ["https://identifiers.org/SBO:0000251"],
-            ["https://identifiers.org/SO:0000316"],
-        ),
-    )
-    operator = _Operator(
-        inducer,
-        product,
-        _Component(
-            "pLac",
-            ["https://identifiers.org/SBO:0000251"],
-            ["https://identifiers.org/SO:0000167"],
-        ),
-    )
-    return _Network([operator])
+def _lower(network: _Network, name: str = "shape") -> lab.NetworkBinding:
+    from lab.bio.parts import B0015, B0034
+
+    module = lab.Module(f"{name}.circuit")
+
+    @lab.circuit
+    def built() -> lab.Layout:
+        return lab.layout(network, rbs=B0034, terminator=B0015)
+
+    return built(name="network", module=module)
 
 
 class StructuralNetworkTests(unittest.TestCase):
     """The network is duck-typed, so LOICA's shape is enough without LOICA."""
 
-    def _instantiate(self, network: _Network) -> lab.CircuitBinding:
-        from lab.bio.parts import B0015, B0034
+    def test_a_cascade_wires_one_units_product_to_the_next_units_trigger(self) -> None:
+        aTc, tetR, gfp = _Part("aTc"), _Part("TetR"), _Part("Gfp")
+        network = _Network([_Operator(aTc, tetR, [0, 100]), _Operator(tetR, gfp, [0, 100])])
 
-        module = lab.Module("shape.circuit")
-
-        @lab.circuit
-        def lac_expression() -> lab.Layout:
-            return lab.layout(network, rbs=B0034, terminator=B0015)
-
-        return lac_expression(name="lac_reporter", module=module)
-
-    def test_a_network_shaped_object_lowers_without_loica(self) -> None:
-        binding = self._instantiate(_network())
+        binding = _lower(network, "cascade")
 
         program = lab.check(binding.module)
-        checked = program.checked["shape.circuit"]
-        target = next(d for d in checked["declarations"] if d["kind"] == "binding")
-        self.assertEqual(
-            [argument["name"] for argument in target["targets"][0]["type"]["arguments"]],
-            ["Iptg", "MCherry"],
+        bound = bindings(program.checked["cascade.circuit"])
+        self.assertEqual(arguments(bound["built_1"]), ["ATc", "TetR"])
+        self.assertEqual(arguments(bound["built_2"]), ["TetR", "Gfp"])
+
+    def test_a_constitutive_source_answers_to_a_named_condition(self) -> None:
+        network = _Network([_Operator(None, _Part("Gfp"))])
+
+        binding = _lower(network, "constitutive")
+
+        source = binding.module.source()
+        self.assertIn("record Constitutive is Signal", source)
+        program = lab.check(binding.module)
+        bound = bindings(program.checked["constitutive.circuit"])
+        self.assertEqual(arguments(bound["built_1"]), ["Constitutive", "Gfp"])
+
+    def test_a_two_input_operator_combines_its_signals(self) -> None:
+        tetR, lacI, gfp = _Part("TetR"), _Part("LacI"), _Part("Gfp")
+        network = _Network([_Operator([tetR, lacI], gfp, [0, 10, 10, 100])])
+
+        binding = _lower(network, "gate")
+
+        self.assertIn("Promoter<Both<TetR, LacI>>", binding.module.source())
+        lab.check(binding.module)
+
+    def test_a_three_input_operator_nests_its_signals(self) -> None:
+        parts = [_Part("TetR"), _Part("LacI"), _Part("AraC")]
+        network = _Network([_Operator(parts, _Part("Gfp"), [0, 100])])
+
+        binding = _lower(network, "three")
+
+        self.assertIn("Promoter<Both<TetR, Both<LacI, AraC>>>", binding.module.source())
+        lab.check(binding.module)
+
+    def test_a_polycistronic_operator_combines_its_products(self) -> None:
+        network = _Network([_Operator(_Part("aTc"), [_Part("Gfp"), _Part("Rfp")], [0, 100])])
+
+        binding = _lower(network, "poly")
+
+        self.assertIn("CDS<Operon<Gfp, Rfp>>", binding.module.source())
+        lab.check(binding.module)
+
+    def test_fan_out_reuses_one_regulator_across_units(self) -> None:
+        tetR = _Part("TetR")
+        network = _Network(
+            [
+                _Operator(_Part("aTc"), tetR, [0, 100]),
+                _Operator(tetR, _Part("Gfp"), [0, 100]),
+                _Operator(tetR, _Part("Rfp"), [0, 100]),
+            ]
         )
 
-    def test_a_network_with_two_operators_is_refused(self) -> None:
-        network = _network()
-        network.operators = network.operators * 2
+        binding = _lower(network, "fanout")
 
-        with self.assertRaisesRegex(lab.CircuitError, "exactly one"):
-            self._instantiate(network)
+        source = binding.module.source()
+        self.assertEqual(source.count("record TetR is Protein, Signal"), 1)
+        lab.check(binding.module)
 
-    def test_an_operator_without_an_input_is_refused(self) -> None:
-        network = _network()
-        network.operators = [_Operator(None, _Part("gfp"), None)]
+    def test_two_parts_sharing_a_name_stay_two_parts(self) -> None:
+        network = _Network([_Operator(_Part("X"), _Part("X"), [0, 100])])
 
-        with self.assertRaisesRegex(lab.CircuitError, "no input"):
-            self._instantiate(network)
+        binding = _lower(network, "samename")
 
-    def test_a_mistyped_inducer_component_is_refused(self) -> None:
-        network = _network()
-        inducer = _Part("iptg", _Component("iptg", ["https://identifiers.org/SBO:0000251"]))
-        network.operators = [_Operator(inducer, _Part("mCherry"), None)]
+        lab.check(binding.module)
 
-        with self.assertRaisesRegex(lab.CircuitError, "SBO:0000247"):
-            self._instantiate(network)
+    def test_an_empty_network_is_refused(self) -> None:
+        with self.assertRaisesRegex(lab.CircuitError, "no operators"):
+            _lower(_Network([]), "empty")
+
+    def test_an_operator_expressing_nothing_is_refused(self) -> None:
+        with self.assertRaisesRegex(lab.CircuitError, "expresses nothing"):
+            _lower(_Network([_Operator(_Part("aTc"), None)]), "noproduct")
 
     def test_a_bare_network_return_is_refused(self) -> None:
         module = lab.Module("shape.bare")
 
         @lab.circuit
         def bare() -> lab.Layout:
-            return _network()  # type: ignore[return-value]
+            return _Network([])  # type: ignore[return-value]
 
         with self.assertRaisesRegex(lab.CircuitError, "lab.layout"):
             bare(name="x", module=module)

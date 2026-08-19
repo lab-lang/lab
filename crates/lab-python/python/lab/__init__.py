@@ -19,9 +19,10 @@ import json
 from typing import Any, cast
 
 from ._circuits import (
-    CircuitBinding,
     CircuitError,
     Layout,
+    NetworkBinding,
+    UnitBinding,
     circuit,
     layout,
 )
@@ -70,7 +71,6 @@ def compile_lab_module(source: str) -> dict[str, Any]:
 __all__ = [
     "ArtifactKind",
     "Binding",
-    "CircuitBinding",
     "CircuitDeclaration",
     "CircuitError",
     "Claim",
@@ -83,6 +83,7 @@ __all__ = [
     "LabError",
     "Layout",
     "Module",
+    "NetworkBinding",
     "Origin",
     "Predicate",
     "Program",
@@ -92,6 +93,7 @@ __all__ = [
     "RecordDeclaration",
     "Symbol",
     "Unit",
+    "UnitBinding",
     "analyze",
     "analyze_sources",
     "and_",

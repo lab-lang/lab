@@ -64,6 +64,9 @@ Protein = Symbol(name="Protein", uses=())
 
 Reason = Symbol(name="Reason", uses=())
 
+Regulation = Symbol(name="Regulation", uses=())
+"""Which way a promoter answers the signal it responds to."""
+
 Rejected = Symbol(name="Rejected", uses=())
 
 RestrictionEnzyme = Symbol(name="RestrictionEnzyme", uses=())
@@ -82,6 +85,12 @@ WorkflowContext = Symbol(name="WorkflowContext", uses=())
 
 circular = Symbol(name="circular", uses=())
 """A value of type Topology."""
+
+induced = Symbol(name="induced", uses=())
+"""A value of type Regulation."""
+
+repressed = Symbol(name="repressed", uses=())
+"""A value of type Regulation."""
 
 no_colonies = Symbol(name="no_colonies", uses=())
 """A value of type Reason."""
