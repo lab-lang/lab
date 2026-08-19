@@ -15,7 +15,7 @@ checks the cascade because the second unit's promoter must respond to the
 first unit's product.
 
     @lab.circuit
-    def repressilator() -> lab.Layout:
+    def repressilator() -> lab.Network:
         network = loica.GeneticNetwork()
         network.add_operator([p_lac, p_tet, p_ci])
         network.add_regulator([tetR, cI, lacI])
@@ -60,7 +60,7 @@ CONSTITUTIVE = "Constitutive"
 
 
 @dataclass(frozen=True)
-class Layout:
+class Network:
     """A genetic network and the shared parts each of its units is built with.
 
     A network names its promoters and the products they express; the ribosome
@@ -73,10 +73,10 @@ class Layout:
     terminator: object
 
 
-def layout(network: object, *, rbs: object, terminator: object) -> Layout:
+def layout(network: object, *, rbs: object, terminator: object) -> Network:
     """State the parts every transcription unit in a network is built with."""
 
-    return Layout(network=network, rbs=rbs, terminator=terminator)
+    return Network(network=network, rbs=rbs, terminator=terminator)
 
 
 class CircuitError(TypeError):
@@ -136,7 +136,7 @@ class _Unit:
     coding: Declaration = field(init=False)
 
 
-def circuit(fn: Callable[[], Layout]) -> Callable[..., NetworkBinding]:
+def circuit(fn: Callable[[], Network]) -> Callable[..., NetworkBinding]:
     """A network written as a function returning a LOICA genetic network.
 
     Calling the decorated function lowers the network once into one Lab
@@ -187,7 +187,7 @@ def circuit(fn: Callable[[], Layout]) -> Callable[..., NetworkBinding]:
     return instantiate
 
 
-def _module_of(fn: Callable[[], Layout]) -> Module:
+def _module_of(fn: Callable[[], Network]) -> Module:
     """The Lab module of the file the circuit function was written in."""
 
     modules = [value for value in fn.__globals__.values() if isinstance(value, Module)]
@@ -208,11 +208,11 @@ class _Lowered:
     units: list[_Unit]
 
 
-def _lower(fn: Callable[[], Layout], module: Module, origin: Origin) -> _Lowered:
+def _lower(fn: Callable[[], Network], module: Module, origin: Origin) -> _Lowered:
     """Run the network builder once and mint everything its units need."""
 
     built = fn()
-    if not isinstance(built, Layout):
+    if not isinstance(built, Network):
         raise CircuitError(
             f"{fn.__name__} returned {type(built).__name__}; a circuit function returns "
             "lab.layout(network, rbs=..., terminator=...), which states the shared parts "

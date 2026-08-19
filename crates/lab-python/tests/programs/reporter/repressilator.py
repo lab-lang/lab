@@ -36,7 +36,7 @@ p_ci = loica.Hill1(input=cI, output=lacI, alpha=[100, 0], K=1, n=2, sbol_comp=_p
 
 
 @lab.circuit
-def repressilator() -> lab.Layout:
+def repressilator() -> lab.Network:
     """Three repressors in a ring, each shutting off the next."""
     network = loica.GeneticNetwork()
     network.add_operator([p_lac, p_tet, p_ci])

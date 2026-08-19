@@ -85,6 +85,80 @@ jobs:
             lab-${{ matrix.target }}.tar.gz.sha256
           if-no-files-found: error
 
+  # One abi3 wheel per platform covers CPython 3.11 and newer, so the matrix
+  # is platforms rather than platforms times interpreter versions. The sdist
+  # carries the workspace crates the bindings are built from, so installing
+  # from source works anywhere a Rust toolchain does.
+  wheels:
+    needs: check-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+          - target: x86_64-apple-darwin
+            os: macos-14
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.target }}
+          args: --release --out dist --manifest-path crates/lab-python/Cargo.toml
+          # The Linux wheels build in manylinux containers so they carry a
+          # tag pip will install on any reasonably current distribution.
+          manylinux: auto
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  sdist:
+    needs: check-tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist --manifest-path crates/lab-python/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  # Trusted publishing: PyPI is configured to accept uploads from this
+  # workflow in this repository, so there is no API token to hold. The
+  # environment is what a protection rule can require a review on.
+  pypi:
+    needs: [wheels, sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheels-*
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
   release:
     needs: build
     runs-on: ubuntu-latest

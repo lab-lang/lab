@@ -1,6 +1,45 @@
-# Lab Python SDK
+# Lab
 
-The Python package is a PyO3 binding over `lab-compiler` and an object model for writing Lab programs in Python. It does not reimplement parsing or semantic checking: the object model emits Lab source and the language's own frontend decides whether it is well formed.
+[Lab](https://lab-lang.org) is a compiler for biology. It takes a description of what should exist, what must be true of it, and what evidence would accept it, and lowers that to something a person or a robot can run.
+
+This distribution is `lab-compiler`, and it imports as `lab`:
+
+```sh
+pip install lab-compiler
+```
+
+Designs are written in [pySBOL3](https://pysbol3.readthedocs.io) and circuits in [LOICA](https://github.com/RudgeLab/LOICA), which is what the field already uses. Neither is required at runtime, because both are read structurally; install them alongside with `pip install "lab-compiler[bio]"`.
+
+```python
+import lab
+from lab.bio.designs import Backbone
+from lab.bio.golden_gate import Plasmid
+from lab.prelude import circular, dna
+from lab.units import ng, uL
+
+module = lab.Module("reporter.designs")
+
+pSB1C3 = Backbone.buy(identity="https://synbiohub.org/public/igem/pSB1C3/1")
+
+reporter = Plasmid.build(
+    sequence=dna("GCTAGCGGATCC"),
+    backbone=pSB1C3,
+    require=[lambda plasmid: plasmid.topology == circular],
+    accept=[lambda built: built.concentration >= 100 * ng / uL],
+)
+
+lab.check(module)
+```
+
+A rejected program raises `lab.LabError`, and each diagnostic points at the line of Python that produced the Lab it is about.
+
+Wheels are published for macOS, Linux, and Windows on CPython 3.11 and newer. Installing from source needs a Rust toolchain.
+
+The rest of this file is the package's own documentation.
+
+## How it works
+
+The Python package is a PyO3 binding over the `lab-compiler` crate and an object model for writing Lab programs in Python. It does not reimplement parsing or semantic checking: the object model emits Lab source and the language's own frontend decides whether it is well formed.
 
 Checking source text directly returns the backend-neutral checked module as Python-native data:
 
@@ -121,7 +160,7 @@ pTet = loica.Receiver(
 
 
 @lab.circuit
-def regulated_expression() -> lab.Layout:
+def regulated_expression() -> lab.Network:
     """A promoter driving a coding sequence through a shared RBS and terminator."""
     network = loica.GeneticNetwork()
     network.add_operator(pTet)
@@ -147,7 +186,7 @@ Everything LOICA can build lowers:
 
 Polarity is not guesswork. LOICA states it in the Hill parameters, where a basal rate above the regulated rate means the promoter expresses less in the presence of its input, so the emitted promoter carries `regulation = repressed` or `regulation = induced`. The remaining Hill parameters (`alpha`, `K`, `n`) are characterization a catalogued promoter has no schema field for, so they stay on each unit as `unit.characterization` rather than lowering.
 
-Both readers are structural: neither `sbol3` nor `loica` is imported by the `lab` package, so anything with the right shape lowers and the package works without either installed. `pip install lab-sdk[bio]` brings in the pair the examples are written with.
+Both readers are structural: neither `sbol3` nor `loica` is imported by the `lab` package, so anything with the right shape lowers and the package works without either installed. `pip install "lab-compiler[bio]"` brings in the pair the examples are written with.
 
 ## The standard-library mirror
 
@@ -178,3 +217,22 @@ The gate runs against the installed extension, so rebuild it after changing Rust
 ```sh
 cd crates/lab-python && uv run maturin develop --uv
 ```
+
+## Releasing
+
+The distribution is `lab-compiler` on PyPI and the package it installs is `lab`. Its version is the Cargo workspace version, so the wheels and the CLI binaries ship from one tag and cannot disagree about what release they are.
+
+Pushing a `v*.*.*` tag builds abi3 wheels for macOS, Linux, and Windows, builds an sdist carrying the workspace crates the bindings compile from, and uploads both to PyPI. One abi3 wheel per platform serves CPython 3.11 and newer, so the matrix is platforms rather than platforms times interpreter versions.
+
+Build the artifacts locally to see exactly what a release would upload:
+
+```sh
+cd crates/lab-python
+uv run maturin build --release --out dist
+uv run maturin sdist --out dist
+```
+
+Uploads use [trusted publishing](https://docs.pypi.org/trusted-publishers/), so there is no API token in the repository. It needs two things set up once, and until they exist the `pypi` job is the only part of a release that fails:
+
+- a PyPI trusted publisher for the project, naming this repository and `release.yml` as the workflow;
+- a GitHub environment named `pypi`, which is where a required-reviewer rule goes if a release should pause for a human.

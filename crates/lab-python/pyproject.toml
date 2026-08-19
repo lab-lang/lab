@@ -2,12 +2,48 @@
 requires = ["maturin>=1.13,<2"]
 build-backend = "maturin"
 
+# The distribution is `lab-compiler` and the package it installs is `lab`,
+# because the thing being distributed is the compiler and the thing being
+# imported is the language. Keep the version in step with the Cargo
+# workspace: the release workflow checks the tag against it once, and the
+# wheels and the CLI binaries ship from that same tag.
 [project]
-name = "lab-sdk"
+name = "lab-compiler"
 version = "0.1.2"
-description = "Python SDK for compiling biological specifications with Lab"
+description = "The Lab compiler: designs as pySBOL3 components, circuits as LOICA networks, checked end to end"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Mike Arpaia" }]
+keywords = [
+  "synthetic-biology",
+  "sbol",
+  "loica",
+  "compiler",
+  "laboratory-automation",
+  "protocols",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://lab-lang.org"
+Documentation = "https://lab-lang.org/docs/overview"
+Repository = "https://github.com/lab-lang/lab"
+Issues = "https://github.com/lab-lang/lab/issues"
 
 # The SDK reads pySBOL3 components and LOICA networks structurally, so
 # neither library is required at runtime; the extra installs the pair the
@@ -32,6 +68,9 @@ dev = [
 python-source = "python"
 module-name = "lab._native"
 features = ["pyo3/extension-module"]
+# The working tree carries bytecode from the editable install used to run the
+# tests, and none of it belongs in a wheel built from that tree.
+exclude = ["**/__pycache__/**", "**/*.pyc"]
 
 [tool.ruff]
 target-version = "py311"

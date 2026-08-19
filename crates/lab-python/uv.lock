@@ -237,7 +237,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lab-sdk"
+name = "lab-compiler"
 version = "0.1.2"
 source = { editable = "." }
 

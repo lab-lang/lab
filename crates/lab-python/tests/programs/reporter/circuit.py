@@ -31,7 +31,7 @@ pTet = loica.Receiver(
 
 
 @lab.circuit
-def regulated_expression() -> lab.Layout:
+def regulated_expression() -> lab.Network:
     """A promoter driving a coding sequence through a shared RBS and terminator."""
     network = loica.GeneticNetwork()
     network.add_operator(pTet)

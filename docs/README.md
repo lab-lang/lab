@@ -2,6 +2,8 @@
 
 This directory records what Lab is becoming, what has been decided, and what the current implementation can honestly do.
 
+The compiler has two frontends. Python is where most experiments are written, and its API is documented with the [Python SDK](../crates/lab-python/README.md). Lab is the native language, and it is what this directory describes: the specimens and design documents below are written in Lab because it names these ideas in the fewest words. Both frontends lower to the same checked module, so nothing downstream can tell which one a declaration came from.
+
 If you are new to the language, start with the [repository introduction](../README.md), then read the representative programs:
 
 - [plasmid design](language/specimens/plasmid-design.lab) shows typed biological composition, requirements, and evidence-based acceptance;

@@ -241,7 +241,7 @@ def _lower(network: _Network, name: str = "shape") -> lab.NetworkBinding:
     module = lab.Module(f"{name}.circuit")
 
     @lab.circuit
-    def built() -> lab.Layout:
+    def built() -> lab.Network:
         return lab.layout(network, rbs=B0034, terminator=B0015)
 
     return built(name="network", module=module)
@@ -333,7 +333,7 @@ class StructuralNetworkTests(unittest.TestCase):
         module = lab.Module("shape.bare")
 
         @lab.circuit
-        def bare() -> lab.Layout:
+        def bare() -> lab.Network:
             return _Network([])  # type: ignore[return-value]
 
         with self.assertRaisesRegex(lab.CircuitError, "lab.layout"):

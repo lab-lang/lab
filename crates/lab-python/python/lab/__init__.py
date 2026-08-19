@@ -20,7 +20,7 @@ from typing import Any, cast
 
 from ._circuits import (
     CircuitError,
-    Layout,
+    Network,
     NetworkBinding,
     UnitBinding,
     circuit,
@@ -81,8 +81,8 @@ __all__ = [
     "Fields",
     "Function",
     "LabError",
-    "Layout",
     "Module",
+    "Network",
     "NetworkBinding",
     "Origin",
     "Predicate",
