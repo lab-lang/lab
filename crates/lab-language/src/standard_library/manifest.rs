@@ -79,10 +79,17 @@ pub enum Export {
     },
     /// A durable effect, and the phrase that performs it. The phrase is the
     /// words and operand names in the order they are written.
+    ///
+    /// A clause a caller may leave out is written into the phrase in its
+    /// place and repeated in `optional`, because a reader of the phrase alone
+    /// cannot tell that `realize <design> from <dependencies>` performs
+    /// without the `from`.
     Action {
         name: String,
         documentation: String,
         phrase: Vec<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        optional: Vec<Vec<String>>,
         results: Vec<Field>,
     },
 }
@@ -184,6 +191,20 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
                 .iter()
                 .flat_map(super::contract::PhrasePart::parts)
                 .map(phrase_word)
+                .collect(),
+            optional: action
+                .phrase
+                .iter()
+                .filter_map(|part| match part {
+                    super::contract::PhrasePart::Optional(clause) => Some(
+                        clause
+                            .iter()
+                            .flat_map(super::contract::PhrasePart::parts)
+                            .map(phrase_word)
+                            .collect(),
+                    ),
+                    _ => None,
+                })
                 .collect(),
             results: action
                 .results

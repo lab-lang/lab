@@ -7,13 +7,18 @@ a runtime evidence question.
 
 # Generated from the Lab standard library by `python -m lab.codegen`. Do not edit.
 
+from .._types import LabType
 from .._vocabulary import Symbol
 
 LAB_MODULE = "std.bio.parts"
 """The Lab module these names come from."""
 
-Arabinose = Symbol(name="Arabinose", uses=("std.bio.designs", "std.bio.parts"))
-"""The inducer an arabinose-responsive promoter answers to."""
+
+class Arabinose(LabType):
+    """The inducer an arabinose-responsive promoter answers to."""
+
+    __lab_uses__ = ("std.bio.designs", "std.bio.parts")
+
 
 B0015 = Symbol(name="B0015", uses=("std.bio.designs", "std.bio.parts"))
 """A value of type Part."""
@@ -24,14 +29,18 @@ B0034 = Symbol(name="B0034", uses=("std.bio.designs", "std.bio.parts"))
 BsaI = Symbol(name="BsaI", uses=("std.bio.designs", "std.bio.parts"))
 """A value of type RestrictionEnzyme."""
 
-GreenFluorescentProtein = Symbol(
-    name="GreenFluorescentProtein",
-    uses=("std.bio.designs", "std.bio.parts"),
-)
-"""A reporter protein read as green fluorescence."""
 
-Tetracycline = Symbol(name="Tetracycline", uses=("std.bio.designs", "std.bio.parts"))
-"""The inducer a tetracycline-responsive promoter answers to."""
+class GreenFluorescentProtein(LabType):
+    """A reporter protein read as green fluorescence."""
+
+    __lab_uses__ = ("std.bio.designs", "std.bio.parts")
+
+
+class Tetracycline(LabType):
+    """The inducer a tetracycline-responsive promoter answers to."""
+
+    __lab_uses__ = ("std.bio.designs", "std.bio.parts")
+
 
 pBAD = Symbol(name="pBAD", uses=("std.bio.designs", "std.bio.parts"))
 """A value of type Promoter<Arabinose>."""

@@ -1,6 +1,6 @@
 # Lab
 
-[Lab](https://lab-lang.org) is a compiler for biology. It takes a description of what should exist, what must be true of it, and what evidence would accept it, and lowers that to something a person or a robot can run.
+[Lab](https://www.lab-compiler.org) is a compiler for biology. It takes a description of what should exist, what must be true of it, and what evidence would accept it, and lowers that to something a person or a robot can run.
 
 This distribution is `lab-compiler`, and it imports as `lab`:
 
@@ -14,7 +14,7 @@ Designs are written in [pySBOL3](https://pysbol3.readthedocs.io) and circuits in
 import lab
 from lab.bio.designs import Backbone
 from lab.bio.golden_gate import Plasmid
-from lab.prelude import circular, dna
+from lab import circular, dna
 from lab.units import ng, uL
 
 module = lab.Module("reporter.designs")
@@ -59,7 +59,7 @@ A Lab module is a Python module. The standard library is mirrored as Python pack
 
 import lab
 from lab.bio.golden_gate import Plasmid
-from lab.prelude import circular, dna
+from lab import circular, dna
 from lab.units import C, minutes, uL
 
 from .inventory import B0034, BsaI, J23101, pSB1C3
@@ -112,7 +112,7 @@ A design is an ordinary `sbol3.Component`, passed positionally to `build`. Where
 ```python
 import sbol3
 
-from lab.bio import golden_gate
+from lab.bio.golden_gate import Plasmid
 
 design = sbol3.Component(
     "reporter",
@@ -120,7 +120,7 @@ design = sbol3.Component(
     features=[J23101, B0034, GFP, B0015],
 )
 
-reporter = golden_gate.Plasmid.build(
+reporter = Plasmid.build(
     design,
     backbone=pSB1C3,
     restriction_enzyme=BsaI,
@@ -188,21 +188,89 @@ Polarity is not guesswork. LOICA states it in the Hill parameters, where a basal
 
 Both readers are structural: neither `sbol3` nor `loica` is imported by the `lab` package, so anything with the right shape lowers and the package works without either installed. `pip install "lab-compiler[bio]"` brings in the pair the examples are written with.
 
+## Workflows
+
+A workflow says how physical material moves once a design exists. It is the one place the object model cannot carry the program, because a workflow is control flow rather than a value: `if`, `match`, and `return` are statements Python runs rather than records. So a workflow is read from the function's own syntax.
+
+```python
+@lab.workflow
+def build_reporter(wf: lab.Context) -> tuple[Material[Strain], Material[Plate]]:
+    """Assemble the reporter, transform it, and plate what recovers."""
+    product = wf.perform(lab.realize(reporter))
+    cells = wf.perform(lab.provision(DH5alpha))
+    strain, culture = wf.perform(lab.transform(reporter_host, plasmids=[product], cells=cells))
+    culture = wf.perform(lab.recover(culture, duration=1 * h))
+    plate = wf.perform(lab.plate(culture, antibiotic=chloramphenicol))
+    return strain, plate
+```
+
+The distinction Lab writes with punctuation is a call here. `=` binds a computation, which a replay may run again because nothing in the world changed; `wf.perform` is a durable step, journaled once and never repeated, which Lab writes `<-`. Everything else follows from that:
+
+| Python | Lab |
+| --- | --- |
+| `x = wf.perform(step)` | `x <- step` |
+| `a, b = wf.perform(step)` | `a, b <- step` |
+| `wf.perform(step)` alone | `<- step` |
+| `x = f(y)` | `x = f(y)` |
+| `xs = wf.state(list[T], [])` | `state xs: List<T> = []` |
+| `@wf.every(30 * minutes)` | `when every 30 min:` |
+| `@wf.after(18 * h)` | `when after 18 h:` |
+| `wf.emit(Event(...))` | `emit Event{...}` |
+| `wf.elapsed` | `workflow.elapsed` |
+| `match x: case Growth.Ready():` | `match x:` / `case Ready:` |
+| `wf.perform(other_workflow(arg))` | `<- other_workflow arg` |
+
+Statements are translated from the syntax and expressions are evaluated, which is what keeps the rest of the SDK working inside a workflow: `30 * minutes` is a quantity because Python multiplied it, and the `use` lines still fall out of the names the body happens to mention.
+
+Durable effects are the standard library's own actions, generated from the phrase Lab writes them with. An action's operands are keywords named after its slots, so `transform <design> from <plasmids> into <cells>` is `transform(design, plasmids=..., cells=...)`. An operand is one word in Lab, so anything built in place is bound above the step, exactly as the hand-written form does:
+
+```python
+strain, culture = wf.perform(lab.transform(host, plasmids=[product], cells=cells))
+```
+
+```lab
+plasmids = [product]
+strain, culture <- transform host from plasmids into cells
+```
+
+Records and their cases are classes. The roles a record plays are its base classes, and a case is a nested class:
+
+```python
+@lab.record
+class ColonyGrowth:
+    """What watching a plate produced."""
+
+    plate: Material[Plate]
+    observations: list[PlateObservation]
+
+    @lab.case
+    class Ready:
+        colonies: ColonyMap
+
+    @lab.case
+    class TimedOut:
+        pass
+```
+
+A form with no Lab meaning is refused where it is written, with the line of Python in the message: a `while` loop, an untyped parameter, a bare expression that performs nothing.
+
+One limitation worth knowing: a record's fields are Lab types written as annotations, so the constructor mypy would need to see is one the decorator builds at runtime. Reading that statically is what a mypy plugin is for, the way dataclasses have one. Until there is one, a program written in the object model is checked by the Lab compiler rather than by mypy, and this repository's own gate disables those checks for its example programs while keeping the package itself strict.
+
 ## The standard-library mirror
 
-`lab.prelude` and `lab.bio.*` hold the same words `std.prelude` and `std.bio.*` do. They are generated from the compiler's own catalog, so the mirror cannot drift from what a Lab program sees, and they are checked in so an editor and a typechecker can use them without running anything. Regenerate after changing the standard library:
+`lab` itself and `lab.bio.*` hold the same words `std.prelude` and `std.bio.*` do. Lab imports the prelude into every module without being asked, and the Python namespace that is always reachable is the package, so `from lab import Material, dna` is what `use std.prelude` would have been. They are generated from the compiler's own catalog, so the mirror cannot drift from what a Lab program sees, and they are checked in so an editor and a typechecker can use them without running anything. Regenerate after changing the standard library:
 
 ```sh
 cd crates/lab-python && uv run python -m lab.codegen
 ```
 
-`tests/test_codegen.py` fails if the checked-in mirror is stale. Modules of durable actions are not mirrored yet, because workflows are not written in Python.
+`tests/test_codegen.py` fails if the checked-in mirror is stale. Types and roles are generated as classes so annotations written with them typecheck; values, functions, and durable actions are generated as the objects that render them.
 
 ## What is covered
 
-Artifact declarations, pySBOL3 designs, and LOICA circuits, including the records, catalogued parts, and bindings a circuit lowering mints. Roles and workflows are written as Lab source and checked with `compile_lab_module`.
+Artifact declarations, pySBOL3 designs, LOICA networks, records with cases, and workflows including reactive ones. Roles are written as Lab source and checked with `compile_lab_module`.
 
-The Golden Gate example's designs are written both ways: as Lab in [`examples/golden-gate/src/designs/`](../../examples/golden-gate/src/designs/) and with this SDK in [`tests/programs/golden_gate/`](tests/programs/golden_gate/). `tests/test_golden_gate.py` compiles both and requires the same checked module from each; `tests/test_sbol_designs.py` and `tests/test_loica_circuits.py` hold the SBOL and LOICA frontends to the same standard against hand-written Lab.
+The Golden Gate example's designs are written both ways: as Lab in [`examples/golden-gate/src/designs/`](../../examples/golden-gate/src/designs/) and with this SDK in [`tests/programs/golden_gate/`](tests/programs/golden_gate/). `tests/test_golden_gate.py` compiles both and requires the same checked module from each; `tests/test_sbol_designs.py`, `tests/test_loica_circuits.py`, and `tests/test_workflows.py` hold the SBOL, LOICA, and workflow frontends to the same standard against hand-written Lab.
 
 ## Development
 

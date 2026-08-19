@@ -21,14 +21,14 @@ use lab_language::ast::instance_word;
 /// Anything Lab needs to say that SBOL has no vocabulary for lives under this
 /// prefix, so a third-party reader can ignore it wholesale and a Lab reader can
 /// recognize its own documents.
-pub const LAB_NAMESPACE: &str = "https://lab-lang.org/ns#";
+pub const LAB_NAMESPACE: &str = "https://lab-compiler.org/ns#";
 
 /// The predicate naming the Lab kind an object was written as.
 ///
 /// A document Lab emitted carries this, so reading one back recovers the kind
 /// exactly rather than inferring it. A document from anywhere else does not,
 /// and inference is all there is.
-pub const LAB_KIND: &str = "https://lab-lang.org/ns#kind";
+pub const LAB_KIND: &str = "https://lab-compiler.org/ns#kind";
 
 /// What the terms an object states resolve to.
 #[derive(Clone, Debug, PartialEq, Eq)]

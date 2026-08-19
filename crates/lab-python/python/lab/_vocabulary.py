@@ -10,26 +10,55 @@ program actually made rather than restated by hand.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from typing import ClassVar
 
 from ._declarations import Claim, Declaration, Module, Predicate, declaring_module
 from ._expressions import Expression
 from ._source import caller_origin
+from ._types import TypeApplication
 
 
 class Symbol(Expression):
     """A name a Lab module exports."""
 
-    __slots__ = ("name", "uses")
+    __slots__ = ("_role_base", "name", "uses")
 
     def __init__(self, *, name: str, uses: Sequence[str] = ()) -> None:
         self.name = name
         self.uses = tuple(uses)
+        self._role_base: type | None = None
 
     def render(self) -> str:
         return self.name
 
     def lab_modules(self) -> Iterator[str]:
         yield from self.uses
+
+    def __getitem__(self, arguments: object) -> TypeApplication:
+        """`Material[Plate]`, which is `Material<Plate>` written in Python.
+
+        A type argument has to be legal Python before it can be read back, so
+        a name answers subscripting instead of refusing it.
+        """
+
+        given = arguments if isinstance(arguments, tuple) else (arguments,)
+        return TypeApplication(self, given)
+
+    def __mro_entries__(self, bases: tuple[type, ...]) -> tuple[type, ...]:
+        """The base a record inherits to say it plays this role.
+
+        A role is a value rather than a class, so writing it as a base needs
+        a stand-in. The class Python builds carries the role's name, and the
+        record decorator reads it back from there.
+        """
+
+        if self._role_base is None:
+            self._role_base = type(
+                f"_role_{self.name}",
+                (),
+                {"__lab_role__": self.name, "__lab_uses__": self.uses},
+            )
+        return (self._role_base,)
 
     def __repr__(self) -> str:
         return f"<lab symbol {self.name}>"
@@ -53,23 +82,18 @@ class ArtifactKind:
     declaration made from this one has to import.
     """
 
-    __slots__ = ("produces", "properties", "uses", "word")
+    #: The word Lab writes a declaration of this kind with.
+    word: ClassVar[str] = ""
+    #: The name of the type its instances have, which is the class's own.
+    produces: ClassVar[str] = ""
+    #: Every Lab module a declaration made from this kind has to import.
+    uses: ClassVar[tuple[str, ...]] = ()
+    #: The property names the kind's schema contributes.
+    properties: ClassVar[tuple[str, ...]] = ()
 
-    def __init__(
-        self,
-        *,
-        word: str,
-        produces: str,
-        uses: Sequence[str] = (),
-        properties: Sequence[str] = (),
-    ) -> None:
-        self.word = word
-        self.produces = produces
-        self.uses = tuple(uses)
-        self.properties = tuple(properties)
-
+    @classmethod
     def build(
-        self,
+        cls,
         design: object | None = None,
         /,
         *,
@@ -102,17 +126,18 @@ class ArtifactKind:
             from . import _sbol
 
             found, _ = declaring_module(depth=2, given=module)
-            read = _sbol.read_design(design, kind=self, module=found, origin=caller_origin(2))
+            read = _sbol.read_design(design, kind=cls, module=found, origin=caller_origin(2))
             module = found
             stated = {**read.properties, **stated}
             require = [*read.requirements, *require]
             doc = doc or read.doc
-        return self._declare(
+        return cls._declare(
             "build", module, name, doc, ascribed, across, require, accept, properties, stated
         )
 
+    @classmethod
     def buy(
-        self,
+        cls,
         *,
         module: Module | None = None,
         name: str | None = None,
@@ -127,10 +152,11 @@ class ArtifactKind:
         claims and no build order: `require` and `accept` belong to building.
         """
 
-        return self._declare("buy", module, name, doc, ascribed, None, (), (), properties, stated)
+        return cls._declare("buy", module, name, doc, ascribed, None, (), (), properties, stated)
 
+    @classmethod
     def _declare(
-        self,
+        cls,
         provenance: str,
         module: Module | None,
         name: str | None,
@@ -145,7 +171,7 @@ class ArtifactKind:
         found, scope = declaring_module(depth=3, given=module)
         declaration = Declaration(
             module=found,
-            kind=self,
+            kind=cls,
             provenance=provenance,
             properties={**stated, **(properties or {})},
             name=name,
@@ -160,8 +186,12 @@ class ArtifactKind:
         found.declare(declaration)
         return declaration
 
-    def __repr__(self) -> str:
-        return f"<lab artifact kind {self.produces}>"
+    def __init_subclass__(cls, **rest: object) -> None:
+        """A kind names the type its instances have, which is its own name."""
+
+        super().__init_subclass__(**rest)
+        if not cls.produces:
+            cls.produces = cls.__name__
 
 
 def _claim(claim: Predicate | Claim) -> Claim:

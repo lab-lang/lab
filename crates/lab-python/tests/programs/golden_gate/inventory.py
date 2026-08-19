@@ -6,8 +6,8 @@ resolution and a runtime evidence question.
 """
 
 import lab
+from lab import dna
 from lab.bio.designs import CDS, Antibiotic, Backbone, Chassis, Part, Promoter, RestrictionEnzyme
-from lab.prelude import dna
 from lab.units import C, minutes
 
 module = lab.Module("golden_gate.designs.inventory", doc=__doc__)

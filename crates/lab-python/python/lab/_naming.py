@@ -12,7 +12,12 @@ import importlib
 import re
 from collections.abc import Iterable
 
-from ._declarations import CircuitDeclaration, Module, RecordDeclaration
+from ._declarations import (
+    CircuitDeclaration,
+    Module,
+    RecordDeclaration,
+    WorkflowDeclaration,
+)
 
 _ROOT = "std"
 _MIRROR_ROOT = "lab"
@@ -61,7 +66,7 @@ def taken_names(module: Module, prospective_uses: Iterable[str] = ()) -> set[str
     for path in (*module.imports(), *prospective_uses):
         taken.update(_mirror_exports(path))
     for item in module.declarations:
-        if isinstance(item, RecordDeclaration | CircuitDeclaration):
+        if isinstance(item, RecordDeclaration | CircuitDeclaration | WorkflowDeclaration):
             taken.add(item.name)
         elif item._name is not None:
             # Artifact declarations and bindings are named by a Python
@@ -77,7 +82,12 @@ def _mirror_exports(path: str) -> set[str]:
     segments = path.split(".")
     if segments[0] != _ROOT:
         return set()
-    mirror = ".".join([_MIRROR_ROOT, *segments[1:]])
+    rest = segments[1:]
+    if rest == ["prelude"]:
+        rest = ["_prelude"]
+    elif len(rest) > 1 and rest[0] == _MIRROR_ROOT:
+        rest = rest[1:]
+    mirror = ".".join([_MIRROR_ROOT, *rest])
     try:
         imported = importlib.import_module(mirror)
     except ImportError:

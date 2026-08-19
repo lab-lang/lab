@@ -9,9 +9,9 @@ import unittest
 from inspect import currentframe
 
 import lab
+from lab import dna
 from lab.bio import golden_gate
 from lab.bio.designs import Backbone, Plasmid
-from lab.prelude import dna
 from lab.units import ng, uL
 
 

@@ -56,7 +56,7 @@ class ReadDesign:
 
 
 def read_design(
-    design: object, *, kind: ArtifactKind, module: Module, origin: Origin
+    design: object, *, kind: type[ArtifactKind], module: Module, origin: Origin
 ) -> ReadDesign:
     """Read a pySBOL3 component into what a `build` declaration states."""
 
@@ -74,13 +74,13 @@ def read_design(
         properties["components"] = parts
     elements = _sequence_elements(design)
     if elements is not None:
-        from .prelude import dna
+        from ._prelude import dna
 
         properties["sequence"] = expression(dna)(elements)
 
     requirements: list[Claim] = []
     if _terms.CIRCULAR in types:
-        from .prelude import circular
+        from ._prelude import circular
 
         requirements.append(_topology_claim(circular))
 

@@ -8,18 +8,30 @@ readout is what lets the numbers sit next to each other.
 
 # Generated from the Lab standard library by `python -m lab.codegen`. Do not edit.
 
-from .._vocabulary import Symbol
+from .._types import LabRole, LabType
 
 LAB_MODULE = "std.bio.reporters"
 """The Lab module these names come from."""
 
-Absorbance = Symbol(name="Absorbance", uses=("std.bio.reporters",))
-"""Light absorbed rather than emitted, read as optical density."""
 
-Fluorescence = Symbol(name="Fluorescence", uses=("std.bio.reporters",))
-"""Light emitted after excitation, read by a plate reader or a microscope."""
+class Absorbance(LabType):
+    """Light absorbed rather than emitted, read as optical density."""
 
-Luminescence = Symbol(name="Luminescence", uses=("std.bio.reporters",))
-"""Light emitted by an enzymatic reaction, requiring no excitation source."""
+    __lab_uses__ = ("std.bio.reporters",)
 
-Reporter = Symbol(name="Reporter", uses=("std.bio.reporters",))
+
+class Fluorescence(LabType):
+    """Light emitted after excitation, read by a plate reader or a microscope."""
+
+    __lab_uses__ = ("std.bio.reporters",)
+
+
+class Luminescence(LabType):
+    """Light emitted by an enzymatic reaction, requiring no excitation source."""
+
+    __lab_uses__ = ("std.bio.reporters",)
+
+
+class Reporter(LabRole):
+    __lab_role__ = "Reporter"
+    __lab_uses__ = ("std.bio.reporters",)

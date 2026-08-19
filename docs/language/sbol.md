@@ -1220,7 +1220,7 @@ it needs deciding rather than discovering.
 upstream is the better end state.
 
 **Namespaces are a policy call.** Whether a package must declare one, and what a
-project without a SynBioHub account uses. A `https://lab-lang.org/local/<package>`
+project without a SynBioHub account uses. A `https://lab-compiler.org/local/<package>`
 default works but publishes IRIs that do not resolve, which is its own kind of
 lie.
 

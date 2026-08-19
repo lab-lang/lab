@@ -2,8 +2,8 @@
 
 import lab
 import sbol3
-from lab.bio import golden_gate
 from lab.bio.designs import Backbone, RestrictionEnzyme
+from lab.bio.golden_gate import Plasmid
 from lab.units import C, minutes, ng, uL
 
 module = lab.Module("reporter.plasmid", doc=__doc__)
@@ -47,7 +47,7 @@ BsaI = RestrictionEnzyme.buy(
     digest_duration=2 * minutes,
 )
 
-reporter = golden_gate.Plasmid.build(
+reporter = Plasmid.build(
     design,
     backbone=pSB1C3,
     restriction_enzyme=BsaI,

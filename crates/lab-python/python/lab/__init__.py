@@ -28,6 +28,7 @@ from ._circuits import (
 )
 from ._declarations import (
     Binding,
+    Case,
     CircuitDeclaration,
     Claim,
     Declaration,
@@ -35,7 +36,9 @@ from ._declarations import (
     Predicate,
     Property,
     RecordDeclaration,
+    WorkflowDeclaration,
 )
+from ._effects import Action, Effect
 from ._expressions import (
     Expression,
     Fields,
@@ -48,6 +51,7 @@ from ._expressions import (
     or_,
 )
 from ._native import compile_lab_module as _compile_lab_module
+from ._prelude import *
 from ._program import (
     Diagnostic,
     LabError,
@@ -57,9 +61,37 @@ from ._program import (
     check,
     check_sources,
 )
+from ._records import CaseType, RecordType, case, record
 from ._sbol import DesignError
 from ._source import Origin
+from ._types import TypeApplication
 from ._vocabulary import ArtifactKind, Function, Symbol
+from ._workflows import Context, Workflow, WorkflowCall, WorkflowError, workflow
+
+# The durable effects of the standard library, which a workflow performs
+# through `wf.perform`. They are the generated mirror's own objects, so
+# reaching them here and reaching them through their module are the same
+# thing, and either spelling emits the same `use` line.
+from .bio.build import realize
+from .plasmid import (
+    assemble,
+    capture,
+    dilute,
+    dispose,
+    grow,
+    pick,
+    plate,
+    provision,
+    purify,
+    quantify,
+    recover,
+    screen,
+    sequence,
+    split,
+    store,
+    synthesize,
+    transform,
+)
 
 
 def compile_lab_module(source: str) -> dict[str, Any]:
@@ -69,40 +101,117 @@ def compile_lab_module(source: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "CDS",
+    "DNA",
+    "Accepted",
+    "Action",
+    "Antibiotic",
     "ArtifactKind",
+    "Backbone",
     "Binding",
+    "Case",
+    "CaseType",
+    "Chassis",
+    "Circuit",
     "CircuitDeclaration",
     "CircuitError",
     "Claim",
+    "Clone",
+    "CloneSet",
+    "Colonies",
+    "ColonyMap",
+    "Context",
+    "Culture",
     "Declaration",
     "DesignError",
     "Diagnostic",
+    "Duration",
+    "Effect",
+    "Event",
+    "Evidence",
+    "Evidential",
     "Expression",
     "Fields",
+    "Fragment",
     "Function",
+    "Image",
     "LabError",
+    "List",
+    "Material",
     "Module",
     "Network",
     "NetworkBinding",
     "Origin",
+    "Part",
+    "Plasmid",
+    "Plate",
     "Predicate",
     "Program",
+    "Promoter",
     "Property",
+    "Protein",
     "Quantity",
+    "Reason",
     "Record",
     "RecordDeclaration",
+    "RecordType",
+    "Regulation",
+    "Rejected",
+    "RestrictionEnzyme",
+    "Screening",
+    "Signal",
+    "Strain",
     "Symbol",
+    "Topology",
+    "TypeApplication",
     "Unit",
     "UnitBinding",
+    "Workflow",
+    "WorkflowCall",
+    "WorkflowContext",
+    "WorkflowDeclaration",
+    "WorkflowError",
+    "acceptance_failed",
+    "accepts",
     "analyze",
     "analyze_sources",
     "and_",
+    "assemble",
+    "capture",
+    "case",
     "check",
     "check_sources",
     "circuit",
+    "circular",
     "compile_lab_module",
+    "detect_colonies",
+    "dilute",
+    "dispose",
+    "dna",
     "expression",
+    "grow",
+    "inconclusive_sequence",
+    "induced",
     "layout",
+    "no_colonies",
     "not_",
     "or_",
+    "pick",
+    "plate",
+    "provision",
+    "purify",
+    "quantify",
+    "realize",
+    "record",
+    "recover",
+    "repressed",
+    "screen",
+    "sequence",
+    "sequence_mismatch",
+    "sites",
+    "split",
+    "store",
+    "synthesize",
+    "transform",
+    "workflow",
 ]

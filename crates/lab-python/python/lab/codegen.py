@@ -28,6 +28,14 @@ from ._native import lab_standard_library
 #: `lab.bio.designs`, because the Python package name already says `lab`.
 _ROOT = "std"
 
+#: The Python package the mirror is written into, which a Lab path repeats:
+#: `std.lab.plasmid` is `lab.plasmid` rather than `lab.lab.plasmid`.
+_MIRROR_ROOT = "lab"
+
+#: The module Lab imports into every other one, whose Python home is the
+#: package namespace rather than a module anybody writes an import for.
+_PRELUDE = "prelude"
+
 _HEADER = "# Generated from the Lab standard library by `python -m lab.codegen`. Do not edit."
 
 #: Documentation is wrapped well inside the line limit, because it is prose
@@ -77,11 +85,7 @@ def write(root: Path, generated: list[GeneratedModule]) -> list[Path]:
 
 
 def _is_mirrored(module: dict[str, Any]) -> bool:
-    """Whether a standard module has anything the object model can use.
-
-    Modules of durable actions are left out until workflows are written in
-    Python; a mirror of them would be names with nothing to attach to.
-    """
+    """Whether a standard module has anything the object model can use."""
 
     return any(_binds(export) for export in module["exports"])
 
@@ -93,18 +97,43 @@ def _binds(export: dict[str, Any]) -> bool:
     what an author writes, so there is nothing useful to bind here.
     """
 
-    return export["kind"] != "action" and not keyword.iskeyword(export["name"])
+    return not keyword.iskeyword(export["name"])
 
 
 def _python_path(lab_path: str) -> tuple[str, ...]:
+    """Where a Lab module's mirror lives, relative to the `lab` package.
+
+    `std` drops because the package it becomes is the standard library, and a
+    following `lab` drops because the package is already called that:
+    `std.lab.plasmid` is `lab.plasmid` rather than `lab.lab.plasmid`.
+
+    The prelude has no module of its own. Lab imports it into every module
+    without being asked, and the Python namespace that is always reachable is
+    the package itself, so its names are generated into `_prelude` and the
+    package re-exports them: `from lab import Material`.
+    """
+
     segments = lab_path.split(".")
     if segments[0] == _ROOT:
+        segments = segments[1:]
+    if segments == [_PRELUDE]:
+        return (f"_{_PRELUDE}",)
+    if len(segments) > 1 and segments[0] == _MIRROR_ROOT:
         segments = segments[1:]
     return tuple(segments)
 
 
 def _module(module: dict[str, Any], grounding: set[str]) -> GeneratedModule:
     exports = [export for export in module["exports"] if _binds(export)]
+    # A name written both as a type and as a constructor is generated once, as
+    # the type: the class annotates and calling it builds the record.
+    constructors = {export["name"] for export in exports if export["kind"] == "constructor"}
+    types = {export["name"] for export in exports if export["kind"] == "type"}
+    exports = [
+        export
+        for export in exports
+        if not (export["kind"] == "constructor" and export["name"] in types)
+    ]
     # Importing one word can require importing what it extends, so a name
     # carries every module a declaration using it has to import. The prelude is
     # imported by every module without saying so, and implies no `use` line.
@@ -120,37 +149,130 @@ def _module(module: dict[str, Any], grounding: set[str]) -> GeneratedModule:
     )
 
     blocks = [_documentation(module["documentation"]), _HEADER]
-    imported = _runtime_imports(module["path"], exports)
+    imported = _runtime_imports(module["path"], exports, frozenset(constructors))
     if imported:
         blocks.append(imported)
+    variables = _type_variables(exports)
+    if variables:
+        blocks.append(variables)
     blocks.append(f'LAB_MODULE = "{module["path"]}"\n"""The Lab module these names come from."""')
-    blocks.extend(_export(export, uses) for export in exports)
-    source = "\n\n".join(blocks).rstrip() + "\n"
-    return GeneratedModule(Path(*_python_path(module["path"])).with_suffix(".py"), source)
+    if module["prelude"]:
+        blocks.append(_exported_names(exports))
+    blocks.extend(_export(export, uses, frozenset(constructors)) for export in exports)
+    return GeneratedModule(Path(*_python_path(module["path"])).with_suffix(".py"), _joined(blocks))
 
 
-def _runtime_imports(path: str, exports: list[dict[str, Any]]) -> str:
+def _exported_names(exports: list[dict[str, Any]]) -> str:
+    """`__all__` for the prelude, which the package re-exports wholesale."""
+
+    names = sorted(
+        (
+            export["produces"] if export["kind"] == "artifact_kind" else export["name"]
+            for export in exports
+        ),
+        key=_export_order,
+    )
+    rendered = "\n".join(f'    "{name}",' for name in names)
+    return f"__all__ = [\n{rendered}\n]"
+
+
+def _export_order(name: str) -> tuple[int, str]:
+    """The order a formatter expects `__all__` in.
+
+    Names that are all capitals come first, then the ones that begin with a
+    capital, then the rest, which is how the linter reads a sorted list.
+    """
+
+    if name.isupper():
+        return (0, name)
+    return (1, name) if name[:1].isupper() else (2, name)
+
+
+def _joined(blocks: list[str]) -> str:
+    """The module's blocks, spaced the way the formatter would space them.
+
+    A class stands two blank lines from its neighbours and a binding one, so
+    the generated mirror is already formatted and regenerating it never shows
+    up as a diff.
+    """
+
+    pieces = [blocks[0]]
+    for index, block in enumerate(blocks[1:]):
+        apart = block.startswith("class ") or blocks[index].startswith("class ")
+        pieces.append("\n\n\n" if apart else "\n\n")
+        pieces.append(block)
+    return "".join(pieces).rstrip() + "\n"
+
+
+def _runtime_imports(path: str, exports: list[dict[str, Any]], constructors: frozenset[str]) -> str:
     kinds = {export["kind"] for export in exports}
-    names = set()
+    names: set[str] = set()
+    types: set[str] = set()
     if "artifact_kind" in kinds:
         names.add("ArtifactKind")
+        types.add("LabType")
     if "function" in kinds:
         names.add("Function")
-    if kinds & {"value", "constructor", "type", "role"}:
+    if kinds & {"value", "constructor"}:
         names.add("Symbol")
-    if not names:
-        return ""
+    if "type" in kinds:
+        types.add("LabType")
+    if constructors & {export["name"] for export in exports if export["kind"] == "type"}:
+        types.add("LabConstructor")
+    if "role" in kinds:
+        types.add("LabRole")
     package = "." * len(_python_path(path))
-    return f"from {package}_vocabulary import {', '.join(sorted(names))}"
+    standard = ["from typing import Generic, TypeVar"] if _parameters(exports) else []
+    local = []
+    if "action" in kinds:
+        local.append(f"from {package}_effects import Action")
+    if types:
+        local.append(f"from {package}_types import {', '.join(sorted(types))}")
+    if names:
+        local.append(f"from {package}_vocabulary import {', '.join(sorted(names))}")
+    blocks = [block for block in ("\n".join(standard), "\n".join(local)) if block]
+    return "\n\n".join(blocks)
+
+
+def _indented(block: str) -> list[str]:
+    """A block of documentation, indented into a class body.
+
+    A blank line keeps no indentation, because trailing spaces are what a
+    formatter would strip and the mirror is written already formatted.
+    """
+
+    return [f"    {line}" if line else "" for line in block.splitlines()]
+
+
+def _parameters(exports: list[dict[str, Any]]) -> int:
+    """The most type parameters any one type in a module takes."""
+
+    return max(
+        (export.get("parameters") or 0 for export in exports if export["kind"] == "type"),
+        default=0,
+    )
+
+
+def _type_variables(exports: list[dict[str, Any]]) -> str:
+    """One variable per type parameter, shared by every generic in the module."""
+
+    count = _parameters(exports)
+    return "\n".join(f'_T{index + 1} = TypeVar("_T{index + 1}")' for index in range(count))
 
 
 #: The line limit the generated mirror is written to, matching the project's.
 _LIMIT = 100
 
 
-def _export(export: dict[str, Any], uses: tuple[str, ...]) -> str:
+def _export(
+    export: dict[str, Any], uses: tuple[str, ...], constructors: frozenset[str] = frozenset()
+) -> str:
     if export["kind"] == "artifact_kind":
         return _artifact_kind(export, uses)
+    if export["kind"] == "action":
+        return _action(export, uses)
+    if export["kind"] in ("type", "role"):
+        return _lab_type(export, uses, constructors)
     factory = "Function" if export["kind"] == "function" else "Symbol"
     name = export["name"]
     assignment = f'{name} = {factory}(name="{name}", uses={_tuple(uses)})'
@@ -161,28 +283,80 @@ def _export(export: dict[str, Any], uses: tuple[str, ...]) -> str:
     return _documented(assignment, export)
 
 
+def _lab_type(
+    export: dict[str, Any], uses: tuple[str, ...], constructors: frozenset[str] = frozenset()
+) -> str:
+    """A type or role, generated as a class so annotations typecheck.
+
+    A parameterized type is generic in as many parameters as Lab gives it, so
+    `Material[Plate]` reads to a typechecker exactly as it reads to the
+    compiler.
+    """
+
+    name = export["name"]
+    parameters = export.get("parameters") or 0
+    if export["kind"] == "role":
+        base = "LabRole"
+    elif export["name"] in constructors:
+        base = "LabConstructor"
+    else:
+        base = "LabType"
+    generic = f", Generic[{', '.join(f'_T{index + 1}' for index in range(parameters))}]"
+    header = f"class {name}({base}{generic if parameters else ''}):"
+    body = [f"    __lab_uses__ = {_tuple(uses)}"]
+    if export["kind"] == "role":
+        body.insert(0, f'    __lab_role__ = "{name}"')
+    documentation = _member_documentation(export)
+    lines = [header]
+    if documentation:
+        lines.extend(_indented(documentation))
+        lines.append("")
+    lines.extend(body)
+    return "\n".join(lines)
+
+
+def _action(export: dict[str, Any], uses: tuple[str, ...]) -> str:
+    """A durable effect, carrying the phrase the standard library writes it as."""
+
+    name = export["name"]
+    lines = [
+        f"{name} = Action(",
+        f'    name="{name}",',
+        f"    phrase={_tuple(tuple(export['phrase']))},",
+        f"    results={_tuple(tuple(result['name'] for result in export['results']))},",
+    ]
+    if export.get("optional"):
+        rendered = ", ".join(_tuple(tuple(clause)) for clause in export["optional"])
+        lines.append(f"    optional=({rendered},),")
+    lines.append(f"    uses={_tuple(uses)},")
+    lines.append(")")
+    return _documented("\n".join(lines), export)
+
+
 def _artifact_kind(export: dict[str, Any], uses: tuple[str, ...]) -> str:
     # The Python name is the type instances have, because that is the name a
     # reader knows the thing by. The word declarations are written with travels
     # with it rather than becoming the Python name.
-    assignment = "\n".join(
-        [
-            f"{export['produces']} = ArtifactKind(",
-            f'    word="{export["name"]}",',
-            f'    produces="{export["produces"]}",',
-            f"    uses={_tuple(uses)},",
-            *_properties(tuple(field["name"] for field in export["fields"])),
-            ")",
-        ]
-    )
-    return _documented(assignment, export)
+    name = export["produces"]
+    lines = [f"class {name}(ArtifactKind, LabType):"]
+    documentation = _member_documentation(export)
+    if documentation:
+        lines.extend(_indented(documentation))
+        lines.append("")
+    lines.append(f'    word = "{export["name"]}"')
+    lines.append(f"    uses = {_tuple(uses)}")
+    lines.append(f"    __lab_uses__ = {_tuple(uses)}")
+    lines.extend(_properties(tuple(field["name"] for field in export["fields"])))
+    return "\n".join(lines)
 
 
 def _properties(properties: tuple[str, ...]) -> list[str]:
-    line = f"    properties={_tuple(properties)},"
+    """The property names a kind contributes, wrapped inside the line limit."""
+
+    line = f"    properties = {_tuple(properties)}"
     if len(line) <= _LIMIT:
         return [line]
-    return ["    properties=(", *(f'        "{name}",' for name in properties), "    ),"]
+    return ["    properties = (", *(f'        "{name}",' for name in properties), "    )"]
 
 
 def _tuple(values: tuple[str, ...]) -> str:
@@ -219,6 +393,13 @@ def _detail(export: dict[str, Any]) -> list[str]:
         detail = [_wrap(f"Properties: {stated}.")] if stated else []
         if export["declares"]:
             detail.append(_wrap(f"Complete when it states {export['declares']}."))
+        return detail
+    if kind == "action":
+        phrase = " ".join(export["phrase"])
+        results = ", ".join(result["name"] for result in export["results"])
+        detail = [_wrap(f"Performed as `{phrase}`.")]
+        if results:
+            detail.append(_wrap(f"Binds {results}."))
         return detail
     if kind == "function":
         return [_wrap(f"Called as ({', '.join(export['parameters'])}) -> {export['result']}.")]

@@ -40,8 +40,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://lab-lang.org"
-Documentation = "https://lab-lang.org/docs/overview"
+Homepage = "https://www.lab-compiler.org"
+Documentation = "https://www.lab-compiler.org/docs/overview"
 Repository = "https://github.com/lab-lang/lab"
 Issues = "https://github.com/lab-lang/lab/issues"
 
@@ -79,6 +79,12 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# The package is where the prelude lives, because the namespace Python always
+# has reachable is the package itself. Its names are generated, so they are
+# re-exported wholesale rather than listed again by hand.
+"python/lab/__init__.py" = ["F403", "F405"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
@@ -87,6 +93,15 @@ files = ["python", "tests"]
 [[tool.mypy.overrides]]
 module = ["sbol3.*", "loica.*"]
 ignore_missing_imports = true
+
+# A record's fields are Lab types stated as annotations, so the constructor
+# mypy would need to see is one `@lab.record` builds at runtime. Reading it
+# statically is what a mypy plugin is for, the way dataclasses have one, and
+# until there is one a program written in the object model is checked by the
+# Lab compiler rather than by mypy. The package itself stays strict.
+[[tool.mypy.overrides]]
+module = ["programs.reporter.*"]
+disable_error_code = ["call-arg", "attr-defined", "no-any-return", "return"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

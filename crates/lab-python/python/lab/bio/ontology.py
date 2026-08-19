@@ -12,57 +12,113 @@ plays in a sequence. EDAM says how a sequence is written down.
 
 # Generated from the Lab standard library by `python -m lab.codegen`. Do not edit.
 
-from .._vocabulary import Symbol
+from .._types import LabRole
 
 LAB_MODULE = "std.bio.ontology"
 """The Lab module these names come from."""
 
-CircularTopology = Symbol(name="CircularTopology", uses=("std.bio.ontology",))
-"""A sequence with no free ends."""
 
-CodingSequence = Symbol(name="CodingSequence", uses=("std.bio.ontology",))
-"""A region translated into a protein."""
+class CircularTopology(LabRole):
+    """A sequence with no free ends."""
 
-EngineeredRegion = Symbol(name="EngineeredRegion", uses=("std.bio.ontology",))
-"""A region deliberately assembled rather than found."""
+    __lab_role__ = "CircularTopology"
+    __lab_uses__ = ("std.bio.ontology",)
 
-FunctionalEntity = Symbol(name="FunctionalEntity", uses=("std.bio.ontology",))
-"""An entity described by what it does rather than what it is made of.
 
-This is the term SBOL falls back to when nothing more specific is known, so
-a kind that plays it is saying only that it participates in a design.
-"""
+class CodingSequence(LabRole):
+    """A region translated into a protein."""
 
-IupacNucleicAcid = Symbol(name="IupacNucleicAcid", uses=("std.bio.ontology",))
-"""Nucleotides written in the IUPAC alphabet."""
+    __lab_role__ = "CodingSequence"
+    __lab_uses__ = ("std.bio.ontology",)
 
-IupacProtein = Symbol(name="IupacProtein", uses=("std.bio.ontology",))
-"""Amino acids written in the IUPAC alphabet."""
 
-LinearTopology = Symbol(name="LinearTopology", uses=("std.bio.ontology",))
-"""A sequence with two free ends."""
+class EngineeredRegion(LabRole):
+    """A region deliberately assembled rather than found."""
 
-Macromolecule = Symbol(name="Macromolecule", uses=("std.bio.ontology",))
-"""A protein, which is what a coding sequence expresses."""
+    __lab_role__ = "EngineeredRegion"
+    __lab_uses__ = ("std.bio.ontology",)
 
-NucleicAcid = Symbol(name="NucleicAcid", uses=("std.bio.ontology",))
-"""A nucleic acid: DNA or RNA."""
 
-Operator = Symbol(name="Operator", uses=("std.bio.ontology",))
-"""A region a repressor or activator binds."""
+class FunctionalEntity(LabRole):
+    """An entity described by what it does rather than what it is made of.
 
-PromoterRegion = Symbol(name="PromoterRegion", uses=("std.bio.ontology",))
-"""A region transcription begins at.
+    This is the term SBOL falls back to when nothing more specific is known, so
+    a kind that plays it is saying only that it participates in a design.
+    """
 
-Named for the region rather than the part because roles and types share one
-namespace, and `Promoter` is already the kind a supplier lists.
-"""
+    __lab_role__ = "FunctionalEntity"
+    __lab_uses__ = ("std.bio.ontology",)
 
-RibosomeEntrySite = Symbol(name="RibosomeEntrySite", uses=("std.bio.ontology",))
-"""Where a ribosome binds ahead of a coding sequence."""
 
-SimpleChemical = Symbol(name="SimpleChemical", uses=("std.bio.ontology",))
-"""A small molecule: an inducer, an antibiotic, a buffer component."""
+class IupacNucleicAcid(LabRole):
+    """Nucleotides written in the IUPAC alphabet."""
 
-Terminator = Symbol(name="Terminator", uses=("std.bio.ontology",))
-"""Where transcription stops."""
+    __lab_role__ = "IupacNucleicAcid"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class IupacProtein(LabRole):
+    """Amino acids written in the IUPAC alphabet."""
+
+    __lab_role__ = "IupacProtein"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class LinearTopology(LabRole):
+    """A sequence with two free ends."""
+
+    __lab_role__ = "LinearTopology"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class Macromolecule(LabRole):
+    """A protein, which is what a coding sequence expresses."""
+
+    __lab_role__ = "Macromolecule"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class NucleicAcid(LabRole):
+    """A nucleic acid: DNA or RNA."""
+
+    __lab_role__ = "NucleicAcid"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class Operator(LabRole):
+    """A region a repressor or activator binds."""
+
+    __lab_role__ = "Operator"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class PromoterRegion(LabRole):
+    """A region transcription begins at.
+
+    Named for the region rather than the part because roles and types share one
+    namespace, and `Promoter` is already the kind a supplier lists.
+    """
+
+    __lab_role__ = "PromoterRegion"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class RibosomeEntrySite(LabRole):
+    """Where a ribosome binds ahead of a coding sequence."""
+
+    __lab_role__ = "RibosomeEntrySite"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class SimpleChemical(LabRole):
+    """A small molecule: an inducer, an antibiotic, a buffer component."""
+
+    __lab_role__ = "SimpleChemical"
+    __lab_uses__ = ("std.bio.ontology",)
+
+
+class Terminator(LabRole):
+    """Where transcription stops."""
+
+    __lab_role__ = "Terminator"
+    __lab_uses__ = ("std.bio.ontology",)

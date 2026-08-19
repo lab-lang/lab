@@ -4,7 +4,7 @@ A Lab module is a Python module. Its declarations are ordinary objects bound to
 ordinary names, and its properties are keyword arguments:
 
     from lab.bio.designs import Plasmid
-    from lab.prelude import circular, dna
+    from lab import circular, dna
 
     module = lab.Module("golden_gate.designs.plasmids", doc=__doc__)
 
@@ -88,7 +88,7 @@ class Declaration:
         self,
         *,
         module: Module,
-        kind: ArtifactKind,
+        kind: type[ArtifactKind],
         provenance: str,
         properties: Mapping[str, object],
         name: str | None,
@@ -164,11 +164,20 @@ class Declaration:
         return f"<lab {self.provenance} {self.kind.word} {self._name or 'unbound'}>"
 
 
-class RecordDeclaration:
-    """A `record` declaration: a named type and the roles it plays.
+@dataclass(frozen=True)
+class Case:
+    """One tagged variant of a record: a name and the fields it adds."""
 
-    The Python frontend writes one when a vocabulary has to be minted rather
-    than imported, such as the signal a LOICA network is induced by.
+    name: str
+    fields: Sequence[tuple[str, str]] = ()
+    doc: str | None = None
+
+
+class RecordDeclaration:
+    """A `record` declaration: a named type, its fields, and the roles it plays.
+
+    A record with cases is a tagged union: the fields above the cases are
+    common to every variant, and each case adds its own.
     """
 
     def __init__(
@@ -177,6 +186,8 @@ class RecordDeclaration:
         module: Module,
         name: str,
         roles: Sequence[str] = (),
+        fields: Sequence[tuple[str, str]] = (),
+        cases: Sequence[Case] = (),
         doc: str | None = None,
         role_uses: Sequence[str] = (),
         origin: Origin | None = None,
@@ -184,6 +195,8 @@ class RecordDeclaration:
         self.module = module
         self.name = name
         self.roles = tuple(roles)
+        self.fields = list(fields)
+        self.cases = list(cases)
         self.doc = doc
         self.role_uses = tuple(role_uses)
         self.origin = origin
@@ -195,7 +208,24 @@ class RecordDeclaration:
         with writer.region(self.origin):
             writer.documentation(self.doc, "/**")
             played = f" is {', '.join(self.roles)}" if self.roles else ""
-            writer.line(f"record {self.name}{played}")
+            header = f"record {self.name}{played}"
+            if not self.fields and not self.cases:
+                writer.line(header)
+                return
+            writer.line(f"{header}:")
+            with writer.indented():
+                for name, annotation in self.fields:
+                    writer.line(f"{name}: {annotation}")
+                for case in self.cases:
+                    writer.line()
+                    writer.documentation(case.doc, "/**")
+                    if not case.fields:
+                        writer.line(f"case {case.name}")
+                        continue
+                    writer.line(f"case {case.name}:")
+                    with writer.indented():
+                        for name, annotation in case.fields:
+                            writer.line(f"{name}: {annotation}")
 
     def __repr__(self) -> str:
         return f"<lab record {self.name}>"
@@ -253,6 +283,67 @@ class CircuitDeclaration:
 
     def __repr__(self) -> str:
         return f"<lab circuit {self.name}>"
+
+
+class WorkflowDeclaration:
+    """A `workflow` declaration: typed parameters, results, and a body.
+
+    The body arrives already translated into lines of Lab, because what a
+    workflow does is control flow rather than a value, and the translation
+    reads the Python function's own syntax.
+    """
+
+    def __init__(
+        self,
+        *,
+        module: Module,
+        name: str,
+        inputs: Sequence[tuple[str, str]],
+        results: Sequence[tuple[str, str]],
+        body: Sequence[str],
+        doc: str | None = None,
+        uses: Sequence[str] = (),
+        origin: Origin | None = None,
+    ) -> None:
+        self.module = module
+        self.name = name
+        self.inputs = list(inputs)
+        self.results = list(results)
+        self.body = list(body)
+        self.doc = doc
+        self.uses = tuple(uses)
+        self.origin = origin
+
+    def lab_modules(self) -> Iterator[str]:
+        yield from self.uses
+
+    def write(self, writer: SourceWriter) -> None:
+        with writer.region(self.origin):
+            writer.documentation(self.doc, "/**")
+            if self.inputs:
+                writer.line(f"workflow {self.name}(")
+                with writer.indented():
+                    for name, annotation in self.inputs:
+                        writer.line(f"{name}: {annotation},")
+                header = ")"
+            else:
+                header = f"workflow {self.name}()"
+            # One result needs no name, because nothing binds it by one. Several
+            # do, so a caller can say which it wants.
+            if len(self.results) == 1:
+                writer.line(f"{header} -> {self.results[0][1]}:")
+            else:
+                writer.line(f"{header} -> (")
+                with writer.indented():
+                    for name, annotation in self.results:
+                        writer.line(f"{name}: {annotation},")
+                writer.line("):")
+            with writer.indented():
+                for line in self.body:
+                    writer.line(line)
+
+    def __repr__(self) -> str:
+        return f"<lab workflow {self.name}>"
 
 
 class Binding:
@@ -333,7 +424,7 @@ class _ItemReference(Expression):
 
 
 #: Everything a module can hold, in the order it is written.
-ModuleItem = Declaration | RecordDeclaration | CircuitDeclaration | Binding
+ModuleItem = Declaration | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
 
 
 class Module:
@@ -427,9 +518,12 @@ def _module_path(target: object) -> str:
     return path
 
 
-def _provenance_groups(
-    items: Sequence[ModuleItem],
-) -> list[list[Declaration] | RecordDeclaration | CircuitDeclaration | Binding]:
+#: What `emit`-style grouping produces: a run of bought declarations written as
+#: one block, or a single item that writes itself.
+Group = list[Declaration] | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+
+
+def _provenance_groups(items: Sequence[ModuleItem]) -> list[Group]:
     """Consecutive artifact declarations sharing a provenance verb.
 
     A run of bought items is written as one `buy:` block, which is what the
@@ -437,7 +531,7 @@ def _provenance_groups(
     kind of item stands alone and writes itself.
     """
 
-    groups: list[list[Declaration] | RecordDeclaration | CircuitDeclaration | Binding] = []
+    groups: list[Group] = []
     for item in items:
         if not isinstance(item, Declaration):
             groups.append(item)

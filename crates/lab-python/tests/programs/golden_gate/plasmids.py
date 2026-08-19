@@ -12,8 +12,8 @@ concern.
 """
 
 import lab
+from lab import circular, dna
 from lab.bio.golden_gate import Plasmid
-from lab.prelude import circular, dna
 from lab.units import C, minutes, uL
 
 from .inventory import B0015, B0034, GFP, J23101, J23106, RFP, BsaI, pSB1C3

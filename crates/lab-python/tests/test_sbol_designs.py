@@ -16,8 +16,8 @@ import lab
 HAVE_SBOL = bool(importlib.util.find_spec("sbol3"))
 if HAVE_SBOL:
     import sbol3
+    from lab import dna
     from lab.bio.designs import Plasmid
-    from lab.prelude import dna
     from programs.reporter import plasmid as reporter_plasmid
 
 HAND_WRITTEN = """\
