@@ -2,6 +2,10 @@
 reporter through a shared RBS and terminator.
 
 Sequences are synthetic compiler fixtures, not qualified biological designs.
+Each composite sequence is exactly the concatenation of the parts listed
+under `components`, in that order, so the design stays true once the compiler
+computes an assembled sequence rather than taking one on trust.
+
 The reaction chemistry in each design is scientific intent and travels with
 the artifact; where the reaction physically happens is a target profile's
 concern.
@@ -22,7 +26,10 @@ composite_plasmid_1 = Plasmid.build(
     J23101 drives GFP through the shared RBS and terminator, assembled by Golden
     Gate with BsaI. Accepted only if the built sequence matches the design.
     """,
-    sequence=dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTC"),
+    sequence=dna(
+        "TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
+        "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
+    ),
     backbone=pSB1C3,
     components=[J23101, B0034, GFP, B0015],
     restriction_enzyme=BsaI,
@@ -46,7 +53,10 @@ composite_plasmid_2 = Plasmid.build(
     J23106 promoter, so the panel reports two promoter strengths against two
     reporters.
     """,
-    sequence=dna("GCTAGCGGATCCATGGCCTCCTCCGAGGACGTCATCAAGGAATTC"),
+    sequence=dna(
+        "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGG"
+        "AGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
+    ),
     backbone=pSB1C3,
     components=[J23106, B0034, RFP, B0015],
     restriction_enzyme=BsaI,

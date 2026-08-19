@@ -53,8 +53,13 @@ def generate(library: dict[str, Any] | None = None) -> list[GeneratedModule]:
     """Render the mirror, one Python module per Lab module."""
 
     described = library if library is not None else standard_library()
+    grounding = {
+        module["path"]
+        for module in described["modules"]
+        if module["exports"] and all(export["kind"] == "role" for export in module["exports"])
+    }
     modules = [module for module in described["modules"] if _is_mirrored(module)]
-    generated = [_module(module) for module in modules]
+    generated = [_module(module, grounding) for module in modules]
     return generated + _packages(generated)
 
 
@@ -98,12 +103,21 @@ def _python_path(lab_path: str) -> tuple[str, ...]:
     return tuple(segments)
 
 
-def _module(module: dict[str, Any]) -> GeneratedModule:
+def _module(module: dict[str, Any], grounding: set[str]) -> GeneratedModule:
     exports = [export for export in module["exports"] if _binds(export)]
     # Importing one word can require importing what it extends, so a name
     # carries every module a declaration using it has to import. The prelude is
     # imported by every module without saying so, and implies no `use` line.
-    uses = () if module["prelude"] else (*module["imports"], module["path"])
+    # A module of nothing but roles grounds kinds in ontology terms; no
+    # declaration ever names a term, so it is never imported either.
+    uses = (
+        ()
+        if module["prelude"]
+        else (
+            *(path for path in module["imports"] if path not in grounding),
+            module["path"],
+        )
+    )
 
     blocks = [_documentation(module["documentation"]), _HEADER]
     imported = _runtime_imports(module["path"], exports)
@@ -165,8 +179,9 @@ def _artifact_kind(export: dict[str, Any], uses: tuple[str, ...]) -> str:
 
 
 def _properties(properties: tuple[str, ...]) -> list[str]:
-    if not properties:
-        return ["    properties=(),"]
+    line = f"    properties={_tuple(properties)},"
+    if len(line) <= _LIMIT:
+        return [line]
     return ["    properties=(", *(f'        "{name}",' for name in properties), "    ),"]
 
 

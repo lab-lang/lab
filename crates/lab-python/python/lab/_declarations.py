@@ -71,7 +71,7 @@ class DeclarationReference(Expression):
 
     __slots__ = ("declaration",)
 
-    def __init__(self, declaration: Declaration) -> None:
+    def __init__(self, declaration: Declaration | Binding) -> None:
         self.declaration = declaration
 
     def render(self) -> str:
@@ -164,19 +164,191 @@ class Declaration:
         return f"<lab {self.provenance} {self.kind.word} {self._name or 'unbound'}>"
 
 
+class RecordDeclaration:
+    """A `record` declaration: a named type and the roles it plays.
+
+    The Python frontend writes one when a vocabulary has to be minted rather
+    than imported, such as the signal a LOICA network is induced by.
+    """
+
+    def __init__(
+        self,
+        *,
+        module: Module,
+        name: str,
+        roles: Sequence[str] = (),
+        doc: str | None = None,
+        role_uses: Sequence[str] = (),
+        origin: Origin | None = None,
+    ) -> None:
+        self.module = module
+        self.name = name
+        self.roles = tuple(roles)
+        self.doc = doc
+        self.role_uses = tuple(role_uses)
+        self.origin = origin
+
+    def lab_modules(self) -> Iterator[str]:
+        yield from self.role_uses
+
+    def write(self, writer: SourceWriter) -> None:
+        with writer.region(self.origin):
+            writer.documentation(self.doc, "/**")
+            played = f" is {', '.join(self.roles)}" if self.roles else ""
+            writer.line(f"record {self.name}{played}")
+
+    def __repr__(self) -> str:
+        return f"<lab record {self.name}>"
+
+
+class CircuitDeclaration:
+    """A `circuit` declaration: typed inputs, an output type, and a layout.
+
+    The body is the `layout:` section, whose entries are the parts the circuit
+    composes in physical order.
+    """
+
+    def __init__(
+        self,
+        *,
+        module: Module,
+        name: str,
+        inputs: Sequence[tuple[str, str]],
+        output: str,
+        layout: Sequence[object],
+        doc: str | None = None,
+        uses: Sequence[str] = (),
+        origin: Origin | None = None,
+    ) -> None:
+        self.module = module
+        self.name = name
+        self.inputs = list(inputs)
+        self.output = output
+        self.layout = [expression(entry) for entry in layout]
+        self.doc = doc
+        self.uses = tuple(uses)
+        self.origin = origin
+
+    def lab_modules(self) -> Iterator[str]:
+        yield from self.uses
+        for entry in self.layout:
+            yield from entry.lab_modules()
+
+    def write(self, writer: SourceWriter) -> None:
+        with writer.region(self.origin):
+            writer.documentation(self.doc, "/**")
+            writer.line(f"circuit {self.name}(")
+            with writer.indented():
+                for parameter, annotation in self.inputs:
+                    writer.line(f"{parameter}: {annotation},")
+            writer.line(f") -> {self.output}:")
+            with writer.indented():
+                writer.line("layout:")
+                with writer.indented():
+                    for entry in self.layout:
+                        writer.line(entry.render())
+
+    def __lab_expression__(self) -> Expression:
+        return _ItemReference(self)
+
+    def __repr__(self) -> str:
+        return f"<lab circuit {self.name}>"
+
+
+class Binding:
+    """A module-level binding, `name = value`.
+
+    Like an artifact declaration, it takes its Lab name from the Python name it
+    is bound to, so `tet_reporter = regulated_expression()` binds the same name
+    in both languages.
+    """
+
+    def __init__(
+        self,
+        *,
+        module: Module,
+        value: object,
+        name: str | None = None,
+        annotation: str | None = None,
+        doc: str | None = None,
+        origin: Origin | None = None,
+        scope: str | None = None,
+    ) -> None:
+        self.module = module
+        self.value = expression(value)
+        self.annotation = annotation
+        self.doc = doc
+        self.origin = origin
+        self._scope = scope
+        self._name = name
+
+    @property
+    def name(self) -> str:
+        """This binding's Lab name, read from the Python name it is bound to."""
+
+        if self._name is None:
+            self._name = self._find_name()
+        return self._name
+
+    def _find_name(self) -> str:
+        if self._scope is not None:
+            for name, value in vars(sys.modules[self._scope]).items():
+                if value is self:
+                    return name
+        where = self._scope or "the module that created it"
+        raise LookupError(
+            f"the binding declared at {self.origin} has no Lab name: "
+            f"bind it to a variable in {where}, or pass name= when declaring it"
+        )
+
+    def lab_modules(self) -> Iterator[str]:
+        yield from self.value.lab_modules()
+
+    def write(self, writer: SourceWriter) -> None:
+        with writer.region(self.origin):
+            writer.documentation(self.doc, "/**")
+            annotated = f"{self.name}: {self.annotation}" if self.annotation else self.name
+            writer.line(f"{annotated} = {self.value.render()}")
+
+    def __lab_expression__(self) -> Expression:
+        return DeclarationReference(self)
+
+    def __repr__(self) -> str:
+        return f"<lab binding {self._name or 'unbound'}>"
+
+
+class _ItemReference(Expression):
+    """A reference to a named module item, such as a circuit being called."""
+
+    __slots__ = ("item",)
+
+    def __init__(self, item: CircuitDeclaration) -> None:
+        self.item = item
+
+    def render(self) -> str:
+        return self.item.name
+
+    def lab_modules(self) -> Iterator[str]:
+        yield self.item.module.name
+
+
+#: Everything a module can hold, in the order it is written.
+ModuleItem = Declaration | RecordDeclaration | CircuitDeclaration | Binding
+
+
 class Module:
     """One Lab module, and the declarations written into it."""
 
     def __init__(self, name: str, doc: str | None = None, uses: Iterable[object] = ()) -> None:
         self.name = name
         self.doc = doc
-        self.declarations: list[Declaration] = []
+        self.declarations: list[ModuleItem] = []
         #: Modules to import beyond the ones the declarations refer to by name.
         #: A module that only contributes properties to a schema is never named
         #: by anything, so it cannot be inferred.
         self.uses = [_module_path(item) for item in uses]
 
-    def declare(self, declaration: Declaration) -> None:
+    def declare(self, declaration: ModuleItem) -> None:
         self.declarations.append(declaration)
 
     def imports(self) -> list[str]:
@@ -205,7 +377,10 @@ class Module:
         for group in _provenance_groups(self.declarations):
             if writer.offset:
                 writer.line()
-            _write_group(writer, group)
+            if isinstance(group, list):
+                _write_group(writer, group)
+            else:
+                group.write(writer)
         return writer.finish()
 
     def source(self) -> str:
@@ -252,19 +427,28 @@ def _module_path(target: object) -> str:
     return path
 
 
-def _provenance_groups(declarations: Sequence[Declaration]) -> list[list[Declaration]]:
-    """Consecutive declarations sharing a provenance verb.
+def _provenance_groups(
+    items: Sequence[ModuleItem],
+) -> list[list[Declaration] | RecordDeclaration | CircuitDeclaration | Binding]:
+    """Consecutive artifact declarations sharing a provenance verb.
 
     A run of bought items is written as one `buy:` block, which is what the
-    block form means: one origin stated over everything inside it.
+    block form means: one origin stated over everything inside it. Every other
+    kind of item stands alone and writes itself.
     """
 
-    groups: list[list[Declaration]] = []
-    for declaration in declarations:
-        if groups and groups[-1][0].provenance == declaration.provenance == "buy":
-            groups[-1].append(declaration)
+    groups: list[list[Declaration] | RecordDeclaration | CircuitDeclaration | Binding] = []
+    for item in items:
+        if not isinstance(item, Declaration):
+            groups.append(item)
+        elif (
+            groups
+            and isinstance(groups[-1], list)
+            and groups[-1][0].provenance == item.provenance == "buy"
+        ):
+            groups[-1].append(item)
         else:
-            groups.append([declaration])
+            groups.append([item])
     return groups
 
 

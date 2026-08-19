@@ -18,12 +18,22 @@ mapped back to the line of Python that produced the Lab it is about.
 import json
 from typing import Any, cast
 
+from ._circuits import (
+    CircuitBinding,
+    CircuitError,
+    Layout,
+    circuit,
+    layout,
+)
 from ._declarations import (
+    Binding,
+    CircuitDeclaration,
     Claim,
     Declaration,
     Module,
     Predicate,
     Property,
+    RecordDeclaration,
 )
 from ._expressions import (
     Expression,
@@ -46,6 +56,7 @@ from ._program import (
     check,
     check_sources,
 )
+from ._sbol import DesignError
 from ._source import Origin
 from ._vocabulary import ArtifactKind, Function, Symbol
 
@@ -58,13 +69,19 @@ def compile_lab_module(source: str) -> dict[str, Any]:
 
 __all__ = [
     "ArtifactKind",
+    "Binding",
+    "CircuitBinding",
+    "CircuitDeclaration",
+    "CircuitError",
     "Claim",
     "Declaration",
+    "DesignError",
     "Diagnostic",
     "Expression",
     "Fields",
     "Function",
     "LabError",
+    "Layout",
     "Module",
     "Origin",
     "Predicate",
@@ -72,6 +89,7 @@ __all__ = [
     "Property",
     "Quantity",
     "Record",
+    "RecordDeclaration",
     "Symbol",
     "Unit",
     "analyze",
@@ -79,8 +97,10 @@ __all__ = [
     "and_",
     "check",
     "check_sources",
+    "circuit",
     "compile_lab_module",
     "expression",
+    "layout",
     "not_",
     "or_",
 ]

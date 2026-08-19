@@ -9,12 +9,23 @@ description = "Python SDK for compiling biological specifications with Lab"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 
+# The SDK reads pySBOL3 components and LOICA networks structurally, so
+# neither library is required at runtime; the extra installs the pair the
+# examples are written with.
+[project.optional-dependencies]
+bio = [
+  "sbol3>=1.2,<2",
+  "loica>=1.0,<2",
+]
+
 [dependency-groups]
 dev = [
   "maturin>=1.13,<2",
   "mypy>=1.17,<2",
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
+  "sbol3>=1.2,<2",
+  "loica>=1.0,<2",
 ]
 
 [tool.maturin]
@@ -33,6 +44,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.11"
 strict = true
 files = ["python", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["sbol3.*", "loica.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

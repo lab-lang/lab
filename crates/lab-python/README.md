@@ -66,6 +66,72 @@ error: Plasmid has no property 'reaction_volme'
   = help: did you mean 'reaction_volume'?
 ```
 
+## Designs in pySBOL3
+
+A design is an ordinary `sbol3.Component`, passed positionally to `build`. Where SBOL can already state something, the compiler reads it rather than asking twice: the referenced parts become `components` in the order the document's `meets` constraints put them, a readable sequence becomes `sequence`, circular topology becomes the requirement it already states, and the component's description becomes the declaration's documentation. What the declaration adds is what SBOL has no vocabulary for: provenance, acceptance claims, and a place in a build order.
+
+```python
+import sbol3
+
+from lab.bio import golden_gate
+
+design = sbol3.Component(
+    "reporter",
+    [sbol3.SBO_DNA, sbol3.SO_CIRCULAR],
+    features=[J23101, B0034, GFP, B0015],
+)
+
+reporter = golden_gate.Plasmid.build(
+    design,
+    backbone=pSB1C3,
+    restriction_enzyme=BsaI,
+    accept=[lambda built: built.sequence == built.design.sequence],
+)
+```
+
+Each referenced part becomes a catalogued declaration whose identity is the registry IRI, because an imported component is something a supplier lists, not something this laboratory built.
+
+## Circuits in LOICA
+
+A circuit is a LOICA genetic network, which is how the field already designs circuits against SBOL. `lab.circuit` lowers the network to a Lab `circuit` declaration, and each call binds one instance. The trigger and the product are read off the network's own SBOL types, so `Circuit<Trigger, Product>` is never restated:
+
+```python
+import loica
+import sbol3
+
+import lab
+from lab.bio.parts import B0015, B0034
+
+aTc = loica.Supplement(name="aTc", sbol_comp=sbol3.Component("aTc", sbol3.SBO_SIMPLE_CHEMICAL))
+sfGFP = loica.Reporter(
+    name="sfGFP", sbol_comp=sbol3.Component("sfGFP", sbol3.SBO_DNA, roles=[sbol3.SO_CDS])
+)
+pTet = loica.Receiver(
+    input=aTc,
+    output=sfGFP,
+    alpha=[0, 100],
+    K=1,
+    n=2,
+    sbol_comp=sbol3.Component("pTet", sbol3.SBO_DNA, roles=[sbol3.SO_PROMOTER]),
+)
+
+
+@lab.circuit
+def regulated_expression() -> lab.Layout:
+    """A promoter driving a coding sequence through a shared RBS and terminator."""
+    network = loica.GeneticNetwork()
+    network.add_operator(pTet)
+    network.add_reporter(sfGFP)
+    return lab.layout(network, rbs=B0034, terminator=B0015)
+
+
+tet_reporter = regulated_expression()
+```
+
+`tet_reporter` checks as `Circuit<ATc, SfGFP>`: the supplement's component is a simple chemical, so it is the trigger; the reporter's is the coding sequence of the product. The receiver's Hill parameters (`alpha`, `K`, `n`) are characterization a catalogued promoter has no schema field for yet, so they stay on the binding as `tet_reporter.characterization` rather than lowering.
+
+Both readers are structural: neither `sbol3` nor `loica` is imported by the `lab` package, so anything with the right shape lowers and the package works without either installed. `pip install lab-sdk[bio]` brings in the pair the examples are written with.
+
 ## The standard-library mirror
 
 `lab.prelude` and `lab.bio.*` hold the same words `std.prelude` and `std.bio.*` do. They are generated from the compiler's own catalog, so the mirror cannot drift from what a Lab program sees, and they are checked in so an editor and a typechecker can use them without running anything. Regenerate after changing the standard library:
@@ -78,9 +144,9 @@ cd crates/lab-python && uv run python -m lab.codegen
 
 ## What is covered
 
-Artifact declarations. Records, roles, circuits, and workflows are written as Lab source and checked with `compile_lab_module`.
+Artifact declarations, pySBOL3 designs, and LOICA circuits, including the records, catalogued parts, and bindings a circuit lowering mints. Roles and workflows are written as Lab source and checked with `compile_lab_module`.
 
-The Golden Gate example's designs are written both ways: as Lab in [`examples/golden-gate/src/designs/`](../../examples/golden-gate/src/designs/) and with this SDK in [`tests/programs/golden_gate/`](tests/programs/golden_gate/). `tests/test_golden_gate.py` compiles both and requires the same checked module from each.
+The Golden Gate example's designs are written both ways: as Lab in [`examples/golden-gate/src/designs/`](../../examples/golden-gate/src/designs/) and with this SDK in [`tests/programs/golden_gate/`](tests/programs/golden_gate/). `tests/test_golden_gate.py` compiles both and requires the same checked module from each; `tests/test_sbol_designs.py` and `tests/test_loica_circuits.py` hold the SBOL and LOICA frontends to the same standard against hand-written Lab.
 
 ## Development
 

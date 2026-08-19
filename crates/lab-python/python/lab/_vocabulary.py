@@ -70,6 +70,8 @@ class ArtifactKind:
 
     def build(
         self,
+        design: object | None = None,
+        /,
         *,
         module: Module | None = None,
         name: str | None = None,
@@ -87,8 +89,24 @@ class ArtifactKind:
         Properties are keyword arguments; `properties` states the ones whose
         names this signature has already taken, and the ones a caller holds in
         a mapping.
+
+        `design` is a pySBOL3 component stating the design directly: its
+        referenced parts become `components` in the order the document's
+        `meets` constraints put them, a readable sequence becomes `sequence`,
+        and circular topology becomes the requirement it already states.
+        What the declaration itself adds is what SBOL has no vocabulary for:
+        provenance, acceptance claims, and a place in a build order.
         """
 
+        if design is not None:
+            from . import _sbol
+
+            found, _ = declaring_module(depth=2, given=module)
+            read = _sbol.read_design(design, kind=self, module=found, origin=caller_origin(2))
+            module = found
+            stated = {**read.properties, **stated}
+            require = [*read.requirements, *require]
+            doc = doc or read.doc
         return self._declare(
             "build", module, name, doc, ascribed, across, require, accept, properties, stated
         )

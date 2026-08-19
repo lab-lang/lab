@@ -6,19 +6,26 @@ resolution and a runtime evidence question.
 """
 
 import lab
-from lab.bio.designs import Antibiotic, Backbone, Chassis, Part, RestrictionEnzyme
+from lab.bio.designs import CDS, Antibiotic, Backbone, Chassis, Part, Promoter, RestrictionEnzyme
+from lab.prelude import dna
 from lab.units import C, minutes
 
 module = lab.Module("golden_gate.designs.inventory", doc=__doc__)
 
-# Constitutive promoters of differing strength, the shared ribosome binding
-# site and terminator, and the fluorescent reporters.
-J23101 = Part.buy()
-J23106 = Part.buy()
-B0034 = Part.buy()
-B0015 = Part.buy()
-GFP = Part.buy()
-RFP = Part.buy()
+# Constitutive promoters of differing strength. Each is a promoter rather
+# than a bare part, so the compiler knows what it is without being told
+# again wherever it is used.
+J23101 = Promoter.buy(sequence=dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC"))
+J23106 = Promoter.buy(sequence=dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC"))
+
+# The shared ribosome binding site and terminator. Neither has a narrower
+# kind here, so both are parts; a package that declares one may say more.
+B0034 = Part.buy(sequence=dna("AAAGAGGAGAAA"))
+B0015 = Part.buy(sequence=dna("CCAGGCATCAAATAAAACGAAAGGCTCAGTCG"))
+
+# The fluorescent reporters, each a coding sequence.
+GFP = CDS.buy(sequence=dna("ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC"))
+RFP = CDS.buy(sequence=dna("ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG"))
 
 # Assembly backbone and the type IIS enzyme that opens it.
 pSB1C3 = Backbone.buy()
