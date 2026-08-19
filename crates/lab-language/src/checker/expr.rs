@@ -606,17 +606,19 @@ impl Checker {
     /// A bound is satisfied by being the type itself or by playing it as a
     /// role. Membership declared in source and membership built into the
     /// standard library are the same relation, so both are read from one map.
+    ///
+    /// A declaration states the roles it plays, and its own type arguments do
+    /// not bear on the question: `Both<TetR, LacI>` is a signal because `Both`
+    /// is declared to be one. A role takes no arguments, so the bound is
+    /// nullary either way.
     pub fn satisfies_bound(&self, actual: &Ty, bound: &Ty) -> bool {
         if self.compatible(actual, bound) {
             return true;
         }
-        let (Ty::Named(actual, actual_arguments), Ty::Named(bound, bound_arguments)) =
-            (actual, bound)
-        else {
+        let (Ty::Named(actual, _), Ty::Named(bound, bound_arguments)) = (actual, bound) else {
             return false;
         };
-        actual_arguments.is_empty()
-            && bound_arguments.is_empty()
+        bound_arguments.is_empty()
             && self
                 .type_roles
                 .get(actual)

@@ -8,12 +8,17 @@ mod bio;
 mod catalog;
 mod contract;
 mod lab;
+pub mod manifest;
 mod prelude;
 
 pub(crate) use catalog::{
     ConstructorSpec, PureFunctionSpec, StandardLibrary, StandardModule, TypeSpec,
 };
 pub(crate) use contract::{ActionContractSpec, ContractType, Lineage, PhrasePart};
+
+pub(crate) fn manifest() -> manifest::Library {
+    manifest::library()
+}
 
 pub(crate) fn render_markdown() -> String {
     StandardLibrary::bundled().render_markdown()

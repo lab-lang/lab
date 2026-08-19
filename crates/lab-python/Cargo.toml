@@ -1,5 +1,8 @@
 [package]
-name = "lab-sdk-python"
+# Named for its directory. The wheel this crate is built into is published to
+# PyPI as `lab-compiler`; the crate itself is never published to crates.io,
+# because `lab-compiler` there is the compiler these bindings wrap.
+name = "lab-python"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +18,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 lab-compiler.workspace = true
 pyo3.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 
 [lints]

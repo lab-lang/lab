@@ -1795,6 +1795,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-python"
+version = "0.1.2"
+dependencies = [
+ "lab-compiler",
+ "pyo3",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lab-runfmt"
 version = "0.1.2"
 dependencies = [
@@ -1840,15 +1850,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
-]
-
-[[package]]
-name = "lab-sdk-python"
-version = "0.1.2"
-dependencies = [
- "lab-compiler",
- "pyo3",
- "serde_json",
 ]
 
 [[package]]

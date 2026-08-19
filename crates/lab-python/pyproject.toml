@@ -2,12 +2,57 @@
 requires = ["maturin>=1.13,<2"]
 build-backend = "maturin"
 
+# The distribution is `lab-compiler` and the package it installs is `lab`,
+# because the thing being distributed is the compiler and the thing being
+# imported is the language. Keep the version in step with the Cargo
+# workspace: the release workflow checks the tag against it once, and the
+# wheels and the CLI binaries ship from that same tag.
 [project]
-name = "lab-sdk"
+name = "lab-compiler"
 version = "0.1.2"
-description = "Python SDK for compiling biological specifications with Lab"
+description = "The Lab compiler: designs as pySBOL3 components, circuits as LOICA networks, checked end to end"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Mike Arpaia" }]
+keywords = [
+  "synthetic-biology",
+  "sbol",
+  "loica",
+  "compiler",
+  "laboratory-automation",
+  "protocols",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://www.lab-compiler.org"
+Documentation = "https://www.lab-compiler.org/docs/overview"
+Repository = "https://github.com/lab-lang/lab"
+Issues = "https://github.com/lab-lang/lab/issues"
+
+# The SDK reads pySBOL3 components and LOICA networks structurally, so
+# neither library is required at runtime; the extra installs the pair the
+# examples are written with.
+[project.optional-dependencies]
+bio = [
+  "sbol3>=1.2,<2",
+  "loica>=1.0,<2",
+]
 
 [dependency-groups]
 dev = [
@@ -15,12 +60,17 @@ dev = [
   "mypy>=1.17,<2",
   "pytest>=8.4,<9",
   "ruff>=0.12,<1",
+  "sbol3>=1.2,<2",
+  "loica>=1.0,<2",
 ]
 
 [tool.maturin]
 python-source = "python"
 module-name = "lab._native"
 features = ["pyo3/extension-module"]
+# The working tree carries bytecode from the editable install used to run the
+# tests, and none of it belongs in a wheel built from that tree.
+exclude = ["**/__pycache__/**", "**/*.pyc"]
 
 [tool.ruff]
 target-version = "py311"
@@ -29,10 +79,29 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# The package is where the prelude lives, because the namespace Python always
+# has reachable is the package itself. Its names are generated, so they are
+# re-exported wholesale rather than listed again by hand.
+"python/lab/__init__.py" = ["F403", "F405"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
 files = ["python", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["sbol3.*", "loica.*"]
+ignore_missing_imports = true
+
+# A record's fields are Lab types stated as annotations, so the constructor
+# mypy would need to see is one `@lab.record` builds at runtime. Reading it
+# statically is what a mypy plugin is for, the way dataclasses have one, and
+# until there is one a program written in the object model is checked by the
+# Lab compiler rather than by mypy. The package itself stays strict.
+[[tool.mypy.overrides]]
+module = ["programs.reporter.*"]
+disable_error_code = ["call-arg", "attr-defined", "no-any-return", "return"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

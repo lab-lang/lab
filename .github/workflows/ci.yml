@@ -22,3 +22,15 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --all-targets
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v5
+      # The gate builds the extension into the project venv and then runs
+      # ruff, mypy, and pytest against the installed package, so the wheel
+      # published from this tree is the thing the tests actually exercised.
+      - run: scripts/check-python-sdk.sh

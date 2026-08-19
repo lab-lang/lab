@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn an_iri_from_an_unlisted_vocabulary_is_accepted() {
-        let iri = "https://lab-lang.org/terms/Reporter";
+        let iri = "https://lab-compiler.org/terms/Reporter";
         assert_eq!(check_term(&term(iri)).expect("an absolute IRI"), iri);
     }
 

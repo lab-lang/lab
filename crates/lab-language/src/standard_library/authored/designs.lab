@@ -23,9 +23,36 @@ use std.bio.ontology
 artifact Part is NucleicAcid:
   sequence?: DNA
 
-/** A promoter for some signal. */
+/**
+ * A promoter for some signal.
+ *
+ * The signal is what the promoter answers to; `regulation` is which way it
+ * answers. A promoter that expresses more in the presence of its signal is
+ * induced by it, and one that expresses less is repressed by it. The
+ * difference is the difference between a buffer and an inverter, so a
+ * catalogue that knows it says it.
+ */
 artifact Promoter is NucleicAcid, PromoterRegion:
   sequence?: DNA
+  regulation?: Regulation
+
+/**
+ * A condition that is two signals at once.
+ *
+ * A promoter can integrate several inputs, and what it responds to is then no
+ * single molecule. Nesting states more than two, because a condition of
+ * several signals is itself a signal.
+ */
+record Both<First: Signal, Second: Signal> is Signal
+
+/**
+ * Two products expressed from one promoter.
+ *
+ * A transcription unit may carry more than one coding sequence, and everything
+ * downstream of the promoter is expressed together. Nesting states more than
+ * two, the way `Both` does for the signals a promoter answers to.
+ */
+record Operon<First: Protein, Second: Protein> is Protein
 
 /** A coding sequence for some protein. */
 artifact CDS is NucleicAcid, CodingSequence:
@@ -66,19 +93,25 @@ artifact Antibiotic is SimpleChemical
  * A DNA design a laboratory can build.
  *
  * A plasmid states its sequence directly, or states the backbone together with
- * what goes into it: the parts an assembly joins, or the circuit a sequence can
- * be derived from.
+ * what goes into it: the parts an assembly joins, or the circuits a sequence
+ * can be derived from.
  *
  * What an assembly joins is anything made of DNA, which is what `any
  * NucleicAcid` says. Naming the admissible kinds instead would be a list that
  * every new kind of part has to be added to, and a promoter or a coding
  * sequence is no less assemblable than a bare part.
+ *
+ * Cargo is a list because a circuit is one transcription unit, and a network
+ * worth carrying is usually several of them wired together by the proteins
+ * they express. The triggers and products are forgotten because units with
+ * different triggers have no trigger in common; what each one responds to
+ * stays on the unit itself.
  */
 artifact Plasmid is NucleicAcid, EngineeredRegion:
   sequence?: DNA
   backbone?: Backbone
   components?: List<any NucleicAcid>
-  cargo?: Circuit<any Signal, any Protein>
+  cargo?: List<Circuit<any Signal, any Protein>>
 
   declares sequence or (backbone and components) or (backbone and cargo)
 

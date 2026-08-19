@@ -7,6 +7,7 @@
 *.rs.bk
 .DS_Store
 crates/lab-python/python/lab/_native.*
+!crates/lab-python/python/lab/_native.pyi
 editors/vscode/node_modules/
 editors/vscode/out/
 editors/vscode/server/

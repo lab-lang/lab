@@ -125,10 +125,14 @@ pub(crate) fn from_checked_type(ty: &CheckedType) -> Ty {
 }
 
 /// Whether a type playing `role` is recorded as doing so.
+///
+/// A declaration states the roles it plays, so its type arguments do not bear
+/// on the question: `Reading<Fluorescence>` is evidence because `Reading` is
+/// declared to be, and a signal standing for several signals at once is a
+/// signal whichever ones it combines.
 fn plays_role(roles: &RoleTable, actual: &Ty, role: &str) -> bool {
-    matches!(actual, Ty::Named(name, arguments)
-        if arguments.is_empty()
-            && roles.get(name).is_some_and(|played| played.contains(role)))
+    matches!(actual, Ty::Named(name, _)
+        if roles.get(name).is_some_and(|played| played.contains(role)))
 }
 
 pub(crate) fn compatible(roles: &RoleTable, actual: &Ty, expected: &Ty) -> bool {

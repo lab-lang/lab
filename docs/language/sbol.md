@@ -305,7 +305,9 @@ coding sequence produces GFP. Those are SBOL Interactions:
 | Lab | SBOL 3 |
 | --- | --- |
 | `circuit ... layout:` | `Component` roled `SO:0000804`, ordered `SubComponent`s joined by `meets` `Constraint`s |
-| `Promoter<S>` | `Interaction` typed `SBO:0000170` (stimulation); `Participation` of `S` as `SBO:0000459` (stimulator), promoter as `SBO:0000598` |
+| `Promoter<S>` | `Interaction` typed `SBO:0000170` (stimulation) where `regulation` is `induced` and `SBO:0000169` (inhibition) where it is `repressed`; `Participation` of `S` as `SBO:0000459` (stimulator) or `SBO:0000020` (inhibitor), promoter as `SBO:0000598` |
+| `Both<A, B>` | one `Interaction` per combined signal, each participating in the same promoter |
+| `Operon<A, B>` | one genetic-production `Interaction` per product of the unit |
 | `CDS<P>` | `Interaction` typed `SBO:0000589` (genetic production); CDS as `SBO:0000645` (template), `P` as `SBO:0000011` (product) |
 | `Circuit<S, P>` | the composite's `Interface`: `S` an input, `P` an output |
 | `any Signal` | a `VariableFeature`, or a `Collection` of variants |
@@ -1218,7 +1220,7 @@ it needs deciding rather than discovering.
 upstream is the better end state.
 
 **Namespaces are a policy call.** Whether a package must declare one, and what a
-project without a SynBioHub account uses. A `https://lab-lang.org/local/<package>`
+project without a SynBioHub account uses. A `https://lab-compiler.org/local/<package>`
 default works but publishes IRIs that do not resolve, which is its own kind of
 lie.
 
