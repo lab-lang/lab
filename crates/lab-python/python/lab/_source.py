@@ -105,6 +105,10 @@ class SourceWriter:
 
         if not doc:
             return
+        if "*/" in doc:
+            raise ValueError(
+                "Lab documentation cannot contain '*/'; it closes the documentation block"
+            )
         lines = [line.rstrip() for line in cleandoc(doc).splitlines()]
         self.line(opener)
         for line in lines:
