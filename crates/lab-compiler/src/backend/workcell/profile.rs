@@ -1,6 +1,7 @@
 //! Deserializable shape of a workcell target profile: the stations a bench
 //! composes and the transport between them.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -10,7 +11,7 @@ use crate::backend::workcell::BACKEND;
 /// carrying labware between them. Station machine configuration is not
 /// repeated here — a robot station names an existing single-machine target
 /// profile, and instrument stations carry only bench properties.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkcellProfile {
     #[serde(default)]
@@ -21,7 +22,7 @@ pub struct WorkcellProfile {
     pub transport: Transport,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TargetMetadata {
     /// The workcell this profile describes, supplied by the loader from the
@@ -45,7 +46,7 @@ fn default_backend() -> String {
     BACKEND.to_string()
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StationDecl {
     pub name: String,
@@ -63,7 +64,7 @@ pub struct StationDecl {
 /// The station kinds this toolchain can plan for. The kind fixes the
 /// station's capabilities; assignment is deterministic over kinds rather
 /// than negotiated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub enum StationKind {
     #[serde(rename = "hamilton.star")]
     HamiltonStar,
@@ -83,7 +84,7 @@ impl StationKind {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Transport {
     #[serde(default = "default_transport")]

@@ -7,6 +7,7 @@ mod run;
 mod scene;
 mod simulate;
 mod stamp;
+mod targets;
 mod typeset;
 mod update;
 mod workcell_run;
@@ -65,6 +66,11 @@ enum Command {
         /// target.
         #[arg(long, conflicts_with = "target")]
         no_target: bool,
+    },
+    /// Discover, validate, and render compiler-owned target profiles.
+    Targets {
+        #[command(subcommand)]
+        command: TargetsCommand,
     },
     /// Execute an emitted run package — a Hamilton STAR package or a
     /// workcell wave — on the connected stations, or review it with
@@ -223,6 +229,28 @@ enum ComputeCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum TargetsCommand {
+    /// Describe every backend and station kind, or one backend in detail.
+    Describe {
+        /// Concrete `[target] backend` value to describe.
+        #[arg(long)]
+        backend: Option<String>,
+    },
+    /// Print the complete reference profile for one backend.
+    Default {
+        /// Concrete `[target] backend` value.
+        backend: String,
+        /// Profile filename stem used for validation metadata.
+        #[arg(long, default_value = "target")]
+        name: String,
+    },
+    /// Parse and semantically validate a target profile.
+    Validate { path: PathBuf },
+    /// Validate and print a complete canonical target profile.
+    Render { path: PathBuf },
+}
+
+#[derive(Debug, Subcommand)]
 enum RobotCommand {
     /// Project one workcell handoff into a backend-neutral robot task.
     Task {
@@ -287,6 +315,12 @@ fn run() -> Result<()> {
             target,
             no_target,
         } => commands::build(path, out_dir, target, no_target, &output),
+        Command::Targets { command } => match command {
+            TargetsCommand::Describe { backend } => targets::describe(backend, &output),
+            TargetsCommand::Default { backend, name } => targets::default(backend, name, &output),
+            TargetsCommand::Validate { path } => targets::validate(path, &output),
+            TargetsCommand::Render { path } => targets::render(path, &output),
+        },
         Command::Run {
             path,
             dry_run,
@@ -436,6 +470,35 @@ mod tests {
             Command::Compute {
                 command: ComputeCommand::Doctor { env_file }
             } if env_file.as_path() == std::path::Path::new("credentials.env")
+        ));
+    }
+
+    #[test]
+    fn parses_target_contract_commands() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "targets",
+            "describe",
+            "--backend",
+            "hamilton.star",
+            "--json",
+        ])
+        .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Command::Targets {
+                command: TargetsCommand::Describe { backend: Some(backend) }
+            } if backend == "hamilton.star"
+        ));
+
+        let cli = Cli::try_parse_from(["lab", "targets", "default", "workcell", "--name", "bench"])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Targets {
+                command: TargetsCommand::Default { backend, name }
+            } if backend == "workcell" && name == "bench"
         ));
     }
 

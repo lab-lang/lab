@@ -1,13 +1,14 @@
 //! Deserializable shape of an OT-2 target profile: instruments, deck
 //! modules, and the labware each build stage claims.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
 
 use crate::backend::opentrons::ot2::profile::defaults::*;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TargetMetadata {
     /// The bench this profile describes, named by whoever loaded it: a profile
@@ -32,7 +33,7 @@ impl Default for TargetMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Instruments {
     #[serde(default = "default_small_pipette")]
@@ -50,7 +51,7 @@ impl Default for Instruments {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pipette {
     pub model: String,
@@ -58,7 +59,7 @@ pub struct Pipette {
 }
 
 /// Hardware present for every stage.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SharedDeck {
     #[serde(default = "default_temperature_module")]
@@ -79,7 +80,7 @@ impl Default for Thermocycler {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TemperatureModule {
     pub model: String,
@@ -90,7 +91,7 @@ pub struct TemperatureModule {
 }
 
 /// The thermocycler occupies fixed slots, so it declares no slot of its own.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Thermocycler {
     pub model: String,
@@ -98,7 +99,7 @@ pub struct Thermocycler {
     pub capacity: usize,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Stages {
     #[serde(default = "default_assembly_stage")]
@@ -109,7 +110,7 @@ pub struct Stages {
     pub plating: PlatingStage,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AssemblyStage {
     #[serde(default = "default_assembly_small_tips")]
@@ -122,7 +123,7 @@ impl Default for AssemblyStage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransformationStage {
     /// Plate holding the assembled plasmids a transformation draws from.
@@ -140,7 +141,7 @@ impl Default for TransformationStage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlatingStage {
     #[serde(default = "default_dilution_plate")]

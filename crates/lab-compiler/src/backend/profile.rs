@@ -1,5 +1,6 @@
 //! Profile fragments every liquid-handler bench declares, whatever the robot.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 fn default_plate_capacity() -> usize {
@@ -8,7 +9,7 @@ fn default_plate_capacity() -> usize {
 
 /// One or more identical plates. Allocation fills each in turn, so adding a
 /// slot raises a build's capacity without changing any program.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Plates {
     pub labware: String,
@@ -23,7 +24,7 @@ impl Plates {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TipRacks {
     pub labware: String,
@@ -38,7 +39,7 @@ impl TipRacks {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MediaRack {
     pub labware: String,

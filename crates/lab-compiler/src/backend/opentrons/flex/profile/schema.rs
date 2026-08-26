@@ -1,13 +1,14 @@
 //! Deserializable shape of a Flex target profile: instruments, deck modules,
 //! the trash bin, and the labware each build stage claims.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
 
 use crate::backend::opentrons::flex::profile::defaults::*;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TargetMetadata {
     /// The bench this profile describes, named by whoever loaded it: a profile
@@ -29,7 +30,7 @@ impl Default for TargetMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Instruments {
     #[serde(default = "default_small_pipette")]
@@ -47,7 +48,7 @@ impl Default for Instruments {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Pipette {
     pub model: String,
@@ -56,7 +57,7 @@ pub struct Pipette {
 
 /// Hardware present for every stage: the two installed modules and the
 /// movable trash bin.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FlexDeck {
     #[serde(default = "default_temperature_module")]
@@ -85,7 +86,7 @@ impl Default for Trash {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TemperatureModule {
     pub model: String,
@@ -97,7 +98,7 @@ pub struct TemperatureModule {
 
 /// The thermocycler installs across slots A1 and B1, so it declares no slot
 /// of its own and nothing else may claim those.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Thermocycler {
     pub model: String,
@@ -107,13 +108,13 @@ pub struct Thermocycler {
 
 /// The movable trash bin, named by its addressable area. The bin occupies its
 /// deck slot, so no stage may place labware there.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Trash {
     pub area: String,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Stages {
     #[serde(default = "default_assembly_stage")]
@@ -124,7 +125,7 @@ pub struct Stages {
     pub plating: PlatingStage,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AssemblyStage {
     #[serde(default = "default_assembly_small_tips")]
@@ -137,7 +138,7 @@ impl Default for AssemblyStage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransformationStage {
     /// Plate holding the assembled plasmids a transformation draws from.
@@ -155,7 +156,7 @@ impl Default for TransformationStage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlatingStage {
     #[serde(default = "default_dilution_plate")]

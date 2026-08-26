@@ -36,6 +36,8 @@ ureq = { version = "3.3.0", default-features = false }
 pyo3 = { version = "0.28.3", features = ["abi3-py311"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+schemars = { version = "1", features = ["derive"] }
+sha2 = "0.11"
 rusb = "0.9"
 # SBOL 3 terms, serialization, and validation. Designs are read from and
 # written to SBOL documents, so the standard's object model is the compiler's

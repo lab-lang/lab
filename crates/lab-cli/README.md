@@ -41,6 +41,18 @@ lab build --target opentrons-ot2
 
 The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable robot protocol it emitted, ready to hand to a robot application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
 
+Editors and control planes use the compiler-owned target contract rather than copying backend structs. It reports each backend's JSON Schema, complete default, catalog choices, capabilities, and workcell station kinds; validation runs the same cross-field semantics as a build and returns canonical TOML, canonical JSON, the compiler and schema versions, and a SHA-256:
+
+```sh
+lab targets describe
+lab --json targets describe
+lab targets default opentrons.flex --name flex-bay-1
+lab targets validate targets/flex-bay-1.toml
+lab --json targets render targets/flex-bay-1.toml
+```
+
+The shipped backends are `opentrons.ot2`, `opentrons.flex`, `hamilton.star`, and `workcell`. `describe` is the discovery authority for the exact compiler binary in use; consumers should not assume that list remains fixed.
+
 A package that usually compiles for one bench names it in the manifest instead of on every invocation:
 
 ```toml

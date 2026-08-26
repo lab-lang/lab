@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -123,7 +124,7 @@ pub enum StarProfileError {
 }
 
 /// The machine variant, which fixes the deck's rail count.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MachineVariant {
     /// 56 rails, 1545 mm deck.
@@ -148,7 +149,7 @@ impl MachineVariant {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TargetMetadata {
     /// The bench this profile describes, named by whoever loaded it: a
@@ -169,7 +170,7 @@ impl Default for TargetMetadata {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Machine {
     #[serde(default = "default_variant")]
@@ -190,7 +191,7 @@ impl Default for Machine {
 }
 
 /// One catalog carrier placed on the deck.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct CarrierPlacement {
     /// The catalog carrier id.
@@ -200,7 +201,7 @@ pub struct CarrierPlacement {
 }
 
 /// One labware on one carrier site.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlacedLabware {
     /// `"<carrier>/<site>"`, 1-based site number.
@@ -212,7 +213,7 @@ pub struct PlacedLabware {
 }
 
 /// The deck: carriers on rails plus the two fixtures every stage shares.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StarDeck {
     #[serde(default = "default_carriers")]
@@ -237,7 +238,7 @@ impl Default for StarDeck {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AssemblyStage {
     #[serde(default = "default_assembly_small_tips")]
@@ -252,7 +253,7 @@ impl Default for AssemblyStage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransformationStage {
     /// Plate holding the plasmids a transformation draws from.
@@ -274,7 +275,7 @@ impl Default for TransformationStage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlatingStage {
     #[serde(default = "default_dilution_plate")]
@@ -301,7 +302,7 @@ impl Default for PlatingStage {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StarStages {
     #[serde(default)]
@@ -315,7 +316,7 @@ pub struct StarStages {
 /// The liquid level detection policy a bench opts into. Planning always
 /// computes deterministic heights; gamma detection adds a runtime check on
 /// top of them, it never replaces them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LldPolicy {
     #[default]
@@ -324,7 +325,7 @@ pub enum LldPolicy {
 }
 
 /// Knobs the runner and command lowering read.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunOptions {
     /// Where `lab run` parks the autoload after setup; absent means the
@@ -350,7 +351,7 @@ impl Default for RunOptions {
 }
 
 /// The complete STAR site configuration consumed by planning and emission.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StarTargetProfile {
     #[serde(default)]

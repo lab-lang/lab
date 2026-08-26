@@ -17,6 +17,7 @@ mod schema;
 use std::collections::BTreeSet;
 
 use opentrons_protocol::{FlexPipetteName, FlexSlot, TrashArea};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::opentrons::flex::BACKEND;
@@ -30,7 +31,7 @@ pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Plates, Stag
 const THERMOCYCLER_SLOTS: [FlexSlot; 2] = [FlexSlot::A1, FlexSlot::B1];
 
 /// The complete Flex site configuration consumed by planning and emission.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FlexTargetProfile {
     #[serde(default)]

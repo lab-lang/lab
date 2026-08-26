@@ -1,5 +1,10 @@
 //! WebAssembly host API for browser editors and embedded desktop surfaces.
 
+use lab_compiler::backend::{
+    default_target_profile as compiler_default_target_profile,
+    target_capabilities as compiler_target_capabilities,
+    validate_target_profile as compiler_validate_target_profile,
+};
 use lab_ide::Workspace;
 use lab_language::{ModuleId, SourceId};
 use serde::Serialize;
@@ -104,6 +109,32 @@ impl Default for LabWorkspace {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The compiler-owned target catalog used by browser control planes.
+#[wasm_bindgen(js_name = targetCapabilities)]
+pub fn target_capabilities() -> Result<JsValue, JsValue> {
+    serialize(
+        &compiler_target_capabilities().map_err(|error| JsValue::from_str(&error.to_string()))?,
+    )
+}
+
+/// A complete reference profile for a backend, validated by this compiler.
+#[wasm_bindgen(js_name = defaultTargetProfile)]
+pub fn default_target_profile(backend: String, name: String) -> Result<JsValue, JsValue> {
+    serialize(
+        &compiler_default_target_profile(&backend, &name)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?,
+    )
+}
+
+/// Parse, semantically validate, canonicalize, and hash target TOML.
+#[wasm_bindgen(js_name = validateTargetProfile)]
+pub fn validate_target_profile(name: String, contents: String) -> Result<JsValue, JsValue> {
+    serialize(
+        &compiler_validate_target_profile(&name, &contents)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?,
+    )
 }
 
 fn serialize<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, JsValue> {

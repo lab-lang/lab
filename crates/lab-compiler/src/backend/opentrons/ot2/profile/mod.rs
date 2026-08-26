@@ -16,6 +16,7 @@ mod schema;
 
 use std::collections::BTreeSet;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::opentrons::ot2::BACKEND;
@@ -31,7 +32,7 @@ const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "
 const THERMOCYCLER_SLOTS: [&str; 4] = ["7", "8", "10", "11"];
 
 /// The complete OT-2 site configuration consumed by planning and emission.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Ot2TargetProfile {
     #[serde(default)]
