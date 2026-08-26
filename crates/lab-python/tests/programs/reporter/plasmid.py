@@ -1,46 +1,41 @@
-"""The GFP reporter plasmid, designed in pySBOL3."""
+"""The GFP reporter plasmid, designed through Lab's typed SBOL layer."""
 
 import lab
-import sbol3
-from lab.bio.designs import Backbone, RestrictionEnzyme
+from lab import sbol
+from lab.bio.designs import CDS, Backbone, Part, Promoter, RestrictionEnzyme
 from lab.bio.golden_gate import Plasmid
 from lab.units import C, minutes, ng, uL
 
 module = lab.Module("reporter.plasmid", doc=__doc__)
 
-sbol3.set_namespace("https://synbiohub.org/user/marpaia/reporter")
-
-# The design is plain pySBOL3: parts referenced at the identity the registry
-# already gave them, ordered by SBOL's own constraints.
+# The typed document owns the pySBOL3 graph underneath. Registry identities are
+# preserved, while each Python value keeps the biological kind it names.
+designs = sbol.Document(namespace="https://synbiohub.org/user/marpaia/reporter")
 IGEM = "https://synbiohub.org/public/igem"
-J23101 = sbol3.SubComponent(f"{IGEM}/BBa_J23101/1")
-B0034 = sbol3.SubComponent(f"{IGEM}/BBa_B0034/1")
-GFP = sbol3.SubComponent(f"{IGEM}/BBa_E0040/1")
-B0015 = sbol3.SubComponent(f"{IGEM}/BBa_B0015/1")
+J23101 = Promoter.buy(
+    design=designs.promoter(identity=f"{IGEM}/BBa_J23101/1"),
+)
+B0034 = Part.buy(
+    design=designs.rbs(identity=f"{IGEM}/BBa_B0034/1"),
+)
+GFP = CDS.buy(
+    design=designs.cds(identity=f"{IGEM}/BBa_E0040/1"),
+)
+B0015 = Part.buy(
+    design=designs.terminator(identity=f"{IGEM}/BBa_B0015/1"),
+)
 
-sequence = sbol3.Sequence("reporter_seq", elements="ACGTACGT", encoding=sbol3.IUPAC_DNA_ENCODING)
-
-design = sbol3.Component(
-    "reporter",
-    [sbol3.SBO_DNA, sbol3.SO_CIRCULAR],
-    roles=[sbol3.SO_ENGINEERED_REGION],
-    sequences=[sequence],
-    features=[J23101, B0034, GFP, B0015],
+design = designs.plasmid(
+    components=[J23101, B0034, GFP, B0015],
+    sequence="ACGTACGT",
     description="The GFP reporter under a strong constitutive promoter.",
 )
-design.constraints = [
-    sbol3.Constraint(sbol3.SBOL_MEETS, J23101, B0034),
-    sbol3.Constraint(sbol3.SBOL_MEETS, B0034, GFP),
-    sbol3.Constraint(sbol3.SBOL_MEETS, GFP, B0015),
-]
-
-document = sbol3.Document()
-document.add(design)
-document.add(sequence)
 
 # What SBOL has no vocabulary for is lab's part: where a material comes
 # from, and the evidence a built artifact is accepted on.
-pSB1C3 = Backbone.buy(identity=f"{IGEM}/pSB1C3/1")
+pSB1C3 = Backbone.buy(
+    design=designs.backbone(identity=f"{IGEM}/pSB1C3/1"),
+)
 BsaI = RestrictionEnzyme.buy(
     identity="NEB-R0535",
     digest_temperature=37 * C,
@@ -48,7 +43,7 @@ BsaI = RestrictionEnzyme.buy(
 )
 
 reporter = Plasmid.build(
-    design,
+    design=design,
     backbone=pSB1C3,
     restriction_enzyme=BsaI,
     reaction_volume=20 * uL,

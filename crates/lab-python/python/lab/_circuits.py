@@ -39,10 +39,12 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from . import _naming, _terms
 from ._declarations import (
     Binding,
+    BuyDeclaration,
     CircuitDeclaration,
     Declaration,
     Module,
@@ -132,8 +134,8 @@ class _Unit:
     operator: object
     trigger: str
     product: str
-    promoter: Declaration = field(init=False)
-    coding: Declaration = field(init=False)
+    promoter: Declaration[Any] = field(init=False)
+    coding: Declaration[Any] = field(init=False)
 
 
 def circuit(fn: Callable[[], Network]) -> Callable[..., NetworkBinding]:
@@ -497,7 +499,7 @@ def _mint_part(
     word: str,
     ascribed: str,
     properties: dict[str, object],
-) -> Declaration:
+) -> Declaration[Any]:
     from .bio import designs
 
     kind = {"promoter": designs.Promoter, "cds": designs.CDS}[word]
@@ -507,7 +509,7 @@ def _mint_part(
         if identity:
             stated = {"identity": str(identity), **stated}
     name = _naming.free_name(_naming.identifier(fallback), word, taken)
-    declaration = Declaration(
+    declaration = BuyDeclaration(
         module=module,
         kind=kind,
         provenance="buy",

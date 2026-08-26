@@ -10,7 +10,7 @@ build-backend = "maturin"
 [project]
 name = "lab-compiler"
 version = "0.1.2"
-description = "The Lab compiler: designs as pySBOL3 components, circuits as LOICA networks, checked end to end"
+description = "The Lab compiler: typed SBOL designs, LOICA circuits, and experiments checked end to end"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -45,9 +45,9 @@ Documentation = "https://www.lab-compiler.org/docs/overview"
 Repository = "https://github.com/lab-lang/lab"
 Issues = "https://github.com/lab-lang/lab/issues"
 
-# The SDK reads pySBOL3 components and LOICA networks structurally, so
-# neither library is required at runtime; the extra installs the pair the
-# examples are written with.
+# The SDK lowers typed or raw pySBOL3 components and LOICA networks
+# structurally, so neither library is required just to import `lab`; the extra
+# installs the pair the examples are written with.
 [project.optional-dependencies]
 bio = [
   "sbol3>=1.2,<2",
@@ -102,6 +102,21 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["programs.reporter.*"]
 disable_error_code = ["call-arg", "attr-defined", "no-any-return", "return"]
+
+[[tool.mypy.overrides]]
+module = [
+  "golden_gate.workflows.assemble",
+  "golden_gate_extended.workflows.assemble",
+]
+disable_error_code = ["no-any-return"]
+
+[[tool.mypy.overrides]]
+module = ["golden_gate_extended.workflows.observe"]
+disable_error_code = ["call-arg", "return"]
+
+[[tool.mypy.overrides]]
+module = ["golden_gate_extended.programs.panel"]
+disable_error_code = ["attr-defined"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

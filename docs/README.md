@@ -68,6 +68,9 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0036: Photoreal projections](language/decisions/0036-photoreal-projections.md) | renderers are players of the scene and trace; assets are facility-owned references with box fallbacks |
 | [0037: Robot learning as a physics projection](language/decisions/0037-robot-learning-is-a-physics-projection.md) | reviewed handoffs project to semantic robot tasks; embodiment and physics remain explicit simulator bindings |
 | [0038: C3 as the primary compute provider](language/decisions/0038-c3-is-the-primary-compute-provider.md) | C3 runs finite training jobs behind provider-neutral lifecycle and artifact contracts; Isaac uses L40 capacity |
+| [0039: Roles carry ontology terms](language/decisions/0039-roles-carry-ontology-terms.md) | roles may name the ontology terms they stand for, grounding Lab types in shared vocabularies |
+| [0040: Networks are lists of transcription units](language/decisions/0040-networks-are-lists-of-transcription-units.md) | genetic networks remain lists of typed circuits whose shared products carry their wiring |
+| [0041: Typed SBOL authoring separates design from provenance](language/decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md) | typed Python designs preserve biological kinds while explicit declarations state build or buy provenance |
 
 ## Implementation and embedding
 

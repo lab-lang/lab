@@ -1,27 +1,25 @@
-"""Designs written as pySBOL3 components.
+"""Read typed Lab designs or raw pySBOL3 components structurally.
 
-A design here is an ordinary `sbol3.Component`: parts referenced at the
-identity the registry already gave them, ordered by SBOL's own `meets`
-constraints, with topology in the component's own types. Where SBOL can
-already state something, the compiler reads it rather than asking for it
-twice, so the component contributes `components`, `sequence`, and the
-circular-topology requirement to the declaration built from it.
+Typed designs can remain anonymous until a ``build`` or ``buy`` declaration is
+named.  At module-emission time this reader asks the design to materialize
+itself under that declaration name, then reads the same biological facts the
+raw SBOL path reads: sequence, ordered components, topology, and prose.
 
-Each referenced part becomes a catalogued declaration whose identity is the
-registry IRI, because an imported component is something a supplier lists,
-not something this laboratory built.
-
-Nothing here imports pySBOL3; the component is read structurally.
+Nothing here imports pySBOL3.  Raw components continue to work through a small
+structural protocol, while the public :mod:`lab.sbol` layer keeps biological
+kinds and their sequences typed. Typed composite children must already carry
+an explicit Lab ``build`` or ``buy`` declaration; only an unannotated raw SBOL
+import uses the language's catalogued fallback.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 from weakref import WeakKeyDictionary
 
 from . import _naming, _terms
-from ._declarations import Claim, Declaration, Module
+from ._declarations import BuyDeclaration, Claim, Declaration, Module
 from ._expressions import Expression, Fields, expression
 from ._source import Origin
 
@@ -30,18 +28,20 @@ if TYPE_CHECKING:
 
 _FIELDS = Fields()
 
-#: Parts already declared for a registry identity, one set per module, so a
-#: design mentioning a part twice and two designs sharing one part both name
-#: one declaration.
-_CATALOGUED: WeakKeyDictionary[Module, dict[str, Declaration]] = WeakKeyDictionary()
+# Registry components already represented in a module. A typed occurrence may
+# refine a raw occurrence's biological kind, but one IRI cannot become two
+# explicitly incompatible kinds.
+_CATALOGUED: WeakKeyDictionary[Module, dict[str, tuple[Declaration[Any], bool]]] = (
+    WeakKeyDictionary()
+)
 
 
 class DesignError(TypeError):
-    """A component that cannot be read as a design, and why."""
+    """A component that cannot be read as the requested biological design."""
 
 
 class ReadDesign:
-    """What one SBOL component contributes to the declaration built from it."""
+    """What one SBOL design contributes to a Lab artifact declaration."""
 
     def __init__(
         self,
@@ -55,31 +55,92 @@ class ReadDesign:
         self.doc = doc
 
 
-def read_design(
-    design: object, *, kind: type[ArtifactKind], module: Module, origin: Origin
-) -> ReadDesign:
-    """Read a pySBOL3 component into what a `build` declaration states."""
+def validate_design_argument(design: object, *, kind: type[ArtifactKind]) -> None:
+    """Reject an obviously incompatible design before declaring anything."""
 
-    types = _terms.terms(_attribute(design, "types"))
-    if _terms.NUCLEIC_ACID not in types:
-        stated = sorted(types) if types else "nothing"
+    _check_typed_design_kind(design, kind)
+    molecule = getattr(design, "__lab_sbol_molecule_type__", None)
+    if callable(molecule):
+        stated = cast(str, molecule())
+        if stated != "dna":
+            raise DesignError(
+                f"a design passed to {kind.produces} must be DNA; this typed design is {stated}"
+            )
+        return
+
+    if not looks_like_component(design):
         raise DesignError(
-            f"a design passed to {kind.produces}.build must be DNA "
-            f"({_terms.NUCLEIC_ACID}); this component's types state {stated}"
+            f"a design passed to {kind.produces} must be a typed lab.sbol design "
+            "or a raw pySBOL3 Component"
         )
+    _check_raw_dna(design, kind)
 
+
+def read_design(
+    design: object,
+    *,
+    kind: type[ArtifactKind],
+    module: Module,
+    origin: Origin,
+    declaration_name: str,
+    provenance: str,
+    before: Declaration[Any],
+) -> ReadDesign:
+    """Prepare and read the design attached to one declaration."""
+
+    validate_design_argument(design, kind=kind)
+    prepare = getattr(design, "__lab_sbol_prepare__", None)
+    if callable(prepare):
+        prepare(declaration_name)
+
+    if _is_typed_design(design):
+        return _read_typed_design(
+            design,
+            kind=kind,
+            module=module,
+            origin=origin,
+            provenance=provenance,
+            before=before,
+        )
+    return _read_raw_design(
+        design,
+        kind=kind,
+        module=module,
+        origin=origin,
+        provenance=provenance,
+        before=before,
+    )
+
+
+def _read_typed_design(
+    design: object,
+    *,
+    kind: type[ArtifactKind],
+    module: Module,
+    origin: Origin,
+    provenance: str,
+    before: Declaration[Any],
+) -> ReadDesign:
     properties: dict[str, object] = {}
-    parts = [_catalogued_part(module, origin, uri) for uri in _ordered_component_uris(design)]
+    children = _typed_components(design)
+    parts = [_typed_source(child, module) for child in children]
     if parts:
         properties["components"] = parts
-    elements = _sequence_elements(design)
+
+    elements = _typed_sequence_elements(design)
     if elements is not None:
         from ._prelude import dna
 
         properties["sequence"] = expression(dna)(elements)
 
+    identity = _typed_identity(design)
+    if provenance == "buy":
+        _remember_typed_buy(module, identity, before, design)
+        properties["identity"] = identity
+
     requirements: list[Claim] = []
-    if _terms.CIRCULAR in types:
+    topology = getattr(design, "topology", None)
+    if provenance == "build" and getattr(topology, "value", None) == "circular":
         from ._prelude import circular
 
         requirements.append(_topology_claim(circular))
@@ -88,21 +149,67 @@ def read_design(
     return ReadDesign(properties=properties, requirements=requirements, doc=doc)
 
 
+def _read_raw_design(
+    design: object,
+    *,
+    kind: type[ArtifactKind],
+    module: Module,
+    origin: Origin,
+    provenance: str,
+    before: Declaration[Any],
+) -> ReadDesign:
+    raw = _component(design)
+    types = _check_raw_dna(raw, kind)
+
+    properties: dict[str, object] = {}
+    parts = [
+        _catalogued_part(module, origin, uri, before=before) for uri in _ordered_component_uris(raw)
+    ]
+    if parts:
+        properties["components"] = parts
+    elements = _sequence_elements(raw)
+    if elements is not None:
+        from ._prelude import dna
+
+        properties["sequence"] = expression(dna)(elements)
+
+    if provenance == "buy":
+        identity = getattr(raw, "identity", None)
+        if identity is None:
+            raise DesignError(f"a design passed to {kind.produces}.buy has no SBOL identity")
+        properties["identity"] = str(identity)
+
+    requirements: list[Claim] = []
+    if provenance == "build" and _terms.CIRCULAR in types:
+        from ._prelude import circular
+
+        requirements.append(_topology_claim(circular))
+
+    doc = _text(raw, "description") or _text(raw, "name")
+    return ReadDesign(properties=properties, requirements=requirements, doc=doc)
+
+
+def _check_raw_dna(design: object, kind: type[ArtifactKind]) -> set[str]:
+    raw = _component(design)
+    types = _terms.terms(_attribute(raw, "types"))
+    if _terms.NUCLEIC_ACID not in types:
+        stated: object = sorted(types) if types else "nothing"
+        raise DesignError(
+            f"a design passed to {kind.produces} must be DNA "
+            f"({_terms.NUCLEIC_ACID}); this component's types state {stated}"
+        )
+    return types
+
+
 def _topology_claim(topology: object) -> Claim:
-    """`require topology == <topology>`, read from the component's own types."""
+    """``require topology == <topology>``, read from the design itself."""
 
     stated = expression(topology)
     return Claim(lambda artifact: artifact.topology == stated)
 
 
 def _ordered_component_uris(design: object) -> list[str]:
-    """The referenced parts, in the order the `meets` constraints state.
-
-    SBOL's own order is a set of constraints, not a list. `subject meets
-    object` says the subject's end abuts the object's start, so the walk
-    starts at the feature nothing precedes and follows the chain. A design
-    with no constraints keeps its feature order.
-    """
+    """Referenced parts in the order stated by SBOL ``meets`` constraints."""
 
     features = list(_attribute(design, "features"))
     subcomponents: dict[str, str] = {}
@@ -146,22 +253,42 @@ def _ordered_component_uris(design: object) -> list[str]:
     return [subcomponents[identity] for identity in ordered]
 
 
-def _catalogued_part(module: Module, origin: Origin, uri: str) -> Declaration:
-    """The catalogued declaration for a registry part, made once per module."""
+def _catalogued_part(
+    module: Module,
+    origin: Origin,
+    uri: str,
+    typed: object | None = None,
+    *,
+    before: Declaration[Any],
+) -> Declaration[Any]:
+    """The catalogued declaration for a registry component, made once."""
 
     catalogued = _CATALOGUED.setdefault(module, {})
-    existing = catalogued.get(uri)
-    if existing is not None:
+    typed_kind = _typed_kind(typed)
+    entry = catalogued.get(uri)
+    if entry is not None:
+        existing, kind_was_stated = entry
+        if typed_kind is None:
+            return existing
+        if kind_was_stated and existing.kind.word != typed_kind.word:
+            raise DesignError(
+                f"{uri!r} is used as both {existing.kind.produces} and "
+                f"{typed_kind.produces}; one SBOL identity must keep one biological kind"
+            )
+        if not kind_was_stated:
+            existing.kind = typed_kind
+            catalogued[uri] = (existing, True)
         return existing
 
     from .bio import designs
 
+    kind = typed_kind or designs.Part
     name = _naming.free_name(
         _naming.identifier(_registry_display_id(uri)), "part", _naming.taken_names(module)
     )
-    declaration = Declaration(
+    declaration = BuyDeclaration(
         module=module,
-        kind=designs.Part,
+        kind=kind,
         provenance="buy",
         properties={"identity": uri},
         name=name,
@@ -173,17 +300,54 @@ def _catalogued_part(module: Module, origin: Origin, uri: str) -> Declaration:
         origin=origin,
         scope=module.name,
     )
-    module.declare(declaration)
-    catalogued[uri] = declaration
+    module.declare(declaration, before=before)
+    catalogued[uri] = (declaration, typed_kind is not None)
     return declaration
 
 
-def _registry_display_id(uri: str) -> str:
-    """The name a registry IRI knows its part by.
+def _typed_source(design: object, module: Module) -> Declaration[Any]:
+    """The explicit Lab source declaration attached to a typed child design."""
 
-    SynBioHub writes `<collection>/<display_id>/<version>`, so a trailing
-    bare number is a version rather than a name.
-    """
+    read = getattr(design, "__lab_sbol_declaration__", None)
+    declaration = read(module) if callable(read) else None
+    if isinstance(declaration, Declaration):
+        return declaration
+    kind = _typed_kind(design)
+    factory = kind.produces if kind is not None else "Artifact"
+    raise DesignError(
+        f"component {_typed_identity(design)!r} has an SBOL design but no Lab provenance; "
+        f"declare it with {factory}.buy(design=...) or {factory}.build(design=...), "
+        "then pass that declaration in components="
+    )
+
+
+def _remember_typed_buy(
+    module: Module,
+    identity: str,
+    declaration: Declaration[Any],
+    design: object,
+) -> None:
+    """Preserve the one-identity/one-biological-kind invariant for explicit buys."""
+
+    catalogued = _CATALOGUED.setdefault(module, {})
+    typed_kind = _typed_kind(design)
+    entry = catalogued.get(identity)
+    if entry is None:
+        catalogued[identity] = (declaration, typed_kind is not None)
+        return
+    existing, kind_was_stated = entry
+    if typed_kind is not None and kind_was_stated and existing.kind.word != typed_kind.word:
+        raise DesignError(
+            f"{identity!r} is used as both {existing.kind.produces} and "
+            f"{typed_kind.produces}; one SBOL identity must keep one biological kind"
+        )
+    if typed_kind is not None and not kind_was_stated:
+        existing.kind = typed_kind
+        catalogued[identity] = (existing, True)
+
+
+def _registry_display_id(uri: str) -> str:
+    """The display ID a registry IRI already gives a component."""
 
     segments = [segment for segment in uri.rstrip("/").split("/") if segment]
     if not segments:
@@ -194,12 +358,7 @@ def _registry_display_id(uri: str) -> str:
 
 
 def _sequence_elements(design: object) -> str | None:
-    """The design's sequence, when the component can produce it.
-
-    A component detached from a document holds sequence references it cannot
-    resolve; only an entry that is itself a sequence object with elements is
-    readable here.
-    """
+    """The one readable sequence carried by a raw SBOL component."""
 
     found = None
     for entry in _attribute(design, "sequences"):
@@ -209,18 +368,29 @@ def _sequence_elements(design: object) -> str | None:
             try:
                 target = lookup() or entry
             except Exception:
-                # A reference detached from any document cannot resolve; the
-                # design still stands on its components.
                 target = entry
         elements = getattr(target, "elements", None)
         if elements:
             if found is not None:
                 raise DesignError(
-                    "the design carries more than one readable sequence; a plasmid "
+                    "the design carries more than one readable sequence; a DNA artifact "
                     "states one, so the extras have to go"
                 )
             found = str(elements)
     return found
+
+
+def _typed_sequence_elements(design: object) -> str | None:
+    sequence = getattr(design, "sequence", None)
+    elements = getattr(sequence, "elements", None)
+    return str(elements) if elements is not None else None
+
+
+def _typed_identity(design: object) -> str:
+    identity = getattr(design, "identity", None)
+    if not identity:
+        raise DesignError("a typed SBOL design was read before its identity was resolved")
+    return str(identity)
 
 
 def _attribute(target: object, name: str) -> Sequence[object]:
@@ -234,8 +404,54 @@ def _text(target: object, name: str) -> str | None:
 
 
 def looks_like_component(candidate: object) -> bool:
-    """Whether a positional argument is plausibly an SBOL component."""
+    """Whether an object is plausibly a raw pySBOL3 Component."""
 
+    if _is_typed_design(candidate):
+        return True
     return not isinstance(candidate, Expression | str) and (
         hasattr(candidate, "types") and hasattr(candidate, "features")
     )
+
+
+def _component(candidate: object) -> object:
+    unwrap = getattr(candidate, "__lab_sbol_component__", None)
+    return unwrap() if callable(unwrap) else candidate
+
+
+def _is_typed_design(candidate: object) -> bool:
+    return callable(getattr(candidate, "__lab_sbol_molecule_type__", None))
+
+
+def _typed_components(candidate: object) -> tuple[object, ...]:
+    children = getattr(candidate, "__lab_sbol_components__", None)
+    if not callable(children):
+        return ()
+    return tuple(cast(Sequence[object], children()))
+
+
+def _check_typed_design_kind(candidate: object, expected: type[ArtifactKind]) -> None:
+    read = getattr(candidate, "__lab_sbol_kind__", None)
+    stated = cast(str | None, read()) if callable(read) else None
+    if stated is not None and stated != expected.word:
+        raise DesignError(
+            f"a typed SBOL {stated} cannot be passed to {expected.produces}; "
+            f"pass a typed {expected.word} design"
+        )
+
+
+def _typed_kind(candidate: object | None) -> type[ArtifactKind] | None:
+    """The Lab kind preserved by a typed SBOL child."""
+
+    from .bio import designs
+
+    read = getattr(candidate, "__lab_sbol_kind__", None)
+    word = cast(str | None, read()) if callable(read) else None
+    if word is None:
+        return None
+    return {
+        "backbone": designs.Backbone,
+        "cds": designs.CDS,
+        "part": designs.Part,
+        "plasmid": designs.Plasmid,
+        "promoter": designs.Promoter,
+    }.get(word)

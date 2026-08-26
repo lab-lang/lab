@@ -15,7 +15,7 @@ It lets scientists describe the biological result they want, the constraints tha
 
 The compiler accepts an experiment in two forms, and both produce the same checked module, so neither is a wrapper over the other and nothing downstream can tell them apart.
 
-**Python** is where most work starts, because it is the language a laboratory already has code in. Designs are [pySBOL3](https://pysbol3.readthedocs.io) components, circuits are [LOICA](https://github.com/RudgeLab/LOICA) genetic networks, and the `lab` package adds what neither has a vocabulary for: artifact declarations, provenance, the acceptance claims a build is judged on, and the durable workflows that carry it out.
+**Python** is where most work starts, because it is the language a laboratory already has code in. Typed `lab.sbol` builders keep biological designs separate from explicit `build` and `buy` declarations, materialize and validate ordinary [pySBOL3](https://pysbol3.readthedocs.io) documents during compilation, and compose with [LOICA](https://github.com/RudgeLab/LOICA) genetic networks. The `lab` package adds what neither standard has a vocabulary for: artifact provenance, the acceptance claims a build is judged on, and the durable workflows that carry it out.
 
 **Lab** is the native language, the one the checker's vocabulary is built around. It states the same designs, claims, and workflows in the fewest words, and it is what the language documentation teaches.
 
@@ -50,8 +50,8 @@ The language and its intermediate representations are evolving, and the durable 
 ## Explore
 
 - [Documentation](docs/README.md)
-- [Python SDK](crates/lab-python/README.md) — designs in pySBOL3, circuits in LOICA
+- [Python SDK](crates/lab-python/README.md) — typed SBOL designs, circuits in LOICA
 - [Language design](docs/language/README.md)
-- [Golden Gate example](examples/golden-gate/README.md)
-- [Golden Gate, extended](examples/golden-gate-extended/README.md) — the same laboratory with most of the language in it
+- Golden Gate example: [Lab](examples/golden-gate/README.md) or [Python](examples/golden-gate-python/README.md)
+- Golden Gate, extended: [Lab](examples/golden-gate-extended/README.md) or [Python](examples/golden-gate-extended-python/README.md)
 - [Compiler internals](crates/lab-compiler/README.md)

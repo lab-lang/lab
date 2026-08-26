@@ -8,7 +8,7 @@ This distribution is `lab-compiler`, and it imports as `lab`:
 pip install lab-compiler
 ```
 
-Designs are written in [pySBOL3](https://pysbol3.readthedocs.io) and circuits in [LOICA](https://github.com/RudgeLab/LOICA), which is what the field already uses. Neither is required at runtime, because both are read structurally; install them alongside with `pip install "lab-compiler[bio]"`.
+Designs are written through Lab's typed SBOL layer, which produces ordinary [pySBOL3](https://pysbol3.readthedocs.io) documents underneath. Circuits are read from [LOICA](https://github.com/RudgeLab/LOICA), which is what the field already uses. Both integrations are optional; install them with `pip install "lab-compiler[bio]"`.
 
 ```python
 import lab
@@ -105,30 +105,57 @@ error: Plasmid has no property 'reaction_volme'
   = help: did you mean 'reaction_volume'?
 ```
 
-## Designs in pySBOL3
+## Typed SBOL designs
 
-A design is an ordinary `sbol3.Component`, passed positionally to `build`. Where SBOL can already state something, the compiler reads it rather than asking twice: the referenced parts become `components` in the order the document's `meets` constraints put them, a readable sequence becomes `sequence`, circular topology becomes the requirement it already states, and the component's description becomes the declaration's documentation. What the declaration adds is what SBOL has no vocabulary for: provenance, acceptance claims, and a place in a build order.
+`lab.sbol` keeps the common path at the level of biological kinds. Its factories return distinct `Promoter`, `RibosomeBindingSite`, `CodingSequence`, `Terminator`, `Backbone`, and `Plasmid` objects. Each retains its associated sequence, so callers never unpack an undifferentiated `(Component, Sequence)` tuple. A plasmid layout accepts DNA components and rejects a protein before it mutates the SBOL document.
 
 ```python
-import sbol3
-
+import lab
+from lab import sbol
+from lab.bio.designs import Backbone, CDS, Part, Promoter
 from lab.bio.golden_gate import Plasmid
 
-design = sbol3.Component(
-    "reporter",
-    [sbol3.SBO_DNA, sbol3.SO_CIRCULAR],
-    features=[J23101, B0034, GFP, B0015],
+module = lab.Module("reporter.designs")
+designs = sbol.Document(
+    namespace="https://synbiohub.org/user/marpaia/reporter",
+)
+IGEM = "https://synbiohub.org/public/igem"
+
+J23101 = Promoter.buy(
+    design=designs.promoter(identity=f"{IGEM}/BBa_J23101/1"),
+)
+B0034 = Part.buy(
+    design=designs.rbs(identity=f"{IGEM}/BBa_B0034/1"),
+)
+GFP = CDS.buy(
+    design=designs.cds(identity=f"{IGEM}/BBa_E0040/1"),
+)
+B0015 = Part.buy(
+    design=designs.terminator(identity=f"{IGEM}/BBa_B0015/1"),
+)
+pSB1C3 = Backbone.buy(
+    design=designs.backbone(identity=f"{IGEM}/pSB1C3/1"),
+)
+
+design = designs.plasmid(
+    components=[J23101, B0034, GFP, B0015],
+    sequence="ACGTACGT",
 )
 
 reporter = Plasmid.build(
-    design,
+    design=design,
     backbone=pSB1C3,
-    restriction_enzyme=BsaI,
     accept=[lambda built: built.sequence == built.design.sequence],
 )
+
+lab.check(module)
 ```
 
-Each referenced part becomes a catalogued declaration whose identity is the registry IRI, because an imported component is something a supplier lists, not something this laboratory built.
+Every semantic input is keyword-only. `design` has the Python type `lab.sbol.PlasmidDesign`, `J23101` is a `lab.BuyDeclaration[Promoter]`, and `reporter` is a `lab.BuildDeclaration[Plasmid]`. The plasmid design has no repeated `"reporter"` string: when `lab.check(module)` resolves the declaration's Python name, it assigns `https://synbiohub.org/user/marpaia/reporter/reporter`, materializes the ordinary pySBOL3 objects, and validates the document before compilation.
+
+The design factories say what the biology is; `build` and `buy` say how this laboratory obtains it. A registry IRI therefore does not silently imply procurement. Each typed component placed into a composite must carry an explicit `BuildDeclaration` or `BuyDeclaration`, exactly as the corresponding Lab program says `build promoter` or `buy promoter`. `build` may carry requirements, acceptance claims, and a place in a build order; `buy` may carry an identity to resolve or order against and cannot carry build claims.
+
+Where SBOL already states something, the compiler reads it rather than asking twice: sourced parts become `components` in their physical order, a readable sequence becomes `sequence`, circular topology becomes a build requirement, and the component's description becomes declaration documentation. The raw objects remain available after materialization as `design.sbol3_component` and `designs.sbol3_document`. An ordinary `sbol3.Component` can still be passed as `design=raw_component`, so the typed layer keeps the full pySBOL3 escape hatch without making it the common path.
 
 ## Networks in LOICA
 
@@ -186,7 +213,7 @@ Everything LOICA can build lowers:
 
 Polarity is not guesswork. LOICA states it in the Hill parameters, where a basal rate above the regulated rate means the promoter expresses less in the presence of its input, so the emitted promoter carries `regulation = repressed` or `regulation = induced`. The remaining Hill parameters (`alpha`, `K`, `n`) are characterization a catalogued promoter has no schema field for, so they stay on each unit as `unit.characterization` rather than lowering.
 
-Both readers are structural: neither `sbol3` nor `loica` is imported by the `lab` package, so anything with the right shape lowers and the package works without either installed. `pip install "lab-compiler[bio]"` brings in the pair the examples are written with.
+The lowering readers are structural: an ordinary object with the right SBOL or LOICA shape still lowers, and importing `lab` does not eagerly import either optional library. Constructing a typed `lab.sbol.Document` loads pySBOL3 and reports the `bio` extra clearly if it is absent. `pip install "lab-compiler[bio]"` brings in both integrations used by the examples.
 
 ## Workflows
 
@@ -268,9 +295,9 @@ cd crates/lab-python && uv run python -m lab.codegen
 
 ## What is covered
 
-Artifact declarations, pySBOL3 designs, LOICA networks, records with cases, and workflows including reactive ones. Roles are written as Lab source and checked with `compile_lab_module`.
+Artifact declarations, typed SBOL designs, LOICA networks, records with cases, and workflows including reactive ones. Roles are written as Lab source and checked with `compile_lab_module`.
 
-The Golden Gate example's designs are written both ways: as Lab in [`examples/golden-gate/src/designs/`](../../examples/golden-gate/src/designs/) and with this SDK in [`tests/programs/golden_gate/`](tests/programs/golden_gate/). `tests/test_golden_gate.py` compiles both and requires the same checked module from each; `tests/test_sbol_designs.py`, `tests/test_loica_circuits.py`, and `tests/test_workflows.py` hold the SBOL, LOICA, and workflow frontends to the same standard against hand-written Lab.
+The repository carries complete Golden Gate programs in both frontends: [`examples/golden-gate/`](../../examples/golden-gate/) and [`examples/golden-gate-extended/`](../../examples/golden-gate-extended/) use Lab, while [`examples/golden-gate-python/`](../../examples/golden-gate-python/) and [`examples/golden-gate-extended-python/`](../../examples/golden-gate-extended-python/) use this SDK. The Python examples are executed by the SDK gate. `tests/test_golden_gate.py` also compares the smaller design modules declaration for declaration; `tests/test_typed_sbol.py`, `tests/test_sbol_designs.py`, `tests/test_loica_circuits.py`, and `tests/test_workflows.py` cover typed authoring, raw SBOL compatibility, LOICA, and workflows against the same checker.
 
 ## Development
 

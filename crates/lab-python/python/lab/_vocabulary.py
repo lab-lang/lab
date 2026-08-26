@@ -10,12 +10,21 @@ program actually made rather than restated by hand.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from typing import ClassVar
+from typing import ClassVar, TypeVar
 
-from ._declarations import Claim, Declaration, Module, Predicate, declaring_module
+from ._declarations import (
+    BuildDeclaration,
+    BuyDeclaration,
+    Claim,
+    Module,
+    Predicate,
+    declaring_module,
+)
 from ._expressions import Expression
 from ._source import caller_origin
 from ._types import TypeApplication
+
+_ArtifactKindT = TypeVar("_ArtifactKindT", bound="ArtifactKind")
 
 
 class Symbol(Expression):
@@ -93,10 +102,9 @@ class ArtifactKind:
 
     @classmethod
     def build(
-        cls,
-        design: object | None = None,
-        /,
+        cls: type[_ArtifactKindT],
         *,
+        design: object | None = None,
         module: Module | None = None,
         name: str | None = None,
         doc: str | None = None,
@@ -106,7 +114,7 @@ class ArtifactKind:
         accept: Sequence[Predicate | Claim] = (),
         properties: Mapping[str, object] | None = None,
         **stated: object,
-    ) -> Declaration:
+    ) -> BuildDeclaration[_ArtifactKindT]:
         """Declare something this laboratory makes.
 
         It has a recipe, acceptance criteria, and a place in a build order.
@@ -114,65 +122,24 @@ class ArtifactKind:
         names this signature has already taken, and the ones a caller holds in
         a mapping.
 
-        `design` is a pySBOL3 component stating the design directly: its
-        referenced parts become `components` in the order the document's
-        `meets` constraints put them, a readable sequence becomes `sequence`,
-        and circular topology becomes the requirement it already states.
-        What the declaration itself adds is what SBOL has no vocabulary for:
-        provenance, acceptance claims, and a place in a build order.
+        `design` is a typed `lab.sbol` design or a raw pySBOL3 component. A
+        typed anonymous design takes this declaration's eventual Python name,
+        then materializes and validates during module emission. Its explicitly
+        sourced parts become `components`, a readable sequence becomes
+        `sequence`, and circular topology becomes the requirement it already
+        states. What the declaration itself adds is what SBOL has no vocabulary
+        for: provenance, acceptance claims, and a place in a build order.
         """
 
+        found, scope = declaring_module(depth=2, given=module)
         if design is not None:
             from . import _sbol
 
-            found, _ = declaring_module(depth=2, given=module)
-            read = _sbol.read_design(design, kind=cls, module=found, origin=caller_origin(2))
-            module = found
-            stated = {**read.properties, **stated}
-            require = [*read.requirements, *require]
-            doc = doc or read.doc
-        return cls._declare(
-            "build", module, name, doc, ascribed, across, require, accept, properties, stated
-        )
-
-    @classmethod
-    def buy(
-        cls,
-        *,
-        module: Module | None = None,
-        name: str | None = None,
-        doc: str | None = None,
-        ascribed: str | None = None,
-        properties: Mapping[str, object] | None = None,
-        **stated: object,
-    ) -> Declaration:
-        """Declare something a supplier lists.
-
-        It has an identity to order against and is never built, so it takes no
-        claims and no build order: `require` and `accept` belong to building.
-        """
-
-        return cls._declare("buy", module, name, doc, ascribed, None, (), (), properties, stated)
-
-    @classmethod
-    def _declare(
-        cls,
-        provenance: str,
-        module: Module | None,
-        name: str | None,
-        doc: str | None,
-        ascribed: str | None,
-        across: int | None,
-        require: Sequence[Predicate | Claim],
-        accept: Sequence[Predicate | Claim],
-        properties: Mapping[str, object] | None,
-        stated: Mapping[str, object],
-    ) -> Declaration:
-        found, scope = declaring_module(depth=3, given=module)
-        declaration = Declaration(
+            _sbol.validate_design_argument(design, kind=cls)
+        declaration = BuildDeclaration(
             module=found,
             kind=cls,
-            provenance=provenance,
+            provenance="build",
             properties={**stated, **(properties or {})},
             name=name,
             doc=doc,
@@ -180,8 +147,53 @@ class ArtifactKind:
             requirements=[_claim(item) for item in require],
             acceptance=[_claim(item) for item in accept],
             across=across,
-            origin=caller_origin(3),
+            origin=caller_origin(2),
             scope=scope,
+            design=design,
+        )
+        found.declare(declaration)
+        return declaration
+
+    @classmethod
+    def buy(
+        cls: type[_ArtifactKindT],
+        *,
+        design: object | None = None,
+        module: Module | None = None,
+        name: str | None = None,
+        doc: str | None = None,
+        ascribed: str | None = None,
+        properties: Mapping[str, object] | None = None,
+        **stated: object,
+    ) -> BuyDeclaration[_ArtifactKindT]:
+        """Declare something a supplier lists.
+
+        It has an identity to resolve or order against and is never built, so it
+        takes no claims and no build order: `require` and `accept` belong to
+        building. A typed `design` contributes its registry identity, sequence,
+        and other biological facts without making the design factory itself
+        imply procurement.
+        """
+
+        found, scope = declaring_module(depth=2, given=module)
+        if design is not None:
+            from . import _sbol
+
+            _sbol.validate_design_argument(design, kind=cls)
+        declaration = BuyDeclaration(
+            module=found,
+            kind=cls,
+            provenance="buy",
+            properties={**stated, **(properties or {})},
+            name=name,
+            doc=doc,
+            ascribed=ascribed,
+            requirements=(),
+            acceptance=(),
+            across=None,
+            origin=caller_origin(2),
+            scope=scope,
+            design=design,
         )
         found.declare(declaration)
         return declaration

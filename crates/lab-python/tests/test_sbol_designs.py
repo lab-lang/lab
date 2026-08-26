@@ -1,9 +1,10 @@
-"""Designs written as pySBOL3 components.
+"""Designs written through typed and raw pySBOL3 components.
 
 The reporter example under `programs/reporter/plasmid.py` states its design
-as an ordinary `sbol3.Component`; the hand-written Lab below is the same
-declaration with the design's contribution spelled out. The two must compile
-to the same checked module: what SBOL already states, the compiler reads.
+through `lab.sbol`; the hand-written Lab below is the same declaration with
+the design's contribution spelled out. The two must compile to the same
+checked module: what SBOL already states, the compiler reads. The focused edge
+case tests below continue to pass ordinary `sbol3.Component` objects directly.
 """
 
 import importlib.util
@@ -22,13 +23,25 @@ if HAVE_SBOL:
 
 HAND_WRITTEN = """\
 /*!
- * The GFP reporter plasmid, designed in pySBOL3.
+ * The GFP reporter plasmid, designed through Lab's typed SBOL layer.
  */
 
 use std.bio.designs
 use std.bio.golden_gate
 
 buy:
+  promoter J23101:
+    identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
+
+  part B0034:
+    identity = "https://synbiohub.org/public/igem/BBa_B0034/1"
+
+  cds GFP:
+    identity = "https://synbiohub.org/public/igem/BBa_E0040/1"
+
+  part B0015:
+    identity = "https://synbiohub.org/public/igem/BBa_B0015/1"
+
   backbone pSB1C3:
     identity = "https://synbiohub.org/public/igem/pSB1C3/1"
 
@@ -37,18 +50,9 @@ buy:
     digest_temperature = 37 C
     digest_duration = 2 min
 
-  part BBa_J23101:
-    identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
-  part BBa_B0034:
-    identity = "https://synbiohub.org/public/igem/BBa_B0034/1"
-  part BBa_E0040:
-    identity = "https://synbiohub.org/public/igem/BBa_E0040/1"
-  part BBa_B0015:
-    identity = "https://synbiohub.org/public/igem/BBa_B0015/1"
-
 /** The GFP reporter under a strong constitutive promoter. */
 build plasmid reporter:
-  components = [BBa_J23101, BBa_B0034, BBa_E0040, BBa_B0015]
+  components = [J23101, B0034, GFP, B0015]
   sequence = dna("ACGTACGT")
   backbone = pSB1C3
   restriction_enzyme = BsaI
@@ -114,7 +118,7 @@ class SbolDesignTests(unittest.TestCase):
 
         module = lab.Module("shuffled.design")
         Plasmid.build(
-            design,
+            design=design,
             module=module,
             name="ordered",
             sequence=dna("ACGT"),
@@ -128,7 +132,7 @@ class SbolDesignTests(unittest.TestCase):
         for name in ("one", "two"):
             part = sbol3.SubComponent("https://example.org/parts/common/1")
             design = sbol3.Component(name, [sbol3.SBO_DNA], features=[part])
-            Plasmid.build(design, module=module, name=name, sequence=dna("ACGT"))
+            Plasmid.build(design=design, module=module, name=name, sequence=dna("ACGT"))
 
         source = module.source()
         self.assertEqual(source.count("part common"), 1)
@@ -139,7 +143,7 @@ class SbolDesignTests(unittest.TestCase):
         module = lab.Module("chemical.design")
 
         with self.assertRaisesRegex(lab.DesignError, "must be DNA"):
-            Plasmid.build(chemical, module=module, name="wrong")
+            Plasmid.build(design=chemical, module=module, name="wrong")
 
     def test_a_broken_meets_chain_is_refused(self) -> None:
         sbol3.set_namespace("https://example.org/broken")
@@ -150,8 +154,9 @@ class SbolDesignTests(unittest.TestCase):
         design.constraints = [sbol3.Constraint(sbol3.SBOL_MEETS, first, second)]
 
         module = lab.Module("broken.design")
+        Plasmid.build(design=design, module=module, name="wrong")
         with self.assertRaisesRegex(lab.DesignError, "meets"):
-            Plasmid.build(design, module=module, name="wrong")
+            module.source()
 
 
 if __name__ == "__main__":

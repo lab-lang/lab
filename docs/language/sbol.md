@@ -1145,6 +1145,33 @@ If authoring Lab from Python is still wanted later, it should generate SBOL
 rather than Lab source and let the compiler import it. Errors then point at
 objects, and the source-map problem does not exist.
 
+The current Python package now takes the first half of that step. Its
+`lab.sbol.Document` lazily builds an ordinary pySBOL3 document through typed
+`Promoter`, `CodingSequence`, `Terminator`, `Backbone`, and `Plasmid` handles;
+ordered DNA layouts create their `meets` constraints, associated sequences stay
+on the typed handle, and registry IRIs remain references rather than copied
+objects. Its public inputs are keyword-only, and a local design may omit its
+identity: `Plasmid.build(design=...)` resolves the Lab declaration name,
+materializes that identity under the document namespace, and validates the
+document as part of module emission. The return types retain provenance too:
+`build` returns `BuildDeclaration[Plasmid]`, while `buy` returns
+`BuyDeclaration[Plasmid]`.
+
+Typed composition does not infer provenance from an SBOL IRI. A child design is
+first attached explicitly with `Promoter.buy(design=...)` or
+`Promoter.build(design=...)`, and the resulting declaration is placed in the
+composite. This mirrors the Lab source distinction between what a design is and
+how a laboratory obtains it. Reading an unannotated third-party SBOL document
+still uses the catalogued default described above, because that import has no
+Python declarations from which to recover a more specific local choice.
+
+The existing source-emitting frontend can read the resulting document today.
+This is an incremental authoring boundary, not the final bridge: moving the
+document through `lab-sbol` directly and retiring generated Lab source remains
+the end state described here. [Decision 0041](decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md)
+records the Python authoring and provenance contract independently of that
+future bridge.
+
 `sbol-py` is currently `publish = false`, excluded from the workspace, and on
 edition 2021 while everything else is 2024. Making this story real means
 publishing it. That is a decision, not a blocker.

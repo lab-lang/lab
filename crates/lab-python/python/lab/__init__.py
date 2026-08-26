@@ -18,6 +18,7 @@ mapped back to the line of Python that produced the Lab it is about.
 import json
 from typing import Any, cast
 
+from . import sbol as sbol
 from ._circuits import (
     CircuitError,
     Network,
@@ -28,6 +29,8 @@ from ._circuits import (
 )
 from ._declarations import (
     Binding,
+    BuildDeclaration,
+    BuyDeclaration,
     Case,
     CircuitDeclaration,
     Claim,
@@ -109,6 +112,8 @@ __all__ = [
     "ArtifactKind",
     "Backbone",
     "Binding",
+    "BuildDeclaration",
+    "BuyDeclaration",
     "Case",
     "CaseType",
     "Chassis",
@@ -205,6 +210,7 @@ __all__ = [
     "record",
     "recover",
     "repressed",
+    "sbol",
     "screen",
     "sequence",
     "sequence_mismatch",

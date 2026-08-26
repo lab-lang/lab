@@ -25,13 +25,15 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from ._expressions import Expression, Fields, expression
 from ._source import Origin, SourceMap, SourceWriter
 
 if TYPE_CHECKING:
     from ._vocabulary import ArtifactKind
+
+_ArtifactKindT = TypeVar("_ArtifactKindT", bound="ArtifactKind")
 
 #: A claim, written as a function of the artifact it is about.
 Predicate = Callable[[Fields], Expression]
@@ -71,7 +73,7 @@ class DeclarationReference(Expression):
 
     __slots__ = ("declaration",)
 
-    def __init__(self, declaration: Declaration | Binding) -> None:
+    def __init__(self, declaration: Declaration[Any] | Binding) -> None:
         self.declaration = declaration
 
     def render(self) -> str:
@@ -81,14 +83,16 @@ class DeclarationReference(Expression):
         yield self.declaration.module.name
 
 
-class Declaration:
+class Declaration(Generic[_ArtifactKindT]):
     """One artifact declaration: a kind, a provenance, and what it states."""
+
+    _expected_provenance: ClassVar[str | None] = None
 
     def __init__(
         self,
         *,
         module: Module,
-        kind: type[ArtifactKind],
+        kind: type[_ArtifactKindT],
         provenance: str,
         properties: Mapping[str, object],
         name: str | None,
@@ -99,7 +103,13 @@ class Declaration:
         across: int | None,
         origin: Origin,
         scope: str,
+        design: object | None = None,
     ) -> None:
+        if self._expected_provenance is not None and provenance != self._expected_provenance:
+            raise ValueError(
+                f"{type(self).__name__} has provenance {self._expected_provenance!r}, "
+                f"not {provenance!r}"
+            )
         self.module = module
         self.kind = kind
         self.provenance = provenance
@@ -110,8 +120,15 @@ class Declaration:
         self.properties = [Property(name, expression(value)) for name, value in properties.items()]
         self.requirements = list(requirements)
         self.acceptance = list(acceptance)
+        self.design = design
+        self._design_prepared = design is None
+        self._user_property_names = frozenset(properties)
         self._scope = scope
         self._name = name
+        if design is not None:
+            attach = getattr(design, "__lab_sbol_attach_declaration__", None)
+            if callable(attach):
+                attach(self)
 
     @property
     def name(self) -> str:
@@ -148,6 +165,41 @@ class Declaration:
             for claim in group:
                 yield word, claim, expression(claim.predicate(_FIELDS))
 
+    def prepare_design(self) -> None:
+        """Materialize and read an attached SBOL design exactly once.
+
+        A declaration takes its name from the Python binding that receives it,
+        so an anonymous design cannot receive its stable identity until this
+        point. Module emission calls this before it computes imports or writes
+        source.
+        """
+
+        if self._design_prepared:
+            return
+        if self.design is None:
+            raise AssertionError("a declaration without a design was marked unprepared")
+
+        from . import _sbol
+
+        read = _sbol.read_design(
+            self.design,
+            kind=self.kind,
+            module=self.module,
+            origin=self.origin,
+            declaration_name=self.name,
+            provenance=self.provenance,
+            before=self,
+        )
+        contributed = [
+            Property(name, expression(value))
+            for name, value in read.properties.items()
+            if name not in self._user_property_names
+        ]
+        self.properties = [*contributed, *self.properties]
+        self.requirements = [*read.requirements, *self.requirements]
+        self.doc = self.doc or read.doc
+        self._design_prepared = True
+
     def lab_modules(self) -> Iterator[str]:
         """Every Lab module this declaration's words come from."""
 
@@ -160,8 +212,27 @@ class Declaration:
     def __lab_expression__(self) -> Expression:
         return DeclarationReference(self)
 
+    def __lab_sbol_design__(self) -> object:
+        """The typed SBOL design this declaration explicitly sources."""
+
+        if self.design is None:
+            raise TypeError(f"{self!r} has no attached SBOL design")
+        return self.design
+
     def __repr__(self) -> str:
         return f"<lab {self.provenance} {self.kind.word} {self._name or 'unbound'}>"
+
+
+class BuildDeclaration(Declaration[_ArtifactKindT]):
+    """A typed declaration for an artifact this laboratory plans to make."""
+
+    _expected_provenance = "build"
+
+
+class BuyDeclaration(Declaration[_ArtifactKindT]):
+    """A typed declaration for an artifact an external source lists."""
+
+    _expected_provenance = "buy"
 
 
 @dataclass(frozen=True)
@@ -424,7 +495,9 @@ class _ItemReference(Expression):
 
 
 #: Everything a module can hold, in the order it is written.
-ModuleItem = Declaration | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+ModuleItem = (
+    Declaration[Any] | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+)
 
 
 class Module:
@@ -434,17 +507,35 @@ class Module:
         self.name = name
         self.doc = doc
         self.declarations: list[ModuleItem] = []
+        self._preparing_designs = False
         #: Modules to import beyond the ones the declarations refer to by name.
         #: A module that only contributes properties to a schema is never named
         #: by anything, so it cannot be inferred.
         self.uses = [_module_path(item) for item in uses]
 
-    def declare(self, declaration: ModuleItem) -> None:
-        self.declarations.append(declaration)
+    def declare(self, declaration: ModuleItem, *, before: ModuleItem | None = None) -> None:
+        """Add an item, optionally before the declaration that discovered it."""
+
+        if before is None:
+            self.declarations.append(declaration)
+        else:
+            self.declarations.insert(self.declarations.index(before), declaration)
+
+    def _prepare_designs(self) -> None:
+        if self._preparing_designs:
+            return
+        self._preparing_designs = True
+        try:
+            for declaration in list(self.declarations):
+                if isinstance(declaration, Declaration):
+                    declaration.prepare_design()
+        finally:
+            self._preparing_designs = False
 
     def imports(self) -> list[str]:
         """The modules this one imports, in the order they are first needed."""
 
+        self._prepare_designs()
         ordered: dict[str, None] = {}
         for path in self.uses:
             ordered.setdefault(path, None)
@@ -457,6 +548,7 @@ class Module:
     def emit(self) -> tuple[str, SourceMap]:
         """This module as Lab source, with the map back to its Python."""
 
+        self._prepare_designs()
         writer = SourceWriter()
         imports = self.imports()
         writer.documentation(self.doc, "/*!")
@@ -520,7 +612,9 @@ def _module_path(target: object) -> str:
 
 #: What `emit`-style grouping produces: a run of bought declarations written as
 #: one block, or a single item that writes itself.
-Group = list[Declaration] | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+Group = (
+    list[Declaration[Any]] | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+)
 
 
 def _provenance_groups(items: Sequence[ModuleItem]) -> list[Group]:
@@ -546,7 +640,7 @@ def _provenance_groups(items: Sequence[ModuleItem]) -> list[Group]:
     return groups
 
 
-def _write_group(writer: SourceWriter, group: Sequence[Declaration]) -> None:
+def _write_group(writer: SourceWriter, group: Sequence[Declaration[Any]]) -> None:
     if len(group) == 1:
         _write_declaration(writer, group[0], verb=True)
         return
@@ -560,7 +654,7 @@ def _write_group(writer: SourceWriter, group: Sequence[Declaration]) -> None:
             _write_declaration(writer, declaration, verb=False)
 
 
-def _write_declaration(writer: SourceWriter, declaration: Declaration, *, verb: bool) -> None:
+def _write_declaration(writer: SourceWriter, declaration: Declaration[Any], *, verb: bool) -> None:
     with writer.region(declaration.origin):
         writer.documentation(declaration.doc, "/**")
         opener = f"{declaration.provenance} " if verb else ""
@@ -575,7 +669,7 @@ def _write_declaration(writer: SourceWriter, declaration: Declaration, *, verb: 
             _write_body(writer, declaration)
 
 
-def _write_body(writer: SourceWriter, declaration: Declaration) -> None:
+def _write_body(writer: SourceWriter, declaration: Declaration[Any]) -> None:
     for property_ in declaration.properties:
         writer.line(f"{property_.name} = {property_.value.render()}")
 

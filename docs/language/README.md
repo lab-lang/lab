@@ -84,6 +84,8 @@ The latest accepted design records are:
 - [`0034`](decisions/0034-the-simulator-is-an-interpreter.md): simulation interprets reviewed run documents;
 - [`0035`](decisions/0035-facility-files.md): facilities live outside package manifests;
 - [`0036`](decisions/0036-photoreal-projections.md): renderers play the shared scene and trace;
-- [`0037`](decisions/0037-robot-learning-is-a-physics-projection.md): reviewed handoffs project into robot-learning tasks while physics stays in simulator bindings; and
-- [`0038`](decisions/0038-c3-is-the-primary-compute-provider.md): C3 is the primary finite-job compute provider behind a provider-neutral lifecycle and artifact boundary; and
-- [`0039`](decisions/0039-roles-carry-ontology-terms.md): a role may name the ontology term it stands for.
+- [`0037`](decisions/0037-robot-learning-is-a-physics-projection.md): reviewed handoffs project into robot-learning tasks while physics stays in simulator bindings;
+- [`0038`](decisions/0038-c3-is-the-primary-compute-provider.md): C3 is the primary finite-job compute provider behind a provider-neutral lifecycle and artifact boundary;
+- [`0039`](decisions/0039-roles-carry-ontology-terms.md): a role may name the ontology term it stands for;
+- [`0040`](decisions/0040-networks-are-lists-of-transcription-units.md): a genetic network is a list of typed transcription units; and
+- [`0041`](decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md): typed Python SBOL authoring keeps biological design separate from build and buy provenance.
