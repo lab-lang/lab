@@ -79,12 +79,6 @@ pub struct BuildMetadata {
     /// line, resolved by filename under `targets/`. A package without one
     /// builds portable module IR and stops.
     pub target: Option<String>,
-    /// Facility a simulation runs against when none is named on the command
-    /// line, resolved by filename under `facilities/`. A facility describes
-    /// the lab — stations, storage, transport — and is shared by every
-    /// package that runs there, so it lives in its own file and the
-    /// manifest carries only this pointer.
-    pub facility: Option<String>,
 }
 
 /// What a target build may draw on before it plans anything: the materials an
@@ -182,13 +176,6 @@ impl PackageManifest {
             && !valid_target_name(target)
         {
             return Err(PackageError::InvalidTarget(target.clone()));
-        }
-        // A facility is a filename under `facilities/`, held to the same
-        // rule as targets: it must not be able to reach outside.
-        if let Some(facility) = &self.build.facility
-            && !valid_target_name(facility)
-        {
-            return Err(PackageError::InvalidFacility(facility.clone()));
         }
         for (name, dependency) in &self.dependencies {
             if !valid_package_name(name) {
@@ -349,31 +336,6 @@ target = "opentrons-ot2"
         assert!(matches!(
             escaping.validate(),
             Err(PackageError::InvalidTarget(_))
-        ));
-    }
-
-    #[test]
-    fn reads_the_default_facility_and_holds_it_to_the_target_name_rule() {
-        let manifest = PackageManifest::parse(
-            r#"[package]
-name = "tet-reporter"
-version = "0.1.0"
-
-[build]
-facility = "main-bench"
-"#,
-        )
-        .unwrap();
-        assert_eq!(manifest.build.facility.as_deref(), Some("main-bench"));
-        manifest.validate().unwrap();
-
-        let escaping = PackageManifest::parse(
-            "[package]\nname = \"t\"\nversion = \"0.1.0\"\n\n[build]\nfacility = \"../elsewhere\"\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            escaping.validate(),
-            Err(PackageError::InvalidFacility(_))
         ));
     }
 

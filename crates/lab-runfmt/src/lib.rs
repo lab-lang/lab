@@ -10,19 +10,6 @@
 //! loaders in this crate, so a wrong or missing format string fails the same
 //! way everywhere.
 
-pub mod facility;
-mod robot_task;
-mod trace;
-
-pub use robot_task::{
-    ROBOT_TASK_FORMAT, RobotTaskAction, RobotTaskCompletion, RobotTaskDocument, RobotTaskEndpoint,
-    RobotTaskObject, load_robot_task,
-};
-pub use trace::{
-    AttentionWindow, ProgramExtent, RunEvent, SIM_TRACE_FORMAT, SimSummary, SimTraceDocument,
-    StationSummary, TimedEvent, summarize,
-};
-
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

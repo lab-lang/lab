@@ -4,6 +4,80 @@
 
 use std::path::Path;
 
+use anyhow::{Result, bail};
+use hamilton_star::RawCommand;
+use lab_instruments::{RunHandle, ThermalProfile};
+
+use crate::events::EventSink;
+use crate::stations::{Connector, CyclerSession, StarSession, StationSession};
+use crate::workcell::Bench;
+
+struct TestStar;
+
+impl StarSession for TestStar {
+    fn execute(&mut self, _command: &RawCommand) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn retract(&mut self) {}
+}
+
+#[derive(Default)]
+struct TestCycler {
+    next_handle: u64,
+}
+
+impl CyclerSession for TestCycler {
+    fn open_lid(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn close_lid(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn run_profile(&mut self, _profile: &ThermalProfile) -> Result<RunHandle> {
+        self.next_handle += 1;
+        Ok(RunHandle::new(self.next_handle))
+    }
+
+    fn await_completion(&mut self, _handle: RunHandle) -> Result<()> {
+        Ok(())
+    }
+
+    fn hold_block(&mut self, _celsius: f64) -> Result<()> {
+        Ok(())
+    }
+
+    fn take_warnings(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// A no-I/O connector used by workcell unit tests.
+#[derive(Default)]
+pub(crate) struct TestConnector;
+
+impl Connector for TestConnector {
+    fn connect(
+        &mut self,
+        station: &str,
+        kind: &str,
+        _bench: &Bench,
+        _events: &mut dyn EventSink,
+    ) -> Result<StationSession> {
+        match kind {
+            "hamilton.star" => Ok(StationSession::Star(Box::new(TestStar))),
+            "inheco.odtc" => Ok(StationSession::Cycler(Box::<TestCycler>::default())),
+            other => bail!("test station '{station}' has unsupported kind '{other}'"),
+        }
+    }
+}
+
 pub(crate) fn write_synthetic_wave(directory: &Path) {
     let plan = serde_json::json!({
         "format": "lab.workcell-run.v0",

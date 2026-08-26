@@ -1,6 +1,6 @@
 [package]
 name = "lab-runtime"
-description = "Interpreters for Lab's run documents: live execution and simulation"
+description = "Interpreters for Lab's reviewed run documents"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,8 +8,8 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-# Live hardware access: USB transport for the Hamilton STAR. Simulation and
-# dry runs never need this, so a pure-simulation build links no libusb.
+# Live hardware access: USB transport for the Hamilton STAR. Dry runs never
+# need this, so document-only consumers do not link libusb.
 hardware = ["hamilton-star/usb"]
 
 [dependencies]

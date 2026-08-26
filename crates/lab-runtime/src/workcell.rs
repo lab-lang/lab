@@ -1,5 +1,5 @@
 //! The workcell walk: one node-by-node interpretation of a coordination
-//! plan, shared by live execution and simulation.
+//! plan for live execution and dry-run review.
 //!
 //! `plan.workcell.json` names every node; station programs run on their
 //! instruments, and every handoff or manual step stops for the operator's
@@ -39,7 +39,7 @@ pub enum LoadedProgram {
 pub struct LoadedNode {
     pub id: String,
     /// Node ids that must complete first. The plan emits a linear chain
-    /// today; the simulator asserts this ordering rather than trusting it.
+    /// today; the loader still validates this ordering rather than trusting it.
     pub after: Vec<String>,
     pub action: LoadedAction,
 }
@@ -390,8 +390,7 @@ fn involves_cycler(bench: &Bench, station: &str) -> bool {
 }
 
 /// Executes one node against its station, confirming with the operator
-/// wherever the plan needs hands. Shared verbatim by live runs and the
-/// simulator: only the injected ports differ.
+/// wherever the plan needs hands.
 pub(crate) fn execute_node(
     node: &LoadedNode,
     sessions: &mut Sessions,
@@ -496,13 +495,10 @@ pub(crate) fn execute_node(
             });
             let star = sessions.ensure_star(station, "hamilton.star", bench, events)?;
             for (index, (command, description)) in steps.iter().enumerate() {
-                let position = crate::events::frame_position(command.frame());
                 events.emit(RunEvent::Frame {
                     station: station.clone(),
                     index: index + 1,
                     description: description.clone(),
-                    x_mm: position.map(|(x, _)| x),
-                    y_mm: position.map(|(_, y)| y),
                 });
                 if let Err(error) = star.execute(command) {
                     star.retract();
@@ -555,23 +551,11 @@ pub(crate) fn execute_node(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
     use super::*;
-    use crate::clock::{VirtualClock, WallClock};
-    use crate::durations::DurationModel;
+    use crate::clock::WallClock;
     use crate::events::{RecordingSink, RunEvent};
     use crate::operator::AutoOperator;
-    use crate::stations::sim::SimConnector;
-    use crate::testing::write_synthetic_wave;
-
-    fn sim_connector() -> SimConnector {
-        SimConnector::new(
-            Rc::new(RefCell::new(VirtualClock::new(0))),
-            Rc::new(DurationModel::default()),
-        )
-    }
+    use crate::testing::{TestConnector, write_synthetic_wave};
 
     fn bench_for(loaded: &LoadedWorkcell) -> Bench {
         Bench {
@@ -586,7 +570,7 @@ mod tests {
         write_synthetic_wave(directory.path());
         let loaded = load_workcell_directory(directory.path()).unwrap();
         let bench = bench_for(&loaded);
-        let mut connector = sim_connector();
+        let mut connector = TestConnector;
         let mut operator = AutoOperator { answer: true };
         let mut sink = RecordingSink::default();
         let outcome = run_workcell(
@@ -661,7 +645,7 @@ mod tests {
         write_synthetic_wave(directory.path());
         let loaded = load_workcell_directory(directory.path()).unwrap();
         let bench = bench_for(&loaded);
-        let mut connector = sim_connector();
+        let mut connector = TestConnector;
         // Confirms the pre-run gate implicitly (assume_yes), then declines
         // the first handoff.
         let mut operator = AutoOperator { answer: false };
@@ -709,7 +693,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut connector = sim_connector();
+        let mut connector = TestConnector;
         let mut operator = AutoOperator { answer: true };
         let mut sink = RecordingSink::default();
         let fresh = run_workcell(

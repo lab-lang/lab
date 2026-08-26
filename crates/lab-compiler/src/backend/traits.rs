@@ -15,8 +15,8 @@ pub trait Backend<Input> {
     fn compile(&self, input: &Input) -> Result<Self::Program, Self::Error>;
 }
 
-/// Artifact emission is separate from planning so simulation and validation
-/// can consume a backend program without first rendering files.
+/// Artifact emission is separate from planning so validation and other
+/// consumers can inspect a backend program without first rendering files.
 pub trait BackendEmitter<Program> {
     type Error: std::error::Error + Send + Sync + 'static;
 

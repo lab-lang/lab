@@ -39,7 +39,7 @@ A workspace root owns membership and nothing else; each member stays an ordinary
 lab build --target opentrons-ot2
 ```
 
-The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable robot protocol it emitted, ready to hand to a robot application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
+The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable automation protocol it emitted, ready to hand to an instrument application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
 
 Editors and control planes use the compiler-owned target contract rather than copying backend structs. It reports each backend's JSON Schema, complete default, catalog choices, capabilities, and workcell station kinds; validation runs the same cross-field semantics as a build and returns canonical TOML, canonical JSON, the compiler and schema versions, and a SHA-256:
 
@@ -80,19 +80,6 @@ lab metadata --json
 lab check --json
 ```
 
-Remote robot-learning compute is C3-first. A local `.env` may hold
-`C3_API_KEY`; it is ignored by Git and read as data rather than sourced as a
-shell script. The doctor is read-only: it validates authentication and the
-current L40-class catalog without submitting a job.
+Path dependencies may optionally carry a semver requirement, which is checked against the dependency manifest. Registry dependencies remain explicitly unsupported and fail closed; adding them requires a registry protocol and integrity model rather than silent fallback.
 
-```sh
-lab compute doctor
-lab compute list
-```
-
-Isaac Sim requires RTX hardware, so the doctor recognizes C3's L40/L40S class
-and does not present A100 or H100 capacity as Isaac-compatible. Actual training
-commands remain absent until the tracked C3 capability gate and a real PPO
-runner have passed.
-
-Path dependencies may optionally carry a semver requirement, which is checked against the dependency manifest. Registry dependencies remain explicitly unsupported and fail closed; adding them requires a registry protocol and integrity model rather than silent fallback. Workflow execution commands will be added only when the durable runtime has real run semantics.
+`lab run <run-directory> --dry-run` validates and narrates reviewed Hamilton STAR or workcell run documents without touching hardware. A live workcell run connects the supported stations, confirms every handoff with the operator, and appends a durable node ledger so `--resume` can continue without repeating completed motion.

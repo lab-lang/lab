@@ -63,14 +63,10 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | a workcell target composes stations; assignment is planning, not language |
 | [0032: Provenance blocks](language/decisions/0032-provenance-blocks.md) | a provenance verb can open a block |
 | [0033: Typeset protocol documents](language/decisions/0033-typeset-protocol-documents.md) | protocol documents are typeset PDFs emitted beside their sources |
-| [0034: The simulator is an interpreter](language/decisions/0034-the-simulator-is-an-interpreter.md) | `lab simulate` interprets the same run documents `lab run` executes; the trace is the visualization contract |
-| [0035: Facility files](language/decisions/0035-facility-files.md) | a facility is its own file under `facilities/`; the manifest carries at most a pointer |
-| [0036: Photoreal projections](language/decisions/0036-photoreal-projections.md) | renderers are players of the scene and trace; assets are facility-owned references with box fallbacks |
-| [0037: Robot learning as a physics projection](language/decisions/0037-robot-learning-is-a-physics-projection.md) | reviewed handoffs project to semantic robot tasks; embodiment and physics remain explicit simulator bindings |
-| [0038: C3 as the primary compute provider](language/decisions/0038-c3-is-the-primary-compute-provider.md) | C3 runs finite training jobs behind provider-neutral lifecycle and artifact contracts; Isaac uses L40 capacity |
 | [0039: Roles carry ontology terms](language/decisions/0039-roles-carry-ontology-terms.md) | roles may name the ontology terms they stand for, grounding Lab types in shared vocabularies |
 | [0040: Networks are lists of transcription units](language/decisions/0040-networks-are-lists-of-transcription-units.md) | genetic networks remain lists of typed circuits whose shared products carry their wiring |
 | [0041: Typed SBOL authoring separates design from provenance](language/decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md) | typed Python designs preserve biological kinds while explicit declarations state build or buy provenance |
+| [0042: Robotics incubates separately](language/decisions/0042-robotics-incubates-separately.md) | simulation, visualization, embodied robotics, and their compute control plane live in the robotics repository |
 
 ## Implementation and embedding
 
@@ -79,14 +75,12 @@ Decision records preserve the reasoning and status behind the language rather th
 - [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
-- [Compute control plane](../crates/lab-compute/README.md) documents the C3-first batch job boundary.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
-- [Isaac Lab plate-transfer prototype](../integrations/isaac-lab/README.md) projects a checked workcell handoff into a manager-based RL environment without conflating workflow simulation and physics episodes.
 
 ## Examples versus specimens
 
 Files under `language/specimens/` are representative language programs used to drive syntax and semantic design. They are compiler-tested, but a specimen may describe runtime behavior that has not been built yet.
 
-The [Golden Gate example](../examples/golden-gate/README.md) is the end-to-end one: a package that compiles through every currently runnable toolchain path, from designs and workflows to the OT-2 protocols a robot application can open.
+The [Golden Gate example](../examples/golden-gate/README.md) is the end-to-end one: a package that compiles through every currently runnable toolchain path, from designs and workflows to the OT-2 protocols an instrument application can open.

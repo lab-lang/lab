@@ -214,9 +214,9 @@ pub(crate) fn build(
             built.directory.display()
         ));
         // Name every runnable protocol, so the path can go straight into a
-        // robot application without hunting through the output directory.
+        // device application without hunting through the output directory.
         if !built.protocols.is_empty() {
-            human.push_str("\n\nRobot protocols:");
+            human.push_str("\n\nAutomation protocols:");
             for protocol in &built.protocols {
                 human.push_str(&format!("\n  {}", protocol.display()));
             }
@@ -249,16 +249,16 @@ pub(crate) fn build(
 }
 
 /// What a target build produced: its package directory, every protocol a
-/// robot application can open, and the typeset operator documents.
+/// device application can open, and the typeset operator documents.
 struct TargetBuild {
     directory: PathBuf,
     protocols: Vec<PathBuf>,
     documents: Vec<PathBuf>,
 }
 
-/// A generated artifact is a robot protocol when it follows the emitters'
+/// A generated artifact is an automation protocol when it follows the emitters'
 /// naming convention, whatever format the backend writes.
-fn is_robot_protocol(path: &Path) -> bool {
+fn is_automation_protocol(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .is_some_and(|name| {
@@ -380,7 +380,7 @@ fn build_for_target(
         }
         fs::write(&path, artifact.contents())
             .with_context(|| format!("failed to write {}", path.display()))?;
-        if is_robot_protocol(&path) {
+        if is_automation_protocol(&path) {
             protocols.push(path);
         }
         if artifact.media_type() == "text/x-typst" && is_typeset_document(artifact.path()) {

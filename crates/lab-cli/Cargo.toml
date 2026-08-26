@@ -16,12 +16,10 @@ anyhow.workspace = true
 clap.workspace = true
 flate2 = "1.1.9"
 lab-compiler.workspace = true
-lab-compute.workspace = true
 lab-runfmt.workspace = true
 # The runner needs the live USB transport the workspace dependency keeps
 # off by default.
 lab-runtime = { workspace = true, features = ["hardware"] }
-lab-scene.workspace = true
 lab-package.workspace = true
 lab-project.workspace = true
 self-replace = "1.5.0"

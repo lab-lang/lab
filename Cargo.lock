@@ -1669,12 +1669,10 @@ dependencies = [
  "clap",
  "flate2",
  "lab-compiler",
- "lab-compute",
  "lab-package",
  "lab-project",
  "lab-runfmt",
  "lab-runtime",
- "lab-scene",
  "self-replace",
  "semver",
  "serde",
@@ -1709,16 +1707,6 @@ dependencies = [
  "sha2",
  "thiserror",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "lab-compute"
-version = "0.1.2"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
 ]
 
 [[package]]
@@ -1816,7 +1804,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
- "toml 0.8.23",
 ]
 
 [[package]]
@@ -1839,19 +1826,6 @@ version = "0.1.2"
 dependencies = [
  "lab-language",
  "sbol3",
- "thiserror",
-]
-
-[[package]]
-name = "lab-scene"
-version = "0.1.2"
-dependencies = [
- "base64",
- "lab-compiler",
- "lab-runfmt",
- "serde",
- "serde_json",
- "tempfile",
  "thiserror",
 ]
 

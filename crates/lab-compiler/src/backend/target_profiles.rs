@@ -61,7 +61,7 @@ pub enum TargetKind {
     Workcell,
 }
 
-/// A station kind a workcell or facility may declare.
+/// A station kind a workcell may declare.
 #[derive(Clone, Debug, Serialize)]
 pub struct StationCapability {
     pub kind: &'static str,

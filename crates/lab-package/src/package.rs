@@ -143,10 +143,6 @@ pub enum PackageError {
         "invalid default target '{0}'; a target names a profile under 'targets/' using letters, digits, '-' or '_'"
     )]
     InvalidTarget(String),
-    #[error(
-        "invalid default facility '{0}'; a facility names a file under 'facilities/' using letters, digits, '-' or '_'"
-    )]
-    InvalidFacility(String),
     #[error("package '{package}' has no Lab source modules under {source_root}")]
     NoSources {
         package: String,

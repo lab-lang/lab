@@ -11,36 +11,6 @@ pub struct BuildInventory {
     pub available_artifacts: BTreeSet<String>,
 }
 
-impl BuildInventory {
-    /// This inventory narrowed to what the graph can consume. A package
-    /// manifest declares exactly the stock its build uses, and resolution
-    /// rejects any surplus; a facility stocks a whole lab, so a build
-    /// drawing on one narrows the stock to the graph's demands first and
-    /// keeps that rejection meaningful for manifests.
-    pub fn restricted_to(&self, graph: &BuildGraph) -> BuildInventory {
-        let required: BTreeSet<&String> = graph
-            .nodes
-            .values()
-            .flat_map(|node| node.required_materials.iter())
-            .collect();
-        let produced: BTreeSet<&String> = graph.nodes.keys().collect();
-        BuildInventory {
-            available_materials: self
-                .available_materials
-                .iter()
-                .filter(|name| required.contains(name))
-                .cloned()
-                .collect(),
-            available_artifacts: self
-                .available_artifacts
-                .iter()
-                .filter(|name| produced.contains(name))
-                .cloned()
-                .collect(),
-        }
-    }
-}
-
 /// A target-neutral artifact dependency graph.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BuildGraph {

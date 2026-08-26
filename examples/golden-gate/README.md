@@ -1,7 +1,7 @@
 # Golden Gate cloning on an Opentrons OT-2
 
 This is Lab's end-to-end example: a package that describes a small reporter
-panel biologically, and compiles it into the robot protocols that build it.
+panel biologically, and compiles it into the automation protocols that build it.
 
 It reproduces the three-stage workflow from
 [PUDU](https://pudu.readthedocs.io/en/latest/guide/workflow.html) — Golden Gate
@@ -34,40 +34,12 @@ From the `examples/golden-gate` directory, run:
 lab build
 ```
 
-The manifest declares `[build] target = "workcell-star"`, so a plain
-`lab build` compiles for the simulatable workcell; `lab build --target
-<name>` compiles for another bench, and `lab build --no-target` stops at
-portable module IR.
+The manifest declares `[build] target = "opentrons-ot2"`, so a plain
+`lab build` compiles for the OT-2 bench. `lab build --target <name>` compiles
+for another bench, and `lab build --no-target` stops at portable module IR.
 
-The build writes run documents under `.lab/build/workcell-star/`, one
-directory per planning wave, and from here the whole simulation flow is
-zero-argument:
-
-```bash
-lab simulate   # timeline, attended vs walk-away, sim-trace.json per wave
-lab scene      # scene.json + glTF + USD per wave (--animated adds the timeline)
-lab render     # Blender frames and a movie from those outputs, per wave
-```
-
-Each command skips work whose inputs have not changed, so rerunning any
-of them costs nothing until the build, the facility, or a setting moves.
-
-The first machine-to-machine learning prototype projects wave 1's reviewed
-STAR-to-ODTC handoff into a backend-neutral robot task:
-
-```bash
-lab robot task .lab/build/workcell-star/wave-001 \
-  --node assembly_thermocycle.to-odtc-1
-```
-
-The command validates the source and destination stations and
-`reaction_plate` against the wave's semantic scene before writing the task.
-The [Isaac Lab adapter](../../integrations/isaac-lab/README.md) binds that
-portable intent to the initial Franka plate-transfer proxy.
-
-`facility.toml` at the package root describes the room the simulation runs
-in: station positions, storage, and transport times. `lab simulate` and
-`lab render` pick it up by convention; `--facility` names another one.
+The build writes protocols under `.lab/build/opentrons-ot2/`, one directory
+per planning wave, and prints the path of every runnable automation protocol.
 
 The build output holds, per target directory:
 
@@ -89,7 +61,7 @@ Artifacts in the same wave have no ordering constraint between them, so a wave
 is a single robot run over a single deck. Wave 2 cannot start until wave 1's
 plasmids physically exist and have been accepted as suitable inputs.
 
-## Build it for a different robot
+## Build it for a different instrument
 
 `targets/opentrons-flex.toml` describes an Opentrons Flex. It declares
 `[target] backend = "opentrons.flex"`, and that key is what selects the

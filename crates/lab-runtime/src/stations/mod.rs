@@ -2,11 +2,8 @@
 //!
 //! The walk talks to stations through two narrow session traits, one per
 //! program shape: frame replay on a liquid handler, and thermal programs on
-//! a cycler. Live sessions wrap the vendor drivers; simulated sessions
-//! (`sim`) advance a virtual clock instead of hardware. Which one a walk
-//! gets is the [`Connector`]'s decision, made once per station name.
-
-pub mod sim;
+//! a cycler. Live sessions wrap the vendor drivers. Which one a walk gets is
+//! the [`Connector`]'s decision, made once per station name.
 
 use std::collections::BTreeMap;
 
@@ -50,7 +47,7 @@ pub enum StationSession {
 }
 
 /// Opens a session for a station the walk touches for the first time. The
-/// live connector reaches hardware; the simulated connector builds models.
+/// production connector reaches hardware; tests can provide a local double.
 pub trait Connector {
     fn connect(
         &mut self,
@@ -181,8 +178,8 @@ impl CyclerSession for lab_instruments::OdtcStation {
 }
 
 /// The connector live runs use: USB for the STAR, the bench's address for
-/// the ODTC. Available only with the `hardware` feature so simulation
-/// builds never link libusb.
+/// the ODTC. Available only with the `hardware` feature so consumers that
+/// only inspect run documents never link libusb.
 #[cfg(feature = "hardware")]
 pub struct HardwareConnector;
 

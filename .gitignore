@@ -3,7 +3,6 @@
 .lab/
 .venv/
 .env
-.c3.local
 *.rs.bk
 .DS_Store
 crates/lab-python/python/lab/_native.*
@@ -18,6 +17,4 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
-viewer/node_modules/
-viewer/dist/
 .claude/

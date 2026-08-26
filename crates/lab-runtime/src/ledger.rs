@@ -1,9 +1,7 @@
 //! The durable run ledger a workcell wave accumulates beside its plan.
 //!
 //! The ledger is the run's memory and its evidence: which nodes completed,
-//! when, and on whose confirmation. Only live runs write it; a simulation
-//! records a trace instead, so a simulated wave never blocks a real one
-//! from starting fresh.
+//! when, and on whose confirmation.
 
 use std::collections::BTreeSet;
 use std::fs;

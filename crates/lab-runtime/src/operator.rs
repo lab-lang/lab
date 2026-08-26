@@ -1,14 +1,12 @@
 //! The operator port: every confirmation in a run flows through one
-//! interface, so the live runner asks a human at the terminal and the
-//! simulator answers for a modeled one.
+//! interface, so the live runner asks a human at the terminal while tests
+//! can supply a deterministic answer.
 
 use std::io::{BufRead, Write};
 
 use anyhow::Result;
 
-/// What a confirmation is for. The live operator sees the same prompt
-/// either way; a simulated operator charges different time for different
-/// kinds of step.
+/// What a confirmation is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConfirmKind {
     /// The gate before any motion starts.
@@ -37,8 +35,8 @@ impl Operator for StdinOperator {
     }
 }
 
-/// An operator that always answers the same way. The simulator confirms
-/// every step with it; tests decline with it.
+/// An operator that always answers the same way, for tests and programmatic
+/// callers.
 pub struct AutoOperator {
     pub answer: bool,
 }
