@@ -135,3 +135,59 @@ pub enum Geometry {
         fallback: [f64; 3],
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{SceneNode, Semantic};
+
+    fn traversal_tree() -> SceneNode {
+        let grandchild = SceneNode::new(
+            "grandchild",
+            Semantic::Well { name: "A1".into() },
+            [4.0, 5.0, 6.0],
+        );
+
+        let mut child = SceneNode::new(
+            "child",
+            Semantic::Station {
+                station_kind: "rotated-station".into(),
+            },
+            [1.0, 2.0, 3.0],
+        );
+        child.rotation_z_deg = 90.0;
+        child.children.push(grandchild);
+
+        let sibling = SceneNode::new("sibling", Semantic::Deck, [-1.0, -2.0, -3.0]);
+        let mut root = SceneNode::new("root", Semantic::Room, [10.0, 20.0, 30.0]);
+        root.children = vec![child, sibling];
+        root
+    }
+
+    #[test]
+    fn walk_visits_each_node_once_in_depth_first_order() {
+        let root = traversal_tree();
+        let mut visited = Vec::new();
+
+        root.walk(&mut |node, _| visited.push(node.id.clone()));
+
+        assert_eq!(visited, ["root", "child", "grandchild", "sibling"]);
+    }
+
+    #[test]
+    fn walk_accumulates_translations_without_applying_rotation() {
+        let root = traversal_tree();
+        let mut visited = Vec::new();
+
+        root.walk(&mut |node, origin| visited.push((node.id.clone(), origin)));
+
+        assert_eq!(
+            visited,
+            [
+                ("root".into(), [10.0, 20.0, 30.0]),
+                ("child".into(), [11.0, 22.0, 33.0]),
+                ("grandchild".into(), [15.0, 27.0, 39.0]),
+                ("sibling".into(), [9.0, 18.0, 27.0]),
+            ]
+        );
+    }
+}
