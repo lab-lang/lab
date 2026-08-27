@@ -145,6 +145,8 @@ pub enum PackageError {
     InvalidTarget(String),
     #[error("invalid inventory configuration: {0}")]
     InvalidInventory(String),
+    #[error("invalid execution configuration: {0}")]
+    InvalidExecution(String),
     #[error("package '{package}' has no Lab source modules under {source_root}")]
     NoSources {
         package: String,
@@ -216,7 +218,7 @@ impl LabPackage {
     pub fn load(root: impl AsRef<Path>) -> Result<Self, PackageError> {
         let root = root.as_ref().to_path_buf();
         let manifest = match read_manifest(&root)? {
-            LabManifest::Package(manifest) => manifest,
+            LabManifest::Package(manifest) => *manifest,
             LabManifest::Workspace(_) => {
                 return Err(PackageError::NotAPackage { path: root });
             }

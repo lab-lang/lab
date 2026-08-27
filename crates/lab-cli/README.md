@@ -63,15 +63,21 @@ target = "opentrons-ot2"
 
 `lab build` then produces that bench's protocols, `--target <name>` compiles for a different one, and `--no-target` stops at portable module IR.
 
-An `[inventory]` table states what the laboratory has on hand, and a target build resolves every artifact dependency against it:
+An `[inventory]` table selects a validated SBOLInventory facility graph, and a target build resolves every artifact dependency against exact active MaterialLots:
 
 ```toml
 [inventory]
-materials = ["BsaI", "T4_DNA_ligase", "pSB1C3"]
-artifacts = ["composite_plasmid_1"]
+document = "inventory/facility.ttl"
+# Required when the document has several facilities:
+facility = "https://example.org/facilities/example-lab"
+
+[[execution.adapters]]
+asset = "https://example.org/facilities/example-lab/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-1.toml"
 ```
 
-`materials` are consumables a reaction may draw on; `artifacts` are already realized and are not built again. Both default to empty, so a package that declares no inventory builds everything from nothing and reports what it is missing.
+Each adapter declaration binds an implementation to one exact catalog Asset. Facility facts remain in RDF, driver selection is never inferred from product metadata, and endpoints and credentials remain local runtime configuration. The old symbolic `materials` and `artifacts` arrays are accepted only as a mutually exclusive migration form.
 
 All read-oriented commands support `--json` for editor and automation clients:
 

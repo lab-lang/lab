@@ -151,6 +151,11 @@ document = "inventory/facility.ttl"
 # Required only when the document contains more than one facility:
 facility = "https://example.org/facilities/tet-lab"
 
+[[execution.adapters]]
+asset = "https://example.org/facilities/tet-lab/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-1.toml"
+
 [dependencies]
 parts = "1.2"
 local-policies = { path = "../policies" }
@@ -161,6 +166,8 @@ local-policies = { path = "../policies" }
 Each required source declaration reaches the graph through its exact `sbol_identity`, and availability means one active MaterialLot in the selected facility whose `sbol:built` points to that exact local Component. No declaration name, display ID, supplier identifier, or IRI prefix is used for matching. Zero lots leaves the dependency blocked, one freezes a Component-to-MaterialLot binding in `lab.dependency-build.v1`, and several produce an allocation ambiguity instead of a silent first choice. A built artifact with one active lot is reused through the same rule.
 
 The old `materials` and `artifacts` arrays remain as a mutually exclusive legacy form while existing examples migrate. They retain symbolic behavior and are identified as `legacy_symbols` in emitted dependency manifests; new packages should use `document`.
+
+Each `[[execution.adapters]]` entry explicitly binds one exact SBOLInventory Asset IRI to a stable Lab driver and a package-relative, non-secret adapter profile. Adapter bindings require an inventory document. They do not duplicate the Asset's manufacturer, model, location, capability offerings, qualification, or control mode, and Lab never infers a driver from those catalog facts. Runtime endpoints and credentials do not belong in this portable manifest or profile.
 
 `[build] target` names the profile a plain `lab build` compiles for, so the command a laboratory runs every day produces the protocols its robots execute rather than intermediate IR. It names a profile under `targets/` and nothing else: a value carrying a path separator is rejected. `--target` compiles for a different bench and `--no-target` stops at portable module IR, so a package that declares a default keeps both. A package that declares no default builds module IR alone.
 

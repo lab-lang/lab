@@ -6,8 +6,9 @@ mod package;
 
 pub use graph::{ImportResolution, ModuleGraph, ModuleGraphError, ModuleNode};
 pub use manifest::{
-    BuildMetadata, DependencyDetail, DependencySpec, InventoryMetadata, LabManifest,
-    PackageManifest, PackageMetadata, WorkspaceManifest, WorkspaceMetadata,
+    AdapterBinding, BuildMetadata, DependencyDetail, DependencySpec, ExecutionMetadata,
+    InventoryMetadata, LabManifest, PackageManifest, PackageMetadata, WorkspaceManifest,
+    WorkspaceMetadata,
 };
 pub use package::{
     DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource, SbolSyntax,
