@@ -12,7 +12,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Quantity types (`Quantity<uL>`) | yes | yes | unit-exact | `CheckedType::Quantity` | n/a |
 | `across N biological replicates` | yes | yes | count resolved, and evidence checked against the lineage it spans | `CheckedAcceptance.replicates` | n/a |
 | Material lineage and replicate class | n/a | n/a | derived from action results | `provenance::lineage` | n/a |
-| Provenance verbs (`build`, `buy`) | yes | yes | `require`/`accept` only on what is built; identity only on what is bought | `CheckedDeclaration::Artifact` and `Catalog` | manifest cross-check at build |
+| Provenance verbs (`build`, `buy`) | yes | yes | `require`/`accept` only on what is built; supplier identity only on what is bought; SBOL identity on either | `CheckedDeclaration::Artifact` and `Catalog` | manifest cross-check at build |
 | Schemas contributed to by several modules | yes | yes | union of every kind declaration in scope | the merged interface schema | n/a |
 | Reagent-owned chemistry with design override | yes | yes | a stated value wins over the item's | `CheckedDeclaration::Catalog.properties` | read by the lowerer |
 | Declarative artifact properties with `=` | yes | expressions | inferred checked values | `CheckedProperty` | target-dependent |
@@ -48,7 +48,8 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Top-level pure bindings | yes | yes | yes | yes | no |
 | Named DNA values referenced by designs | `name: DNA = dna("...")` | references resolve across modules | DNA-typed design property | one reusable `design.dna_sequence` SSA value | target-dependent |
 | `record` plus role membership (`is Event`, `is Evidential`) | yes | yes | yes | yes | no |
-| Biological catalog identity, version, and provenance chains | syntax pending | no | no | no | no |
+| Exact SBOL Component and supplier identities | `sbol_identity`, `supplier_identity` | declarations resolve normally | SBOL identity must be an absolute IRI | separate fields in `lab.portable-module.v5` | inventory binding pending |
+| Biological catalog version and provenance chains | syntax pending | no | no | no | no |
 | Tagged `record` declarations with `case` constructors | yes | yes | yes | yes | no |
 | Workflow declarations and calls | yes | yes | yes | yes | runtime pending |
 | Pure workflow bindings | yes | yes | yes | yes | no |

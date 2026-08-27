@@ -75,11 +75,11 @@ A biological declaration is immutable intent. Its `name = value` entries are typ
 
 Inside a declaration body the two operators divide cleanly. `=` associates a name with a value; `:` gives a name a type. That is what lets a declaration's shape be read before its meaning is resolved, because one token after the name decides which is which without knowing the word that opened the block.
 
-A source value may stand for an external identity. `buy part J23101` declares a source symbol of type `Part` whose identity — what a supplier's order names — defaults to the declared name and is written explicitly only where the two differ. The symbol name and external identifier are distinct: renaming one does not silently rewrite the other. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Chassis`, or `Antibiotic` is required is a type error.
+A declaration may carry an exact biological-design identity independently of how that design is obtained. `sbol_identity` is an absolute IRI naming the SBOL Component represented by either a `build` or `buy` declaration. A bought declaration may additionally state `supplier_identity`, the order identifier used to acquire it; that identifier defaults to the declared name. The source symbol, SBOL identity, and supplier identity are distinct, so renaming one does not silently rewrite either of the others. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Chassis`, or `Antibiotic` is required is a type error.
 
 `Chassis` and `Strain` are different kinds of thing. A chassis is a catalogued host organism, declared with `buy`. A strain is a declared artifact: a chassis together with the plasmid designs it carries. One chassis appears in many strains, and one plasmid design may appear in strains built on different chassis.
 
-Typed identity is not availability. It does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require inventory resolution and runtime evidence.
+Design identity is not availability. An `sbol_identity` does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require exact MaterialLot resolution against a validated SBOLInventory document and runtime evidence.
 
 ## Commands and events
 

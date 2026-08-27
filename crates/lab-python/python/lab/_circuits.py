@@ -507,7 +507,7 @@ def _mint_part(
     if component is not None:
         identity = getattr(component, "identity", None)
         if identity:
-            stated = {"identity": str(identity), **stated}
+            stated = {"sbol_identity": str(identity), **stated}
     name = _naming.free_name(_naming.identifier(fallback), word, taken)
     declaration = BuyDeclaration(
         module=module,

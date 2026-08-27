@@ -45,25 +45,25 @@ record CI is Protein, Signal
 
 buy:
   promoter pLac: Promoter<LacI>:
-    identity = "https://example.org/repressilator/pLac"
+    sbol_identity = "https://example.org/repressilator/pLac"
     regulation = repressed
 
   cds TetR_cds: CDS<TetR>:
-    identity = "https://example.org/repressilator/TetR"
+    sbol_identity = "https://example.org/repressilator/TetR"
 
   promoter pTet_promoter: Promoter<TetR>:
-    identity = "https://example.org/repressilator/pTet"
+    sbol_identity = "https://example.org/repressilator/pTet"
     regulation = repressed
 
   cds CI_cds: CDS<CI>:
-    identity = "https://example.org/repressilator/CI"
+    sbol_identity = "https://example.org/repressilator/CI"
 
   promoter pCI: Promoter<CI>:
-    identity = "https://example.org/repressilator/pCI"
+    sbol_identity = "https://example.org/repressilator/pCI"
     regulation = repressed
 
   cds LacI_cds: CDS<LacI>:
-    identity = "https://example.org/repressilator/LacI"
+    sbol_identity = "https://example.org/repressilator/LacI"
 
 /**
  * One transcription unit: a promoter driving a coding sequence

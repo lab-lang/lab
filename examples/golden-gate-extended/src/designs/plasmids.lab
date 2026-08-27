@@ -89,5 +89,5 @@ build plasmid composite_plasmid_2:
  * above, and only its provenance differs.
  */
 buy plasmid reference_gfp:
-  identity = "Addgene-#134516"
+  supplier_identity = "Addgene-#134516"
   sequence = gfp_reporter_sequence

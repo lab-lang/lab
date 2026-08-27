@@ -18,7 +18,7 @@ buy:
 
   /** BsaI cuts at 37 C, so every plasmid it opens digests the same way. */
   restriction_enzyme BsaI:
-    identity = "NEB-R0535"
+    supplier_identity = "NEB-R0535"
     digest_temperature = 37 C
     digest_duration = 2 min
 

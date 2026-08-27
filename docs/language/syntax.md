@@ -386,9 +386,9 @@ plasmid p_sensor:
 
 `require` is checked before physical construction. `accept` describes a runtime claim that must be supported by evidence.
 
-## Typed inventory identities and target properties
+## Typed design identities and target properties
 
-Inventory identities enter through `buy` declarations against imported kinds, and plasmid properties refer to those symbols. Properties are backend-neutral typed expressions—not executable bindings and not evidence that inventory is physically available:
+Biological designs enter through `build` and `buy` declarations against imported kinds, and plasmid properties refer to those typed symbols. An exact SBOL Component IRI may be attached to either provenance. These declarations and properties are not executable bindings or evidence that a material lot is physically available:
 
 ```lab
 use std.lab.plasmid
@@ -422,7 +422,7 @@ strain reporter_host:
   serial_dilutions = 2
 ```
 
-A bought item's external identity is what a supplier's order names. It defaults to the declared name and is stated as an `identity` property only where the two differ, so renaming a source symbol and changing an external identifier are distinct operations. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
+An `sbol_identity` is an absolute IRI naming the SBOL Component represented by a built or bought declaration. A bought item's `supplier_identity` names what a supplier's order line calls it and defaults to the declared name; `identity` remains a legacy alias for `supplier_identity`. The source symbol, design identity, and supplier identity are distinct, so renaming one does not silently rewrite the others. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
 
 The OT-2 specialization interprets these properties after ordinary module checking. Another target may ignore them, interpret other metadata, or reject the module. Target-specific property names are not encoded in the core checker.
 

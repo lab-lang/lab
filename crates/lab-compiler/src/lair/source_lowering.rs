@@ -47,7 +47,7 @@ struct RealizationFlow {
 
 struct BuildLoweringContext<'a> {
     flows: &'a BTreeMap<String, RealizationFlow>,
-    identities: &'a BTreeMap<String, String>,
+    supplier_identities: &'a BTreeMap<String, String>,
     stated: &'a BTreeMap<String, Vec<lab_language::CheckedProperty>>,
     bindings: &'a BTreeMap<(String, String), TypedExpression>,
 }
@@ -232,20 +232,20 @@ pub(crate) struct StrainArtifactIntent {
 /// intent. This is the only layer that knows the standard-library operation
 /// identities used by the source frontend.
 ///
-/// The modules are one program. Inventory identities, artifact declarations,
+/// The modules are one program. Supplier identities, artifact declarations,
 /// and realization workflows are read across all of them, so a declaration and
 /// the workflow that realizes it may live in different modules. The caller
 /// supplies them in a deterministic order.
 pub(crate) fn lower_build_intent(
     modules: &[&CheckedModule],
 ) -> Result<Vec<BuildArtifactIntent>, SourceLoweringError> {
-    let identities = inventory_identities(modules);
+    let supplier_identities = supplier_identities(modules);
     let stated = inventory_properties(modules);
     let bindings = binding_values(modules);
-    let flows = realization_flows(modules, &identities)?;
+    let flows = realization_flows(modules, &supplier_identities)?;
     let context = BuildLoweringContext {
         flows: &flows,
-        identities: &identities,
+        supplier_identities: &supplier_identities,
         stated: &stated,
         bindings: &bindings,
     };
@@ -289,7 +289,7 @@ fn lower_artifact(
     properties: &[lab_language::CheckedProperty],
     context: &BuildLoweringContext<'_>,
 ) -> Result<BuildArtifactIntent, SourceLoweringError> {
-    let identities = context.identities;
+    let supplier_identities = context.supplier_identities;
     let stated = context.stated;
     let bindings = context.bindings;
     let find = |field: &'static str| {
@@ -302,9 +302,10 @@ fn lower_artifact(
                 field,
             })
     };
-    let symbol = |field, accepted| checked_symbol(name, field, find(field)?, identities, accepted);
+    let symbol =
+        |field, accepted| checked_symbol(name, field, find(field)?, supplier_identities, accepted);
     let symbols =
-        |field, accepted| checked_symbols(name, field, find(field)?, identities, accepted);
+        |field, accepted| checked_symbols(name, field, find(field)?, supplier_identities, accepted);
     let owner = |owner_field: &'static str| {
         properties
             .iter()
@@ -462,14 +463,17 @@ fn inventory_properties(
 
 /// What each catalogued symbol calls the item a supplier lists.
 ///
-/// A catalog declaration carries both, so this reads two fields rather than
-/// recognizing the shape of a synthesized call.
-fn inventory_identities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
+/// This deliberately ignores the separate SBOL Component IRI. Existing device
+/// manifests require order identifiers, while inventory binding requires exact
+/// biological-design identities.
+fn supplier_identities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
     declarations(modules)
         .filter_map(|declaration| match declaration {
-            CheckedDeclaration::Catalog { name, identity, .. } => {
-                Some((name.clone(), identity.clone()))
-            }
+            CheckedDeclaration::Catalog {
+                name,
+                supplier_identity,
+                ..
+            } => Some((name.clone(), supplier_identity.clone())),
             _ => None,
         })
         .collect()

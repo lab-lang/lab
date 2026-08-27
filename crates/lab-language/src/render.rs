@@ -38,10 +38,10 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
             CheckedDeclaration::Catalog {
                 name,
                 r#type,
-                identity,
+                supplier_identity,
                 ..
             } => output.push_str(&format!(
-                "  - catalog {name}: {type} (\"{identity}\")\n",
+                "  - catalog {name}: {type} (supplier \"{supplier_identity}\")\n",
                 r#type = r#type
             )),
             CheckedDeclaration::Data { name, roles, .. } => {

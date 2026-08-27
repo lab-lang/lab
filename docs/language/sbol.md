@@ -164,10 +164,7 @@ error: 'engineered region' is neither an IRI nor a compact identifier
 
 ## Layer 1: identity that resolves
 
-Today `CheckedDeclaration::Catalog` carries `identity: String`, defaulting to
-the declared name, and `source_lowering.rs` is its only consumer, reading it
-into a `BTreeMap<String, String>`. It is an opaque string: no scheme, no
-namespace, no resolution, no version.
+`CheckedDeclaration::Catalog` carries an optional exact `sbol_identity` separately from its `supplier_identity`, which defaults to the declared name. `CheckedDeclaration::Artifact` carries the same optional `sbol_identity`. The source lowerer uses only the supplier identifier for existing device-specific manifests; inventory resolution uses only the SBOL Component IRI.
 
 Two changes.
 
@@ -188,23 +185,19 @@ that `sbol3::design::sanitize_display_id` gets wrong, keeping `pUC19-A` and
 `pUC19_A` distinct, and carries a test asserting the encoding still satisfies
 rule sbol3-10201.
 
-**An identity distinguishes a registry record from an order line.** Both are
-written the same way, as the property they already are:
+**A design identity is separate from an order line.** The two meanings have distinct fields:
 
 ```lab
 buy:
   part J23101:
-    identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
+    sbol_identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
 
   restriction_enzyme BsaI:
-    identity = "NEB-R0535"
+    supplier_identity = "NEB-R0535"
     digest_temperature = 37 C
 ```
 
-An absolute IRI is resolvable and carries a design. A catalog number names
-something to order. The compiler treats them differently because they mean
-different things, which is the distinction
-[0021](decisions/0021-typed-external-identities.md) collapsed.
+`sbol_identity` is an absolute IRI naming the SBOL Component represented by either a `build` or `buy` declaration. `supplier_identity` is available only on `buy`, defaults to the declaration name, and names something to order. The legacy `identity` spelling remains an alias for `supplier_identity` during migration. The compiler carries both meanings separately, which restores the distinction [0021](decisions/0021-typed-external-identities.md) collapsed.
 
 Where an identity resolves, the local declaration is checkable against the
 registry record. A part declared `Promoter<Tetracycline>` whose SynBioHub record
@@ -1245,11 +1238,7 @@ its omissions report intact. It is a projection of the output, not a peer of it.
 
 ## Open questions and risks
 
-**`sbol3` has no serde.** `CheckedModule` is serde-serialized under
-`lab.portable-module.v4`, so SBOL objects cannot ride inside the portable module
-IR. Keeping IRIs as strings in `CheckedModule` and rebuilding SBOL objects at
-emission is probably right, since it keeps the portable IR self-describing, but
-it needs deciding rather than discovering.
+**Portable SBOL identities are strings by design.** `CheckedModule` is serde-serialized under `lab.portable-module.v5`, so pySBOL3 and sbol-rs objects do not ride inside portable compiler IR. `sbol_identity` carries the exact absolute Component IRI as a string, while typed SBOL objects remain behind the authoring and inventory boundaries.
 
 **No OM unit constants in sbol-rs.** Lab has `Quantity<uL>`, `Quantity<C>`, and
 `Quantity<min>`, and emitting them as OM `Measure` values needs unit IRIs that
@@ -1299,13 +1288,7 @@ and the RDF I/O stack are not obviously fine. This is why the validation pass
 runs from `lab-project` rather than from `compile_parsed_module`, and it needs
 measuring rather than assuming.
 
-**Identity migration is broad, and it breaks two wire formats.**
-`PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding
-landed; `DependencyBuildManifest` serializes artifact names into an on-disk manifest
-with its own `schema_version`. Both are deliberate, versioned boundaries, so the
-break is manageable, but it should be one break rather than several. Land the
-identity type and the minting rules first, then move consumers, rather than
-letting IRIs leak outward one pass at a time.
+**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed and to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields. `DependencyBuildManifest` serializes artifact names into an on-disk manifest with its own `schema_version`; changing its inventory bindings requires a separate deliberate version change.
 
 The checker's tables are the bulk of the mechanical work: fifteen
 `HashMap<String, _>` and `BTreeSet<String>` fields on `SemanticContext`, plus

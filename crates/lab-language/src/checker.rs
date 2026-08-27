@@ -1681,13 +1681,12 @@ workflow read_out(
         );
     }
 
-    /// What an order names is the declared name, unless the item states an
-    /// identity of its own, because in practice the two are almost always the
-    /// same.
+    /// What an order names is the declared name unless the item states a
+    /// supplier identity. This is unrelated to its SBOL Component IRI.
     #[test]
-    fn a_bought_item_defaults_its_identity_to_its_name() {
+    fn a_bought_item_defaults_its_supplier_identity_to_its_name() {
         let module = compile_module(
-            "use std.bio.designs\nuse std.bio.golden_gate\n\nbuy part J23101\nbuy part GFP\nbuy restriction_enzyme BsaI_HF:\n  identity = \"BsaI-HF-v2\"\n",
+            "use std.bio.designs\nuse std.bio.golden_gate\n\nbuy part J23101\nbuy part GFP\nbuy restriction_enzyme BsaI_HF:\n  supplier_identity = \"BsaI-HF-v2\"\n",
         )
         .expect("each bought item names its kind");
 
@@ -1697,10 +1696,14 @@ workflow read_out(
             .filter_map(|declaration| match declaration {
                 CheckedDeclaration::Catalog {
                     name,
-                    identity,
+                    supplier_identity,
                     r#type,
                     ..
-                } => Some((name.as_str(), identity.as_str(), r#type.display_name())),
+                } => Some((
+                    name.as_str(),
+                    supplier_identity.as_str(),
+                    r#type.display_name(),
+                )),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1712,8 +1715,73 @@ workflow read_out(
                 ("GFP", "GFP", "Part".to_owned()),
                 ("BsaI_HF", "BsaI-HF-v2", "RestrictionEnzyme".to_owned()),
             ],
-            "each name is its own declaration, and an identity is written only where it differs"
+            "each name is its own declaration, and an order identifier is written only where it differs"
         );
+    }
+
+    #[test]
+    fn legacy_identity_remains_a_supplier_identity_alias() {
+        let module =
+            compile_module("use std.bio.designs\n\nbuy part legacy:\n  identity = \"SKU-17\"\n")
+                .unwrap();
+        let CheckedDeclaration::Catalog {
+            sbol_identity,
+            supplier_identity,
+            properties,
+            ..
+        } = &module.declarations[0]
+        else {
+            panic!("the declaration is bought");
+        };
+        assert_eq!(sbol_identity, &None);
+        assert_eq!(supplier_identity, "SKU-17");
+        assert!(properties.is_empty());
+    }
+
+    #[test]
+    fn sbol_identity_is_preserved_independently_of_build_or_buy() {
+        let module = compile_module(
+            r#"use std.bio.designs
+
+build part local_design:
+  sbol_identity = "https://example.org/design/local"
+
+buy part catalogued_design:
+  sbol_identity = "https://example.org/design/catalogued"
+  supplier_identity = "SKU-42"
+"#,
+        )
+        .unwrap();
+
+        let CheckedDeclaration::Artifact { sbol_identity, .. } = &module.declarations[0] else {
+            panic!("the first declaration is built");
+        };
+        assert_eq!(
+            sbol_identity.as_deref(),
+            Some("https://example.org/design/local")
+        );
+        let CheckedDeclaration::Catalog {
+            sbol_identity,
+            supplier_identity,
+            ..
+        } = &module.declarations[1]
+        else {
+            panic!("the second declaration is bought");
+        };
+        assert_eq!(
+            sbol_identity.as_deref(),
+            Some("https://example.org/design/catalogued")
+        );
+        assert_eq!(supplier_identity, "SKU-42");
+    }
+
+    #[test]
+    fn sbol_identity_must_be_an_absolute_iri() {
+        let error = compile_module(
+            "use std.bio.designs\n\nbuy part local:\n  sbol_identity = \"BBa_J23101\"\n",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("not an absolute IRI"), "{error}");
     }
 
     /// A parameterized type is catalogued when its head is, which is a separate
