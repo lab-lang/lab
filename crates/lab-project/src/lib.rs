@@ -802,4 +802,12 @@ workflow main() -> Material<Plasmid>:
         );
         assert!(LabProject::discover(root).unwrap().compile().is_ok());
     }
+
+    #[test]
+    fn ebef_reference_package_compiles_as_a_portable_library() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ebef");
+        let compiled = LabProject::discover(root).unwrap().compile().unwrap();
+        assert_eq!(compiled.modules.len(), 1);
+        assert_eq!(compiled.modules[0].source.module, "ebef_reference.facility");
+    }
 }

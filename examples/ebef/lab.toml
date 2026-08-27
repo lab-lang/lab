@@ -1,0 +1,7 @@
+[package]
+name = "ebef-reference"
+version = "0.1.0"
+edition = "2026"
+
+[inventory]
+document = "inventory/ebef.ttl"

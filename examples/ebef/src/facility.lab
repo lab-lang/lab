@@ -1,0 +1,5 @@
+/*!
+ * This package exercises Lab's portable SBOLInventory ingestion against the
+ * public-data EBEF reference catalog. Operational workflows will be added as
+ * capability requirements and facility allocation become available.
+ */
