@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -81,13 +81,16 @@ pub struct BuildMetadata {
     pub target: Option<String>,
 }
 
-/// What a target build may draw on before it plans anything: the materials an
-/// operator has on hand and the artifacts already realized. Names are the
-/// symbolic identities `src/` declares, so the inventory reads as a statement
-/// about this package's stock rather than as an opaque data file.
+/// The facility catalog a package may plan against.
+///
+/// `document` selects the portable SBOLInventory graph and `facility` disambiguates
+/// that graph when it contains several facilities. The symbolic sets remain only
+/// as a mutually exclusive migration form for existing packages.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InventoryMetadata {
+    pub document: Option<PathBuf>,
+    pub facility: Option<String>,
     #[serde(default)]
     pub materials: BTreeSet<String>,
     #[serde(default)]
@@ -177,6 +180,7 @@ impl PackageManifest {
         {
             return Err(PackageError::InvalidTarget(target.clone()));
         }
+        self.inventory.validate()?;
         for (name, dependency) in &self.dependencies {
             if !valid_package_name(name) {
                 return Err(PackageError::InvalidDependency {
@@ -220,6 +224,42 @@ impl PackageManifest {
                     }
                 }
             }
+        }
+        Ok(())
+    }
+}
+
+impl InventoryMetadata {
+    pub fn uses_legacy_symbols(&self) -> bool {
+        !self.materials.is_empty() || !self.artifacts.is_empty()
+    }
+
+    fn validate(&self) -> Result<(), PackageError> {
+        if let Some(document) = &self.document {
+            if self.uses_legacy_symbols() {
+                return Err(PackageError::InvalidInventory(
+                    "'document' cannot be combined with legacy 'materials' or 'artifacts'"
+                        .to_owned(),
+                ));
+            }
+            let invalid = document.as_os_str().is_empty()
+                || document.is_absolute()
+                || document.components().any(|component| {
+                    matches!(
+                        component,
+                        Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                    )
+                });
+            if invalid {
+                return Err(PackageError::InvalidInventory(format!(
+                    "document '{}' must be a package-relative path without '..'",
+                    document.display()
+                )));
+            }
+        } else if self.facility.is_some() {
+            return Err(PackageError::InvalidInventory(
+                "'facility' requires an inventory 'document'".to_owned(),
+            ));
         }
         Ok(())
     }
@@ -371,6 +411,68 @@ artifacts = ["composite_plasmid_1"]
             misspelled.is_err(),
             "a misspelled key must not silently empty the inventory"
         );
+    }
+
+    #[test]
+    fn reads_an_sbol_inventory_document_and_optional_facility() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "tet-reporter"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/ebef.ttl"
+facility = "https://example.org/ebef/facility"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.inventory.document.as_deref(),
+            Some(std::path::Path::new("inventory/ebef.ttl"))
+        );
+        assert_eq!(
+            manifest.inventory.facility.as_deref(),
+            Some("https://example.org/ebef/facility")
+        );
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_non_portable_inventory_configuration() {
+        let mixed = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/catalog.ttl"
+materials = ["BsaI"]
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            mixed.validate(),
+            Err(PackageError::InvalidInventory(_))
+        ));
+
+        let escaping = PackageManifest::parse(
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[inventory]\ndocument = \"../catalog.ttl\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            escaping.validate(),
+            Err(PackageError::InvalidInventory(_))
+        ));
+
+        let selector_only = PackageManifest::parse(
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[inventory]\nfacility = \"https://example.org/facility\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            selector_only.validate(),
+            Err(PackageError::InvalidInventory(_))
+        ));
     }
 
     #[test]

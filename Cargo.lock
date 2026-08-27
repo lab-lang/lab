@@ -1669,6 +1669,7 @@ dependencies = [
  "clap",
  "flate2",
  "lab-compiler",
+ "lab-inventory",
  "lab-package",
  "lab-project",
  "lab-runfmt",

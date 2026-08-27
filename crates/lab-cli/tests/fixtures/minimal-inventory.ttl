@@ -1,0 +1,33 @@
+@prefix cap: <https://draggon.org/ns/capability#> .
+@prefix ex: <https://example.org/sbolinventory/> .
+@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix sbol: <http://sbols.org/v3#> .
+
+ex:facility a sbol:TopLevel, fac:Facility ;
+    sbol:displayId "facility" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ;
+    sbol:name "Example facility" .
+
+ex:room a sbol:TopLevel, fac:Zone ;
+    sbol:displayId "room" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ;
+    fac:facility ex:facility ;
+    fac:zoneKind fac:Room ;
+    fac:isActive true .
+
+ex:cycler a sbol:TopLevel, fac:Asset ;
+    sbol:displayId "cycler" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ;
+    fac:facility ex:facility ;
+    fac:assetKind fac:Instrument ;
+    fac:locatedIn ex:room ;
+    fac:isActive true ;
+    fac:capability <https://example.org/sbolinventory/cycler/thermal_cycling> .
+
+<https://example.org/sbolinventory/cycler/thermal_cycling>
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "thermal_cycling" ;
+    fac:capabilityKind cap:ThermalCycling ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .

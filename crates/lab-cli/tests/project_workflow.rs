@@ -86,6 +86,41 @@ fn registry_dependencies_fail_closed_without_being_ignored() {
 }
 
 #[test]
+fn check_validates_a_configured_sbol_inventory() {
+    let project = temporary_project();
+    let project_text = project.to_string_lossy().into_owned();
+    let created = run(&["new", &project_text]);
+    assert!(created.status.success());
+
+    let manifest = project.join("lab.toml");
+    let mut text = std::fs::read_to_string(&manifest).unwrap();
+    text.push_str("\n[inventory]\ndocument = \"inventory/catalog.ttl\"\n");
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::create_dir(project.join("inventory")).unwrap();
+    let valid = include_str!("fixtures/minimal-inventory.ttl");
+    std::fs::write(project.join("inventory/catalog.ttl"), valid).unwrap();
+
+    let checked = run(&["check", &project_text]);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+
+    let invalid = valid.replace("fac:isActive true", "fac:isActive \"yes\"");
+    std::fs::write(project.join("inventory/catalog.ttl"), invalid).unwrap();
+    let rejected = run(&["check", &project_text]);
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("does not conform to SBOLInventory"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+
+    std::fs::remove_dir_all(&project).unwrap();
+}
+
+#[test]
 fn a_target_build_emits_automation_protocols_for_every_wave() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")

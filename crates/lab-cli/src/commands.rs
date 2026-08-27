@@ -8,6 +8,7 @@ use lab_compiler::planning::BuildInventory;
 use lab_compiler::{
     DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
 };
+use lab_inventory::InventorySnapshot;
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{CompiledProject, LOCK_FILE, LabProject};
 use serde::Serialize;
@@ -100,6 +101,7 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
 
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
+    validate_project_inventories(&project)?;
     let compiled = project.compile()?;
     let package = project.default_package();
     output.success(
@@ -128,6 +130,7 @@ pub(crate) fn build(
 ) -> Result<()> {
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
+    validate_project_inventories(&project)?;
     let compiled = project.compile()?;
     let package = project.default_package();
     // A named target wins over the manifest's default, and `--no-target` asks
@@ -449,6 +452,23 @@ pub(crate) fn metadata(path: PathBuf, output: &Output) -> Result<()> {
 fn load_package(path: &Path) -> Result<LabPackage> {
     LabPackage::discover(path)
         .with_context(|| format!("failed to load package from {}", path.display()))
+}
+
+fn validate_project_inventories(project: &LabProject) -> Result<()> {
+    for package in project.member_packages() {
+        let inventory = &package.manifest.inventory;
+        let Some(document) = inventory.document.as_ref() else {
+            continue;
+        };
+        InventorySnapshot::load(&package.root, document, inventory.facility.as_deref())
+            .with_context(|| {
+                format!(
+                    "failed to load inventory for package '{}'",
+                    package.manifest.package.name
+                )
+            })?;
+    }
+    Ok(())
 }
 
 fn validate_package_name(name: &str) -> Result<()> {
