@@ -1,5 +1,6 @@
 //! The boundary between portable Lab packages and SBOLInventory facility graphs.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -15,6 +16,33 @@ pub struct InventorySnapshot {
     source_path: PathBuf,
     source_sha256: String,
     facility: Iri,
+}
+
+/// Active material lots in one selected facility, indexed by the exact SBOL Component they realize.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterialLotCatalog {
+    facility: Iri,
+    by_component: BTreeMap<Iri, Vec<Iri>>,
+}
+
+impl MaterialLotCatalog {
+    pub fn facility(&self) -> &Iri {
+        &self.facility
+    }
+
+    /// Returns active lot IRIs in deterministic order for one exact Component IRI.
+    pub fn candidates(&self, component: &Iri) -> &[Iri] {
+        self.by_component
+            .get(component)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+    }
+
+    pub fn components(&self) -> impl Iterator<Item = (&Iri, &[Iri])> {
+        self.by_component
+            .iter()
+            .map(|(component, lots)| (component, lots.as_slice()))
+    }
 }
 
 impl InventorySnapshot {
@@ -102,6 +130,49 @@ impl InventorySnapshot {
             .check()
             .expect("an InventorySnapshot contains a validated immutable document")
     }
+
+    /// Indexes only active lots governed by the selected facility.
+    ///
+    /// Availability is never inferred from names, display IDs, identity prefixes, or a lot's location.
+    pub fn active_material_lots(&self) -> Result<MaterialLotCatalog, MaterialLotCatalogError> {
+        let facility = Resource::Iri(self.facility.clone());
+        let mut by_component = BTreeMap::<Iri, Vec<Iri>>::new();
+        for lot in self
+            .document
+            .material_lots()
+            .filter(|lot| lot.facility_id() == Some(&facility) && lot.is_active() == Some(true))
+        {
+            let lot_identity = lot.identity().as_iri().cloned().ok_or_else(|| {
+                MaterialLotCatalogError::NonIriMaterialLot {
+                    identity: lot.identity().clone(),
+                }
+            })?;
+            let built = lot
+                .built_id()
+                .expect("validated MaterialLots have exactly one sbol:built reference")
+                .as_iri()
+                .cloned()
+                .ok_or_else(|| MaterialLotCatalogError::NonIriBuilt {
+                    material_lot: lot.identity().clone(),
+                })?;
+            by_component.entry(built).or_default().push(lot_identity);
+        }
+        for lots in by_component.values_mut() {
+            lots.sort();
+        }
+        Ok(MaterialLotCatalog {
+            facility: self.facility.clone(),
+            by_component,
+        })
+    }
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum MaterialLotCatalogError {
+    #[error("validated MaterialLot `{identity}` does not have an IRI identity")]
+    NonIriMaterialLot { identity: Resource },
+    #[error("validated MaterialLot `{material_lot}` has a non-IRI sbol:built reference")]
+    NonIriBuilt { material_lot: Resource },
 }
 
 #[derive(Debug, Error)]
@@ -339,5 +410,55 @@ ex:cycler a sbol:TopLevel, fac:Asset ; sbol:displayId "cycler" ;
             escaping,
             InventoryLoadError::InvalidDocumentPath(_)
         ));
+    }
+
+    #[test]
+    fn indexes_active_material_lots_by_exact_component_within_the_selected_facility() {
+        let package = TempDir::new().unwrap();
+        let contents = format!(
+            r#"{MINIMAL}
+@prefix inv: <https://draggon.org/ns/inventory#> .
+
+ex:design a sbol:Component ; sbol:displayId "design" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+ex:lot_b a sbol:Implementation ; sbol:displayId "lot_b" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
+    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive true .
+ex:lot_a a sbol:Implementation ; sbol:displayId "lot_a" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
+    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive true .
+ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
+    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive false .
+"#
+        );
+        write_inventory(package.path(), &contents);
+
+        let snapshot =
+            InventorySnapshot::load(package.path(), "inventory/catalog.ttl", None).unwrap();
+        let catalog = snapshot.active_material_lots().unwrap();
+        let design = Iri::new("https://example.org/sbolinventory/design".to_owned()).unwrap();
+        let candidates = catalog
+            .candidates(&design)
+            .iter()
+            .map(Iri::as_str)
+            .collect::<Vec<_>>();
+
+        assert_eq!(catalog.facility(), snapshot.facility());
+        assert_eq!(
+            candidates,
+            [
+                "https://example.org/sbolinventory/lot_a",
+                "https://example.org/sbolinventory/lot_b",
+            ]
+        );
+        assert!(
+            catalog
+                .components()
+                .all(|(component, _)| component == &design)
+        );
+        let display_name = Iri::new("https://example.org/design".to_owned()).unwrap();
+        assert!(catalog.candidates(&display_name).is_empty());
     }
 }
