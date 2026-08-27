@@ -3,8 +3,9 @@
 The public factories in this module describe biology rather than exposing the
 mutable pySBOL3 graph.  A promoter stays a :class:`Promoter`, a coding
 sequence stays a :class:`CodingSequence`, and a plasmid stays a
-:class:`Plasmid`; an associated sequence is carried by that typed object rather
-than returned beside it in an undifferentiated tuple.
+:class:`Plasmid`. DNA and protein sequences are independent, typed document
+objects which designs reference, so a sequence can be named and reused without
+collapsing either value into an undifferentiated tuple.
 
 Designs and laboratory provenance are deliberately separate.  ``plasmid``
 describes what a design is, while ``Plasmid.build(design=...)`` and
@@ -51,52 +52,80 @@ class Topology(Enum):
     LINEAR = "linear"
 
 
-class DnaSequence:
-    """One IUPAC DNA sequence and, once materialized, its pySBOL3 object."""
+class _SequenceValue:
+    """One independently identified sequence in a typed SBOL document."""
 
-    __slots__ = ("_elements", "_owner", "_sbol3_sequence")
+    __slots__ = (
+        "_description",
+        "_document",
+        "_elements",
+        "_identity",
+        "_name",
+        "_owners",
+        "_requested_identity",
+        "_sbol3_sequence",
+    )
 
-    def __init__(self, elements: str, owner: DnaComponent) -> None:
+    def __init__(
+        self,
+        document: Document,
+        identity: str | None,
+        elements: str,
+        *,
+        name: str | None,
+        description: str | None,
+    ) -> None:
+        if not isinstance(elements, str):
+            raise TypeError(f"sequence elements must be str, got {type(elements).__name__}")
+        if not elements:
+            raise ValueError("sequence elements cannot be empty")
+        self._document = document
+        self._requested_identity = identity
+        self._identity: str | None = None
         self._elements = elements
-        self._owner = owner
+        self._name = name
+        self._description = description
+        self._owners: list[Component] = []
         self._sbol3_sequence: object | None = None
+
+    @property
+    def identity(self) -> str | None:
+        """The stable SBOL identity, or ``None`` while this sequence is anonymous."""
+
+        return self._identity
 
     @property
     def elements(self) -> str:
         return self._elements
 
     @property
-    def sbol3_sequence(self) -> object:
-        """The raw pySBOL3 sequence, materializing its design if necessary."""
-
-        self._owner._materialize()
-        if self._sbol3_sequence is None:
-            raise AssertionError("a DNA sequence was not materialized with its component")
-        return self._sbol3_sequence
-
-
-class ProteinSequence:
-    """One IUPAC protein sequence and, once materialized, its pySBOL3 object."""
-
-    __slots__ = ("_elements", "_owner", "_sbol3_sequence")
-
-    def __init__(self, elements: str, owner: ProteinComponent) -> None:
-        self._elements = elements
-        self._owner = owner
-        self._sbol3_sequence: object | None = None
+    def name(self) -> str | None:
+        return self._name
 
     @property
-    def elements(self) -> str:
-        return self._elements
+    def description(self) -> str | None:
+        return self._description
 
     @property
     def sbol3_sequence(self) -> object:
-        """The raw pySBOL3 sequence, materializing its design if necessary."""
+        """The raw pySBOL3 sequence, materialized independently of any design."""
 
-        self._owner._materialize()
+        self._document._materialize_sequence(self)
         if self._sbol3_sequence is None:
-            raise AssertionError("a protein sequence was not materialized with its component")
+            raise AssertionError("an SBOL sequence was not materialized")
         return self._sbol3_sequence
+
+    def __repr__(self) -> str:
+        identity = self.identity or "<anonymous>"
+        return f"<lab.sbol {type(self).__name__} {identity}>"
+
+
+class DnaSequence(_SequenceValue):
+    """One independently named IUPAC DNA sequence."""
+
+
+class ProteinSequence(_SequenceValue):
+    """One independently named IUPAC protein sequence."""
 
 
 class Component:
@@ -230,13 +259,20 @@ class DnaComponent(Component):
         self,
         document: Document,
         identity: str | None,
-        sequence: str | None,
+        sequence: DnaSequence | None,
         *,
         name: str | None,
         description: str | None,
     ) -> None:
         super().__init__(document, identity, name=name, description=description)
-        self._sequence = None if sequence is None else DnaSequence(sequence, self)
+        if sequence is not None and not isinstance(sequence, DnaSequence):
+            raise TypeError(
+                f"a DNA component sequence must be lab.sbol.DnaSequence, "
+                f"got {type(sequence).__name__}"
+            )
+        if sequence is not None and sequence._document is not document:
+            raise ValueError("a component and its sequence must belong to the same SBOL document")
+        self._sequence = sequence
 
     @property
     def sequence(self) -> DnaSequence | None:
@@ -297,7 +333,7 @@ class EngineeredRegion(DnaComponent):
         document: Document,
         identity: str | None,
         components: Sequence[DnaComponent],
-        sequence: str | None,
+        sequence: DnaSequence | None,
         topology: Topology,
         *,
         name: str | None,
@@ -345,13 +381,20 @@ class ProteinComponent(Component):
         self,
         document: Document,
         identity: str | None,
-        sequence: str | None,
+        sequence: ProteinSequence | None,
         *,
         name: str | None,
         description: str | None,
     ) -> None:
         super().__init__(document, identity, name=name, description=description)
-        self._sequence = None if sequence is None else ProteinSequence(sequence, self)
+        if sequence is not None and not isinstance(sequence, ProteinSequence):
+            raise TypeError(
+                f"a protein component sequence must be lab.sbol.ProteinSequence, "
+                f"got {type(sequence).__name__}"
+            )
+        if sequence is not None and sequence._document is not document:
+            raise ValueError("a component and its sequence must belong to the same SBOL document")
+        self._sequence = sequence
 
     @property
     def sequence(self) -> ProteinSequence | None:
@@ -391,6 +434,7 @@ class Document:
         self._sbol3 = _load_sbol3()
         self._document: Any = self._sbol3.Document()
         self._components: list[Component] = []
+        self._sequences: list[DnaSequence | ProteinSequence] = []
         self._identities: dict[str, object] = {}
         self._materializing: set[Component] = set()
 
@@ -399,6 +443,12 @@ class Document:
         """The typed designs in factory-call order."""
 
         return tuple(self._components)
+
+    @property
+    def sequences(self) -> tuple[DnaSequence | ProteinSequence, ...]:
+        """The independent typed sequences in factory-call order."""
+
+        return tuple(self._sequences)
 
     @property
     def sbol3_document(self) -> object:
@@ -414,6 +464,17 @@ class Document:
         unresolved = [component for component in self._components if component.identity is None]
         if unresolved:
             raise SbolIdentityError(_unresolved_message(unresolved))
+        unresolved_sequences = [
+            sequence for sequence in self._sequences if sequence.identity is None
+        ]
+        if unresolved_sequences:
+            kinds = ", ".join(type(sequence).__name__ for sequence in unresolved_sequences)
+            raise SbolIdentityError(
+                f"the document still has anonymous sequence(s): {kinds}; pass identity= or "
+                "reference each sequence from a design with a resolved identity"
+            )
+        for sequence in self._sequences:
+            self._materialize_sequence(sequence)
         for component in self._components:
             self._materialize(component)
         return cast(object, self._document)
@@ -424,11 +485,51 @@ class Document:
         _ = self.sbol3_document
         self._validate_materialized()
 
+    def dna_sequence(
+        self,
+        *,
+        elements: str,
+        identity: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> DnaSequence:
+        """Declare a DNA sequence independently of the designs which use it."""
+
+        sequence = DnaSequence(
+            self,
+            identity,
+            elements,
+            name=name,
+            description=description,
+        )
+        self._register_sequence(sequence)
+        return sequence
+
+    def protein_sequence(
+        self,
+        *,
+        elements: str,
+        identity: str | None = None,
+        name: str | None = None,
+        description: str | None = None,
+    ) -> ProteinSequence:
+        """Declare a protein sequence independently of the designs which use it."""
+
+        sequence = ProteinSequence(
+            self,
+            identity,
+            elements,
+            name=name,
+            description=description,
+        )
+        self._register_sequence(sequence)
+        return sequence
+
     def part(
         self,
         *,
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> DnaPart:
@@ -446,7 +547,7 @@ class Document:
         self,
         *,
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> Promoter:
@@ -464,7 +565,7 @@ class Document:
         self,
         *,
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> RibosomeBindingSite:
@@ -482,7 +583,7 @@ class Document:
         self,
         *,
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> CodingSequence:
@@ -500,7 +601,7 @@ class Document:
         self,
         *,
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> Terminator:
@@ -519,7 +620,7 @@ class Document:
         *,
         components: Sequence[DnaComponentInput] = (),
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         topology: Topology = Topology.LINEAR,
         name: str | None = None,
         description: str | None = None,
@@ -541,7 +642,7 @@ class Document:
         *,
         components: Sequence[DnaComponentInput] = (),
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> Plasmid:
@@ -562,7 +663,7 @@ class Document:
         *,
         components: Sequence[DnaComponentInput] = (),
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: DnaSequence | None = None,
         topology: Topology = Topology.CIRCULAR,
         name: str | None = None,
         description: str | None = None,
@@ -583,7 +684,7 @@ class Document:
         self,
         *,
         identity: str | None = None,
-        sequence: str | None = None,
+        sequence: ProteinSequence | None = None,
         name: str | None = None,
         description: str | None = None,
     ) -> ProteinComponent:
@@ -604,7 +705,7 @@ class Document:
         result: type[_DnaPartT],
         *,
         identity: str | None,
-        sequence: str | None,
+        sequence: DnaSequence | None,
         name: str | None,
         description: str | None,
     ) -> _DnaPartT:
@@ -624,7 +725,7 @@ class Document:
         *,
         identity: str | None,
         components: Sequence[DnaComponentInput],
-        sequence: str | None,
+        sequence: DnaSequence | None,
         topology: Topology,
         name: str | None,
         description: str | None,
@@ -662,9 +763,30 @@ class Document:
         return component
 
     def _register_design(self, component: Component) -> None:
-        if component._requested_identity is not None:
-            self._assign_identity(component, self._identity(component._requested_identity))
-        self._components.append(component)
+        sequence = getattr(component, "sequence", None)
+        if isinstance(sequence, _SequenceValue):
+            self._attach_sequence(component, sequence)
+        try:
+            if component._requested_identity is not None:
+                self._assign_identity_tree(component, self._identity(component._requested_identity))
+            self._components.append(component)
+        except Exception:
+            if isinstance(sequence, _SequenceValue):
+                sequence._owners.remove(component)
+            raise
+
+    def _attach_sequence(self, component: Component, sequence: _SequenceValue) -> None:
+        if sequence._requested_identity is None and sequence._owners:
+            raise SbolIdentityError(
+                "one anonymous SBOL sequence cannot be referenced by several designs; "
+                "pass identity= when declaring a reusable sequence"
+            )
+        sequence._owners.append(component)
+
+    def _register_sequence(self, sequence: DnaSequence | ProteinSequence) -> None:
+        if sequence._requested_identity is not None:
+            self._assign_sequence_identity(sequence, self._identity(sequence._requested_identity))
+        self._sequences.append(sequence)
 
     def _prepare_root(self, component: Component, declaration_name: str) -> None:
         if component._requested_identity is None:
@@ -685,8 +807,9 @@ class Document:
                     f"it was attached to declaration {declaration_name!r}; give a reused design "
                     "an explicit identity"
                 )
-            self._assign_identity(component, expected)
-        self._assign_descendant_identities(component)
+            self._assign_identity_tree(component, expected)
+        else:
+            self._assign_descendant_identities(component)
         self._materialize(component)
         self._validate_materialized()
 
@@ -699,8 +822,9 @@ class Document:
                     "this anonymous SBOL design has no identity yet; attach it with "
                     "Artifact.build(design=...) or Artifact.buy(design=...), or pass identity="
                 )
-            self._assign_identity(component, suggested_identity)
-        self._assign_descendant_identities(component)
+            self._assign_identity_tree(component, suggested_identity)
+        else:
+            self._assign_descendant_identities(component)
         if component._sbol3_component is not None or self._is_external_reference(component):
             return
         if component in self._materializing:
@@ -719,16 +843,89 @@ class Document:
         finally:
             self._materializing.remove(component)
 
+    def _materialize_sequence(self, sequence: _SequenceValue) -> object:
+        if sequence._document is not self:
+            raise ValueError("an SBOL document cannot materialize another document's sequence")
+        if sequence.identity is None:
+            raise SbolIdentityError(
+                "this anonymous SBOL sequence has no identity yet; pass identity= or reference "
+                "it from a design with a resolved identity"
+            )
+        if sequence._sbol3_sequence is not None:
+            return sequence._sbol3_sequence
+        if isinstance(sequence, DnaSequence):
+            encoding = self._sbol3.IUPAC_DNA_ENCODING
+        elif isinstance(sequence, ProteinSequence):
+            encoding = self._sbol3.IUPAC_PROTEIN_ENCODING
+        else:
+            raise TypeError(f"unsupported typed SBOL sequence {type(sequence).__name__}")
+        raw = self._sbol3.Sequence(
+            sequence.identity,
+            elements=sequence.elements,
+            encoding=encoding,
+            name=sequence.name,
+            description=sequence.description,
+        )
+        self._document.add(raw)
+        sequence._sbol3_sequence = raw
+        return cast(object, raw)
+
     def _assign_descendant_identities(self, component: Component) -> None:
         """Reserve a composite's complete identity tree before mutating pySBOL3."""
 
-        if not isinstance(component, EngineeredRegion):
-            return
-        identity = _required_identity(component)
-        for index, part in enumerate(component.components):
-            if part.identity is None:
-                self._assign_identity(part, f"{identity}/{part._display_token}_{index + 1}")
-            self._assign_descendant_identities(part)
+        self._assign_identity_tree(component)
+
+    def _assign_identity_tree(
+        self, component: Component, suggested_identity: str | None = None
+    ) -> None:
+        """Atomically reserve identities for a design, its sequences, and its children."""
+
+        assignments: list[tuple[Component | _SequenceValue, str]] = []
+
+        def collect(current: Component, suggested: str | None) -> None:
+            identity = current.identity
+            if identity is None:
+                if suggested is None:
+                    raise AssertionError("an anonymous design needs a suggested identity")
+                assignments.append((current, suggested))
+                identity = suggested
+
+            sequence = getattr(current, "sequence", None)
+            if isinstance(sequence, _SequenceValue) and sequence.identity is None:
+                assignments.append((sequence, f"{identity}_sequence"))
+
+            if isinstance(current, EngineeredRegion):
+                for index, part in enumerate(current.components):
+                    child = f"{identity}/{part._display_token}_{index + 1}"
+                    collect(part, child)
+
+        collect(component, suggested_identity)
+        self._commit_identity_assignments(assignments)
+
+    def _commit_identity_assignments(
+        self, assignments: Sequence[tuple[Component | _SequenceValue, str]]
+    ) -> None:
+        by_identity: dict[str, Component | _SequenceValue] = {}
+        by_owner: dict[Component | _SequenceValue, str] = {}
+        for owner, identity in assignments:
+            prior_identity = by_owner.get(owner)
+            if prior_identity is not None and prior_identity != identity:
+                raise SbolIdentityError(
+                    f"one anonymous SBOL value would be assigned both {prior_identity!r} and "
+                    f"{identity!r}; pass identity= before reusing it"
+                )
+            prior_owner = by_identity.get(identity)
+            if prior_owner is not None and prior_owner is not owner:
+                raise ValueError(f"the SBOL identity {identity!r} is already in this document")
+            existing = self._identities.get(identity)
+            if existing is not None and existing is not owner:
+                raise ValueError(f"the SBOL identity {identity!r} is already in this document")
+            by_owner[owner] = identity
+            by_identity[identity] = owner
+
+        for owner, identity in assignments:
+            owner._identity = identity
+            self._identities[identity] = owner
 
     def _materialize_dna_part(self, component: DnaPart) -> None:
         identity = _required_identity(component)
@@ -748,7 +945,7 @@ class Document:
             name=component.name,
             description=component.description,
         )
-        self._add_materialized(component, raw, raw_sequence)
+        self._add_materialized(component, raw)
 
     def _materialize_composite(self, component: EngineeredRegion) -> None:
         identity = _required_identity(component)
@@ -777,19 +974,13 @@ class Document:
             self._sbol3.Constraint(self._sbol3.SBOL_MEETS, first, second)
             for first, second in pairwise(features)
         ]
-        self._add_materialized(component, raw, raw_sequence)
+        self._add_materialized(component, raw)
 
     def _materialize_protein(self, component: ProteinComponent) -> None:
         identity = _required_identity(component)
-        raw_sequence = None
-        if component.sequence is not None:
-            sequence_identity = f"{identity}_sequence"
-            raw_sequence = self._sbol3.Sequence(
-                sequence_identity,
-                elements=component.sequence.elements,
-                encoding=self._sbol3.IUPAC_PROTEIN_ENCODING,
-            )
-            component.sequence._sbol3_sequence = raw_sequence
+        raw_sequence = (
+            None if component.sequence is None else self._materialize_sequence(component.sequence)
+        )
         raw = self._sbol3.Component(
             identity,
             self._sbol3.SBO_PROTEIN,
@@ -797,40 +988,24 @@ class Document:
             name=component.name,
             description=component.description,
         )
-        self._add_materialized(component, raw, raw_sequence)
+        self._add_materialized(component, raw)
 
     def _dna_sequence(self, component: DnaComponent) -> object | None:
         if component.sequence is None:
             return None
-        sequence_identity = f"{_required_identity(component)}_sequence"
-        raw_sequence = self._sbol3.Sequence(
-            sequence_identity,
-            elements=component.sequence.elements,
-            encoding=self._sbol3.IUPAC_DNA_ENCODING,
-        )
-        component.sequence._sbol3_sequence = raw_sequence
-        return cast(object, raw_sequence)
+        return self._materialize_sequence(component.sequence)
 
-    def _add_materialized(
-        self, component: Component, raw_component: object, raw_sequence: object | None
-    ) -> None:
-        objects = [raw_component]
-        if raw_sequence is not None:
-            objects.append(raw_sequence)
-        self._document.add(objects)
+    def _add_materialized(self, component: Component, raw_component: object) -> None:
+        self._document.add(raw_component)
         component._sbol3_component = raw_component
 
-    def _assign_identity(self, component: Component, identity: str) -> None:
-        sequence = getattr(component, "sequence", None)
-        candidates: list[tuple[str, object]] = [(identity, component)]
-        if sequence is not None:
-            candidates.append((f"{identity}_sequence", sequence))
-        for candidate, owner in candidates:
-            existing = self._identities.get(candidate)
-            if existing is not None and existing is not owner:
-                raise ValueError(f"the SBOL identity {candidate!r} is already in this document")
-        component._identity = identity
-        self._identities.update(candidates)
+    def _assign_sequence_identity(self, sequence: _SequenceValue, identity: str) -> None:
+        if sequence.identity is not None and sequence.identity != identity:
+            raise SbolIdentityError(
+                f"one anonymous SBOL sequence was assigned both {sequence.identity!r} and "
+                f"{identity!r}; pass identity= before reusing it across designs"
+            )
+        self._commit_identity_assignments([(sequence, identity)])
 
     def _identity(self, identity: str) -> str:
         if not identity:

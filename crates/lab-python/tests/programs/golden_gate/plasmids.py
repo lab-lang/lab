@@ -20,16 +20,34 @@ from .inventory import B0015, B0034, GFP, J23101, J23106, RFP, BsaI, pSB1C3
 
 module = lab.Module("golden_gate.designs.plasmids", doc=__doc__)
 
+composite_plasmid_1_sequence = lab.Binding(
+    module=module,
+    name="composite_plasmid_1_sequence",
+    annotation="DNA",
+    value=dna(
+        "TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
+        "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
+    ),
+)
+module.declare(composite_plasmid_1_sequence)
+composite_plasmid_2_sequence = lab.Binding(
+    module=module,
+    name="composite_plasmid_2_sequence",
+    annotation="DNA",
+    value=dna(
+        "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGG"
+        "AGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
+    ),
+)
+module.declare(composite_plasmid_2_sequence)
+
 composite_plasmid_1 = Plasmid.build(
     doc="""A GFP transcription unit in the pSB1C3 backbone.
 
     J23101 drives GFP through the shared RBS and terminator, assembled by Golden
     Gate with BsaI. Accepted only if the built sequence matches the design.
     """,
-    sequence=dna(
-        "TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
-        "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
-    ),
+    sequence=composite_plasmid_1_sequence,
     backbone=pSB1C3,
     components=[J23101, B0034, GFP, B0015],
     restriction_enzyme=BsaI,
@@ -53,10 +71,7 @@ composite_plasmid_2 = Plasmid.build(
     J23106 promoter, so the panel reports two promoter strengths against two
     reporters.
     """,
-    sequence=dna(
-        "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGG"
-        "AGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
-    ),
+    sequence=composite_plasmid_2_sequence,
     backbone=pSB1C3,
     components=[J23106, B0034, RFP, B0015],
     restriction_enzyme=BsaI,

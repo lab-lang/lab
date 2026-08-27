@@ -83,5 +83,6 @@ The latest accepted design records are:
 - [`0033`](decisions/0033-typeset-protocol-documents.md): protocol documents are typeset PDFs;
 - [`0039`](decisions/0039-roles-carry-ontology-terms.md): a role may name the ontology term it stands for;
 - [`0040`](decisions/0040-networks-are-lists-of-transcription-units.md): a genetic network is a list of typed transcription units; and
-- [`0041`](decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md): typed Python SBOL authoring keeps biological design separate from build and buy provenance; and
-- [`0042`](decisions/0042-robotics-incubates-separately.md): simulation, visualization, embodied robotics, and related compute infrastructure incubate outside Lab.
+- [`0041`](decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md): typed Python SBOL authoring keeps biological design separate from build and buy provenance;
+- [`0042`](decisions/0042-robotics-incubates-separately.md): simulation, visualization, embodied robotics, and related compute infrastructure incubate outside Lab; and
+- [`0043`](decisions/0043-sequences-are-first-class-design-values.md): DNA and protein sequences are independent typed values referenced by designs.

@@ -46,8 +46,9 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Forgotten type arguments (`any Role`) | type-argument position only | yes | packing only where an annotation asks | `CheckedType::Any` | n/a |
 | Diagnostics with secondary spans and help | n/a | n/a | n/a | `Diagnostic.related` and `.help` | rendered by `lab check` on one file, and by the language server |
 | Top-level pure bindings | yes | yes | yes | yes | no |
+| Named DNA values referenced by designs | `name: DNA = dna("...")` | references resolve across modules | DNA-typed design property | one reusable `design.dna_sequence` SSA value | target-dependent |
 | `record` plus role membership (`is Event`, `is Evidential`) | yes | yes | yes | yes | no |
-| Biological `part` declarations carrying sequence and provenance | syntax pending | no | no | no | no |
+| Biological catalog identity, version, and provenance chains | syntax pending | no | no | no | no |
 | Tagged `record` declarations with `case` constructors | yes | yes | yes | yes | no |
 | Workflow declarations and calls | yes | yes | yes | yes | runtime pending |
 | Pure workflow bindings | yes | yes | yes | yes | no |

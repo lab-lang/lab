@@ -486,7 +486,8 @@ change much larger than it needs to be.
 
 ### Design LAIR becomes an SBOL document
 
-The design dialect does not use pliron for anything pliron is good at.
+The first design dialect did not use pliron for the relationship between a
+design and its sequence. It copied the sequence into an attribute:
 
 ```rust
 #[pliron_op(
@@ -498,14 +499,21 @@ The design dialect does not use pliron for anything pliron is good at.
 pub struct DesignPlasmidOp;
 ```
 
-Zero operands. `design.plasmid` and `design.strain` define an opaque SSA value
-and carry a flat attribute bag. The workflow dialect does consume that value,
+Decision [0043](decisions/0043-sequences-are-first-class-design-values.md)
+removed that particular flattening. `design.dna_sequence` now defines a typed
+SSA value containing the sequence identity and elements, and `design.plasmid`
+consumes it as an operand. Named `DNA` source bindings lower once and can feed
+several designs; inline `dna("...")` is represented by the same operation with
+a synthetic name.
+
+`design.strain` and most other design relationships still use a flat attribute
+bag. The workflow dialect consumes each design value,
 `workflow.realize` declaring `operands = (design: DesignType)` and
 `workflow.transform` declaring `operands = (design: DesignType, cells: MaterialType)`,
 and those operands carry the use-def edges `MaterialLinearityAnalysis` walks to
 enforce affinity. So the design layer is a source in the dataflow graph.
 
-But that one edge is not really a graph edge. It is rebuilt during lowering from
+But the remaining design-to-workflow edge is still rebuilt during lowering from
 a string map:
 
 ```rust
@@ -1044,10 +1052,12 @@ target exists.
 
 Two versions, and they are a sequence rather than a choice.
 
-**Shallow.** `design.plasmid` today carries `artifact_name`, `sequence`,
-`topology`, `copies`, and two acceptance thresholds, all as `StringAttr` or
-`IntegerAttr`. It gains an identity IRI, type and role term IRIs, and an
-encoding term on the sequence. That alone is what lets a backend stop guessing
+**Shallow.** `design.plasmid` today carries `artifact_name`, `topology`,
+`copies`, and two acceptance thresholds as attributes. Its sequence is already
+a `design.dna_sequence` operand under
+[0043](decisions/0043-sequences-are-first-class-design-values.md).
+The design gains an identity IRI and type and role term IRIs, while the sequence
+gains its encoding term. That is what lets a backend stop guessing
 `SBO:0000241`, and it is a small enough change to land early.
 
 **Deep.** Once terms are attributes rather than op identity, `design.plasmid`
@@ -1148,8 +1158,9 @@ objects, and the source-map problem does not exist.
 The current Python package now takes the first half of that step. Its
 `lab.sbol.Document` lazily builds an ordinary pySBOL3 document through typed
 `Promoter`, `CodingSequence`, `Terminator`, `Backbone`, and `Plasmid` handles;
-ordered DNA layouts create their `meets` constraints, associated sequences stay
-on the typed handle, and registry IRIs remain references rather than copied
+ordered DNA layouts create their `meets` constraints, and independent typed
+`DnaSequence` and `ProteinSequence` values are referenced by designs rather
+than hidden inside them. Registry IRIs remain references rather than copied
 objects. Its public inputs are keyword-only, and a local design may omit its
 identity: `Plasmid.build(design=...)` resolves the Lab declaration name,
 materializes that identity under the document namespace, and validates the

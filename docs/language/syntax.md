@@ -347,10 +347,17 @@ error: unknown declaration kind 'reagent'
 Inside an artifact declaration, `name = value` records a typed property:
 
 ```lab
+reporter_sequence: DNA = dna("ACGT")
+
 plasmid reporter:
-  sequence = dna("ACGT")
+  sequence = reporter_sequence
   backbone = pSB1C3
 ```
+
+The sequence is a first-class typed value. Several designs can reference one
+named sequence, and Design IR preserves that sharing as a use-def edge. Writing
+`sequence = dna("ACGT")` inline remains valid shorthand and lowers to the same
+independent sequence value with a synthetic name.
 
 The value is a deterministic expression, evaluated once and never repeated: `=` contrasts with `<-`, which is the durable effect form, and a property is definitively not an effect. `:` is reserved for the other thing a declaration body can say — that a name has a type — so the two never collide:
 
@@ -365,8 +372,10 @@ Duplicate property names are rejected. Portable checked IR preserves the propert
 ## Plasmid requirements and acceptance
 
 ```lab
+p_sensor_sequence: DNA = dna("ATGCGTACGTTAGCTA")
+
 plasmid p_sensor:
-  sequence = dna("ATGCGTACGTTAGCTA")
+  sequence = p_sensor_sequence
 
   require topology == circular
 

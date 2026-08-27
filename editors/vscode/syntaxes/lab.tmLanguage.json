@@ -104,6 +104,13 @@
           "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=<[A-Za-z_])"
         },
         {
+          "comment": "The type of a named value binding, as in reporter_sequence: DNA = dna(...).",
+          "match": "(?<=:)\\s*([A-Za-z_][A-Za-z0-9_]*)(?=\\s*=)",
+          "captures": {
+            "1": { "name": "support.type.lab" }
+          }
+        },
+        {
           "comment": "Type arguments, brackets included. Ends at the line as well as at the closing bracket, so an unmatched < cannot run away down the file.",
           "name": "support.type.lab",
           "begin": "(?<=[A-Za-z0-9_])<(?=[A-Za-z_])",

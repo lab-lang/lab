@@ -26,6 +26,10 @@ same plasmid are two separate things to build and accept. Nothing in the source
 says which order to build them in; the compiler derives that from the material
 each workflow consumes.
 
+The DNA sequences are first-class values declared independently of the designs
+that reference them. Provenance is separate again: `buy` marks catalogued parts
+and reagents, while `build` marks the plasmids and strains this laboratory makes.
+
 ## Build it
 
 From the `examples/golden-gate` directory, run:

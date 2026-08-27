@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, cast
 from weakref import WeakKeyDictionary
 
 from . import _naming, _terms
-from ._declarations import BuyDeclaration, Claim, Declaration, Module
+from ._declarations import Binding, BuyDeclaration, Claim, Declaration, Module
 from ._expressions import Expression, Fields, expression
 from ._source import Origin
 
@@ -34,6 +34,11 @@ _FIELDS = Fields()
 _CATALOGUED: WeakKeyDictionary[Module, dict[str, tuple[Declaration[Any], bool]]] = (
     WeakKeyDictionary()
 )
+
+# A sequence is a module-level DNA value, not text copied into every design
+# that references it. The registry also makes repeated use of one SBOL
+# sequence emit exactly one Lab binding.
+_SEQUENCE_BINDINGS: WeakKeyDictionary[Module, dict[str, tuple[Binding, str]]] = WeakKeyDictionary()
 
 
 class DesignError(TypeError):
@@ -99,6 +104,7 @@ def read_design(
             kind=kind,
             module=module,
             origin=origin,
+            declaration_name=declaration_name,
             provenance=provenance,
             before=before,
         )
@@ -107,6 +113,7 @@ def read_design(
         kind=kind,
         module=module,
         origin=origin,
+        declaration_name=declaration_name,
         provenance=provenance,
         before=before,
     )
@@ -118,6 +125,7 @@ def _read_typed_design(
     kind: type[ArtifactKind],
     module: Module,
     origin: Origin,
+    declaration_name: str,
     provenance: str,
     before: Declaration[Any],
 ) -> ReadDesign:
@@ -127,11 +135,17 @@ def _read_typed_design(
     if parts:
         properties["components"] = parts
 
-    elements = _typed_sequence_elements(design)
-    if elements is not None:
-        from ._prelude import dna
-
-        properties["sequence"] = expression(dna)(elements)
+    sequence = _typed_sequence(design)
+    if sequence is not None:
+        target, elements = sequence
+        properties["sequence"] = _sequence_binding(
+            module,
+            origin,
+            before,
+            target=target,
+            elements=elements,
+            fallback_name=f"{declaration_name}_sequence",
+        )
 
     identity = _typed_identity(design)
     if provenance == "buy":
@@ -155,6 +169,7 @@ def _read_raw_design(
     kind: type[ArtifactKind],
     module: Module,
     origin: Origin,
+    declaration_name: str,
     provenance: str,
     before: Declaration[Any],
 ) -> ReadDesign:
@@ -167,11 +182,17 @@ def _read_raw_design(
     ]
     if parts:
         properties["components"] = parts
-    elements = _sequence_elements(raw)
-    if elements is not None:
-        from ._prelude import dna
-
-        properties["sequence"] = expression(dna)(elements)
+    sequence = _readable_sequence(raw)
+    if sequence is not None:
+        target, elements = sequence
+        properties["sequence"] = _sequence_binding(
+            module,
+            origin,
+            before,
+            target=target,
+            elements=elements,
+            fallback_name=f"{declaration_name}_sequence",
+        )
 
     if provenance == "buy":
         identity = getattr(raw, "identity", None)
@@ -357,10 +378,10 @@ def _registry_display_id(uri: str) -> str:
     return segments[-1]
 
 
-def _sequence_elements(design: object) -> str | None:
+def _readable_sequence(design: object) -> tuple[object, str] | None:
     """The one readable sequence carried by a raw SBOL component."""
 
-    found = None
+    found: tuple[object, str] | None = None
     for entry in _attribute(design, "sequences"):
         target = entry
         lookup = getattr(entry, "lookup", None)
@@ -376,14 +397,56 @@ def _sequence_elements(design: object) -> str | None:
                     "the design carries more than one readable sequence; a DNA artifact "
                     "states one, so the extras have to go"
                 )
-            found = str(elements)
+            found = (target, str(elements))
     return found
 
 
-def _typed_sequence_elements(design: object) -> str | None:
+def _typed_sequence(design: object) -> tuple[object, str] | None:
     sequence = getattr(design, "sequence", None)
     elements = getattr(sequence, "elements", None)
-    return str(elements) if elements is not None else None
+    return (sequence, str(elements)) if elements is not None else None
+
+
+def _sequence_binding(
+    module: Module,
+    origin: Origin,
+    before: Declaration[Any],
+    *,
+    target: object,
+    elements: str,
+    fallback_name: str,
+) -> Binding:
+    """Declare one independently named Lab DNA value for one SBOL sequence."""
+
+    identity = getattr(target, "identity", None)
+    key = f"identity:{identity}" if identity else f"object:{id(target)}"
+    bindings = _SEQUENCE_BINDINGS.setdefault(module, {})
+    existing = bindings.get(key)
+    if existing is not None:
+        binding, prior_elements = existing
+        if prior_elements != elements:
+            raise DesignError(
+                f"SBOL sequence {identity!r} is used with conflicting elements in one module"
+            )
+        return binding
+
+    from ._prelude import dna
+
+    display_id = _registry_display_id(str(identity)) if identity else fallback_name
+    name = _naming.free_name(
+        _naming.identifier(display_id), "sequence", _naming.taken_names(module)
+    )
+    binding = Binding(
+        module=module,
+        value=expression(dna)(elements),
+        name=name,
+        annotation="DNA",
+        origin=origin,
+    )
+    anchor = next((item for item in module.declarations if isinstance(item, Declaration)), before)
+    module.declare(binding, before=anchor)
+    bindings[key] = (binding, elements)
+    return binding
 
 
 def _typed_identity(design: object) -> str:

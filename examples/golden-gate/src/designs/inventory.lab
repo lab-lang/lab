@@ -8,27 +8,34 @@
 
 use std.bio.designs
 
+J23101_sequence: DNA = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC")
+J23106_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC")
+B0034_sequence: DNA = dna("AAAGAGGAGAAA")
+B0015_sequence: DNA = dna("CCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+GFP_sequence: DNA = dna("ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC")
+RFP_sequence: DNA = dna("ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG")
+
 buy:
   // Constitutive promoters of differing strength. Each is a promoter rather
   // than a bare part, so the compiler knows what it is without being told
   // again wherever it is used.
   promoter J23101:
-    sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC")
+    sequence = J23101_sequence
   promoter J23106:
-    sequence = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC")
+    sequence = J23106_sequence
 
   // The shared ribosome binding site and terminator. Neither has a narrower
   // kind here, so both are parts; a package that declares one may say more.
   part B0034:
-    sequence = dna("AAAGAGGAGAAA")
+    sequence = B0034_sequence
   part B0015:
-    sequence = dna("CCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+    sequence = B0015_sequence
 
   // The fluorescent reporters, each a coding sequence.
   cds GFP:
-    sequence = dna("ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC")
+    sequence = GFP_sequence
   cds RFP:
-    sequence = dna("ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG")
+    sequence = RFP_sequence
 
   // Assembly backbone and the type IIS enzyme that opens it.
   backbone pSB1C3

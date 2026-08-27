@@ -1,6 +1,6 @@
 //! Lower checked Lab modules into target-neutral Design and Workflow intent.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lab_language::{
     CheckedActionArgument, CheckedDeclaration, CheckedExpression, CheckedModule, CheckedStatement,
@@ -45,6 +45,13 @@ struct RealizationFlow {
     actions: Vec<WorkflowActionIntent>,
 }
 
+struct BuildLoweringContext<'a> {
+    flows: &'a BTreeMap<String, RealizationFlow>,
+    identities: &'a BTreeMap<String, String>,
+    stated: &'a BTreeMap<String, Vec<lab_language::CheckedProperty>>,
+    bindings: &'a BTreeMap<(String, String), TypedExpression>,
+}
+
 #[derive(Debug, Error)]
 pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
@@ -64,6 +71,16 @@ pub enum SourceLoweringError {
         artifact: String,
         field: &'static str,
     },
+    #[error(
+        "artifact '{artifact}' references DNA sequence binding '{module}.{name}', but its value is not available to lowering"
+    )]
+    MissingSequenceBinding {
+        artifact: String,
+        module: String,
+        name: String,
+    },
+    #[error("artifact '{artifact}' contains a cycle through DNA sequence binding '{sequence}'")]
+    CyclicSequenceBinding { artifact: String, sequence: String },
     #[error("artifact '{artifact}' count '{field}' exceeds u8")]
     CountOverflow {
         artifact: String,
@@ -128,10 +145,20 @@ impl BuildArtifactIntent {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PlasmidArtifactIntent {
     pub name: String,
-    pub sequence: String,
+    pub sequence: DnaSequenceIntent,
     pub dependencies: Vec<String>,
     pub recipe: AssemblyRecipeIntent,
     pub actions: Vec<WorkflowActionIntent>,
+}
+
+/// One named DNA value in source, retained independently of every design that
+/// references it. `key` is program-unique; `name` is what diagnostics and IR
+/// render for a person.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DnaSequenceIntent {
+    pub key: String,
+    pub name: String,
+    pub elements: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -214,9 +241,17 @@ pub(crate) fn lower_build_intent(
 ) -> Result<Vec<BuildArtifactIntent>, SourceLoweringError> {
     let identities = inventory_identities(modules);
     let stated = inventory_properties(modules);
+    let bindings = binding_values(modules);
     let flows = realization_flows(modules, &identities)?;
-    let artifacts = declarations(modules)
-        .filter_map(|declaration| {
+    let context = BuildLoweringContext {
+        flows: &flows,
+        identities: &identities,
+        stated: &stated,
+        bindings: &bindings,
+    };
+    let mut artifacts = Vec::new();
+    for module in modules {
+        for declaration in &module.declarations {
             let CheckedDeclaration::Artifact {
                 artifact,
                 name,
@@ -224,18 +259,17 @@ pub(crate) fn lower_build_intent(
                 ..
             } = declaration
             else {
-                return None;
+                continue;
             };
-            Some(lower_artifact(
+            artifacts.push(lower_artifact(
+                module.module.as_str(),
                 artifact.as_str(),
                 name,
                 properties,
-                flows.get(name),
-                &identities,
-                &stated,
-            ))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+                &context,
+            )?);
+        }
+    }
     if artifacts.is_empty() {
         return Err(SourceLoweringError::EmptyBuild);
     }
@@ -249,13 +283,15 @@ fn declarations<'a>(
 }
 
 fn lower_artifact(
+    module: &str,
     kind: &str,
     name: &str,
     properties: &[lab_language::CheckedProperty],
-    flow: Option<&RealizationFlow>,
-    identities: &BTreeMap<String, String>,
-    stated: &BTreeMap<String, Vec<lab_language::CheckedProperty>>,
+    context: &BuildLoweringContext<'_>,
 ) -> Result<BuildArtifactIntent, SourceLoweringError> {
+    let identities = context.identities;
+    let stated = context.stated;
+    let bindings = context.bindings;
     let find = |field: &'static str| {
         properties
             .iter()
@@ -303,7 +339,10 @@ fn lower_artifact(
         Some(property) => checked_u16(name, field, &property.value),
         None => Ok(default),
     };
-    let flow = flow.ok_or_else(|| SourceLoweringError::MissingRealization(name.to_owned()))?;
+    let flow = context
+        .flows
+        .get(name)
+        .ok_or_else(|| SourceLoweringError::MissingRealization(name.to_owned()))?;
     match kind {
         "plasmid" => {
             // Every kind a plasmid's schema admits as a component, which is
@@ -337,7 +376,7 @@ fn lower_artifact(
             }
             Ok(BuildArtifactIntent::Plasmid(PlasmidArtifactIntent {
                 name: name.to_owned(),
-                sequence: checked_dna(name, find("sequence")?)?,
+                sequence: checked_dna(module, name, find("sequence")?, bindings)?,
                 dependencies: flow.dependencies.clone(),
                 recipe: AssemblyRecipeIntent {
                     backbone: symbol("backbone", &["Backbone"])?,
@@ -380,6 +419,27 @@ fn lower_artifact(
             kind: other.to_owned(),
         }),
     }
+}
+
+/// Top-level values are part of design intent. Keeping their checked
+/// expressions available here lets a property reference a named sequence
+/// instead of forcing every backend-facing design to contain an inline call.
+fn binding_values(modules: &[&CheckedModule]) -> BTreeMap<(String, String), TypedExpression> {
+    let mut values = BTreeMap::new();
+    for module in modules {
+        for declaration in &module.declarations {
+            let CheckedDeclaration::Binding(binding) = declaration else {
+                continue;
+            };
+            for target in &binding.targets {
+                values.insert(
+                    (module.module.to_string(), target.name.clone()),
+                    binding.value.clone(),
+                );
+            }
+        }
+    }
+    values
 }
 
 /// What each catalogued item states about itself.
@@ -697,9 +757,70 @@ fn checked_symbol(
 }
 
 fn checked_dna(
+    module: &str,
     artifact: &str,
     expression: &TypedExpression,
-) -> Result<String, SourceLoweringError> {
+    bindings: &BTreeMap<(String, String), TypedExpression>,
+) -> Result<DnaSequenceIntent, SourceLoweringError> {
+    resolve_dna(
+        artifact,
+        expression,
+        bindings,
+        DnaSequenceIntent {
+            key: format!("{module}::{artifact}::sequence"),
+            name: format!("{artifact}_sequence"),
+            elements: String::new(),
+        },
+        &mut BTreeSet::new(),
+    )
+}
+
+fn resolve_dna(
+    artifact: &str,
+    expression: &TypedExpression,
+    bindings: &BTreeMap<(String, String), TypedExpression>,
+    identity: DnaSequenceIntent,
+    resolving: &mut BTreeSet<(String, String)>,
+) -> Result<DnaSequenceIntent, SourceLoweringError> {
+    if let CheckedExpression::Reference {
+        definition, path, ..
+    } = &expression.value
+    {
+        let name = path
+            .last()
+            .ok_or_else(|| invalid_field(artifact, "sequence"))?
+            .clone();
+        let module = definition.module.to_string();
+        let key = (module.clone(), name.clone());
+        if !resolving.insert(key.clone()) {
+            return Err(SourceLoweringError::CyclicSequenceBinding {
+                artifact: artifact.to_owned(),
+                sequence: format!("{module}.{name}"),
+            });
+        }
+        let value =
+            bindings
+                .get(&key)
+                .ok_or_else(|| SourceLoweringError::MissingSequenceBinding {
+                    artifact: artifact.to_owned(),
+                    module: module.clone(),
+                    name: name.clone(),
+                })?;
+        let result = resolve_dna(
+            artifact,
+            value,
+            bindings,
+            DnaSequenceIntent {
+                key: format!("{module}::{name}"),
+                name,
+                elements: String::new(),
+            },
+            resolving,
+        );
+        resolving.remove(&key);
+        return result;
+    }
+
     let CheckedExpression::Call {
         operation,
         arguments,
@@ -710,7 +831,10 @@ fn checked_dna(
     if operation != "std.bio.dna" || arguments.len() != 1 {
         return Err(invalid_field(artifact, "sequence"));
     }
-    checked_string(artifact, "sequence", &arguments[0].value)
+    Ok(DnaSequenceIntent {
+        elements: checked_string(artifact, "sequence", &arguments[0].value)?,
+        ..identity
+    })
 }
 
 fn checked_u8(

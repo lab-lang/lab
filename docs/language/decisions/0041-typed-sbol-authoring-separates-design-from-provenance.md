@@ -18,8 +18,9 @@ Utility functions can hide that graph manipulation, but a helper that always
 returns `tuple[sbol3.Component, sbol3.Sequence]` loses the biological type that
 selected the helper. A promoter, coding sequence, terminator, backbone, and
 plasmid all become the same tuple even though callers and type checkers know
-they are not interchangeable. It also makes the component and its sequence two
-values the caller must keep synchronized.
+they are not interchangeable. The tuple also provides no typed relationship
+between the two independently identified SBOL objects, leaving synchronization
+and reuse to convention.
 
 The first typed API repeated another fact. An anonymous plasmid was written as
 `designs.plasmid("reporter", ...)` and then assigned to
@@ -49,10 +50,15 @@ for each biological kind:
 - `plasmid` returns `PlasmidDesign`; and
 - `protein` returns `ProteinDesign`.
 
-Each DNA design carries its sequence as a typed field. The public document and
-factory inputs are keyword-only, including `namespace`, `identity`, `sequence`,
-and `components`. This makes calls readable at the point of use and allows a
-factory to grow without changing the meaning of a positional argument.
+The same document creates independent `DnaSequence` and `ProteinSequence`
+objects. A design references a sequence of the appropriate type rather than
+receiving bare elements or owning a hidden sequence. This relationship is
+specified further in
+[0043](0043-sequences-are-first-class-design-values.md). The public document
+and factory inputs are keyword-only, including `namespace`, `identity`,
+`elements`, `sequence`, and `components`. This makes calls readable at the
+point of use and allows a factory to grow without changing the meaning of a
+positional argument.
 
 A local design may omit `identity`. When a Lab declaration is emitted, its name
 becomes the anonymous design's local SBOL identity under the document namespace.
@@ -83,7 +89,11 @@ GFP = CDS.buy(
     design=designs.cds(identity="https://registry.example/GFP"),
 )
 
-design = designs.plasmid(components=[J23101, B0034, GFP])
+reporter_sequence = designs.dna_sequence(elements="ACGTACGT")
+design = designs.plasmid(
+    components=[J23101, B0034, GFP],
+    sequence=reporter_sequence,
+)
 reporter = Plasmid.build(design=design)
 ```
 
@@ -101,11 +111,12 @@ provenance. A bare typed child with no declaration is refused when the module is
 emitted.
 
 Materialization is delayed until module emission, when the declaration name is
-known. The document then creates ordinary pySBOL3 components, sequences,
-subcomponents, topology types, and `meets` constraints, and validates the
-resulting document before Lab source is checked. Materialization is idempotent,
-identity collisions and cross-document composition are refused, and invalid
-generated SBOL is reported at this boundary.
+known. The document then creates ordinary independent pySBOL3 sequences,
+components which reference them, subcomponents, topology types, and `meets`
+constraints, and validates the resulting document before Lab source is checked.
+Materialization is idempotent, identity collisions and cross-document
+composition are refused, and invalid generated SBOL is reported at this
+boundary.
 
 The abstraction is not a replacement for pySBOL3. Typed designs expose their
 materialized `sbol3_component`, and a document exposes its `sbol3_document`.
@@ -123,6 +134,10 @@ a plasmid merely because both are circular DNA. The Lab boundary also checks
 the design kind at runtime, so a promoter design cannot be supplied to a
 plasmid declaration. Declaration return types preserve whether an artifact is
 built or bought instead of collapsing both into one generic declaration.
+
+Sequence result types preserve molecule distinctions too: a `ProteinSequence`
+cannot be supplied where a DNA design expects `DnaSequence`, and a named
+sequence may be shared without duplicating its elements or SBOL object.
 
 The common API no longer exposes tuple bookkeeping or requires a repeated local
 identity. In the example above, `reporter` resolves to

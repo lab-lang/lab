@@ -10,8 +10,10 @@ buy:
   backbone p15A_kan
   cds GFP
 
+p_reporter_sequence: DNA = dna("ACGTACGT")
+
 build plasmid p_reporter:
-  sequence = dna("ACGTACGT")
+  sequence = p_reporter_sequence
   backbone = p15A_kan
   components = [GFP]
   restriction_enzyme = BsaI

@@ -12,8 +12,10 @@
 
 use std.bio.designs
 
+p_acceptance_sequence: DNA = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT")
+
 plasmid p_acceptance:
-  sequence = dna("GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT")
+  sequence = p_acceptance_sequence
   require topology == circular
 
   // These are acceptance obligations, not claims about the eventual artifact.

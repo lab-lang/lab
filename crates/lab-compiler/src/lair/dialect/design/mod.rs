@@ -34,19 +34,96 @@ pub(crate) enum TopologyAttr {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DesignType;
 
+/// An independently named DNA sequence. Several designs may reference the
+/// same sequence value without copying its elements into each design.
+#[pliron_type(
+    name = "design.dna_sequence",
+    format,
+    generate_get = true,
+    verifier = "succ"
+)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DnaSequenceType;
+
+#[pliron_op(
+    name = "design.dna_sequence",
+    format,
+    attributes = (
+        sequence_name: StringAttr,
+        elements: StringAttr
+    ),
+    interfaces = [NOpdsInterface<0>],
+    results = (sequence: DnaSequenceType)
+)]
+/// Declare one exact DNA sequence independently of the designs that use it.
+pub struct DesignDnaSequenceOp;
+
+impl DesignDnaSequenceOp {
+    pub fn new(
+        ctx: &mut Context,
+        sequence_name: impl Into<String>,
+        elements: impl Into<String>,
+    ) -> Self {
+        let op = Operation::new(
+            ctx,
+            Self::get_concrete_op_info(),
+            vec![DnaSequenceType::get(ctx).into()],
+            vec![],
+            vec![],
+            0,
+        );
+        let result = Self { op };
+        result.set_attr_sequence_name(ctx, StringAttr::new(sequence_name.into()));
+        result.set_attr_elements(ctx, StringAttr::new(elements.into()));
+        result
+    }
+}
+
+impl Verify for DesignDnaSequenceOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        let Some(name) = self.get_attr_sequence_name(ctx) else {
+            return verify_err!(
+                self.loc(ctx),
+                "design.dna_sequence is missing sequence_name"
+            );
+        };
+        if pliron::identifier::Identifier::try_from(name.as_str()).is_err() {
+            return verify_err!(
+                self.loc(ctx),
+                "design.dna_sequence sequence_name must be an identifier"
+            );
+        }
+
+        let Some(elements) = self.get_attr_elements(ctx) else {
+            return verify_err!(self.loc(ctx), "design.dna_sequence is missing elements");
+        };
+        if elements.as_str().is_empty()
+            || elements
+                .as_str()
+                .bytes()
+                .any(|base| !matches!(base, b'A' | b'C' | b'G' | b'T'))
+        {
+            return verify_err!(
+                self.loc(ctx),
+                "design.dna_sequence elements must be non-empty, uppercase, and unambiguous DNA"
+            );
+        }
+        Ok(())
+    }
+}
+
 #[pliron_op(
     name = "design.plasmid",
     format,
     attributes = (
         artifact_name: StringAttr,
-        sequence: StringAttr,
         topology: TopologyAttr,
         copies: IntegerAttr,
         exact_sequence_required: BoolAttr,
         acceptance_minimum_concentration_ng_per_ul: IntegerAttr,
         acceptance_minimum_volume_ul: IntegerAttr
     ),
-    interfaces = [NOpdsInterface<0>],
+    operands = (sequence: DnaSequenceType),
     results = (design: DesignType)
 )]
 /// Declare a target-neutral circular plasmid design and its acceptance intent.
@@ -56,7 +133,7 @@ impl DesignPlasmidOp {
     pub fn new(
         ctx: &mut Context,
         artifact_name: impl Into<String>,
-        sequence: impl Into<String>,
+        sequence: pliron::value::Value,
         copies: u16,
         exact_sequence_required: bool,
         minimum_concentration_ng_per_ul: Option<u32>,
@@ -66,13 +143,12 @@ impl DesignPlasmidOp {
             ctx,
             Self::get_concrete_op_info(),
             vec![DesignType::get(ctx).into()],
-            vec![],
+            vec![sequence],
             vec![],
             0,
         );
         let result = Self { op };
         result.set_attr_artifact_name(ctx, StringAttr::new(artifact_name.into()));
-        result.set_attr_sequence(ctx, StringAttr::new(sequence.into()));
         result.set_attr_topology(ctx, TopologyAttr::Circular);
         result.set_attr_copies(ctx, u32_attr(ctx, copies.into()));
         result.set_attr_exact_sequence_required(ctx, BoolAttr::new(exact_sequence_required));
@@ -90,7 +166,6 @@ impl Verify for DesignPlasmidOp {
     fn verify(&self, ctx: &Context) -> Result<()> {
         for (name, present) in [
             ("artifact_name", self.get_attr_artifact_name(ctx).is_some()),
-            ("sequence", self.get_attr_sequence(ctx).is_some()),
             ("topology", self.get_attr_topology(ctx).is_some()),
             ("copies", self.get_attr_copies(ctx).is_some()),
             (
@@ -112,16 +187,15 @@ impl Verify for DesignPlasmidOp {
             );
         }
 
-        let sequence = self.get_attr_sequence(ctx).expect("presence checked above");
-        if sequence.as_str().is_empty()
-            || sequence
-                .as_str()
-                .bytes()
-                .any(|base| !matches!(base, b'A' | b'C' | b'G' | b'T'))
+        if self
+            .get_operand_sequence(ctx)
+            .defining_op()
+            .and_then(|operation| Operation::get_op::<DesignDnaSequenceOp>(operation, ctx))
+            .is_none()
         {
             return verify_err!(
                 self.loc(ctx),
-                "design.plasmid sequence must be non-empty, uppercase, and unambiguous DNA"
+                "design.plasmid sequence must be produced by design.dna_sequence"
             );
         }
 

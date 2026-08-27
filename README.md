@@ -52,6 +52,7 @@ The language and its intermediate representations are evolving, and the durable 
 - [Documentation](docs/README.md)
 - [Python SDK](crates/lab-python/README.md) — typed SBOL designs, circuits in LOICA
 - [Language design](docs/language/README.md)
-- Golden Gate example: [Lab](examples/golden-gate/README.md) or [Python](examples/golden-gate-python/README.md)
-- Golden Gate, extended: [Lab](examples/golden-gate-extended/README.md) or [Python](examples/golden-gate-extended-python/README.md)
+- [Golden Gate example](examples/golden-gate/README.md)
+- [Golden Gate in Python](examples/golden-gate-python/README.md) — the same checked program through the typed Python frontend
+- [Golden Gate, extended](examples/golden-gate-extended/README.md) — the same laboratory with most of the language in it
 - [Compiler internals](crates/lab-compiler/README.md)

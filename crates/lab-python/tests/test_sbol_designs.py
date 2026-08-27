@@ -29,6 +29,8 @@ HAND_WRITTEN = """\
 use std.bio.designs
 use std.bio.golden_gate
 
+reporter_sequence: DNA = dna("ACGTACGT")
+
 buy:
   promoter J23101:
     identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
@@ -53,7 +55,7 @@ buy:
 /** The GFP reporter under a strong constitutive promoter. */
 build plasmid reporter:
   components = [J23101, B0034, GFP, B0015]
-  sequence = dna("ACGTACGT")
+  sequence = reporter_sequence
   backbone = pSB1C3
   restriction_enzyme = BsaI
   reaction_volume = 20 uL
@@ -144,6 +146,25 @@ class SbolDesignTests(unittest.TestCase):
 
         with self.assertRaisesRegex(lab.DesignError, "must be DNA"):
             Plasmid.build(design=chemical, module=module, name="wrong")
+
+    def test_a_raw_sequence_becomes_one_named_lab_value(self) -> None:
+        sbol3.set_namespace("https://example.org/raw-sequence")
+        document = sbol3.Document()
+        sequence = sbol3.Sequence(
+            "reporter_sequence",
+            elements="ACGT",
+            encoding=sbol3.IUPAC_DNA_ENCODING,
+        )
+        design = sbol3.Component("reporter", sbol3.SBO_DNA, sequences=[sequence])
+        document.add([sequence, design])
+        module = lab.Module("raw.sequence")
+        Plasmid.build(design=design, module=module, name="reporter")
+
+        source = module.source()
+
+        self.assertIn('reporter_sequence: DNA = dna("ACGT")', source)
+        self.assertIn("sequence = reporter_sequence", source)
+        self.assertEqual(source.count('DNA = dna("ACGT")'), 1)
 
     def test_a_broken_meets_chain_is_refused(self) -> None:
         sbol3.set_namespace("https://example.org/broken")

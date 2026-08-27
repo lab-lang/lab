@@ -19,8 +19,10 @@ buy:
   chassis DH5alpha
   antibiotic chloramphenicol
 
+reporter_sequence: DNA = dna("ACGTACGT")
+
 build plasmid reporter:
-  sequence = dna("ACGTACGT")
+  sequence = reporter_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI

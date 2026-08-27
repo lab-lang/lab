@@ -56,8 +56,7 @@ fn parsing_and_biological_verification_are_distinct_failures() {
     let SessionError::VerificationFailed(diagnostic) = error else {
         panic!("expected biological verification failure");
     };
-    assert!(
-        diagnostic
-            .contains("design.plasmid sequence must be non-empty, uppercase, and unambiguous DNA")
-    );
+    assert!(diagnostic.contains(
+        "design.dna_sequence elements must be non-empty, uppercase, and unambiguous DNA"
+    ));
 }

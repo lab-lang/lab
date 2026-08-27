@@ -2,7 +2,7 @@
 
 This is the Python counterpart to [`golden-gate`](../golden-gate). It describes the same two reporter plasmids, four engineered strains, and material-dependent build order through Lab's typed Python frontend.
 
-The biological designs use `lab.sbol.Document`, whose factories retain whether a component is a promoter, coding sequence, terminator, backbone, or plasmid. The declarations around those designs state provenance separately: ordered parts use `.buy(...)`, while plasmids and strains made by this laboratory use `.build(...)`.
+The biological designs use `lab.sbol.Document`, whose factories retain whether a component is a promoter, coding sequence, terminator, backbone, or plasmid. DNA sequences are independent typed document values referenced by those designs. The declarations around the designs state provenance separately: ordered parts use `.buy(...)`, while plasmids and strains made by this laboratory use `.build(...)`.
 
 From this directory, run the example against the repository's Python SDK environment:
 

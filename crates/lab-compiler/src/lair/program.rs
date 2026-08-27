@@ -14,7 +14,7 @@ use pliron::printable::Printable;
 use thiserror::Error;
 
 use crate::lair::dialect::attributes::quantity_dict;
-use crate::lair::dialect::design::{DesignPlasmidOp, DesignStrainOp};
+use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
 use crate::lair::dialect::workflow::{
     DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp,
 };
@@ -73,14 +73,35 @@ impl PortableLairProgram {
             &mut context,
             Identifier::try_from("lab_build").expect("static module name is valid"),
         );
+        let mut sequences = BTreeMap::new();
+        for artifact in &artifacts {
+            let BuildArtifactIntent::Plasmid(intent) = artifact else {
+                continue;
+            };
+            if sequences.contains_key(&intent.sequence.key) {
+                continue;
+            }
+            let operation = DesignDnaSequenceOp::new(
+                &mut context,
+                intent.sequence.name.clone(),
+                intent.sequence.elements.clone(),
+            );
+            let sequence = operation.get_result_sequence(&context);
+            root.append_operation(&mut context, operation.get_operation(), 0);
+            sequences.insert(intent.sequence.key.clone(), sequence);
+        }
         let mut designs = BTreeMap::new();
         for artifact in &artifacts {
             let design = match artifact {
                 BuildArtifactIntent::Plasmid(intent) => {
+                    let sequence = sequences
+                        .get(&intent.sequence.key)
+                        .copied()
+                        .expect("every plasmid sequence was lowered before its design");
                     let operation = DesignPlasmidOp::new(
                         &mut context,
                         intent.name.clone(),
-                        intent.sequence.clone(),
+                        sequence,
                         1,
                         true,
                         None,
@@ -380,8 +401,10 @@ buy restriction_enzyme BsaI
 buy chassis DH5alpha
 buy antibiotic chloramphenicol
 
+gfp_sequence: DNA = dna("ACGT")
+
 plasmid p_gfp:
-  sequence = dna("ACGT")
+  sequence = gfp_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI
@@ -425,6 +448,41 @@ workflow build_reporter_host(
   return strain, plate
 "#;
 
+    const SHARED_SEQUENCE_PROGRAM: &str = r#"use std.bio.build
+use std.bio.designs
+use std.bio.golden_gate
+
+buy part insert
+buy backbone pSB1C3
+buy restriction_enzyme BsaI
+
+shared_sequence: DNA = dna("ACGT")
+
+plasmid first:
+  sequence = shared_sequence
+  backbone = pSB1C3
+  components = [insert]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+
+plasmid second:
+  sequence = shared_sequence
+  backbone = pSB1C3
+  components = [insert]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+
+workflow build_first() -> Material<Plasmid>:
+  dependencies = []
+  product <- realize first from dependencies
+  return product
+
+workflow build_second() -> Material<Plasmid>:
+  dependencies = []
+  product <- realize second from dependencies
+  return product
+"#;
+
     #[test]
     fn lowers_an_artifact_and_its_workflow_from_separate_modules() {
         let designs = compile_module_in_environment(
@@ -442,6 +500,12 @@ workflow build_reporter_host(
         let program =
             PortableLairProgram::lower_program(&[&designs, &workflows]).expect("program lowers");
         let split = program.ir();
+
+        assert_eq!(split.matches(" = design.dna_sequence ").count(), 1);
+        assert!(split.contains("sequence_name: builtin.string \"gfp_sequence\""));
+        assert!(split.contains("elements: builtin.string \"ACGT\""));
+        assert!(split.contains("<(design.dna_sequence ) -> (design.artifact )>"));
+        assert!(!split.contains("design.plasmid ()"));
 
         let combined = compile_module(
             &format!("{DESIGNS}{WORKFLOWS}")
@@ -476,6 +540,22 @@ workflow build_reporter_host(
         assert!(
             error.to_string().contains("std.bio.build.realize"),
             "{error}"
+        );
+    }
+
+    #[test]
+    fn several_designs_share_one_named_sequence_value() {
+        let checked = compile_module(SHARED_SEQUENCE_PROGRAM).expect("shared sequence checks");
+        let ir = PortableLairProgram::lower(&checked)
+            .expect("shared sequence lowers")
+            .ir();
+
+        assert_eq!(ir.matches(" = design.dna_sequence ").count(), 1);
+        assert_eq!(ir.matches(" = design.plasmid ").count(), 2);
+        assert_eq!(
+            ir.matches("sequence_name: builtin.string \"shared_sequence\"")
+                .count(),
+            1
         );
     }
 }

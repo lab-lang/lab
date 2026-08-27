@@ -12,7 +12,7 @@ use pliron::operation::Operation;
 use crate::ProtocolLairProgram;
 use crate::backend::error::PlanningError;
 use crate::lair::dialect::attributes::{quantity_entry, u32_value};
-use crate::lair::dialect::design::{DesignPlasmidOp, DesignStrainOp};
+use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
 use crate::lair::dialect::protocol::{
     AssembleOp, DiluteOp, PlateOp, ProvisionOp, RecoverOp, SynthesizeOp, TransformOp,
 };
@@ -43,7 +43,13 @@ impl AssemblyTrace {
     }
 
     pub(in crate::backend) fn sequence(&self, context: &Context) -> String {
-        required_string(self.design.get_attr_sequence(context).as_deref())
+        let sequence = self
+            .design
+            .get_operand_sequence(context)
+            .defining_op()
+            .and_then(|operation| Operation::get_op::<DesignDnaSequenceOp>(operation, context))
+            .expect("verified design.plasmid consumes design.dna_sequence");
+        required_string(sequence.get_attr_elements(context).as_deref())
     }
 
     pub(in crate::backend) fn backbone(&self, context: &Context) -> String {

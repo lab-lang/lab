@@ -17,6 +17,9 @@ use std.bio.golden_gate
 
 use golden_gate.designs.inventory
 
+composite_plasmid_1_sequence: DNA = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+composite_plasmid_2_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+
 /**
  * A GFP transcription unit in the pSB1C3 backbone.
  *
@@ -24,7 +27,7 @@ use golden_gate.designs.inventory
  * Gate with BsaI. Accepted only if the built sequence matches the design.
  */
 build plasmid composite_plasmid_1:
-  sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+  sequence = composite_plasmid_1_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI
@@ -50,7 +53,7 @@ build plasmid composite_plasmid_1:
  * reporters.
  */
 build plasmid composite_plasmid_2:
-  sequence = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+  sequence = composite_plasmid_2_sequence
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]
   restriction_enzyme = BsaI

@@ -103,20 +103,5 @@ ignore_missing_imports = true
 module = ["programs.reporter.*"]
 disable_error_code = ["call-arg", "attr-defined", "no-any-return", "return"]
 
-[[tool.mypy.overrides]]
-module = [
-  "golden_gate.workflows.assemble",
-  "golden_gate_extended.workflows.assemble",
-]
-disable_error_code = ["no-any-return"]
-
-[[tool.mypy.overrides]]
-module = ["golden_gate_extended.workflows.observe"]
-disable_error_code = ["call-arg", "return"]
-
-[[tool.mypy.overrides]]
-module = ["golden_gate_extended.programs.panel"]
-disable_error_code = ["attr-defined"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]

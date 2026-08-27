@@ -67,6 +67,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0040: Networks are lists of transcription units](language/decisions/0040-networks-are-lists-of-transcription-units.md) | genetic networks remain lists of typed circuits whose shared products carry their wiring |
 | [0041: Typed SBOL authoring separates design from provenance](language/decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md) | typed Python designs preserve biological kinds while explicit declarations state build or buy provenance |
 | [0042: Robotics incubates separately](language/decisions/0042-robotics-incubates-separately.md) | simulation, visualization, embodied robotics, and their compute control plane live in the robotics repository |
+| [0043: Sequences are first-class design values](language/decisions/0043-sequences-are-first-class-design-values.md) | DNA and protein sequences are independent typed values referenced by designs |
 
 ## Implementation and embedding
 
@@ -84,3 +85,5 @@ Decision records preserve the reasoning and status behind the language rather th
 Files under `language/specimens/` are representative language programs used to drive syntax and semantic design. They are compiler-tested, but a specimen may describe runtime behavior that has not been built yet.
 
 The [Golden Gate example](../examples/golden-gate/README.md) is the end-to-end one: a package that compiles through every currently runnable toolchain path, from designs and workflows to the OT-2 protocols an instrument application can open.
+
+Its [Python counterpart](../examples/golden-gate-python/README.md) describes and checks the same program through `lab.sbol` and the typed Python workflow frontend. The [extended example](../examples/golden-gate-extended/README.md) is the broader language showcase.

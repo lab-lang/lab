@@ -25,9 +25,10 @@ B0015 = Part.buy(
     design=designs.terminator(identity=f"{IGEM}/BBa_B0015/1"),
 )
 
+reporter_sequence = designs.dna_sequence(elements="ACGTACGT")
 design = designs.plasmid(
     components=[J23101, B0034, GFP, B0015],
-    sequence="ACGTACGT",
+    sequence=reporter_sequence,
     description="The GFP reporter under a strong constitutive promoter.",
 )
 

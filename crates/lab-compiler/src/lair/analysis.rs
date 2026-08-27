@@ -72,7 +72,7 @@ mod tests {
     use pliron::linked_list::ContainsLinkedList;
     use pliron::op::Op;
 
-    use crate::lair::dialect::design::DesignPlasmidOp;
+    use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp};
     use crate::lair::dialect::protocol::{AssembleOp, AssemblyMethodAttr, SynthesizeOp};
 
     use crate::lair::analysis::*;
@@ -84,7 +84,10 @@ mod tests {
         let block = module.get_region(ctx).deref(ctx).get_head().unwrap();
         let mut inserter = IRInserter::<DummyListener>::new_at_block_end(block);
 
-        let design = DesignPlasmidOp::new(ctx, "p_test", "ACGT", 1, true, None, None);
+        let sequence = DesignDnaSequenceOp::new(ctx, "p_test_sequence", "ACGT");
+        let sequence_value = sequence.get_result_sequence(ctx);
+        inserter.append_op(ctx, &sequence);
+        let design = DesignPlasmidOp::new(ctx, "p_test", sequence_value, 1, true, None, None);
         let design_value = design.get_result_design(ctx);
         inserter.append_op(ctx, &design);
         let synthesize = SynthesizeOp::new(ctx, design_value);

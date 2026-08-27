@@ -19,6 +19,9 @@ use golden_gate_extended.designs.inventory
 // The DNA parts, written in SBOL rather than in Lab.
 use golden_gate_extended.designs.parts
 
+gfp_reporter_sequence: DNA = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+rfp_reporter_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+
 /**
  * The GFP reporter under a strong constitutive promoter.
  *
@@ -27,7 +30,7 @@ use golden_gate_extended.designs.parts
  * has to clear a bar on enough independent clones to mean something.
  */
 build plasmid composite_plasmid_1:
-  sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+  sequence = gfp_reporter_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI
@@ -57,7 +60,7 @@ build plasmid composite_plasmid_1:
  * is a property of the design rather than of the protocol that built it.
  */
 build plasmid composite_plasmid_2:
-  sequence = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+  sequence = rfp_reporter_sequence
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]
   restriction_enzyme = BsaI
@@ -87,4 +90,4 @@ build plasmid composite_plasmid_2:
  */
 buy plasmid reference_gfp:
   identity = "Addgene-#134516"
-  sequence = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+  sequence = gfp_reporter_sequence

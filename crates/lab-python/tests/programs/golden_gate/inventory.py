@@ -12,20 +12,66 @@ from lab.units import C, minutes
 
 module = lab.Module("golden_gate.designs.inventory", doc=__doc__)
 
+J23101_sequence = lab.Binding(
+    module=module,
+    name="J23101_sequence",
+    annotation="DNA",
+    value=dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC"),
+)
+J23106_sequence = lab.Binding(
+    module=module,
+    name="J23106_sequence",
+    annotation="DNA",
+    value=dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC"),
+)
+B0034_sequence = lab.Binding(
+    module=module,
+    name="B0034_sequence",
+    annotation="DNA",
+    value=dna("AAAGAGGAGAAA"),
+)
+B0015_sequence = lab.Binding(
+    module=module,
+    name="B0015_sequence",
+    annotation="DNA",
+    value=dna("CCAGGCATCAAATAAAACGAAAGGCTCAGTCG"),
+)
+GFP_sequence = lab.Binding(
+    module=module,
+    name="GFP_sequence",
+    annotation="DNA",
+    value=dna("ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC"),
+)
+RFP_sequence = lab.Binding(
+    module=module,
+    name="RFP_sequence",
+    annotation="DNA",
+    value=dna("ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG"),
+)
+for sequence_binding in (
+    J23101_sequence,
+    J23106_sequence,
+    B0034_sequence,
+    B0015_sequence,
+    GFP_sequence,
+    RFP_sequence,
+):
+    module.declare(sequence_binding)
+
 # Constitutive promoters of differing strength. Each is a promoter rather
 # than a bare part, so the compiler knows what it is without being told
 # again wherever it is used.
-J23101 = Promoter.buy(sequence=dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGC"))
-J23106 = Promoter.buy(sequence=dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGC"))
+J23101 = Promoter.buy(sequence=J23101_sequence)
+J23106 = Promoter.buy(sequence=J23106_sequence)
 
 # The shared ribosome binding site and terminator. Neither has a narrower
 # kind here, so both are parts; a package that declares one may say more.
-B0034 = Part.buy(sequence=dna("AAAGAGGAGAAA"))
-B0015 = Part.buy(sequence=dna("CCAGGCATCAAATAAAACGAAAGGCTCAGTCG"))
+B0034 = Part.buy(sequence=B0034_sequence)
+B0015 = Part.buy(sequence=B0015_sequence)
 
 # The fluorescent reporters, each a coding sequence.
-GFP = CDS.buy(sequence=dna("ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC"))
-RFP = CDS.buy(sequence=dna("ATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATG"))
+GFP = CDS.buy(sequence=GFP_sequence)
+RFP = CDS.buy(sequence=RFP_sequence)
 
 # Assembly backbone and the type IIS enzyme that opens it.
 pSB1C3 = Backbone.buy()
