@@ -1,6 +1,7 @@
 //! Artifact-realization operations in `std.bio.build`.
 
 use crate::checked::OwnershipMode;
+use crate::standard_library::capability;
 use crate::standard_library::catalog::StandardModule;
 use crate::standard_library::contract::{
     ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec,
@@ -13,7 +14,7 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
     let concrete = ContractType::Concrete;
     let action = ActionContractSpec {
         operation: "std.bio.build.realize",
-        capability: "artifact_realization",
+        capability: capability::ARTIFACT_REALIZATION,
         phrase: vec![
             PhrasePart::Word("realize"),
             PhrasePart::Operand {

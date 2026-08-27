@@ -12,6 +12,7 @@ use crate::checked::{
     CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
     CheckedSection,
 };
+use crate::iri::is_absolute_iri;
 use crate::semantic_error::SemanticError;
 use crate::source::{Identifier, Span};
 use crate::type_system::{Ty, to_checked_type};
@@ -1425,31 +1426,9 @@ impl Checker {
     }
 }
 
-fn is_absolute_iri(value: &str) -> bool {
-    let Some((scheme, rest)) = value.split_once(':') else {
-        return false;
-    };
-    !rest.is_empty()
-        && scheme
-            .chars()
-            .next()
-            .is_some_and(|character| character.is_ascii_alphabetic())
-        && scheme.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
-        })
-        && !value.chars().any(|character| {
-            character.is_whitespace()
-                || character.is_control()
-                || matches!(
-                    character,
-                    '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`'
-                )
-        })
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{conjunction, is_absolute_iri, nearest, quoted_conjunction};
+    use super::{conjunction, nearest, quoted_conjunction};
 
     #[test]
     fn suggests_the_name_a_typo_meant() {
@@ -1482,15 +1461,5 @@ mod tests {
         assert_eq!(conjunction(&["a", "b"]), "a and b");
         assert_eq!(conjunction(&["a", "b", "c"]), "a, b, and c");
         assert_eq!(quoted_conjunction(&["a", "b"]), "'a' and 'b'");
-    }
-
-    #[test]
-    fn recognizes_absolute_design_iris_without_importing_an_rdf_stack() {
-        assert!(is_absolute_iri("https://example.org/design"));
-        assert!(is_absolute_iri(
-            "urn:uuid:2ed8c319-58b7-46ad-aaf0-95c79be6b107"
-        ));
-        assert!(!is_absolute_iri("BBa_J23101"));
-        assert!(!is_absolute_iri("https://example.org/a design"));
     }
 }

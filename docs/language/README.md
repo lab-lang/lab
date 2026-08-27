@@ -6,6 +6,7 @@ The documents have distinct jobs:
 
 - `syntax.md` records accepted surface-language rules;
 - `semantics.md` records the meaning of laboratory values and effects;
+- `capabilities.md` records stable capability IRIs, the standard-action audit, and requirement matching rules;
 - `generics.md` records how type parameters, roles, generic kinds, and unit types fit together;
 - `modules.md` records package imports and idiomatic source organization;
 - `open-questions.md` keeps unresolved design choices visible;

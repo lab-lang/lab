@@ -1971,7 +1971,10 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
             panic!("expected effect")
         };
         assert_eq!(action.operation, "std.lab.plasmid.store");
-        assert_eq!(action.capability.as_deref(), Some("cold_storage"));
+        assert_eq!(
+            action.capability.as_deref(),
+            Some("https://draggon.org/ns/capability#ColdStorage")
+        );
         assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
         assert_eq!(action.results[0].name, "material");
         assert_eq!(action.results[0].r#type.display_name(), "Material<Plasmid>");

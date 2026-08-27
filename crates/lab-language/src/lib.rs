@@ -5,6 +5,7 @@ mod checked;
 mod checker;
 mod diagnostics;
 mod error;
+mod iri;
 mod lexer;
 mod material_flow;
 mod parser;

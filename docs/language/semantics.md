@@ -89,7 +89,7 @@ An effect binding records a command and durably waits for the corresponding even
 
 Workflow replay must not repeat completed physical actions. Time, randomness, inventory queries, device interaction, network access, and human decisions are effects rather than ambient language operations.
 
-Every resolved action contract names the capability required to dispatch it, the type of each operand and result, and how each operand participates in physical ownership. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action.
+Every resolved action contract names the capability required to dispatch it as an absolute SBOLInventory capability-kind IRI, the type of each operand and result, and how each operand participates in physical ownership. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action. Capability matching is exact IRI equality; source actions that describe composite biological work retain an explicit refinement boundary rather than pretending to name one instrument operation. The complete standard-action audit is in [`capabilities.md`](capabilities.md).
 
 `=` and `<-` therefore have different replay laws. `=` evaluates a deterministic expression or commits an explicit state transition. `<-` creates a durable command boundary and obtains its value from a recorded completion event. The result may look like a local binding, but the physical action must not be repeated merely because a workflow is replayed.
 

@@ -48,7 +48,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Top-level pure bindings | yes | yes | yes | yes | no |
 | Named DNA values referenced by designs | `name: DNA = dna("...")` | references resolve across modules | DNA-typed design property | one reusable `design.dna_sequence` SSA value | target-dependent |
 | `record` plus role membership (`is Event`, `is Evidential`) | yes | yes | yes | yes | no |
-| Exact SBOL Component and supplier identities | `sbol_identity`, `supplier_identity` | declarations resolve normally | SBOL identity must be an absolute IRI | separate fields in `lab.portable-module.v5` | unique active MaterialLot frozen in `lab.dependency-build.v1` |
+| Exact SBOL Component and supplier identities | `sbol_identity`, `supplier_identity` | declarations resolve normally | SBOL identity must be an absolute IRI | separate fields in `lab.portable-module.v6` | unique active MaterialLot frozen in `lab.dependency-build.v1` |
 | Biological catalog version and provenance chains | syntax pending | no | no | no | no |
 | Tagged `record` declarations with `case` constructors | yes | yes | yes | yes | no |
 | Workflow declarations and calls | yes | yes | yes | yes | runtime pending |
@@ -56,7 +56,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Explicit durable workflow `state` | yes | yes | yes | yes | no |
 | Built-in durable operations with `<-` | yes | yes | yes | yes | no |
 | Structured typed expression IR | n/a | yes | yes | yes | no |
-| Action capability and ownership contracts | n/a | built-ins | built-ins | yes | no |
+| Action capability and ownership contracts | n/a | built-ins | absolute SBOLInventory capability IRI and ownership modes | `lab.portable-module.v6` | facility binding pending |
 | Direct `return value, ...` and result checking | yes | yes | arity and per-result type | named result fields | no |
 | `match` / `case` with continuing-branch bindings | yes | yes | yes | yes | no |
 | `if` / `else` and `for` / `in` | yes | yes | yes | yes | no |

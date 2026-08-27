@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::checked::OwnershipMode;
+use crate::iri::is_absolute_iri;
 use crate::type_system::Ty;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,8 +107,11 @@ impl ActionContractSpec {
         if self.operation.is_empty() {
             return Err("action operation identity cannot be empty".to_owned());
         }
-        if self.capability.is_empty() {
-            return Err("action capability cannot be empty".to_owned());
+        if !is_absolute_iri(self.capability) {
+            return Err(format!(
+                "action capability '{}' is not an absolute IRI",
+                self.capability
+            ));
         }
 
         let mut argument_names = BTreeSet::new();
@@ -210,10 +214,20 @@ mod tests {
     fn contract(phrase: Vec<PhrasePart>) -> ActionContractSpec {
         ActionContractSpec {
             operation: "test.action",
-            capability: "testing",
+            capability: "https://example.org/capability#Testing",
             phrase,
             results: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_capability_must_be_an_absolute_iri() {
+        let mut action = contract(vec![PhrasePart::Word("act")]);
+        action.capability = "testing";
+
+        let error = action.validate().expect_err("bare names are not portable");
+
+        assert!(error.contains("not an absolute IRI"), "{error}");
     }
 
     fn optional_operand(r#type: ContractType) -> PhrasePart {

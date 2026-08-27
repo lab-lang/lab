@@ -213,12 +213,12 @@ fn inventory_specimen_preserves_properties_and_resolved_operations() {
         .iter()
         .find(|declaration| declaration["kind"] == "catalog" && declaration["name"] == "J23101")
         .expect("the specimen catalogues its parts");
-    assert_eq!(catalogued["identity"], "J23101");
+    assert_eq!(catalogued["supplier_identity"], "J23101");
     assert_eq!(catalogued["type"]["name"], "Promoter");
 
     let serialized = serde_json::to_string(&module).unwrap();
     assert!(serialized.contains("std.bio.build.realize"));
-    assert!(serialized.contains("artifact_realization"));
+    assert!(serialized.contains("https://draggon.org/ns/capability#ArtifactRealization"));
 }
 
 #[test]

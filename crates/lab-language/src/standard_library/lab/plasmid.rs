@@ -1,6 +1,7 @@
 //! `std.lab.plasmid` durable action contracts.
 
 use crate::checked::OwnershipMode;
+use crate::standard_library::capability;
 use crate::standard_library::catalog::StandardModule;
 use crate::standard_library::contract::{
     ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec,
@@ -32,7 +33,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
     let actions = vec![
         ActionContractSpec {
             operation: "std.lab.plasmid.capture",
-            capability: "plate_imaging",
+            capability: capability::PLATE_IMAGING,
             phrase: vec![
                 PhrasePart::Word("capture"),
                 PhrasePart::Word("image"),
@@ -43,7 +44,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.synthesize",
-            capability: "dna_synthesis",
+            capability: capability::DNA_SYNTHESIS,
             phrase: vec![
                 PhrasePart::Word("synthesize"),
                 operand("design", concrete(named("Plasmid")), copy),
@@ -55,7 +56,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.assemble",
-            capability: "dna_assembly",
+            capability: capability::DNA_ASSEMBLY,
             phrase: vec![
                 PhrasePart::Word("assemble"),
                 operand(
@@ -68,7 +69,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.provision",
-            capability: "inventory",
+            capability: capability::MATERIAL_PROVISIONING,
             phrase: vec![
                 PhrasePart::Word("provision"),
                 operand("item", ContractType::AnyValue, copy),
@@ -80,7 +81,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.transform",
-            capability: "chemical_transformation",
+            capability: capability::CHEMICAL_TRANSFORMATION,
             phrase: vec![
                 PhrasePart::Word("transform"),
                 operand("design", concrete(named("Strain")), copy),
@@ -100,7 +101,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.recover",
-            capability: "culture_incubation",
+            capability: capability::INCUBATION,
             phrase: vec![
                 PhrasePart::Word("recover"),
                 operand("culture", concrete(material(named("Culture"))), take),
@@ -115,7 +116,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.dilute",
-            capability: "liquid_handling",
+            capability: capability::LIQUID_HANDLING,
             phrase: vec![
                 PhrasePart::Word("dilute"),
                 operand("culture", concrete(material(named("Culture"))), take),
@@ -124,7 +125,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.plate",
-            capability: "antibiotic_selection",
+            capability: capability::ANTIBIOTIC_SELECTION,
             phrase: vec![
                 PhrasePart::Word("plate"),
                 operand("culture", concrete(material(named("Culture"))), take),
@@ -135,7 +136,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.pick",
-            capability: "colony_picking",
+            capability: capability::COLONY_PICKING,
             phrase: vec![
                 PhrasePart::Word("pick"),
                 PhrasePart::Integer {
@@ -154,7 +155,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.screen",
-            capability: "clone_screening",
+            capability: capability::CLONE_SCREENING,
             phrase: vec![
                 PhrasePart::Word("screen"),
                 operand(
@@ -169,7 +170,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.grow",
-            capability: "culture_incubation",
+            capability: capability::INCUBATION,
             phrase: vec![
                 PhrasePart::Word("grow"),
                 operand("clone", concrete(material(named("Clone"))), take),
@@ -190,7 +191,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.purify",
-            capability: "plasmid_purification",
+            capability: capability::PLASMID_PURIFICATION,
             phrase: vec![
                 PhrasePart::Word("purify"),
                 operand("culture", concrete(material(named("Culture"))), take),
@@ -199,7 +200,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.split",
-            capability: "liquid_handling",
+            capability: capability::LIQUID_HANDLING,
             phrase: vec![
                 PhrasePart::Word("split"),
                 operand("material", concrete(material(named("Plasmid"))), take),
@@ -211,7 +212,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.sequence",
-            capability: "sanger_sequencing",
+            capability: capability::SANGER_SEQUENCING,
             phrase: vec![
                 PhrasePart::Word("sequence"),
                 operand("aliquot", concrete(material(named("Plasmid"))), take),
@@ -220,7 +221,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.quantify",
-            capability: "dna_quantification",
+            capability: capability::DNA_QUANTIFICATION,
             phrase: vec![
                 PhrasePart::Word("quantify"),
                 operand("material", concrete(material(named("Plasmid"))), borrow),
@@ -229,7 +230,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.store",
-            capability: "cold_storage",
+            capability: capability::COLD_STORAGE,
             phrase: vec![
                 PhrasePart::Word("store"),
                 operand("material", concrete(material(named("Plasmid"))), take),
@@ -244,7 +245,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.dispose",
-            capability: "waste_handling",
+            capability: capability::WASTE_HANDLING,
             phrase: vec![
                 PhrasePart::Word("dispose"),
                 operand("material", ContractType::AnyMaterial, take),

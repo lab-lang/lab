@@ -17,12 +17,13 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// an acceptance claim carries the evidence it is believed on, a role may name
 /// the ontology term it stands for, an artifact kind carries the roles its
 /// produced type plays, and artifact instances preserve exact SBOL identities
-/// independently of laboratory provenance.
+/// independently of laboratory provenance. Action capabilities are absolute
+/// SBOLInventory capability-kind IRIs rather than compiler-local names.
 ///
-/// A consumer that ignores the last two reads a design with nothing said about
-/// what it is, which is exactly the silence grounding exists to end. That is
-/// why they raise the version rather than riding along as optional fields.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v5";
+/// Grounding, design identities, and capability identities are semantic
+/// contracts, so each incompatible change raises the version rather than
+/// riding along as an optional field.
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v6";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
