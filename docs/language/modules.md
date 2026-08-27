@@ -147,15 +147,20 @@ entry = "src/programs/main.lab"
 target = "opentrons-ot2"
 
 [inventory]
-materials = ["BsaI", "T4_DNA_ligase", "pSB1C3"]
-artifacts = ["composite_plasmid_1"]
+document = "inventory/facility.ttl"
+# Required only when the document contains more than one facility:
+facility = "https://example.org/facilities/tet-lab"
 
 [dependencies]
 parts = "1.2"
 local-policies = { path = "../policies" }
 ```
 
-`[inventory]` states what the laboratory already has: `materials` a reaction may draw on, and `artifacts` that are already realized and are not built again. Both name the symbolic identities `src/` declares, so a target build resolves artifact dependencies against the manifest rather than against a separate data file, and both default to empty.
+`[inventory] document` names a package-relative SBOLInventory document in Turtle, RDF/XML, JSON-LD, or N-Triples. Lab validates the complete SBOL 3 and SBOLInventory Profile 0.2 graph before planning. If `facility` is omitted, the document must contain exactly one facility; otherwise the absolute Facility IRI selects one exactly.
+
+Each required source declaration reaches the graph through its exact `sbol_identity`, and availability means one active MaterialLot in the selected facility whose `sbol:built` points to that exact local Component. No declaration name, display ID, supplier identifier, or IRI prefix is used for matching. Zero lots leaves the dependency blocked, one freezes a Component-to-MaterialLot binding in `lab.dependency-build.v1`, and several produce an allocation ambiguity instead of a silent first choice. A built artifact with one active lot is reused through the same rule.
+
+The old `materials` and `artifacts` arrays remain as a mutually exclusive legacy form while existing examples migrate. They retain symbolic behavior and are identified as `legacy_symbols` in emitted dependency manifests; new packages should use `document`.
 
 `[build] target` names the profile a plain `lab build` compiles for, so the command a laboratory runs every day produces the protocols its robots execute rather than intermediate IR. It names a profile under `targets/` and nothing else: a value carrying a path separator is rejected. `--target` compiles for a different bench and `--no-target` stops at portable module IR, so a package that declares a default keeps both. A package that declares no default builds module IR alone.
 

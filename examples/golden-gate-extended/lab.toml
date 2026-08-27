@@ -13,15 +13,14 @@ materials = [
   # BsaI states a supplier identity, so that is what an order names.
   "NEB-R0535",
   "DH5alpha",
-  # The DNA parts are declared in SBOL, where a part's identity is the registry
-  # record it resolves to. That record is what an order names, so it is what is
-  # listed here rather than the bare symbol a Lab declaration would have used.
-  "https://synbiohub.org/public/igem/B0015",
-  "https://synbiohub.org/public/igem/B0034",
-  "https://synbiohub.org/public/igem/GFP",
-  "https://synbiohub.org/public/igem/J23101",
-  "https://synbiohub.org/public/igem/J23106",
-  "https://synbiohub.org/public/igem/RFP",
+  # This example still exercises the temporary symbolic migration form. SBOL
+  # Component IRIs remain separate from the supplier identifiers listed here.
+  "B0015",
+  "B0034",
+  "GFP",
+  "J23101",
+  "J23106",
+  "RFP",
   "T4_DNA_ligase",
   "T4_DNA_ligase_buffer",
   "chloramphenicol",

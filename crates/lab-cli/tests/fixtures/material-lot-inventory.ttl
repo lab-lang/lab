@@ -1,0 +1,92 @@
+@prefix ex: <https://example.org/material-lot-test/> .
+@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix inv: <https://draggon.org/ns/inventory#> .
+@prefix sbol: <http://sbols.org/v3#> .
+
+ex:facility a sbol:TopLevel, fac:Facility ;
+    sbol:displayId "facility" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:name "Material lot test facility" .
+
+ex:source a sbol:Component ;
+    sbol:displayId "source" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:backbone a sbol:Component ;
+    sbol:displayId "backbone" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:enzyme a sbol:Component ;
+    sbol:displayId "enzyme" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:ligase a sbol:Component ;
+    sbol:displayId "ligase" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:buffer a sbol:Component ;
+    sbol:displayId "buffer" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:water a sbol:Component ;
+    sbol:displayId "water" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:product a sbol:Component ;
+    sbol:displayId "product" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+ex:source_lot a sbol:Implementation ;
+    sbol:displayId "source_lot" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:built ex:source ;
+    fac:materialKind inv:DnaSample ;
+    fac:facility ex:facility ;
+    fac:isActive true .
+
+ex:backbone_lot a sbol:Implementation ;
+    sbol:displayId "backbone_lot" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:built ex:backbone ;
+    fac:materialKind inv:DnaSample ;
+    fac:facility ex:facility ;
+    fac:isActive true .
+
+ex:enzyme_lot a sbol:Implementation ;
+    sbol:displayId "enzyme_lot" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:built ex:enzyme ;
+    fac:materialKind inv:Reagent ;
+    fac:facility ex:facility ;
+    fac:isActive true .
+
+ex:ligase_lot a sbol:Implementation ;
+    sbol:displayId "ligase_lot" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:built ex:ligase ;
+    fac:materialKind inv:Reagent ;
+    fac:facility ex:facility ;
+    fac:isActive true .
+
+ex:buffer_lot a sbol:Implementation ;
+    sbol:displayId "buffer_lot" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:built ex:buffer ;
+    fac:materialKind inv:Reagent ;
+    fac:facility ex:facility ;
+    fac:isActive true .
+
+ex:water_lot a sbol:Implementation ;
+    sbol:displayId "water_lot" ;
+    sbol:hasNamespace <https://example.org/material-lot-test> ;
+    sbol:built ex:water ;
+    fac:materialKind inv:Reagent ;
+    fac:facility ex:facility ;
+    fac:isActive true .

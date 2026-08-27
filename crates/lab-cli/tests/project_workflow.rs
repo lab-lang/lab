@@ -121,6 +121,70 @@ fn check_validates_a_configured_sbol_inventory() {
 }
 
 #[test]
+fn a_target_build_freezes_exact_material_lot_bindings() {
+    let project = temporary_project();
+    std::fs::create_dir_all(project.join("src/programs")).unwrap();
+    std::fs::create_dir_all(project.join("inventory")).unwrap();
+    std::fs::create_dir_all(project.join("targets")).unwrap();
+    std::fs::write(
+        project.join("lab.toml"),
+        "[package]\nname = \"material-lot-build\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[build]\nentry = \"src/programs/main.lab\"\ntarget = \"opentrons-ot2\"\n\n[inventory]\ndocument = \"inventory/catalog.ttl\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/programs/main.lab"),
+        include_str!("fixtures/material-lot-build.lab"),
+    )
+    .unwrap();
+    let inventory = include_str!("fixtures/material-lot-inventory.ttl");
+    std::fs::write(project.join("inventory/catalog.ttl"), inventory).unwrap();
+    std::fs::write(
+        project.join("targets/opentrons-ot2.toml"),
+        "[target]\nbackend = \"opentrons.ot2\"\n",
+    )
+    .unwrap();
+
+    let built = run(&["build", project.to_str().unwrap(), "--json"]);
+
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(project.join(".lab/build/opentrons-ot2/dependency_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["schema_version"], "lab.dependency-build.v1");
+    assert_eq!(manifest["inventory"]["kind"], "sbol_inventory");
+    assert_eq!(
+        manifest["inventory"]["facility"],
+        "https://example.org/material-lot-test/facility"
+    );
+    assert_eq!(
+        manifest["inventory"]["source_sha256"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
+    );
+    let bindings = manifest["nodes"][0]["material_lot_bindings"]
+        .as_array()
+        .unwrap();
+    assert_eq!(bindings.len(), 6);
+    assert!(bindings.iter().all(|binding| {
+        binding["component"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://example.org/material-lot-test/")
+            && binding["material_lot"].as_str().unwrap().ends_with("_lot")
+    }));
+    assert_eq!(manifest["nodes"][0]["resolution"], "generated");
+
+    std::fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
 fn a_target_build_emits_automation_protocols_for_every_wave() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")

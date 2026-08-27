@@ -6,7 +6,7 @@ use lab_compiler::ProtocolLairProgram;
 use lab_compiler::backend::Backend;
 use lab_compiler::backend::opentrons::flex::{FlexBackend, FlexTargetProfile};
 use lab_compiler::backend::opentrons::ot2::{Ot2Backend, Ot2TargetProfile};
-use lab_compiler::planning::BuildInventory;
+use lab_compiler::planning::{BuildInventory, LegacyBuildInventory};
 use lab_compiler::{PortableLairProgram, compile_module, parse_module, render_checked_module};
 
 #[derive(Debug, Parser)]
@@ -106,8 +106,9 @@ fn load_inventory(cli: &Cli) -> Result<BuildInventory> {
     if let Some(path) = &cli.inventory {
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read inventory {}", path.display()))?;
-        serde_json::from_str::<BuildInventory>(&contents)
-            .with_context(|| format!("failed to parse inventory {}", path.display()))
+        serde_json::from_str::<LegacyBuildInventory>(&contents)
+            .map(BuildInventory::LegacySymbols)
+            .with_context(|| format!("failed to parse legacy inventory {}", path.display()))
     } else {
         Ok(BuildInventory::default())
     }

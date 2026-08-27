@@ -452,7 +452,7 @@ pub(in crate::backend) fn boundary_blocks() -> Vec<Block> {
     let mut doc = fragment();
     doc.heading(1, [text("Execution boundary")]);
     doc.para_text(
-        "This concept spike allocates one 96-well reaction plate, one DNA plate, one dilution plate, one agar plate, and 24-well source racks. It does not resolve inventory lots, verify DNA concentrations, design overhangs, domesticate internal restriction sites, or qualify the protocol for a specific lab.",
+        "This concept spike allocates one 96-well reaction plate, one DNA plate, one dilution plate, one agar plate, and 24-well source racks. Dependency planning may freeze exact inventory lots, but this device plan does not reason over their quantities, verify DNA concentrations, design overhangs, domesticate internal restriction sites, or qualify the protocol for a specific lab.",
     );
     doc.blocks
 }

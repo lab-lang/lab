@@ -81,6 +81,8 @@ A declaration may carry an exact biological-design identity independently of how
 
 Design identity is not availability. An `sbol_identity` does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require exact MaterialLot resolution against a validated SBOLInventory document and runtime evidence.
 
+During inventory-backed planning, a checked `sbol_identity` is joined only to active MaterialLots in the selected facility whose `sbol:built` names that exact Component IRI. A unique candidate is frozen in the dependency plan together with the facility IRI and source-document hash. No candidate is a missing input; several candidates are an allocation ambiguity requiring policy or review. The compiler never treats candidate ordering as allocation.
+
 ## Commands and events
 
 An effect binding records a command and durably waits for the corresponding event. Dispatching a command does not establish that a physical action happened. Only the recorded completion event establishes the result observed by the workflow.

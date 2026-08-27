@@ -311,9 +311,39 @@ fn build_for_target(
 
     let package = project.default_package();
     let declared = &package.manifest.inventory;
-    let inventory = BuildInventory {
-        available_materials: declared.materials.clone(),
-        available_artifacts: declared.artifacts.clone(),
+    let inventory = if let Some(document) = declared.document.as_ref() {
+        let snapshot =
+            InventorySnapshot::load(&package.root, document, declared.facility.as_deref())
+                .with_context(|| {
+                    format!(
+                        "failed to load inventory for package '{}'",
+                        package.manifest.package.name
+                    )
+                })?;
+        let material_lots = snapshot
+            .active_material_lots()
+            .context("failed to index active SBOLInventory MaterialLots")?;
+        let lots_by_component = material_lots
+            .components()
+            .map(|(component, lots)| {
+                (
+                    component.as_str().to_owned(),
+                    lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
+                )
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        BuildInventory::from_material_lots(
+            &modules,
+            snapshot.source_sha256(),
+            snapshot.facility().as_str(),
+            &lots_by_component,
+        )
+        .context("failed to bind checked designs to SBOLInventory MaterialLots")?
+    } else {
+        BuildInventory::legacy(
+            declared.materials.iter().cloned(),
+            declared.artifacts.iter().cloned(),
+        )
     };
 
     let artifacts = match &profile {

@@ -54,7 +54,7 @@ Profile composition is also unresolved. Sites that share most of a layout have n
 
 ## Inventory identity, availability, and provenance
 
-Inventory constructors currently associate a typed source symbol with an external string. Stable identifiers, aliases, lots, quantities, locations, expiration, provenance, trust, and asynchronous availability are unresolved. A planner must distinguish “this design refers to an inventory identity” from “a suitable physical lot is available now.”
+Design identity and physical availability are now separate. `sbol_identity` names an exact SBOL Component; target planning loads a validated SBOLInventory document, restricts active MaterialLots to the selected facility, joins them through `sbol:built`, rejects ambiguity, and freezes the selected lot together with the facility and document hash. Quantity, expiration, containment, reservation, allocation policy beyond refusing ambiguity, trust policy, and asynchronous availability remain open.
 
 ## Package resolution
 

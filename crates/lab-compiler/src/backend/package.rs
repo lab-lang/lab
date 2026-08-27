@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use crate::backend::document::{Block, Column, Doc, DocMeta, code, text};
-use crate::planning::{ArtifactResolution, DependencyBuildManifest};
+use crate::planning::{ArtifactResolution, DependencyBuildManifest, DependencyInventorySource};
 
 /// One robot run in execution order: run index, planning iteration, artifact
 /// label, package directory, and the run's own manual content, spliced into
@@ -187,6 +187,18 @@ pub(in crate::backend) fn render_report(meta: DocMeta, manifest: &DependencyBuil
     let mut doc = Doc::new(meta);
     doc.para([text("Status: "), code(format!("{:?}", manifest.status))]);
     doc.para_text(format!("Roots: {}", manifest.roots.join(", ")));
+    match &manifest.inventory {
+        DependencyInventorySource::SbolInventory {
+            source_sha256,
+            facility,
+        } => {
+            doc.para([text("Facility: "), code(facility)]);
+            doc.para([text("Inventory source SHA-256: "), code(source_sha256)]);
+        }
+        DependencyInventorySource::LegacySymbols => {
+            doc.para_text("Inventory source: legacy symbolic manifest arrays.");
+        }
+    }
     doc.table(
         [
             Column::left("Artifact"),
@@ -206,6 +218,43 @@ pub(in crate::backend) fn render_report(meta: DocMeta, manifest: &DependencyBuil
             ]
         }),
     );
+    let lot_rows = manifest
+        .nodes
+        .iter()
+        .flat_map(|node| {
+            node.existing_material_lot
+                .iter()
+                .map(|binding| {
+                    vec![
+                        vec![text(node.artifact.as_str())],
+                        vec![text("existing artifact")],
+                        vec![code(binding.component.as_str())],
+                        vec![code(binding.material_lot.as_str())],
+                    ]
+                })
+                .chain(node.material_lot_bindings.iter().map(|binding| {
+                    vec![
+                        vec![text(node.artifact.as_str())],
+                        vec![code(binding.symbol.as_str())],
+                        vec![code(binding.component.as_str())],
+                        vec![code(binding.material_lot.as_str())],
+                    ]
+                }))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    if !lot_rows.is_empty() {
+        doc.heading(1, [text("Material lot bindings")]);
+        doc.table(
+            [
+                Column::left("Artifact"),
+                Column::left("Use"),
+                Column::left("SBOL Component"),
+                Column::left("MaterialLot"),
+            ],
+            lot_rows,
+        );
+    }
     let blockers = manifest
         .nodes
         .iter()

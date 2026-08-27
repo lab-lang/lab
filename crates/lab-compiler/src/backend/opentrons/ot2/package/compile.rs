@@ -231,8 +231,8 @@ workflow build_final_host(
 "#;
 
     fn inventory() -> BuildInventory {
-        BuildInventory {
-            available_materials: [
+        BuildInventory::legacy(
+            [
                 "terminal_part",
                 "source_part",
                 "receiver",
@@ -247,10 +247,50 @@ workflow build_final_host(
                 "recovery_medium",
             ]
             .into_iter()
-            .map(str::to_owned)
-            .collect(),
-            available_artifacts: BTreeSet::new(),
-        }
+            .map(str::to_owned),
+            [],
+        )
+    }
+
+    #[test]
+    fn semantic_inventory_bindings_reach_the_dependency_manifest() {
+        let checked = compile_module(include_str!(
+            "../../../../../../lab-cli/tests/fixtures/material-lot-build.lab"
+        ))
+        .unwrap();
+        let lots = ["source", "backbone", "enzyme", "ligase", "buffer", "water"]
+            .into_iter()
+            .map(|name| {
+                (
+                    format!("https://example.org/material-lot-test/{name}"),
+                    vec![format!("https://example.org/material-lot-test/{name}_lot")],
+                )
+            })
+            .collect();
+        let inventory = BuildInventory::from_material_lots(
+            &[&checked],
+            "abc123",
+            "https://example.org/material-lot-test/facility",
+            &lots,
+        )
+        .unwrap();
+        let protocol = crate::PortableLairProgram::lower(&checked)
+            .unwrap()
+            .select_protocol()
+            .unwrap();
+
+        let bundle =
+            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
+
+        assert_eq!(bundle.manifest.schema_version, "lab.dependency-build.v1");
+        assert_eq!(bundle.manifest.nodes.len(), 1);
+        assert_eq!(bundle.manifest.nodes[0].material_lot_bindings.len(), 6);
+        assert!(
+            bundle.manifest.nodes[0]
+                .material_lot_bindings
+                .iter()
+                .all(|binding| binding.component != binding.material_lot)
+        );
     }
 
     #[test]
@@ -346,9 +386,10 @@ workflow build_final_host(
             .select_protocol()
             .unwrap();
         let mut inventory = inventory();
-        inventory.available_artifacts.insert("intermediate".into());
-        inventory.available_materials.remove("source_part");
-        inventory.available_materials.remove("carrier");
+        let legacy = inventory.as_legacy_mut().unwrap();
+        legacy.available_artifacts.insert("intermediate".into());
+        legacy.available_materials.remove("source_part");
+        legacy.available_materials.remove("carrier");
         let bundle =
             compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
@@ -395,6 +436,8 @@ workflow build_final_host(
 
         let mut inventory = inventory();
         inventory
+            .as_legacy_mut()
+            .unwrap()
             .available_artifacts
             .insert("final_artifact".into());
         let bundle =
