@@ -29,6 +29,12 @@ SBOLInventory Profile 0.2 deliberately keeps capability kinds open. Lab uses the
 
 The audit does not assert that every source action maps directly to one instrument operation. `ArtifactRealization`, `DnaAssembly`, `ChemicalTransformation`, and similar biological requirements may refine into several operational requirements such as liquid handling, thermal cycling, incubation, transport, or manual work. Requirement refinement must preserve the parent requirement and source-action identity so a reviewed plan can explain why each allocated offering is present.
 
+## Compiler requirement IR
+
+`lab build` emits `capability_requirements.json` with schema `lab.capability-requirements.v1` and links it from the portable package index. Each requirement template has a deterministic ID and exact source module, workflow, statement path, and operation. It records the capability-kind IRI, a typed minimum qualification, a typed set of accepted SBOLInventory control modes, exact typed scalar constraints, typed design or data value ports, and typed material inputs and outputs with ownership modes.
+
+These records describe workflow definitions. A workflow call does not duplicate its callee's template, and an unused workflow remains visible as a reusable template. Facility planning must instantiate only the workflows reached by the selected program, preserve call and refinement ancestry, and then allocate the resulting operational requirements. The root templates deliberately contain no Asset or CapabilityOffering IRI.
+
 ## Matching rules
 
 Capability matching is exact IRI equality. Qualification, control mode, typed parameters, material compatibility, containment, capacity, and configured adapter availability are separate predicates. Candidate order is deterministic for review but never constitutes allocation.

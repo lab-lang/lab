@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use lab_compiler::backend::hamilton::star::StarTargetProfile;
 use lab_compiler::backend::{TargetProfile, parse_target_profile};
-use lab_compiler::planning::BuildInventory;
+use lab_compiler::planning::{BuildInventory, CapabilityRequirements};
 use lab_compiler::{
     DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
 };
@@ -149,6 +149,22 @@ pub(crate) fn build(
     fs::create_dir_all(&output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
 
+    let program_packages = project.program_packages();
+    let program_modules = compiled
+        .modules
+        .iter()
+        .filter(|module| program_packages.contains(&module.package))
+        .map(|module| &module.module)
+        .collect::<Vec<_>>();
+    let capability_requirements = CapabilityRequirements::extract(&program_modules)
+        .context("failed to derive workflow capability requirements")?;
+    let capability_requirements_artifact = PathBuf::from("capability_requirements.json");
+    let capability_requirements_path = output_root.join(&capability_requirements_artifact);
+    let mut capability_requirements_json = serde_json::to_string_pretty(&capability_requirements)?;
+    capability_requirements_json.push('\n');
+    fs::write(&capability_requirements_path, capability_requirements_json)
+        .with_context(|| format!("failed to write {}", capability_requirements_path.display()))?;
+
     let mut artifacts = Vec::new();
     for compiled_module in &compiled.modules {
         let source = &compiled_module.source;
@@ -174,13 +190,14 @@ pub(crate) fn build(
     }
 
     let index = BuildIndex {
-        schema_version: 2,
+        schema_version: 3,
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         edition: package.manifest.package.edition.clone(),
         entry: package.manifest.build.entry.clone(),
         members: compiled.members.clone(),
         modules: artifacts,
+        capability_requirements: capability_requirements_artifact,
     };
     let index_path = output_root.join("package.json");
     let mut json = serde_json::to_string_pretty(&index)?;
@@ -581,6 +598,7 @@ struct BuildIndex {
     entry: Option<PathBuf>,
     members: Vec<String>,
     modules: Vec<BuildModule>,
+    capability_requirements: PathBuf,
 }
 
 #[derive(Serialize)]

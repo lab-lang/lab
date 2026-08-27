@@ -51,8 +51,39 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
     let index_path = project.join(".lab/build/package.json");
     let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
+    assert_eq!(index["schema_version"], 3);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
+    assert_eq!(
+        index["capability_requirements"],
+        "capability_requirements.json"
+    );
+    let requirements: Value = serde_json::from_slice(
+        &std::fs::read(project.join(".lab/build/capability_requirements.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        requirements["schema_version"],
+        "lab.capability-requirements.v1"
+    );
+    assert_eq!(requirements["requirements"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        requirements["requirements"][0]["capability_kind"],
+        "https://draggon.org/ns/capability#ArtifactRealization"
+    );
+    assert_eq!(
+        requirements["requirements"][0]["minimum_qualification"],
+        "https://draggon.org/ns/facility#Plannable"
+    );
+    assert_eq!(
+        requirements["requirements"][0]["value_inputs"][0]["argument"],
+        "design"
+    );
+    assert!(
+        requirements["requirements"][0]
+            .get("parameter_constraints")
+            .is_none()
+    );
     assert!(project.join("lab.lock").is_file());
 
     let metadata = run(&["metadata", &project_text, "--json"]);

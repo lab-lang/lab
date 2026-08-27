@@ -1,5 +1,5 @@
 /// Recognizes an absolute IRI without pulling an RDF or URL stack into the language frontend.
-pub(crate) fn is_absolute_iri(value: &str) -> bool {
+pub fn is_absolute_iri(value: &str) -> bool {
     let Some((scheme, rest)) = value.split_once(':') else {
         return false;
     };

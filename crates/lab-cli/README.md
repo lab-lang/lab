@@ -19,7 +19,7 @@ lab check
 lab build
 ```
 
-`lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. `lab build` writes verified portable module IR plus a package index under `.lab/build/` and a deterministic `lab.lock` at the project root.
+`lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. `lab build` writes verified portable module IR, `capability_requirements.json`, and a package index under `.lab/build/`, plus a deterministic `lab.lock` at the project root. The requirement file describes checked workflow templates and contains no facility allocation.
 
 A `lab.toml` may instead declare a workspace, grouping member packages under one root:
 

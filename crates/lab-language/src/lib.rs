@@ -30,6 +30,7 @@ pub use diagnostics::{
     SourceId, analyze_module, analyze_module_in_environment, render_diagnostic,
 };
 pub use error::ParseError;
+pub use iri::is_absolute_iri;
 pub use material_flow::MaterialFlowError;
 pub use parser::parse_module;
 pub use render::render_checked_module;
