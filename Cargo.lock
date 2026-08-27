@@ -1741,6 +1741,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-inventory"
+version = "0.1.2"
+dependencies = [
+ "sbol-inventory",
+ "sbol3",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-language"
 version = "0.1.2"
 dependencies = [
@@ -2886,18 +2897,25 @@ dependencies = [
 [[package]]
 name = "sbol-core"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8ce81427537a371614e75990f4bd232529f8723194ee3f851da920485893cf"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=42806cdb708e2265f19aab668cf177c68f019846#42806cdb708e2265f19aab668cf177c68f019846"
 dependencies = [
  "sbol-rdf",
  "thiserror",
 ]
 
 [[package]]
+name = "sbol-inventory"
+version = "0.1.0"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=42806cdb708e2265f19aab668cf177c68f019846#42806cdb708e2265f19aab668cf177c68f019846"
+dependencies = [
+ "sbol3",
+ "thiserror",
+]
+
+[[package]]
 name = "sbol-ontology"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f96778ec4bf56dcdec299e44a5cda7b6b44f467fa0e123229596837493f5584c"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=42806cdb708e2265f19aab668cf177c68f019846#42806cdb708e2265f19aab668cf177c68f019846"
 dependencies = [
  "clap",
  "sha2",
@@ -2907,8 +2925,7 @@ dependencies = [
 [[package]]
 name = "sbol-rdf"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "319f0eb87a0386c973af337435f43eb64e970f1b118a0275564845d7f46f4a18"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=42806cdb708e2265f19aab668cf177c68f019846#42806cdb708e2265f19aab668cf177c68f019846"
 dependencies = [
  "oxjsonld",
  "oxrdf",
@@ -2919,8 +2936,7 @@ dependencies = [
 [[package]]
 name = "sbol-rulegen"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14fb61f94454a8c1d0491f19a67c21c578ddf4c1ec8fcda6e56fefaccb10fe68"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=42806cdb708e2265f19aab668cf177c68f019846#42806cdb708e2265f19aab668cf177c68f019846"
 dependencies = [
  "serde",
  "toml 1.1.4+spec-1.1.0",
@@ -2929,8 +2945,7 @@ dependencies = [
 [[package]]
 name = "sbol3"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80bf17db3038c3905c78c82d5200200cb5886c2f47bfd503bf3a53484fede5c7"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=42806cdb708e2265f19aab668cf177c68f019846#42806cdb708e2265f19aab668cf177c68f019846"
 dependencies = [
  "sbol-core",
  "sbol-ontology",
