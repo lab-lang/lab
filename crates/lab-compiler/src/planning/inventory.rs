@@ -33,15 +33,26 @@ impl BuildInventory {
         for declaration in modules.iter().flat_map(|module| module.declarations.iter()) {
             match declaration {
                 CheckedDeclaration::Catalog {
+                    name,
                     sbol_identity,
                     supplier_identity,
                     ..
-                } => insert_declaration(
-                    &mut materials,
-                    supplier_identity,
-                    sbol_identity.as_deref(),
-                    lots_by_component,
-                )?,
+                } => {
+                    insert_declaration(
+                        &mut materials,
+                        name,
+                        sbol_identity.as_deref(),
+                        lots_by_component,
+                    )?;
+                    if supplier_identity != name {
+                        insert_declaration(
+                            &mut materials,
+                            supplier_identity,
+                            sbol_identity.as_deref(),
+                            lots_by_component,
+                        )?;
+                    }
+                }
                 CheckedDeclaration::Artifact {
                     name,
                     sbol_identity,
@@ -141,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn binds_checked_design_iris_without_using_supplier_or_declaration_names_as_designs() {
+    fn binds_operational_aliases_to_one_exact_design_iri() {
         let checked = compile_module(
             r#"use std.bio.designs
 
@@ -167,14 +178,13 @@ build part product:
         };
         assert_eq!(inventory.facility, "https://example.org/inventory/facility");
         assert!(inventory.materials.contains_key("SKU-1"));
-        assert!(!inventory.materials.contains_key("source"));
-        assert_eq!(
-            inventory.materials["SKU-1"],
-            MaterialLotCandidates::Identified {
-                component: "https://example.org/inventory/input".to_owned(),
-                material_lots: vec!["https://example.org/inventory/input_lot".to_owned()],
-            }
-        );
+        assert!(inventory.materials.contains_key("source"));
+        let expected = MaterialLotCandidates::Identified {
+            component: "https://example.org/inventory/input".to_owned(),
+            material_lots: vec!["https://example.org/inventory/input_lot".to_owned()],
+        };
+        assert_eq!(inventory.materials["SKU-1"], expected);
+        assert_eq!(inventory.materials["source"], expected);
         assert_eq!(
             inventory.artifacts["product"],
             MaterialLotCandidates::Identified {
