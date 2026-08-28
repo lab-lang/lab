@@ -2,7 +2,7 @@
 //! concrete execution targets.
 //!
 //! Three layers live here. The contracts — [`Backend`], [`BackendEmitter`],
-//! [`BackendDescriptor`], [`TargetConstraintError`] — say what a backend is.
+//! [`AdapterDescriptor`], [`TargetConstraintError`] — say what a backend is.
 //! The modules beside them are planning that holds for any liquid handler and
 //! names no robot: provenance analysis over Protocol LAIR, projection into the
 //! target-independent build graph, SBS plate geometry and well allocation, the
@@ -17,8 +17,8 @@
 //! and concrete emitters. The language frontend and generic output renderers
 //! deliberately do not depend on any target module.
 
+mod adapters;
 mod constraints;
-mod descriptor;
 mod document;
 mod error;
 mod graph;
@@ -34,8 +34,12 @@ mod traits;
 mod typst;
 pub mod workcell;
 
+pub use adapters::{
+    ADAPTER_CATALOG_FORMAT, ADAPTER_PROFILE_SCHEMA_VERSION, AdapterCatalog, AdapterDescriptor,
+    AdapterProfileContractError, AdapterServices, ValidatedAdapterProfile, adapter_catalog,
+    default_adapter_profile, validate_adapter_profile,
+};
 pub use constraints::TargetConstraintError;
-pub use descriptor::{BackendDescriptor, BackendTarget};
 pub use target_profiles::{
     CAPABILITIES_FORMAT, KNOWN_BACKENDS, PROFILE_SCHEMA_VERSION, StationCapability,
     TargetCapabilitiesDocument, TargetCapability, TargetKind, TargetProfile,

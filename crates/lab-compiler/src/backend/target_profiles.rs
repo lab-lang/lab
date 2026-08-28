@@ -12,12 +12,12 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::backend::hamilton::star::StarTargetProfile;
 use crate::backend::hamilton::star::catalog::{CARRIERS, LABWARE, LabwareRole};
-use crate::backend::hamilton::star::{StarBackend, StarTargetProfile};
-use crate::backend::opentrons::flex::{FlexBackend, FlexTargetProfile};
-use crate::backend::opentrons::ot2::{Ot2Backend, Ot2TargetProfile};
+use crate::backend::opentrons::flex::FlexTargetProfile;
+use crate::backend::opentrons::ot2::Ot2TargetProfile;
 use crate::backend::workcell::{StationKind, WorkcellProfile};
-use crate::backend::{Backend, BackendDescriptor};
+use crate::backend::{AdapterDescriptor, adapter_catalog};
 
 pub const CAPABILITIES_FORMAT: &str = "lab.target-capabilities.v0";
 pub const PROFILE_SCHEMA_VERSION: &str = "lab.target-profile.v0";
@@ -134,6 +134,16 @@ impl TargetProfile {
 
 /// Describe every target and station kind this exact compiler binary provides.
 pub fn target_capabilities() -> Result<TargetCapabilitiesDocument, TargetProfileContractError> {
+    let adapters = adapter_catalog()
+        .map_err(|error| TargetProfileContractError::Serialize(error.to_string()))?
+        .adapters;
+    let adapter = |id: &str| {
+        adapters
+            .iter()
+            .find(|adapter| adapter.id == id)
+            .cloned()
+            .expect("the adapter registry contains every legacy machine target")
+    };
     Ok(TargetCapabilitiesDocument {
         format: CAPABILITIES_FORMAT,
         compiler_version: env!("CARGO_PKG_VERSION"),
@@ -141,17 +151,17 @@ pub fn target_capabilities() -> Result<TargetCapabilitiesDocument, TargetProfile
         targets: vec![
             liquid_handler_capability::<Ot2TargetProfile>(
                 "opentrons.ot2",
-                Ot2Backend::default().descriptor(),
+                adapter("opentrons.ot2"),
                 ot2_catalog(),
             )?,
             liquid_handler_capability::<FlexTargetProfile>(
                 "opentrons.flex",
-                FlexBackend::default().descriptor(),
+                adapter("opentrons.flex"),
                 flex_catalog(),
             )?,
             liquid_handler_capability::<StarTargetProfile>(
                 "hamilton.star",
-                StarBackend::default().descriptor(),
+                adapter("hamilton.star"),
                 star_catalog(),
             )?,
             TargetCapability {
@@ -259,30 +269,25 @@ pub fn parse_target_profile(
 
 fn liquid_handler_capability<T>(
     backend: &'static str,
-    descriptor: BackendDescriptor,
+    descriptor: AdapterDescriptor,
     catalog: Value,
 ) -> Result<TargetCapability, TargetProfileContractError>
 where
     T: JsonSchema,
 {
-    let target = descriptor
-        .targets
-        .into_iter()
-        .next()
-        .expect("each shipped machine backend has one target descriptor");
     Ok(TargetCapability {
         backend,
-        display_name: target.display_name,
+        display_name: descriptor.display_name,
         manufacturer: descriptor.manufacturer,
         kind: TargetKind::LiquidHandler,
-        capabilities: target.capabilities,
+        capabilities: descriptor.capabilities,
         schema: schema_value::<T>()?,
         default_profile: default_target_profile(backend, backend)?,
         catalog,
     })
 }
 
-fn schema_value<T: JsonSchema>() -> Result<Value, TargetProfileContractError> {
+pub(super) fn schema_value<T: JsonSchema>() -> Result<Value, TargetProfileContractError> {
     let mut schema = serde_json::to_value(schema_for!(T))
         .map_err(|error| TargetProfileContractError::Serialize(error.to_string()))?;
     sanitize_schema_defaults(&mut schema);

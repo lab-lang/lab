@@ -53,6 +53,8 @@ lab --json targets render targets/flex-bay-1.toml
 
 The shipped backends are `opentrons.ot2`, `opentrons.flex`, `hamilton.star`, and `workcell`. `describe` is the discovery authority for the exact compiler binary in use; consumers should not assume that list remains fixed.
 
+`lab adapters describe` is the facility-facing discovery authority. Its `lab.adapter-catalog.v1` output keeps semantic SBOLInventory capability IRIs separate from implementation features and declares accepted control modes, run-document formats, configuration schemas, and actual planning, simulation, and runtime support. `lab adapters validate <driver> <profile>` selects the parser from the explicit driver binding; manufacturer and model never select code.
+
 A package that usually compiles for one bench names it in the manifest instead of on every invocation:
 
 ```toml

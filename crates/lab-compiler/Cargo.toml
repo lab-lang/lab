@@ -29,6 +29,7 @@ hamilton-star.workspace = true
 lab-instruments.workspace = true
 lab-runfmt.workspace = true
 lab-language.workspace = true
+sbol-inventory.workspace = true
 opentrons-protocol.workspace = true
 pliron.workspace = true
 serde.workspace = true

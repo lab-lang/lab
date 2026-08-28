@@ -1,7 +1,5 @@
 use crate::ArtifactBundle;
 
-use crate::backend::BackendDescriptor;
-
 /// Typed compilation boundary implemented by a concrete robot backend.
 ///
 /// The generic input and associated program preserve backend-specific IRs. A
@@ -11,7 +9,6 @@ pub trait Backend<Input> {
     type Program;
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn descriptor(&self) -> BackendDescriptor;
     fn compile(&self, input: &Input) -> Result<Self::Program, Self::Error>;
 }
 

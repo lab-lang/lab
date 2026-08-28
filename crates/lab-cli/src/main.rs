@@ -1,3 +1,4 @@
+mod adapters;
 mod commands;
 mod run;
 mod targets;
@@ -65,6 +66,11 @@ enum Command {
         #[command(subcommand)]
         command: TargetsCommand,
     },
+    /// Discover, validate, and render asset-bound adapter profiles.
+    Adapters {
+        #[command(subcommand)]
+        command: AdaptersCommand,
+    },
     /// Execute an emitted run package — a Hamilton STAR package or a
     /// workcell wave — on the connected stations, or review it with
     /// --dry-run.
@@ -128,6 +134,27 @@ enum TargetsCommand {
     Render { path: PathBuf },
 }
 
+#[derive(Debug, Subcommand)]
+enum AdaptersCommand {
+    /// Describe every adapter implementation, or one driver in detail.
+    Describe {
+        /// Stable adapter ID such as `hamilton.star`.
+        #[arg(long)]
+        driver: Option<String>,
+    },
+    /// Print the complete reference profile for one adapter.
+    Default {
+        driver: String,
+        /// Profile filename stem used for validation metadata.
+        #[arg(long, default_value = "adapter")]
+        name: String,
+    },
+    /// Parse and semantically validate an adapter profile against an explicit driver.
+    Validate { driver: String, path: PathBuf },
+    /// Validate and print a complete canonical adapter profile.
+    Render { driver: String, path: PathBuf },
+}
+
 struct Output {
     json: bool,
 }
@@ -180,6 +207,12 @@ fn run() -> Result<()> {
             TargetsCommand::Default { backend, name } => targets::default(backend, name, &output),
             TargetsCommand::Validate { path } => targets::validate(path, &output),
             TargetsCommand::Render { path } => targets::render(path, &output),
+        },
+        Command::Adapters { command } => match command {
+            AdaptersCommand::Describe { driver } => adapters::describe(driver, &output),
+            AdaptersCommand::Default { driver, name } => adapters::default(driver, name, &output),
+            AdaptersCommand::Validate { driver, path } => adapters::validate(driver, path, &output),
+            AdaptersCommand::Render { driver, path } => adapters::render(driver, path, &output),
         },
         Command::Run {
             path,
@@ -269,6 +302,44 @@ mod tests {
             Command::Targets {
                 command: TargetsCommand::Default { backend, name }
             } if backend == "workcell" && name == "bench"
+        ));
+    }
+
+    #[test]
+    fn parses_adapter_contract_commands() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "adapters",
+            "describe",
+            "--driver",
+            "hamilton.star",
+            "--json",
+        ])
+        .unwrap();
+        assert!(cli.json);
+        assert!(matches!(
+            cli.command,
+            Command::Adapters {
+                command: AdaptersCommand::Describe {
+                    driver: Some(driver)
+                }
+            } if driver == "hamilton.star"
+        ));
+
+        let cli = Cli::try_parse_from([
+            "lab",
+            "adapters",
+            "validate",
+            "inheco.odtc",
+            "adapters/cycler.toml",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Adapters {
+                command: AdaptersCommand::Validate { driver, path }
+            } if driver == "inheco.odtc"
+                && path.as_path() == std::path::Path::new("adapters/cycler.toml")
         ));
     }
 
