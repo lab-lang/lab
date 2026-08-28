@@ -161,7 +161,7 @@ mod tests {
                     capability_kind: "https://example.org/LiquidHandling".to_owned(),
                     offering: "https://example.org/ot2/liquid-handling".to_owned(),
                 }],
-                output: PathBuf::from("lowerings/ot2/opentrons-ot2"),
+                output: PathBuf::from("assets/ot2"),
                 artifacts: vec![FacilityLoweredArtifact {
                     path: PathBuf::from("wave-001/protocol.py"),
                     media_type: "text/x-python".to_owned(),
@@ -178,7 +178,7 @@ mod tests {
         assert_eq!(reviewed[0].requirements, ["example::main/body[0]"]);
         assert_eq!(
             reviewed[0].artifacts[0].path,
-            "lowerings/ot2/opentrons-ot2/wave-001/protocol.py"
+            "assets/ot2/wave-001/protocol.py"
         );
         assert_eq!(
             reviewed[0].artifacts[0].role,

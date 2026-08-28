@@ -442,6 +442,8 @@ fn facility_lowering_emits_automation_protocols_for_every_wave() {
     if out_dir.exists() {
         std::fs::remove_dir_all(&out_dir).unwrap();
     }
+    std::fs::create_dir_all(out_dir.join("lowerings/stale")).unwrap();
+    std::fs::write(out_dir.join("lowerings/stale/protocol.py"), "stale").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
@@ -458,6 +460,7 @@ fn facility_lowering_emits_automation_protocols_for_every_wave() {
         "facility plan failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(!out_dir.join("lowerings").exists());
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "planned");
     // Planning names every runnable protocol, so a path can go straight into
@@ -583,6 +586,8 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         assert!(Path::new(path.as_str().unwrap()).is_file(), "{path}");
     }
     assert!(out_dir.join("plan.execution.json").is_file());
+    assert!(out_dir.join("assets/opentrons_ot2").is_dir());
+    assert!(!out_dir.join("lowerings").exists());
     assert!(out_dir.join("package.json").is_file());
     let index: Value =
         serde_json::from_slice(&std::fs::read(out_dir.join("package.json")).unwrap()).unwrap();
@@ -593,7 +598,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         index["facility"]["protocols"][0]
             .as_str()
             .unwrap()
-            .starts_with("lowerings/")
+            .starts_with("assets/opentrons_ot2/")
     );
 
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -611,8 +616,8 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         String::from_utf8_lossy(&human.stderr)
     );
     let printed = String::from_utf8(human.stdout).unwrap();
-    assert!(printed.contains("Adapter bundles:"), "{printed}");
-    assert!(printed.contains("opentrons-ot2"), "{printed}");
+    assert!(printed.contains("Asset bundles:"), "{printed}");
+    assert!(printed.contains("\n  assets/opentrons_ot2"), "{printed}");
     assert!(printed.contains("Automation protocols:"), "{printed}");
     assert!(printed.contains("assembly_protocol.py"), "{printed}");
     assert!(printed.contains("Documents:"), "{printed}");
@@ -689,6 +694,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     );
     assert_eq!(route["driver"], "opentrons.ot2");
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
+    assert_eq!(route["output"], "assets/opentrons_ot2");
     assert_eq!(route["requirements"].as_array().unwrap().len(), 6);
     let protocols = route["artifacts"]
         .as_array()

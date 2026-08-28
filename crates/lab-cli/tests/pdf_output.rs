@@ -1,4 +1,4 @@
-//! `lab plan` typesets every emitted protocol document to PDF, in-process
+//! Facility builds typeset every emitted protocol document to PDF, in-process
 //! and hermetically: fonts are embedded in the binary and the documents
 //! import only the bundled style sheet, so this runs offline everywhere.
 

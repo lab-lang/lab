@@ -109,6 +109,11 @@ pub(crate) fn lower_allocated_adapters(
             "facility allocation selects several whole-program lowerers ({routes}); these legacy backends cannot yet partition one program by requirement"
         );
     }
+    let mut lowering_directories = facility_lowering_directories(
+        lowerable
+            .iter()
+            .map(|((asset, driver, _, _), _, _)| (asset.as_str(), driver.as_str())),
+    );
 
     let mut routes = Vec::new();
     let mut protocols = Vec::new();
@@ -155,7 +160,9 @@ pub(crate) fn lower_allocated_adapters(
                     asset, driver
                 )
             })?;
-            let relative_output = facility_lowering_directory(&asset, &driver);
+            let relative_output = lowering_directories
+                .remove(&(asset.clone(), driver.clone()))
+                .expect("every lowerable Asset and adapter has an output directory");
             let written = write_facility_artifacts(
                 &bundle,
                 output_root,
@@ -216,29 +223,55 @@ fn semantic_build_inventory(
     .context("failed to bind checked designs to SBOLInventory MaterialLots")
 }
 
-fn facility_lowering_directory(asset: &str, driver: &str) -> PathBuf {
+fn facility_lowering_directories<'a>(
+    routes: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> BTreeMap<(String, String), PathBuf> {
+    let routes = routes
+        .into_iter()
+        .map(|(asset, driver)| (asset, driver, facility_asset_name(asset)))
+        .collect::<Vec<_>>();
+    let mut name_counts = BTreeMap::<String, usize>::new();
+    for (_, _, name) in &routes {
+        *name_counts.entry(name.clone()).or_default() += 1;
+    }
+    routes
+        .into_iter()
+        .map(|(asset, driver, name)| {
+            let directory = if name_counts[&name] == 1 {
+                name
+            } else {
+                let identity = format!("{asset}\0{driver}");
+                format!("{name}-{}", &sha256_hex(identity.as_bytes())[..8])
+            };
+            (
+                (asset.to_owned(), driver.to_owned()),
+                PathBuf::from("assets").join(directory),
+            )
+        })
+        .collect()
+}
+
+fn facility_asset_name(asset: &str) -> String {
     let raw_name = asset
         .rsplit(['/', '#'])
         .find(|segment| !segment.is_empty())
         .unwrap_or("asset");
-    let mut asset_name = raw_name
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
-    if asset_name.is_empty() {
-        asset_name.push_str("asset");
+    let mut name = String::new();
+    for character in raw_name.chars() {
+        if character.is_ascii_alphanumeric() {
+            name.push(character.to_ascii_lowercase());
+        } else if matches!(character, '-' | '_') {
+            name.push(character);
+        } else if !name.ends_with('-') {
+            name.push('-');
+        }
     }
-    let asset_hash = sha256_hex(asset.as_bytes());
-    let driver_name = driver.replace('.', "-");
-    PathBuf::from("lowerings")
-        .join(format!("{asset_name}-{}", &asset_hash[..12]))
-        .join(driver_name)
+    let name = name.trim_matches('-');
+    if name.is_empty() {
+        "asset".to_owned()
+    } else {
+        name.to_owned()
+    }
 }
 
 fn facility_lowering_id(asset: &str, driver: &str) -> String {
@@ -336,4 +369,45 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_unique_asset_gets_a_short_readable_directory() {
+        let directories = facility_lowering_directories([(
+            "https://example.org/facility/Opentrons_OT2",
+            "opentrons.ot2",
+        )]);
+
+        assert_eq!(
+            directories[&(
+                "https://example.org/facility/Opentrons_OT2".to_owned(),
+                "opentrons.ot2".to_owned()
+            )],
+            PathBuf::from("assets/opentrons_ot2")
+        );
+    }
+
+    #[test]
+    fn colliding_asset_names_get_only_the_hash_they_need() {
+        let directories = facility_lowering_directories([
+            ("https://example.org/room-a/reader", "reader.alpha"),
+            ("https://example.org/room-b/reader", "reader.beta"),
+        ]);
+        let first = &directories[&(
+            "https://example.org/room-a/reader".to_owned(),
+            "reader.alpha".to_owned(),
+        )];
+        let second = &directories[&(
+            "https://example.org/room-b/reader".to_owned(),
+            "reader.beta".to_owned(),
+        )];
+
+        assert_ne!(first, second);
+        assert!(first.to_string_lossy().starts_with("assets/reader-"));
+        assert!(second.to_string_lossy().starts_with("assets/reader-"));
+    }
 }

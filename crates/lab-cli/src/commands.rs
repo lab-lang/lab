@@ -257,16 +257,19 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
             human.push_str(&format!("\n  {} {}", product.kind, product.name));
         }
     }
-    human.push_str(&format!("\n\nCompiler output: {}", output_root.display()));
+    human.push_str(&format!(
+        "\n\nCompiler output: {}",
+        human_path(&output_root)
+    ));
     if let Some(facility) = &facility {
         human.push_str(&format!(
             "\n\nFacility outputs:\n  Facility: {}\n  Requirements allocated: {}\n  Adapter lowerings: {}\n  Allocation: {}\n  Lowering manifest: {}\n  Reviewed plan: {}",
             facility.facility,
             facility.allocated_requirements,
             facility.adapter_lowerings,
-            facility.allocation.display(),
-            facility.lowering.display(),
-            facility.execution_plan.display()
+            artifact_path(facility, &facility.allocation),
+            artifact_path(facility, &facility.lowering),
+            artifact_path(facility, &facility.execution_plan)
         ));
         append_facility_artifacts(&mut human, facility);
     }
@@ -319,13 +322,14 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
     };
     let planned = write_facility_plan(&project, &compiled, &output_root)?;
     let mut human = format!(
-        "Planned {} {} against {}\n  Requirements: {}\n  Adapter lowerings: {}\n  Reviewed plan: {}",
+        "Planned {} {} against {}\n  Requirements: {}\n  Adapter lowerings: {}\n  Plan output: {}\n  Reviewed plan: {}",
         planned.package,
         planned.version,
         planned.facility,
         planned.allocated_requirements,
         planned.adapter_lowerings,
-        planned.execution_plan.display()
+        human_path(&planned.output),
+        artifact_path(&planned, &planned.execution_plan)
     );
     append_facility_artifacts(&mut human, &planned);
     output.success("planned", planned, human)
@@ -371,6 +375,7 @@ fn write_facility_plan(
     .context("failed to allocate reachable requirements across the selected facility")?;
     fs::create_dir_all(output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
+    reset_facility_bundle_directories(output_root)?;
 
     let lowered = crate::facility_lowering::lower_allocated_adapters(
         package,
@@ -441,23 +446,67 @@ fn write_facility_plan(
 
 fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {
     if !planned.bundles.is_empty() {
-        human.push_str("\n\nAdapter bundles:");
+        human.push_str("\n\nAsset bundles:");
         for bundle in &planned.bundles {
-            human.push_str(&format!("\n  {}", bundle.display()));
+            human.push_str(&format!("\n  {}", artifact_path(planned, bundle)));
         }
     }
     if !planned.protocols.is_empty() {
         human.push_str("\n\nAutomation protocols:");
         for protocol in &planned.protocols {
-            human.push_str(&format!("\n  {}", protocol.display()));
+            human.push_str(&format!("\n  {}", artifact_path(planned, protocol)));
         }
     }
     if !planned.documents.is_empty() {
         human.push_str("\n\nDocuments:");
         for document in &planned.documents {
-            human.push_str(&format!("\n  {}", document.display()));
+            human.push_str(&format!("\n  {}", artifact_path(planned, document)));
         }
     }
+}
+
+fn artifact_path(planned: &PlanCompleted, path: &Path) -> String {
+    path.strip_prefix(&planned.output)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
+fn human_path(path: &Path) -> String {
+    let displayed = std::env::current_dir()
+        .ok()
+        .and_then(|current| path.strip_prefix(current).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| path.to_path_buf());
+    if displayed.as_os_str().is_empty() {
+        ".".to_owned()
+    } else {
+        displayed.display().to_string()
+    }
+}
+
+/// Replace only compiler-owned adapter bundle directories. The legacy
+/// `lowerings/` path is removed during migration so a successful rebuild never
+/// leaves an obsolete protocol beside the reviewed `assets/` bundle.
+fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
+    for name in ["assets", "lowerings"] {
+        let path = output_root.join(name);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
+            }
+        };
+        if !metadata.is_dir() {
+            bail!(
+                "refusing to replace managed facility output {} because it is not a directory",
+                path.display()
+            );
+        }
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("failed to replace {}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn build_facility_index(planned: &PlanCompleted, output_root: &Path) -> Result<BuildFacilityIndex> {
