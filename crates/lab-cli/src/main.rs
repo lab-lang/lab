@@ -42,7 +42,7 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Build a package into verified portable experiment artifacts.
+    /// Build verified experiment artifacts and specialize through a configured facility.
     Build {
         /// Package directory or any path inside a package.
         #[arg(default_value = ".")]
@@ -51,7 +51,7 @@ enum Command {
         #[arg(long)]
         out_dir: Option<PathBuf>,
     },
-    /// Bind reachable workflow requirements to one validated facility and write a reviewed plan.
+    /// Write only the reviewed facility plan and its adapter lowerings.
     Plan {
         /// Package directory or any path inside a package.
         #[arg(default_value = ".")]

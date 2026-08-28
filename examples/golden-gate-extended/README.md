@@ -5,11 +5,10 @@ A four-strain reporter panel written to exercise most of the language rather tha
 ```bash
 lab check
 lab build
-lab plan
-lab run .lab/plan --dry-run
+lab run .lab/build --dry-run
 ```
 
-`lab build` emits portable experiment artifacts. `lab plan` consumes `inventory/facility.ttl`, binds the reachable requirements across the exact Opentrons OT-2 and manual-workstation offerings, resolves the ordered reference plasmid through its exact MaterialLot, and derives five OT-2 protocols through the Asset's installed adapter.
+`lab build` emits portable experiment artifacts, consumes `inventory/facility.ttl`, binds the reachable requirements across the exact Opentrons OT-2 and manual-workstation offerings, resolves the ordered reference plasmid through its exact MaterialLot, and derives five OT-2 protocols and the operator PDFs through the Asset's installed adapter. It prints every emitted bundle, protocol, document, and reviewed-plan path.
 
 ## What it shows
 

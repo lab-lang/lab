@@ -11,7 +11,7 @@ use lab_compiler::{
 };
 use lab_inventory::InventorySnapshot;
 use lab_package::{LabPackage, PackageManifest};
-use lab_project::{CompiledModule, LOCK_FILE, LabProject};
+use lab_project::{CompiledModule, CompiledProject, LOCK_FILE, LabProject};
 use lab_runfmt::{EXECUTION_PLAN_FILE, ExecutionPlanDocument};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -210,8 +210,18 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         });
     }
 
+    let facility =
+        if package.manifest.inventory.document.is_some() && package.entry_source().is_some() {
+            Some(write_facility_plan(&project, &compiled, &output_root)?)
+        } else {
+            None
+        };
+    let facility_index = facility
+        .as_ref()
+        .map(|planned| build_facility_index(planned, &output_root))
+        .transpose()?;
     let index = BuildIndex {
-        schema_version: 5,
+        schema_version: 6,
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         edition: package.manifest.package.edition.clone(),
@@ -221,6 +231,7 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         capability_requirements: capability_requirements_artifact,
         capability_instances: capability_instances_artifact,
         adapter_bindings: adapter_bindings_artifact,
+        facility: facility_index,
     };
     let index_path = output_root.join("package.json");
     let mut json = serde_json::to_string_pretty(&index)?;
@@ -247,6 +258,18 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         }
     }
     human.push_str(&format!("\n\nCompiler output: {}", output_root.display()));
+    if let Some(facility) = &facility {
+        human.push_str(&format!(
+            "\n\nFacility outputs:\n  Facility: {}\n  Requirements allocated: {}\n  Adapter lowerings: {}\n  Allocation: {}\n  Lowering manifest: {}\n  Reviewed plan: {}",
+            facility.facility,
+            facility.allocated_requirements,
+            facility.adapter_lowerings,
+            facility.allocation.display(),
+            facility.lowering.display(),
+            facility.execution_plan.display()
+        ));
+        append_facility_artifacts(&mut human, facility);
+    }
     output.success(
         "built",
         BuildCompleted {
@@ -255,6 +278,7 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
             modules: index.modules.len(),
             output: output_root.clone(),
             products,
+            facility,
         },
         human,
     )
@@ -287,6 +311,31 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     let compiled = project.compile()?;
+    let project_root = project.root();
+    let output_root = match out_dir {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => project_root.join(path),
+        None => project_root.join(".lab").join("plan"),
+    };
+    let planned = write_facility_plan(&project, &compiled, &output_root)?;
+    let mut human = format!(
+        "Planned {} {} against {}\n  Requirements: {}\n  Adapter lowerings: {}\n  Reviewed plan: {}",
+        planned.package,
+        planned.version,
+        planned.facility,
+        planned.allocated_requirements,
+        planned.adapter_lowerings,
+        planned.execution_plan.display()
+    );
+    append_facility_artifacts(&mut human, &planned);
+    output.success("planned", planned, human)
+}
+
+fn write_facility_plan(
+    project: &LabProject,
+    compiled: &CompiledProject,
+    output_root: &Path,
+) -> Result<PlanCompleted> {
     let package = project.default_package();
     let entry = package.entry_source().with_context(|| {
         format!(
@@ -320,13 +369,7 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         adapter_bindings.as_ref(),
     )
     .context("failed to allocate reachable requirements across the selected facility")?;
-    let project_root = project.root();
-    let output_root = match out_dir {
-        Some(path) if path.is_absolute() => path,
-        Some(path) => project_root.join(path),
-        None => project_root.join(".lab").join("plan"),
-    };
-    fs::create_dir_all(&output_root)
+    fs::create_dir_all(output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
 
     let lowered = crate::facility_lowering::lower_allocated_adapters(
@@ -335,7 +378,7 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         &inventory,
         &allocation,
         adapter_bindings.as_ref(),
-        &output_root,
+        output_root,
     )?;
     let inventory_document = staged_inventory_name(&inventory)?;
     let reviewed_lowerings = reviewed_lowering_bundles(&lowered.manifest)
@@ -348,7 +391,7 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         },
     )
     .context("failed to construct the reviewed execution plan")?;
-    stage_execution_inputs(package, &inventory, &mut execution_plan, &output_root)?;
+    stage_execution_inputs(package, &inventory, &mut execution_plan, output_root)?;
     execution_plan.lowerings = reviewed_lowerings;
     execution_plan
         .validate()
@@ -371,44 +414,85 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         None
     };
 
-    let mut human = format!(
-        "Planned {} {} against {}\n  Requirements: {}\n  Adapter lowerings: {}\n  Reviewed plan: {}",
-        package.manifest.package.name,
-        package.manifest.package.version,
-        allocation.facility,
-        allocation.allocations.len(),
-        lowered.manifest.routes.len(),
-        execution_plan_path.display()
-    );
-    if !lowered.protocols.is_empty() {
+    let bundles = lowered
+        .manifest
+        .routes
+        .iter()
+        .map(|route| output_root.join(&route.output))
+        .collect();
+    Ok(PlanCompleted {
+        package: package.manifest.package.name.clone(),
+        version: package.manifest.package.version.clone(),
+        output: output_root.to_path_buf(),
+        facility: allocation.facility.clone(),
+        allocated_requirements: allocation.allocations.len(),
+        adapter_lowerings: lowered.manifest.routes.len(),
+        requirements: requirements_path,
+        instances: instances_path,
+        adapter_bindings: adapter_bindings_path,
+        allocation: allocation_path,
+        lowering: lowering_path,
+        execution_plan: execution_plan_path,
+        bundles,
+        protocols: lowered.protocols,
+        documents: lowered.documents,
+    })
+}
+
+fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {
+    if !planned.bundles.is_empty() {
+        human.push_str("\n\nAdapter bundles:");
+        for bundle in &planned.bundles {
+            human.push_str(&format!("\n  {}", bundle.display()));
+        }
+    }
+    if !planned.protocols.is_empty() {
         human.push_str("\n\nAutomation protocols:");
-        for protocol in &lowered.protocols {
+        for protocol in &planned.protocols {
             human.push_str(&format!("\n  {}", protocol.display()));
         }
     }
-    if !lowered.documents.is_empty() {
+    if !planned.documents.is_empty() {
         human.push_str("\n\nDocuments:");
-        for document in &lowered.documents {
+        for document in &planned.documents {
             human.push_str(&format!("\n  {}", document.display()));
         }
     }
-    output.success(
-        "planned",
-        PlanCompleted {
-            package: package.manifest.package.name.clone(),
-            version: package.manifest.package.version.clone(),
-            output: output_root,
-            requirements: requirements_path,
-            instances: instances_path,
-            adapter_bindings: adapter_bindings_path,
-            allocation: allocation_path,
-            lowering: lowering_path,
-            execution_plan: execution_plan_path,
-            protocols: lowered.protocols,
-            documents: lowered.documents,
-        },
-        human,
-    )
+}
+
+fn build_facility_index(planned: &PlanCompleted, output_root: &Path) -> Result<BuildFacilityIndex> {
+    let relative = |path: &Path| {
+        path.strip_prefix(output_root)
+            .map(Path::to_path_buf)
+            .with_context(|| {
+                format!(
+                    "facility artifact {} is outside build output {}",
+                    path.display(),
+                    output_root.display()
+                )
+            })
+    };
+    Ok(BuildFacilityIndex {
+        facility: planned.facility.clone(),
+        allocation: relative(&planned.allocation)?,
+        lowering: relative(&planned.lowering)?,
+        execution_plan: relative(&planned.execution_plan)?,
+        bundles: planned
+            .bundles
+            .iter()
+            .map(|path| relative(path))
+            .collect::<Result<Vec<_>>>()?,
+        protocols: planned
+            .protocols
+            .iter()
+            .map(|path| relative(path))
+            .collect::<Result<Vec<_>>>()?,
+        documents: planned
+            .documents
+            .iter()
+            .map(|path| relative(path))
+            .collect::<Result<Vec<_>>>()?,
+    })
 }
 
 pub(crate) fn metadata(path: PathBuf, output: &Output) -> Result<()> {
@@ -620,6 +704,8 @@ struct BuildCompleted {
     modules: usize,
     output: PathBuf,
     products: Vec<BuildProduct>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    facility: Option<PlanCompleted>,
 }
 
 #[derive(Serialize)]
@@ -635,6 +721,9 @@ struct PlanCompleted {
     package: String,
     version: String,
     output: PathBuf,
+    facility: String,
+    allocated_requirements: usize,
+    adapter_lowerings: usize,
     requirements: PathBuf,
     instances: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -642,6 +731,7 @@ struct PlanCompleted {
     allocation: PathBuf,
     lowering: PathBuf,
     execution_plan: PathBuf,
+    bundles: Vec<PathBuf>,
     protocols: Vec<PathBuf>,
     documents: Vec<PathBuf>,
 }
@@ -673,6 +763,19 @@ struct BuildIndex {
     capability_instances: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     adapter_bindings: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    facility: Option<BuildFacilityIndex>,
+}
+
+#[derive(Serialize)]
+struct BuildFacilityIndex {
+    facility: String,
+    allocation: PathBuf,
+    lowering: PathBuf,
+    execution_plan: PathBuf,
+    bundles: Vec<PathBuf>,
+    protocols: Vec<PathBuf>,
+    documents: Vec<PathBuf>,
 }
 
 #[derive(Serialize)]

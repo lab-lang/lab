@@ -41,6 +41,8 @@ A completed live run writes a new `inventory-after.ttl`; a completed simulation 
 
 The workcell target, station taxonomy, `lab.workcell-run.v0`, workcell runtime, independent single-device target profiles, `[build] target`, `lab build --target`, and `lab targets` are removed. Device backends are reachable through explicit Asset-to-adapter bindings only after facility allocation.
 
+For a runnable package that selects an inventory document, `lab build` performs that allocation and adapter lowering after portable compilation and writes the reviewed plan beside the portable artifacts. `lab plan` exposes the identical facility phase separately; it is not another target-selection mechanism.
+
 ## Consequences
 
 - Facility composition is open to any conformant SBOLInventory graph rather than a closed product or station enum.

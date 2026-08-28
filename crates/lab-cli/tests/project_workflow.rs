@@ -70,9 +70,13 @@ fn new_check_build_and_metadata_form_one_project_loop() {
         build_output.contains("Build products:\n  plasmid starter"),
         "{build_output}"
     );
+    assert!(
+        !build_output.contains("Facility outputs:"),
+        "{build_output}"
+    );
     let index_path = project.join(".lab/build/package.json");
     let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
-    assert_eq!(index["schema_version"], 5);
+    assert_eq!(index["schema_version"], 6);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
     assert_eq!(
@@ -80,6 +84,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
         "capability_requirements.json"
     );
     assert_eq!(index["capability_instances"], "capability_instances.json");
+    assert!(index.get("facility").is_none());
     let requirements: Value = serde_json::from_slice(
         &std::fs::read(project.join(".lab/build/capability_requirements.json")).unwrap(),
     )
@@ -340,11 +345,27 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     );
     std::fs::write(&manifest, text).unwrap();
     std::fs::create_dir(project.join("inventory")).unwrap();
-    std::fs::write(
-        project.join("inventory/catalog.ttl"),
+    let inventory = format!(
+        "{}\n{}",
         include_str!("fixtures/minimal-inventory.ttl"),
-    )
-    .unwrap();
+        r#"ex:operator a sbol:TopLevel, fac:Asset ;
+    sbol:displayId "operator" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ;
+    fac:facility ex:facility ;
+    fac:assetKind fac:Workstation ;
+    fac:locatedIn ex:room ;
+    fac:isActive true ;
+    fac:capability <https://example.org/sbolinventory/operator/artifact_realization> .
+
+<https://example.org/sbolinventory/operator/artifact_realization>
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "artifact_realization" ;
+    fac:capabilityKind cap:ArtifactRealization ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true ."#,
+    );
+    std::fs::write(project.join("inventory/catalog.ttl"), inventory).unwrap();
     std::fs::create_dir(project.join("adapters")).unwrap();
     std::fs::write(project.join("adapters/cycler.toml"), "").unwrap();
 
@@ -364,8 +385,12 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     let index: Value =
         serde_json::from_slice(&std::fs::read(project.join(".lab/build/package.json")).unwrap())
             .unwrap();
-    assert_eq!(index["schema_version"], 5);
+    assert_eq!(index["schema_version"], 6);
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
+    assert_eq!(
+        index["facility"]["facility"],
+        "https://example.org/sbolinventory/facility"
+    );
     let bindings: Value = serde_json::from_slice(
         &std::fs::read(project.join(".lab/build/adapter_bindings.json")).unwrap(),
     )
@@ -491,13 +516,13 @@ fn facility_lowering_emits_automation_protocols_for_every_wave() {
 }
 
 #[test]
-fn build_stays_portable_when_a_package_describes_an_operational_facility() {
+fn build_emits_facility_selected_protocol_bundles_and_documents() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
         .unwrap();
     let out_dir = std::env::temp_dir().join(format!(
-        "lab-golden-gate-portable-build-{}-{}",
+        "lab-golden-gate-facility-build-{}-{}",
         std::process::id(),
         line!()
     ));
@@ -517,7 +542,7 @@ fn build_stays_portable_when_a_package_describes_an_operational_facility() {
         .unwrap();
     assert!(
         built.status.success(),
-        "portable build failed: {}",
+        "facility build failed: {}",
         String::from_utf8_lossy(&built.stderr)
     );
     let result: Value = serde_json::from_slice(&built.stdout).unwrap();
@@ -541,11 +566,57 @@ fn build_stays_portable_when_a_package_describes_an_operational_facility() {
             "composite_strain_4",
         ]
     );
-    assert!(!out_dir.join("opentrons-ot2").exists());
+    let facility = &result["result"]["facility"];
+    assert_eq!(
+        facility["facility"],
+        "https://example.org/golden-gate/facility"
+    );
+    assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
+    assert_eq!(facility["protocols"].as_array().unwrap().len(), 3);
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 4);
+    for path in facility["protocols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(facility["documents"].as_array().unwrap())
+    {
+        assert!(Path::new(path.as_str().unwrap()).is_file(), "{path}");
+    }
+    assert!(out_dir.join("plan.execution.json").is_file());
     assert!(out_dir.join("package.json").is_file());
     let index: Value =
         serde_json::from_slice(&std::fs::read(out_dir.join("package.json")).unwrap()).unwrap();
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
+    assert_eq!(index["schema_version"], 6);
+    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 3);
+    assert!(
+        index["facility"]["protocols"][0]
+            .as_str()
+            .unwrap()
+            .starts_with("lowerings/")
+    );
+
+    let human = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        human.status.success(),
+        "facility build failed: {}",
+        String::from_utf8_lossy(&human.stderr)
+    );
+    let printed = String::from_utf8(human.stdout).unwrap();
+    assert!(printed.contains("Adapter bundles:"), "{printed}");
+    assert!(printed.contains("opentrons-ot2"), "{printed}");
+    assert!(printed.contains("Automation protocols:"), "{printed}");
+    assert!(printed.contains("assembly_protocol.py"), "{printed}");
+    assert!(printed.contains("Documents:"), "{printed}");
+    assert!(printed.contains("dependency_report.pdf"), "{printed}");
 
     std::fs::remove_dir_all(out_dir).unwrap();
 }
