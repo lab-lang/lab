@@ -3,6 +3,7 @@
 mod adapters;
 mod allocation;
 mod capability;
+mod execution;
 mod inventory;
 mod model;
 mod resolution;
@@ -25,6 +26,9 @@ pub use capability::{
     CapabilityRequirements, CapabilityValueInput, CapabilityValueOutput, ParameterRelation,
     RequirementControlMode, RequirementQualification, StatementBlock, StatementPathSegment,
     WorkflowCallSite, WorkflowIdentity,
+};
+pub use execution::{
+    ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,
 };
 pub use inventory::BuildInventoryError;
 pub use model::{
