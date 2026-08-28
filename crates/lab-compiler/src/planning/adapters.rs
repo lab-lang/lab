@@ -3,14 +3,14 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use lab_inventory::{FacilityAssetError, InventorySnapshot};
+use lab_inventory::{FacilityAssetError, FacilityScalarValue, InventorySnapshot};
 use sbol_inventory::vocabulary::Qualification;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::backend::{AdapterServices, ValidatedAdapterProfile, adapter_catalog};
 
-pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v1";
+pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v2";
 
 #[derive(Clone, Debug)]
 pub struct AdapterBindingRequest {
@@ -77,6 +77,40 @@ impl AdapterBindingSnapshot {
                     capability_kind: offering.capability_kind.as_str().to_owned(),
                     qualification: offering.qualification.iri().to_owned(),
                     control_mode: offering.control_mode.iri().to_owned(),
+                    parameters: offering
+                        .parameters
+                        .iter()
+                        .map(|parameter| BoundCapabilityParameter {
+                            parameter: parameter.identity.as_str().to_owned(),
+                            property_kind: parameter.property_kind.as_str().to_owned(),
+                            value: match &parameter.value {
+                                FacilityScalarValue::Text(value) => {
+                                    BoundCapabilityParameterValue::Text {
+                                        value: value.clone(),
+                                    }
+                                }
+                                FacilityScalarValue::Integer(value) => {
+                                    BoundCapabilityParameterValue::Integer {
+                                        value: value.clone(),
+                                    }
+                                }
+                                FacilityScalarValue::Real(value) => {
+                                    BoundCapabilityParameterValue::Real {
+                                        value: value.clone(),
+                                    }
+                                }
+                                FacilityScalarValue::Boolean(value) => {
+                                    BoundCapabilityParameterValue::Boolean { value: *value }
+                                }
+                                FacilityScalarValue::Iri(value) => {
+                                    BoundCapabilityParameterValue::Iri {
+                                        value: value.as_str().to_owned(),
+                                    }
+                                }
+                            },
+                            unit: parameter.unit.as_ref().map(|unit| unit.as_str().to_owned()),
+                        })
+                        .collect(),
                     effectively_active: offering.effectively_active,
                     planning_eligible: offering.effectively_active
                         && descriptor.services.planning
@@ -140,10 +174,32 @@ pub struct BoundCapabilityOffering {
     pub capability_kind: String,
     pub qualification: String,
     pub control_mode: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<BoundCapabilityParameter>,
     pub effectively_active: bool,
     pub planning_eligible: bool,
     pub simulation_eligible: bool,
     pub execution_eligible: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundCapabilityParameter {
+    pub parameter: String,
+    pub property_kind: String,
+    #[serde(flatten)]
+    pub value: BoundCapabilityParameterValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "value_type", rename_all = "snake_case")]
+pub enum BoundCapabilityParameterValue {
+    Text { value: String },
+    Integer { value: String },
+    Real { value: String },
+    Boolean { value: bool },
+    Iri { value: String },
 }
 
 #[derive(Debug, Error)]
@@ -210,7 +266,11 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
 <https://example.org/facility/star/liquid_handling>
     a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid_handling" ;
     fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Plannable ;
-    fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
+    fac:controlMode fac:ReviewedFileControl ; fac:isActive true ;
+    fac:parameter <https://example.org/facility/star/liquid_handling/plate_wells> .
+<https://example.org/facility/star/liquid_handling/plate_wells>
+    a sbol:Identified, fac:PropertyValue ; sbol:displayId "plate_wells" ;
+    fac:propertyKind cap:SupportedPlateWells ; fac:integerValue 96 .
 "#;
 
     fn inventory(contents: &str) -> (TempDir, InventorySnapshot) {
@@ -248,6 +308,17 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         assert_eq!(
             offering.offering,
             "https://example.org/facility/star/liquid_handling"
+        );
+        assert_eq!(offering.parameters.len(), 1);
+        assert_eq!(
+            offering.parameters[0].property_kind,
+            "https://draggon.org/ns/capability#SupportedPlateWells"
+        );
+        assert_eq!(
+            offering.parameters[0].value,
+            BoundCapabilityParameterValue::Integer {
+                value: "96".to_owned()
+            }
         );
         assert!(offering.planning_eligible);
         assert!(!offering.simulation_eligible);

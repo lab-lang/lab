@@ -8,7 +8,8 @@ mod resolution;
 
 pub use adapters::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
-    AdapterBindingSnapshot, BoundCapabilityOffering, ResolvedAdapterBinding,
+    AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
+    BoundCapabilityParameterValue, ResolvedAdapterBinding,
 };
 pub use capability::{
     CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION, CAPABILITY_REQUIREMENTS_SCHEMA_VERSION,

@@ -211,7 +211,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         &std::fs::read(project.join(".lab/build/adapter_bindings.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v1");
+    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v2");
     assert_eq!(
         bindings["facility"],
         "https://example.org/sbolinventory/facility"

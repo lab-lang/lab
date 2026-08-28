@@ -5,7 +5,9 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use sbol_inventory::vocabulary::{ControlMode, Qualification};
-use sbol_inventory::{CandidateQuery, InventoryDocument, InventoryValidationReport};
+use sbol_inventory::{
+    CandidateQuery, InventoryDocument, InventoryValidationReport, ScalarValueRef,
+};
 use sbol3::{Iri, RdfFormat, ReadError, Resource};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -45,8 +47,28 @@ pub struct FacilityCapabilityOffering {
     pub capability_kind: Iri,
     pub qualification: Qualification,
     pub control_mode: ControlMode,
+    pub parameters: Vec<FacilityCapabilityParameter>,
     /// True only when both the offering and its complete Asset/Zone containment chain are active.
     pub effectively_active: bool,
+}
+
+/// One exact typed parameter owned by a capability offering.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FacilityCapabilityParameter {
+    pub identity: Iri,
+    pub property_kind: Iri,
+    pub value: FacilityScalarValue,
+    pub unit: Option<Iri>,
+}
+
+/// The five scalar value forms allowed by SBOLInventory Profile 0.2.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FacilityScalarValue {
+    Text(String),
+    Integer(String),
+    Real(String),
+    Boolean(bool),
+    Iri(Iri),
 }
 
 impl MaterialLotCatalog {
@@ -234,6 +256,38 @@ impl InventorySnapshot {
             let control_mode = offering
                 .control_mode()
                 .expect("validated offerings have a known control mode");
+            let mut parameters = Vec::new();
+            for parameter in offering.parameters() {
+                let parameter_identity =
+                    parameter.identity().as_iri().cloned().ok_or_else(|| {
+                        FacilityAssetError::NonIriCapabilityParameter {
+                            offering: offering.identity().clone(),
+                            parameter: parameter.identity().clone(),
+                        }
+                    })?;
+                let value = match parameter
+                    .value()
+                    .expect("validated PropertyValues have exactly one typed value")
+                {
+                    ScalarValueRef::Text(value) => FacilityScalarValue::Text(value.to_owned()),
+                    ScalarValueRef::Integer(value) => {
+                        FacilityScalarValue::Integer(value.to_owned())
+                    }
+                    ScalarValueRef::Real(value) => FacilityScalarValue::Real(value.to_owned()),
+                    ScalarValueRef::Boolean(value) => FacilityScalarValue::Boolean(value),
+                    ScalarValueRef::Iri(value) => FacilityScalarValue::Iri(value.clone()),
+                };
+                parameters.push(FacilityCapabilityParameter {
+                    identity: parameter_identity,
+                    property_kind: parameter
+                        .kind()
+                        .expect("validated PropertyValues have one property kind")
+                        .clone(),
+                    value,
+                    unit: parameter.unit().cloned(),
+                });
+            }
+            parameters.sort_by(|left, right| left.identity.cmp(&right.identity));
             let query = CandidateQuery::new(capability_kind.clone(), Qualification::Discovered)
                 .within_facility(self.facility.clone());
             let effectively_active =
@@ -249,6 +303,7 @@ impl InventorySnapshot {
                 capability_kind,
                 qualification,
                 control_mode,
+                parameters,
                 effectively_active,
             });
         }
@@ -310,6 +365,11 @@ pub enum FacilityAssetError {
         asset: Resource,
         reference: FacilityAssetReference,
         value: Resource,
+    },
+    #[error("capability offering `{offering}` owns non-IRI parameter `{parameter}`")]
+    NonIriCapabilityParameter {
+        offering: Resource,
+        parameter: Resource,
     },
 }
 
@@ -488,6 +548,7 @@ mod tests {
 @prefix ex: <https://example.org/sbolinventory/> .
 @prefix fac: <https://draggon.org/ns/facility#> .
 @prefix sbol: <http://sbols.org/v3#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:name "Example facility" .
@@ -501,7 +562,12 @@ ex:cycler a sbol:TopLevel, fac:Asset ; sbol:displayId "cycler" ;
 <https://example.org/sbolinventory/cycler/thermal_cycling>
     a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "thermal_cycling" ;
     fac:capabilityKind cap:ThermalCycling ; fac:qualification fac:Plannable ;
-    fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
+    fac:controlMode fac:ReviewedFileControl ; fac:isActive true ;
+    fac:parameter <https://example.org/sbolinventory/cycler/thermal_cycling/temperature> .
+<https://example.org/sbolinventory/cycler/thermal_cycling/temperature>
+    a sbol:Identified, fac:PropertyValue ; sbol:displayId "temperature" ;
+    fac:propertyKind cap:Temperature ; fac:realValue "37.0"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
 "#;
 
     fn write_inventory(root: &Path, contents: &str) {
@@ -664,6 +730,23 @@ ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
         );
         assert_eq!(offering.qualification, Qualification::Plannable);
         assert_eq!(offering.control_mode, ControlMode::ReviewedFile);
+        assert_eq!(offering.parameters.len(), 1);
+        assert_eq!(
+            offering.parameters[0].identity.as_str(),
+            "https://example.org/sbolinventory/cycler/thermal_cycling/temperature"
+        );
+        assert_eq!(
+            offering.parameters[0].property_kind.as_str(),
+            "https://draggon.org/ns/capability#Temperature"
+        );
+        assert_eq!(
+            offering.parameters[0].value,
+            FacilityScalarValue::Real("37.0".to_owned())
+        );
+        assert_eq!(
+            offering.parameters[0].unit.as_ref().map(Iri::as_str),
+            Some("http://qudt.org/vocab/unit/DEG_C")
+        );
         assert!(offering.effectively_active);
     }
 
