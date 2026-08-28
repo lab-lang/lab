@@ -21,6 +21,8 @@ lab build
 
 `lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. `lab build` writes verified portable module IR, `capability_requirements.json`, `capability_instances.json` for runnable packages, an optional `adapter_bindings.json`, and a package index under `.lab/build/`, plus a deterministic `lab.lock` at the project root. The requirement file describes every checked workflow template and contains no facility allocation. The instance file expands only templates reachable from the exact entry module's `main` workflow, preserves every resolved workflow call site, and rejects recursive expansion rather than inventing a finite run. The adapter-binding file freezes exact Asset, compatible CapabilityOffering, profile-hash, qualification, control-mode, and service-eligibility facts but does not allocate a workflow requirement.
 
+`lab plan` requires an SBOLInventory document, applies the package's exact facility selector, allocates every reachable capability instance to one exact offering and Asset, and writes `facility_allocation.json` plus a validated `plan.execution.json` under `.lab/plan/`. Candidate ordering never chooses an asset: zero eligible offerings is an explained failure, and several eligible offerings require an explicit allocation policy. A planning-only or manual facility needs no adapter declaration. When one compatible planning adapter is configured, its exact driver and profile hash are frozen into the reviewed plan.
+
 A `lab.toml` may instead declare a workspace, grouping member packages under one root:
 
 ```toml

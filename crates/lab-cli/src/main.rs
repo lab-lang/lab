@@ -61,6 +61,15 @@ enum Command {
         #[arg(long, conflicts_with = "target")]
         no_target: bool,
     },
+    /// Bind reachable workflow requirements to one validated facility and write a reviewed plan.
+    Plan {
+        /// Package directory or any path inside a package.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Plan artifact directory, relative to the project root unless absolute.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
     /// Discover, validate, and render compiler-owned target profiles.
     Targets {
         #[command(subcommand)]
@@ -202,6 +211,7 @@ fn run() -> Result<()> {
             target,
             no_target,
         } => commands::build(path, out_dir, target, no_target, &output),
+        Command::Plan { path, out_dir } => commands::plan(path, out_dir, &output),
         Command::Targets { command } => match command {
             TargetsCommand::Describe { backend } => targets::describe(backend, &output),
             TargetsCommand::Default { backend, name } => targets::default(backend, name, &output),
@@ -259,6 +269,17 @@ mod tests {
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
                     && target.as_deref() == Some("opentrons-ot2")
                     && !no_target
+        ));
+    }
+
+    #[test]
+    fn parses_facility_plan_options() {
+        let cli = Cli::try_parse_from(["lab", "plan", "project", "--out-dir", "review"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Plan { path, out_dir }
+                if path.as_path() == std::path::Path::new("project")
+                    && out_dir.as_deref() == Some(std::path::Path::new("review"))
         ));
     }
 

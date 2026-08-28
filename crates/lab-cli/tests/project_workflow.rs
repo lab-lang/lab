@@ -119,6 +119,101 @@ fn new_check_build_and_metadata_form_one_project_loop() {
 }
 
 #[test]
+fn plan_binds_reachable_requirements_to_an_exact_facility_offering() {
+    let project = temporary_project();
+    std::fs::create_dir_all(project.join("src/programs")).unwrap();
+    std::fs::create_dir_all(project.join("inventory")).unwrap();
+    std::fs::write(
+        project.join("lab.toml"),
+        r#"[package]
+name = "facility-plan"
+version = "0.1.0"
+edition = "2026"
+
+[build]
+entry = "src/programs/main.lab"
+
+[inventory]
+document = "inventory/catalog.ttl"
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("src/programs/main.lab"),
+        r#"use std.bio.build
+use std.bio.designs
+
+plasmid starter:
+  sequence = dna("ATGC")
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow main() -> Material<Plasmid>:
+  product <- realize starter
+  return product
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("inventory/catalog.ttl"),
+        r#"@prefix cap: <https://draggon.org/ns/capability#> .
+@prefix ex: <https://example.org/facility/> .
+@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix sbol: <http://sbols.org/v3#> .
+
+ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
+    sbol:hasNamespace <https://example.org/facility> .
+ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
+    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    fac:zoneKind fac:Room ; fac:isActive true .
+ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
+    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    fac:assetKind fac:Workstation ; fac:locatedIn ex:room ; fac:isActive true ;
+    fac:capability <https://example.org/facility/operator/realization> .
+<https://example.org/facility/operator/realization>
+    a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "realization" ;
+    fac:capabilityKind cap:ArtifactRealization ; fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ; fac:isActive true .
+"#,
+    )
+    .unwrap();
+    let project_text = project.to_string_lossy().into_owned();
+
+    let planned = run(&["plan", &project_text]);
+
+    assert!(
+        planned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    let allocation: Value = serde_json::from_slice(
+        &std::fs::read(project.join(".lab/plan/facility_allocation.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(allocation["schema_version"], "lab.facility-allocation.v1");
+    assert_eq!(
+        allocation["allocations"][0]["offering"],
+        "https://example.org/facility/operator/realization"
+    );
+    assert_eq!(
+        allocation["allocations"][0]["asset"],
+        "https://example.org/facility/operator"
+    );
+    assert!(allocation["allocations"][0].get("adapter").is_none());
+    let plan: Value = serde_json::from_slice(
+        &std::fs::read(project.join(".lab/plan/plan.execution.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(plan["format"], "lab.execution-plan.v1");
+    assert_eq!(plan["requirements"].as_array().unwrap().len(), 1);
+    assert_eq!(plan["nodes"][0]["action"], "execute");
+    assert_eq!(
+        plan["nodes"][0]["requirement"],
+        plan["requirements"][0]["requirement_instance"]
+    );
+}
+
+#[test]
 fn registry_dependencies_fail_closed_without_being_ignored() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();

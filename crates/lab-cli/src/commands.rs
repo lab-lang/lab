@@ -4,13 +4,17 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use lab_compiler::backend::hamilton::star::StarTargetProfile;
 use lab_compiler::backend::{TargetProfile, parse_target_profile};
-use lab_compiler::planning::{BuildInventory, CapabilityRequirements};
+use lab_compiler::planning::{
+    BuildInventory, CapabilityRequirements, ExecutionPlanOptions, FacilityAllocation,
+    build_execution_plan,
+};
 use lab_compiler::{
     DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
 };
 use lab_inventory::InventorySnapshot;
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{CompiledProject, LOCK_FILE, LabProject};
+use lab_runfmt::EXECUTION_PLAN_FILE;
 use serde::Serialize;
 
 use crate::Output;
@@ -300,6 +304,94 @@ pub(crate) fn build(
     )
 }
 
+pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
+    let project = LabProject::discover(&path)
+        .with_context(|| format!("failed to load project from {}", path.display()))?;
+    let compiled = project.compile()?;
+    let package = project.default_package();
+    let entry = package.entry_source().with_context(|| {
+        format!(
+            "package '{}' is a library with no build.entry; a facility plan needs an exact main workflow",
+            package.manifest.package.name
+        )
+    })?;
+    let inventory = package_inventory_snapshot(package)?.with_context(|| {
+        format!(
+            "package '{}' has no inventory.document; facility planning consumes a validated SBOLInventory document",
+            package.manifest.package.name
+        )
+    })?;
+    let program_packages = project.program_packages();
+    let modules = compiled
+        .modules
+        .iter()
+        .filter(|module| program_packages.contains(&module.package))
+        .map(|module| &module.module)
+        .collect::<Vec<_>>();
+    let requirements = CapabilityRequirements::extract(&modules)
+        .context("failed to derive workflow capability requirements")?;
+    let instances = requirements
+        .instantiate_reachable(&modules, &entry.module, "main")
+        .context("failed to instantiate reachable workflow capability requirements")?;
+    let adapter_bindings = crate::adapters::resolve_package_bindings(package, &inventory)?;
+    let allocation = FacilityAllocation::allocate(
+        &requirements,
+        &instances,
+        &inventory,
+        adapter_bindings.as_ref(),
+    )
+    .context("failed to allocate reachable requirements across the selected facility")?;
+    let execution_plan = build_execution_plan(&allocation, ExecutionPlanOptions::default())
+        .context("failed to construct the reviewed execution plan")?;
+
+    let project_root = project.root();
+    let output_root = match out_dir {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => project_root.join(path),
+        None => project_root.join(".lab").join("plan"),
+    };
+    fs::create_dir_all(&output_root)
+        .with_context(|| format!("failed to create {}", output_root.display()))?;
+    let requirements_path = output_root.join("capability_requirements.json");
+    let instances_path = output_root.join("capability_instances.json");
+    let allocation_path = output_root.join("facility_allocation.json");
+    let execution_plan_path = output_root.join(EXECUTION_PLAN_FILE);
+    write_pretty_json(&requirements_path, &requirements)?;
+    write_pretty_json(&instances_path, &instances)?;
+    write_pretty_json(&allocation_path, &allocation)?;
+    write_pretty_json(&execution_plan_path, &execution_plan)?;
+    let adapter_bindings_path = if let Some(bindings) = adapter_bindings.as_ref() {
+        let path = output_root.join("adapter_bindings.json");
+        write_pretty_json(&path, bindings)?;
+        Some(path)
+    } else {
+        None
+    };
+
+    let human = format!(
+        "Planned {} {} against {}\n  Requirements: {}\n  Reviewed plan: {}",
+        package.manifest.package.name,
+        package.manifest.package.version,
+        allocation.facility,
+        allocation.allocations.len(),
+        execution_plan_path.display()
+    );
+    output.success(
+        "planned",
+        PlanCompleted {
+            package: package.manifest.package.name.clone(),
+            version: package.manifest.package.version.clone(),
+            output: output_root,
+            requirements: requirements_path,
+            instances: instances_path,
+            adapter_bindings: adapter_bindings_path,
+            allocation: allocation_path,
+            execution_plan: execution_plan_path,
+        },
+        human,
+    )
+}
+
 /// What a target build produced: its package directory, every protocol a
 /// device application can open, and the typeset operator documents.
 struct TargetBuild {
@@ -584,6 +676,12 @@ fn write_new(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
+fn write_pretty_json(path: &Path, value: &impl Serialize) -> Result<()> {
+    let mut json = serde_json::to_string_pretty(value)?;
+    json.push('\n');
+    fs::write(path, json).with_context(|| format!("failed to write {}", path.display()))
+}
+
 #[derive(Serialize)]
 struct ProjectCreated {
     package: String,
@@ -614,6 +712,19 @@ struct BuildCompleted {
     target_output: Option<PathBuf>,
     protocols: Vec<PathBuf>,
     documents: Vec<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct PlanCompleted {
+    package: String,
+    version: String,
+    output: PathBuf,
+    requirements: PathBuf,
+    instances: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    adapter_bindings: Option<PathBuf>,
+    allocation: PathBuf,
+    execution_plan: PathBuf,
 }
 
 #[derive(Serialize)]
