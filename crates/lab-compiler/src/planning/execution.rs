@@ -17,14 +17,27 @@ use super::{
     ParameterRelation,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPlanOptions {
+    /// Package-relative copy of the exact inventory graph reviewed with the plan.
+    pub inventory_document: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<ExecutionMaterialBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub movements: Vec<PlannedMaterialMove>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
+}
+
+impl Default for ExecutionPlanOptions {
+    fn default() -> Self {
+        Self {
+            inventory_document: "inventory-source.ttl".to_owned(),
+            materials: Vec::new(),
+            movements: Vec::new(),
+            reviewed_documents: BTreeMap::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,6 +183,7 @@ pub fn build_execution_plan(
     let plan = ExecutionPlanDocument {
         format: EXECUTION_PLAN_FORMAT.to_owned(),
         inventory: ExecutionInventoryReference {
+            document: options.inventory_document,
             source_sha256: allocation.inventory_sha256.clone(),
             facility: allocation.facility.clone(),
         },
@@ -325,6 +339,7 @@ mod tests {
         let plan = build_execution_plan(
             &allocation,
             ExecutionPlanOptions {
+                inventory_document: "inventory-source.ttl".to_owned(),
                 materials: vec![material],
                 movements: vec![PlannedMaterialMove {
                     id: "move-plate".to_owned(),
@@ -368,6 +383,7 @@ mod tests {
         let error = build_execution_plan(
             &allocation,
             ExecutionPlanOptions {
+                inventory_document: "inventory-source.ttl".to_owned(),
                 reviewed_documents: documents,
                 ..ExecutionPlanOptions::default()
             },

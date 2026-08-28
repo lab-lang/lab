@@ -14,8 +14,9 @@ use lab_compiler::{
 use lab_inventory::InventorySnapshot;
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{CompiledProject, LOCK_FILE, LabProject};
-use lab_runfmt::EXECUTION_PLAN_FILE;
+use lab_runfmt::{EXECUTION_PLAN_FILE, ExecutionPlanDocument};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use crate::Output;
 
@@ -341,8 +342,15 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         adapter_bindings.as_ref(),
     )
     .context("failed to allocate reachable requirements across the selected facility")?;
-    let execution_plan = build_execution_plan(&allocation, ExecutionPlanOptions::default())
-        .context("failed to construct the reviewed execution plan")?;
+    let inventory_document = staged_inventory_name(&inventory)?;
+    let mut execution_plan = build_execution_plan(
+        &allocation,
+        ExecutionPlanOptions {
+            inventory_document: inventory_document.clone(),
+            ..ExecutionPlanOptions::default()
+        },
+    )
+    .context("failed to construct the reviewed execution plan")?;
 
     let project_root = project.root();
     let output_root = match out_dir {
@@ -352,6 +360,7 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
     };
     fs::create_dir_all(&output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
+    stage_execution_inputs(package, &inventory, &mut execution_plan, &output_root)?;
     let requirements_path = output_root.join("capability_requirements.json");
     let instances_path = output_root.join("capability_instances.json");
     let allocation_path = output_root.join("facility_allocation.json");
@@ -648,6 +657,99 @@ fn package_inventory_snapshot(package: &LabPackage) -> Result<Option<InventorySn
                 package.manifest.package.name
             )
         })
+}
+
+fn staged_inventory_name(inventory: &InventorySnapshot) -> Result<String> {
+    let extension = inventory
+        .source_path()
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .context("the inventory document needs a UTF-8 file extension")?;
+    Ok(format!("inventory-source.{extension}"))
+}
+
+/// Copies every mutable package input named by a reviewed plan into its artifact directory.
+/// The resulting paths and digests are therefore sufficient for runtime preflight and provenance.
+fn stage_execution_inputs(
+    package: &LabPackage,
+    inventory: &InventorySnapshot,
+    plan: &mut ExecutionPlanDocument,
+    output_root: &Path,
+) -> Result<()> {
+    let inventory_bytes = fs::read(inventory.source_path()).with_context(|| {
+        format!(
+            "failed to re-read inventory source {}",
+            inventory.source_path().display()
+        )
+    })?;
+    let observed_inventory_hash = sha256_hex(&inventory_bytes);
+    if observed_inventory_hash != inventory.source_sha256() {
+        bail!(
+            "inventory source {} changed after validation; run `lab plan` again from a stable source",
+            inventory.source_path().display()
+        );
+    }
+    let inventory_path = output_root.join(&plan.inventory.document);
+    fs::write(&inventory_path, inventory_bytes)
+        .with_context(|| format!("failed to stage {}", inventory_path.display()))?;
+
+    let canonical_root = fs::canonicalize(&package.root)
+        .with_context(|| format!("failed to resolve package root {}", package.root.display()))?;
+    let adapters_directory = output_root.join("adapters");
+    for requirement in &mut plan.requirements {
+        let Some(adapter) = requirement.adapter.as_mut() else {
+            continue;
+        };
+        let source =
+            fs::canonicalize(canonical_root.join(&adapter.profile_path)).with_context(|| {
+                format!(
+                    "failed to resolve adapter profile {} for '{}'",
+                    adapter.profile_path, requirement.requirement_instance
+                )
+            })?;
+        if !source.starts_with(&canonical_root) {
+            bail!(
+                "adapter profile '{}' for '{}' resolves outside package '{}'",
+                adapter.profile_path,
+                requirement.requirement_instance,
+                package.manifest.package.name
+            );
+        }
+        let profile = crate::adapters::load_and_validate(&adapter.driver, &source)?;
+        if profile.sha256 != adapter.profile_sha256 {
+            bail!(
+                "adapter profile {} changed after allocation for '{}'",
+                source.display(),
+                requirement.requirement_instance
+            );
+        }
+        fs::create_dir_all(&adapters_directory)
+            .with_context(|| format!("failed to create {}", adapters_directory.display()))?;
+        let relative = format!(
+            "adapters/{}-{}.toml",
+            adapter.driver,
+            &adapter.profile_sha256[..12]
+        );
+        let destination = output_root.join(&relative);
+        fs::write(&destination, profile.canonical_toml.as_bytes())
+            .with_context(|| format!("failed to stage {}", destination.display()))?;
+        if sha256_hex(profile.canonical_toml.as_bytes()) != adapter.profile_sha256 {
+            bail!(
+                "canonical adapter profile for '{}' does not match its frozen digest",
+                requirement.requirement_instance
+            );
+        }
+        adapter.profile_path = relative;
+    }
+    plan.validate()
+        .map_err(|message| anyhow::anyhow!("staged execution plan is invalid: {message}"))
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn validate_package_name(name: &str) -> Result<()> {

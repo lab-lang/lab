@@ -205,6 +205,11 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     )
     .unwrap();
     assert_eq!(plan["format"], "lab.execution-plan.v1");
+    assert_eq!(plan["inventory"]["document"], "inventory-source.ttl");
+    assert_eq!(
+        std::fs::read(project.join(".lab/plan/inventory-source.ttl")).unwrap(),
+        std::fs::read(project.join("inventory/catalog.ttl")).unwrap()
+    );
     assert_eq!(plan["requirements"].as_array().unwrap().len(), 1);
     assert_eq!(plan["nodes"][0]["action"], "execute");
     assert_eq!(

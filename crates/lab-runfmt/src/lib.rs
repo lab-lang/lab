@@ -150,6 +150,7 @@ impl ExecutionPlanDocument {
             ));
         }
         require_sha256("inventory source", &self.inventory.source_sha256)?;
+        require_relative_path("inventory source", &self.inventory.document)?;
 
         let mut requirements = BTreeMap::new();
         for requirement in &self.requirements {
@@ -254,6 +255,8 @@ impl ExecutionPlanDocument {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionInventoryReference {
+    /// Exact source graph copied into the reviewed execution package.
+    pub document: String,
     pub source_sha256: String,
     pub facility: String,
 }
@@ -556,6 +559,7 @@ mod tests {
         ExecutionPlanDocument {
             format: EXECUTION_PLAN_FORMAT.to_owned(),
             inventory: ExecutionInventoryReference {
+                document: "inventory-source.ttl".to_owned(),
                 source_sha256: "a".repeat(64),
                 facility: "https://example.org/facility".to_owned(),
             },
