@@ -33,6 +33,8 @@ The audit does not assert that every source action maps directly to one instrume
 
 `lab build` emits `capability_requirements.json` with schema `lab.capability-requirements.v1` and links it from the portable package index. Each requirement template has a deterministic ID and exact source module, workflow, statement path, and operation. It records the capability-kind IRI, a typed minimum qualification, a typed set of accepted SBOLInventory control modes, exact typed scalar constraints, typed design or data value ports, and typed material inputs and outputs with ownership modes.
 
+Runnable packages also emit `capability_instances.json` with schema `lab.capability-requirement-instances.v1`. The compiler begins at the exact module named by `build.entry` and its `main` workflow, follows resolved workflow declaration identities across package boundaries, and emits one instance for each reachable call path. Calling one workflow twice creates two distinct instances. Uncalled workflow templates remain portable but are not allocated. Structural branches and loops are retained conservatively as potential work, while recursive workflow expansion is rejected because it cannot yield a finite reviewed plan.
+
 These records describe workflow definitions. A workflow call does not duplicate its callee's template, and an unused workflow remains visible as a reusable template. Facility planning must instantiate only the workflows reached by the selected program, preserve call and refinement ancestry, and then allocate the resulting operational requirements. The root templates deliberately contain no Asset or CapabilityOffering IRI.
 
 ## Matching rules

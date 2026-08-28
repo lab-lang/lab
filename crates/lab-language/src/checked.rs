@@ -18,12 +18,13 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// the ontology term it stands for, an artifact kind carries the roles its
 /// produced type plays, and artifact instances preserve exact SBOL identities
 /// independently of laboratory provenance. Action capabilities are absolute
-/// SBOLInventory capability-kind IRIs rather than compiler-local names.
+/// SBOLInventory capability-kind IRIs rather than compiler-local names, and
+/// durable workflow calls preserve the resolved identity of their callee.
 ///
 /// Grounding, design identities, and capability identities are semantic
 /// contracts, so each incompatible change raises the version rather than
 /// riding along as an optional field.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v6";
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v7";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -393,6 +394,12 @@ pub enum OwnershipMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedAction {
     pub operation: String,
+    /// Exact declaration identity for a durable workflow call.
+    ///
+    /// Standard-library actions have no callee because their `operation` is
+    /// already the stable semantic operation identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee: Option<DefinitionId>,
     pub capability: Option<String>,
     pub arguments: Vec<CheckedActionArgument>,
     pub results: Vec<CheckedField>,

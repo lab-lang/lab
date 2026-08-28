@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lab_language::{
     CheckedActionArgument, CheckedDeclaration, CheckedField, CheckedModule, CheckedStatement,
@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const CAPABILITY_REQUIREMENTS_SCHEMA_VERSION: &str = "lab.capability-requirements.v1";
+pub const CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION: &str =
+    "lab.capability-requirement-instances.v1";
 
 /// Requirement templates derived from checked workflow definitions.
 ///
@@ -51,6 +53,87 @@ impl CapabilityRequirements {
             requirements,
         })
     }
+
+    /// Instantiates only requirement templates reachable from one exact entry workflow.
+    ///
+    /// A workflow invoked twice produces two instances. Structural branches and loops are
+    /// retained conservatively as potential work, while recursive workflow expansion is rejected
+    /// because it cannot produce a finite reviewed plan.
+    pub fn instantiate_reachable(
+        &self,
+        modules: &[&CheckedModule],
+        entry_module: &str,
+        entry_workflow: &str,
+    ) -> Result<CapabilityRequirementInstances, CapabilityInstantiationError> {
+        let entry = WorkflowIdentity {
+            module: entry_module.to_owned(),
+            workflow: entry_workflow.to_owned(),
+        };
+        let workflows = workflow_bodies(modules)?;
+        if !workflows.contains_key(&(entry.module.clone(), entry.workflow.clone())) {
+            return Err(CapabilityInstantiationError::MissingEntryWorkflow {
+                module: entry.module,
+                workflow: entry.workflow,
+            });
+        }
+        let templates = self
+            .requirements
+            .iter()
+            .map(|requirement| (requirement.id.clone(), requirement))
+            .collect::<BTreeMap<_, _>>();
+        let mut instances = Vec::new();
+        instantiate_workflow(
+            &entry,
+            &entry,
+            &workflows,
+            &templates,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut instances,
+        )?;
+        let mut seen = BTreeSet::new();
+        if let Some(id) = instances
+            .iter()
+            .find_map(|instance| (!seen.insert(instance.id.clone())).then(|| instance.id.clone()))
+        {
+            return Err(CapabilityInstantiationError::DuplicateInstanceId { id });
+        }
+        Ok(CapabilityRequirementInstances {
+            schema_version: CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION.to_owned(),
+            entry,
+            instances,
+        })
+    }
+}
+
+/// Requirement occurrences reachable from one exact package entry workflow.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRequirementInstances {
+    pub schema_version: String,
+    pub entry: WorkflowIdentity,
+    pub instances: Vec<CapabilityRequirementInstance>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct WorkflowIdentity {
+    pub module: String,
+    pub workflow: String,
+}
+
+/// One distinct use of a requirement template in the entry workflow's static call expansion.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapabilityRequirementInstance {
+    pub id: String,
+    pub template: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub call_path: Vec<WorkflowCallSite>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowCallSite {
+    pub caller: WorkflowIdentity,
+    pub statement_path: Vec<StatementPathSegment>,
+    pub callee: WorkflowIdentity,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -209,6 +292,30 @@ pub enum CapabilityRequirementError {
     },
     #[error("capability requirement ID `{id}` occurs more than once")]
     DuplicateId { id: String },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CapabilityInstantiationError {
+    #[error("entry module `{module}` does not declare workflow `{workflow}`")]
+    MissingEntryWorkflow { module: String, workflow: String },
+    #[error("workflow `{module}::{workflow}` occurs more than once in checked modules")]
+    DuplicateWorkflow { module: String, workflow: String },
+    #[error(
+        "workflow call at `{caller}` resolves to `{module}::{workflow}`, but its checked body is unavailable"
+    )]
+    MissingWorkflowBody {
+        caller: String,
+        module: String,
+        workflow: String,
+    },
+    #[error("workflow call `{operation}` at `{caller}` has no resolved callee identity")]
+    MissingCalleeIdentity { operation: String, caller: String },
+    #[error("reachable capability template `{template}` is absent from the extracted catalog")]
+    MissingTemplate { template: String },
+    #[error("recursive workflow expansion cannot produce a finite plan: {cycle}")]
+    RecursiveWorkflow { cycle: String },
+    #[error("capability requirement instance ID `{id}` occurs more than once")]
+    DuplicateInstanceId { id: String },
 }
 
 fn collect_block(
@@ -403,12 +510,247 @@ fn is_parameter_type(r#type: &CheckedType) -> bool {
 }
 
 fn requirement_id(module: &str, workflow: &str, path: &[StatementPathSegment]) -> String {
-    let path = path
-        .iter()
+    let path = render_statement_path(path);
+    format!("{module}::{workflow}::{path}")
+}
+
+fn render_statement_path(path: &[StatementPathSegment]) -> String {
+    path.iter()
         .map(|segment| format!("{}[{}]", segment.block.id_label(), segment.index))
         .collect::<Vec<_>>()
-        .join("/");
-    format!("{module}::{workflow}::{path}")
+        .join("/")
+}
+
+fn workflow_bodies<'a>(
+    modules: &[&'a CheckedModule],
+) -> Result<BTreeMap<(String, String), &'a [CheckedStatement]>, CapabilityInstantiationError> {
+    let mut workflows = BTreeMap::new();
+    for module in modules {
+        for declaration in &module.declarations {
+            let CheckedDeclaration::Workflow { name, body, .. } = declaration else {
+                continue;
+            };
+            let key = (module.module.as_str().to_owned(), name.clone());
+            if workflows.insert(key.clone(), body.as_slice()).is_some() {
+                return Err(CapabilityInstantiationError::DuplicateWorkflow {
+                    module: key.0,
+                    workflow: key.1,
+                });
+            }
+        }
+    }
+    Ok(workflows)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn instantiate_workflow(
+    entry: &WorkflowIdentity,
+    current: &WorkflowIdentity,
+    workflows: &BTreeMap<(String, String), &[CheckedStatement]>,
+    templates: &BTreeMap<String, &CapabilityRequirement>,
+    active: &mut Vec<WorkflowIdentity>,
+    call_path: &mut Vec<WorkflowCallSite>,
+    instances: &mut Vec<CapabilityRequirementInstance>,
+) -> Result<(), CapabilityInstantiationError> {
+    if let Some(index) = active.iter().position(|workflow| workflow == current) {
+        let cycle = active[index..]
+            .iter()
+            .chain(std::iter::once(current))
+            .map(|workflow| format!("{}::{}", workflow.module, workflow.workflow))
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        return Err(CapabilityInstantiationError::RecursiveWorkflow { cycle });
+    }
+    let key = (current.module.clone(), current.workflow.clone());
+    let body =
+        workflows
+            .get(&key)
+            .ok_or_else(|| CapabilityInstantiationError::MissingWorkflowBody {
+                caller: call_path
+                    .last()
+                    .map(render_call_site)
+                    .unwrap_or_else(|| format!("{}::{}", entry.module, entry.workflow)),
+                module: current.module.clone(),
+                workflow: current.workflow.clone(),
+            })?;
+    active.push(current.clone());
+    let result = instantiate_block(
+        entry,
+        current,
+        StatementBlock::WorkflowBody,
+        body,
+        workflows,
+        templates,
+        active,
+        call_path,
+        &mut Vec::new(),
+        instances,
+    );
+    active.pop();
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn instantiate_block(
+    entry: &WorkflowIdentity,
+    current: &WorkflowIdentity,
+    block: StatementBlock,
+    statements: &[CheckedStatement],
+    workflows: &BTreeMap<(String, String), &[CheckedStatement]>,
+    templates: &BTreeMap<String, &CapabilityRequirement>,
+    active: &mut Vec<WorkflowIdentity>,
+    call_path: &mut Vec<WorkflowCallSite>,
+    path: &mut Vec<StatementPathSegment>,
+    instances: &mut Vec<CapabilityRequirementInstance>,
+) -> Result<(), CapabilityInstantiationError> {
+    for (index, statement) in statements.iter().enumerate() {
+        path.push(StatementPathSegment { block, index });
+        match statement {
+            CheckedStatement::Effect { action, .. } => {
+                if action.capability.is_some() {
+                    let template = requirement_id(&current.module, &current.workflow, path);
+                    if !templates.contains_key(&template) {
+                        return Err(CapabilityInstantiationError::MissingTemplate { template });
+                    }
+                    instances.push(CapabilityRequirementInstance {
+                        id: requirement_instance_id(entry, call_path, &template),
+                        template,
+                        call_path: call_path.clone(),
+                    });
+                }
+                if let Some(callee) = &action.callee {
+                    let callee = WorkflowIdentity {
+                        module: callee.module.as_str().to_owned(),
+                        workflow: callee.local.clone(),
+                    };
+                    let call_site = WorkflowCallSite {
+                        caller: current.clone(),
+                        statement_path: path.clone(),
+                        callee: callee.clone(),
+                    };
+                    if !workflows.contains_key(&(callee.module.clone(), callee.workflow.clone())) {
+                        return Err(CapabilityInstantiationError::MissingWorkflowBody {
+                            caller: render_call_site(&call_site),
+                            module: callee.module,
+                            workflow: callee.workflow,
+                        });
+                    }
+                    call_path.push(call_site);
+                    let result = instantiate_workflow(
+                        entry, &callee, workflows, templates, active, call_path, instances,
+                    );
+                    call_path.pop();
+                    result?;
+                } else if action.operation.starts_with("workflow.") {
+                    return Err(CapabilityInstantiationError::MissingCalleeIdentity {
+                        operation: action.operation.clone(),
+                        caller: format!(
+                            "{}::{}::{}",
+                            current.module,
+                            current.workflow,
+                            render_statement_path(path)
+                        ),
+                    });
+                }
+            }
+            CheckedStatement::If {
+                body, else_body, ..
+            } => {
+                instantiate_block(
+                    entry,
+                    current,
+                    StatementBlock::IfBody,
+                    body,
+                    workflows,
+                    templates,
+                    active,
+                    call_path,
+                    path,
+                    instances,
+                )?;
+                instantiate_block(
+                    entry,
+                    current,
+                    StatementBlock::ElseBody,
+                    else_body,
+                    workflows,
+                    templates,
+                    active,
+                    call_path,
+                    path,
+                    instances,
+                )?;
+            }
+            CheckedStatement::Match { cases, .. } => {
+                for (case, branch) in cases.iter().enumerate() {
+                    instantiate_block(
+                        entry,
+                        current,
+                        StatementBlock::MatchCase { case },
+                        &branch.body,
+                        workflows,
+                        templates,
+                        active,
+                        call_path,
+                        path,
+                        instances,
+                    )?;
+                }
+            }
+            CheckedStatement::For { body, .. } => instantiate_block(
+                entry,
+                current,
+                StatementBlock::ForBody,
+                body,
+                workflows,
+                templates,
+                active,
+                call_path,
+                path,
+                instances,
+            )?,
+            CheckedStatement::When { body, .. } => instantiate_block(
+                entry,
+                current,
+                StatementBlock::WhenBody,
+                body,
+                workflows,
+                templates,
+                active,
+                call_path,
+                path,
+                instances,
+            )?,
+            CheckedStatement::Binding(_)
+            | CheckedStatement::StateUpdate { .. }
+            | CheckedStatement::Return { .. }
+            | CheckedStatement::Emit { .. } => {}
+        }
+        path.pop();
+    }
+    Ok(())
+}
+
+fn requirement_instance_id(
+    entry: &WorkflowIdentity,
+    call_path: &[WorkflowCallSite],
+    template: &str,
+) -> String {
+    let mut parts = vec![format!("{}::{}", entry.module, entry.workflow)];
+    parts.extend(call_path.iter().map(render_call_site));
+    parts.push(template.to_owned());
+    parts.join("/")
+}
+
+fn render_call_site(call: &WorkflowCallSite) -> String {
+    format!(
+        "{}::{}::{}=>{}::{}",
+        call.caller.module,
+        call.caller.workflow,
+        render_statement_path(&call.statement_path),
+        call.callee.module,
+        call.callee.workflow
+    )
 }
 
 #[cfg(test)]
@@ -496,6 +838,94 @@ workflow main(plasmid: Material<Plasmid>) -> Material<Plasmid>:
 
         assert_eq!(catalog.requirements.len(), 1);
         assert_eq!(catalog.requirements[0].source.workflow, "preserve");
+    }
+
+    #[test]
+    fn instantiates_only_reachable_requirements_and_distinguishes_two_call_sites() {
+        let module = compile_module(
+            r#"use std.lab.plasmid
+
+workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
+  stored <- store plasmid at -80 C
+  return stored
+
+workflow never_called(plasmid: Material<Plasmid>) -> Material<Plasmid>:
+  stored <- store plasmid at -20 C
+  return stored
+
+workflow main(plasmid: Material<Plasmid>) -> Material<Plasmid>:
+  first <- preserve plasmid
+  second <- preserve first
+  return second
+"#,
+        )
+        .unwrap();
+        let catalog = CapabilityRequirements::extract(&[&module]).unwrap();
+
+        let instances = catalog
+            .instantiate_reachable(&[&module], "standalone", "main")
+            .unwrap();
+
+        assert_eq!(
+            instances.schema_version,
+            CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION
+        );
+        assert_eq!(instances.entry.module, "standalone");
+        assert_eq!(instances.entry.workflow, "main");
+        assert_eq!(instances.instances.len(), 2);
+        assert_ne!(instances.instances[0].id, instances.instances[1].id);
+        assert!(
+            instances
+                .instances
+                .iter()
+                .all(|instance| instance.template == "standalone::preserve::body[0]")
+        );
+        assert_eq!(instances.instances[0].call_path.len(), 1);
+        assert_eq!(
+            instances.instances[0].call_path[0].callee,
+            WorkflowIdentity {
+                module: "standalone".to_owned(),
+                workflow: "preserve".to_owned(),
+            }
+        );
+        let json = serde_json::to_string(&instances).unwrap();
+        assert_eq!(
+            serde_json::from_str::<CapabilityRequirementInstances>(&json).unwrap(),
+            instances
+        );
+    }
+
+    #[test]
+    fn rejects_recursive_workflow_expansion() {
+        let module = compile_module(
+            r#"use std.lab.plasmid
+
+workflow first(plasmid: Material<Plasmid>) -> Material<Plasmid>:
+  next <- second plasmid
+  return next
+
+workflow second(plasmid: Material<Plasmid>) -> Material<Plasmid>:
+  next <- first plasmid
+  return next
+
+workflow main(plasmid: Material<Plasmid>) -> Material<Plasmid>:
+  result <- first plasmid
+  return result
+"#,
+        )
+        .unwrap();
+        let catalog = CapabilityRequirements::extract(&[&module]).unwrap();
+
+        let error = catalog
+            .instantiate_reachable(&[&module], "standalone", "main")
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            CapabilityInstantiationError::RecursiveWorkflow {
+                cycle: "standalone::first -> standalone::second -> standalone::first".to_owned(),
+            }
+        );
     }
 
     #[test]

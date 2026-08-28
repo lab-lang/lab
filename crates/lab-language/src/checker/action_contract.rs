@@ -262,6 +262,7 @@ impl Checker {
         Ok((
             ResolvedAction {
                 operation: contract.operation.to_owned(),
+                callee: None,
                 capability: Some(contract.capability.to_owned()),
                 arguments,
                 results: checked_results,

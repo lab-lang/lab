@@ -51,13 +51,14 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
     let index_path = project.join(".lab/build/package.json");
     let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
-    assert_eq!(index["schema_version"], 4);
+    assert_eq!(index["schema_version"], 5);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
     assert_eq!(
         index["capability_requirements"],
         "capability_requirements.json"
     );
+    assert_eq!(index["capability_instances"], "capability_instances.json");
     let requirements: Value = serde_json::from_slice(
         &std::fs::read(project.join(".lab/build/capability_requirements.json")).unwrap(),
     )
@@ -83,6 +84,21 @@ fn new_check_build_and_metadata_form_one_project_loop() {
         requirements["requirements"][0]
             .get("parameter_constraints")
             .is_none()
+    );
+    let instances: Value = serde_json::from_slice(
+        &std::fs::read(project.join(".lab/build/capability_instances.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        instances["schema_version"],
+        "lab.capability-requirement-instances.v1"
+    );
+    assert_eq!(instances["entry"]["module"], "test_project.programs.main");
+    assert_eq!(instances["entry"]["workflow"], "main");
+    assert_eq!(instances["instances"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        instances["instances"][0]["template"],
+        "test_project.programs.main::main::body[0]"
     );
     assert!(project.join("lab.lock").is_file());
 
@@ -189,7 +205,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     let index: Value =
         serde_json::from_slice(&std::fs::read(project.join(".lab/build/package.json")).unwrap())
             .unwrap();
-    assert_eq!(index["schema_version"], 4);
+    assert_eq!(index["schema_version"], 5);
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
     let bindings: Value = serde_json::from_slice(
         &std::fs::read(project.join(".lab/build/adapter_bindings.json")).unwrap(),

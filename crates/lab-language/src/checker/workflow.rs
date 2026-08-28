@@ -530,6 +530,7 @@ impl Checker {
         Ok((
             ResolvedAction {
                 operation: format!("workflow.{operation}"),
+                callee: Some(self.definition_for_action_word(operation)),
                 capability: None,
                 arguments,
                 results: outputs

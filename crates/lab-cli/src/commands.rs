@@ -165,6 +165,20 @@ pub(crate) fn build(
     fs::write(&capability_requirements_path, capability_requirements_json)
         .with_context(|| format!("failed to write {}", capability_requirements_path.display()))?;
 
+    let capability_instances_artifact = if let Some(entry) = package.entry_source() {
+        let instances = capability_requirements
+            .instantiate_reachable(&program_modules, &entry.module, "main")
+            .context("failed to instantiate reachable workflow capability requirements")?;
+        let artifact = PathBuf::from("capability_instances.json");
+        let path = output_root.join(&artifact);
+        let mut json = serde_json::to_string_pretty(&instances)?;
+        json.push('\n');
+        fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))?;
+        Some(artifact)
+    } else {
+        None
+    };
+
     let adapter_bindings_artifact = if let Some(snapshot) = package_inventory_snapshot(package)? {
         if let Some(bindings) = crate::adapters::resolve_package_bindings(package, &snapshot)? {
             let artifact = PathBuf::from("adapter_bindings.json");
@@ -206,7 +220,7 @@ pub(crate) fn build(
     }
 
     let index = BuildIndex {
-        schema_version: 4,
+        schema_version: 5,
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         edition: package.manifest.package.edition.clone(),
@@ -214,6 +228,7 @@ pub(crate) fn build(
         members: compiled.members.clone(),
         modules: artifacts,
         capability_requirements: capability_requirements_artifact,
+        capability_instances: capability_instances_artifact,
         adapter_bindings: adapter_bindings_artifact,
     };
     let index_path = output_root.join("package.json");
@@ -624,6 +639,8 @@ struct BuildIndex {
     members: Vec<String>,
     modules: Vec<BuildModule>,
     capability_requirements: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    capability_instances: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     adapter_bindings: Option<PathBuf>,
 }

@@ -11,11 +11,13 @@ pub use adapters::{
     AdapterBindingSnapshot, BoundCapabilityOffering, ResolvedAdapterBinding,
 };
 pub use capability::{
-    CAPABILITY_REQUIREMENTS_SCHEMA_VERSION, CapabilityMaterialInput, CapabilityMaterialOutput,
+    CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION, CAPABILITY_REQUIREMENTS_SCHEMA_VERSION,
+    CapabilityInstantiationError, CapabilityMaterialInput, CapabilityMaterialOutput,
     CapabilityParameterConstraint, CapabilityRequirement, CapabilityRequirementError,
-    CapabilityRequirementSource, CapabilityRequirements, CapabilityValueInput,
-    CapabilityValueOutput, ParameterRelation, RequirementControlMode, RequirementQualification,
-    StatementBlock, StatementPathSegment,
+    CapabilityRequirementInstance, CapabilityRequirementInstances, CapabilityRequirementSource,
+    CapabilityRequirements, CapabilityValueInput, CapabilityValueOutput, ParameterRelation,
+    RequirementControlMode, RequirementQualification, StatementBlock, StatementPathSegment,
+    WorkflowCallSite, WorkflowIdentity,
 };
 pub use inventory::BuildInventoryError;
 pub use model::{
