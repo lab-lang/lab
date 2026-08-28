@@ -341,6 +341,23 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         adapter_bindings.as_ref(),
     )
     .context("failed to allocate reachable requirements across the selected facility")?;
+    let project_root = project.root();
+    let output_root = match out_dir {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => project_root.join(path),
+        None => project_root.join(".lab").join("plan"),
+    };
+    fs::create_dir_all(&output_root)
+        .with_context(|| format!("failed to create {}", output_root.display()))?;
+
+    let lowered = crate::facility_lowering::lower_allocated_adapters(
+        package,
+        &modules,
+        &inventory,
+        &allocation,
+        adapter_bindings.as_ref(),
+        &output_root,
+    )?;
     let inventory_document = staged_inventory_name(&inventory)?;
     let mut execution_plan = build_execution_plan(
         &allocation,
@@ -350,23 +367,16 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         },
     )
     .context("failed to construct the reviewed execution plan")?;
-
-    let project_root = project.root();
-    let output_root = match out_dir {
-        Some(path) if path.is_absolute() => path,
-        Some(path) => project_root.join(path),
-        None => project_root.join(".lab").join("plan"),
-    };
-    fs::create_dir_all(&output_root)
-        .with_context(|| format!("failed to create {}", output_root.display()))?;
     stage_execution_inputs(package, &inventory, &mut execution_plan, &output_root)?;
     let requirements_path = output_root.join("capability_requirements.json");
     let instances_path = output_root.join("capability_instances.json");
     let allocation_path = output_root.join("facility_allocation.json");
+    let lowering_path = output_root.join("facility_lowering.json");
     let execution_plan_path = output_root.join(EXECUTION_PLAN_FILE);
     write_pretty_json(&requirements_path, &requirements)?;
     write_pretty_json(&instances_path, &instances)?;
     write_pretty_json(&allocation_path, &allocation)?;
+    write_pretty_json(&lowering_path, &lowered.manifest)?;
     write_pretty_json(&execution_plan_path, &execution_plan)?;
     let adapter_bindings_path = if let Some(bindings) = adapter_bindings.as_ref() {
         let path = output_root.join("adapter_bindings.json");
@@ -376,14 +386,27 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         None
     };
 
-    let human = format!(
-        "Planned {} {} against {}\n  Requirements: {}\n  Reviewed plan: {}",
+    let mut human = format!(
+        "Planned {} {} against {}\n  Requirements: {}\n  Adapter lowerings: {}\n  Reviewed plan: {}",
         package.manifest.package.name,
         package.manifest.package.version,
         allocation.facility,
         allocation.allocations.len(),
+        lowered.manifest.routes.len(),
         execution_plan_path.display()
     );
+    if !lowered.protocols.is_empty() {
+        human.push_str("\n\nAutomation protocols:");
+        for protocol in &lowered.protocols {
+            human.push_str(&format!("\n  {}", protocol.display()));
+        }
+    }
+    if !lowered.documents.is_empty() {
+        human.push_str("\n\nDocuments:");
+        for document in &lowered.documents {
+            human.push_str(&format!("\n  {}", document.display()));
+        }
+    }
     output.success(
         "planned",
         PlanCompleted {
@@ -394,7 +417,10 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
             instances: instances_path,
             adapter_bindings: adapter_bindings_path,
             allocation: allocation_path,
+            lowering: lowering_path,
             execution_plan: execution_plan_path,
+            protocols: lowered.protocols,
+            documents: lowered.documents,
         },
         human,
     )
@@ -693,10 +719,9 @@ fn stage_execution_inputs(
         }
         fs::create_dir_all(&adapters_directory)
             .with_context(|| format!("failed to create {}", adapters_directory.display()))?;
-        let relative = format!(
-            "adapters/{}-{}.toml",
-            adapter.driver,
-            &adapter.profile_sha256[..12]
+        let relative = crate::facility_lowering::staged_adapter_profile_path(
+            &adapter.driver,
+            &adapter.profile_sha256,
         );
         let destination = output_root.join(&relative);
         fs::write(&destination, profile.canonical_toml.as_bytes())
@@ -707,7 +732,7 @@ fn stage_execution_inputs(
                 requirement.requirement_instance
             );
         }
-        adapter.profile_path = relative;
+        adapter.profile_path = relative.to_string_lossy().into_owned();
     }
     plan.validate()
         .map_err(|message| anyhow::anyhow!("staged execution plan is invalid: {message}"))
@@ -794,7 +819,10 @@ struct PlanCompleted {
     #[serde(skip_serializing_if = "Option::is_none")]
     adapter_bindings: Option<PathBuf>,
     allocation: PathBuf,
+    lowering: PathBuf,
     execution_plan: PathBuf,
+    protocols: Vec<PathBuf>,
+    documents: Vec<PathBuf>,
 }
 
 #[derive(Serialize)]

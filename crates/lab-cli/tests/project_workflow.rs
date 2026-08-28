@@ -640,6 +640,34 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
             && binding["adapter"]["driver"] == "opentrons.ot2"
     }));
 
+    let lowering: Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
+            .unwrap();
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v1");
+    assert_eq!(lowering["inventory_sha256"], allocation["inventory_sha256"]);
+    assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
+    let route = &lowering["routes"][0];
+    assert_eq!(
+        route["asset"],
+        "https://example.org/golden-gate/opentrons_ot2"
+    );
+    assert_eq!(route["driver"], "opentrons.ot2");
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 6);
+    let protocols = route["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|artifact| artifact["role"] == "automation_protocol")
+        .collect::<Vec<_>>();
+    assert_eq!(protocols.len(), 3);
+    assert!(protocols.iter().all(|artifact| {
+        artifact["sha256"].as_str().unwrap().len() == 64
+            && out_dir
+                .join(route["output"].as_str().unwrap())
+                .join(artifact["path"].as_str().unwrap())
+                .is_file()
+    }));
+
     let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args(["run", out_dir.to_str().unwrap(), "--dry-run"])
         .output()

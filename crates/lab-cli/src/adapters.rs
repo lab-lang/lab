@@ -133,6 +133,7 @@ fn render_catalog(catalog: &AdapterCatalog) -> String {
     for adapter in &catalog.adapters {
         let services = [
             adapter.services.planning.then_some("planning"),
+            adapter.services.lowering.then_some("lowering"),
             adapter.services.simulation.then_some("simulation"),
             adapter.services.runtime.then_some("runtime"),
         ]

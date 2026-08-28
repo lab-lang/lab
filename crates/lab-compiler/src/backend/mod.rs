@@ -35,8 +35,9 @@ mod typst;
 
 pub use adapters::{
     ADAPTER_CATALOG_FORMAT, ADAPTER_PROFILE_SCHEMA_VERSION, AdapterCatalog, AdapterDescriptor,
-    AdapterProfileContractError, AdapterServices, ValidatedAdapterProfile, adapter_catalog,
-    default_adapter_profile, validate_adapter_profile,
+    AdapterLoweringError, AdapterProfileContractError, AdapterServices, ValidatedAdapterProfile,
+    adapter_catalog, default_adapter_profile, lower_dependency_build_with_adapter,
+    validate_adapter_profile,
 };
 pub use constraints::TargetConstraintError;
 pub use target_profiles::{

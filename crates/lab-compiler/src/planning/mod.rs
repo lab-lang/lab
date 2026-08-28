@@ -5,6 +5,7 @@ mod allocation;
 mod capability;
 mod execution;
 mod inventory;
+mod lowering;
 mod model;
 mod resolution;
 
@@ -31,6 +32,10 @@ pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,
 };
 pub use inventory::BuildInventoryError;
+pub use lowering::{
+    FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
+    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
+};
 pub use model::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,
     DependencyBuildManifest, DependencyBuildStatus, DependencyEdge, DependencyInventorySource,

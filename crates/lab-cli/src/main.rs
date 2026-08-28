@@ -1,6 +1,7 @@
 mod adapters;
 mod commands;
 mod execution_run;
+mod facility_lowering;
 mod run;
 mod targets;
 mod typeset;

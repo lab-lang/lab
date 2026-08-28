@@ -19,6 +19,8 @@ use crate::backend::hamilton::star::StarTargetProfile;
 use crate::backend::opentrons::flex::FlexTargetProfile;
 use crate::backend::opentrons::ot2::Ot2TargetProfile;
 use crate::backend::target_profiles::{TargetProfile, TargetProfileContractError, schema_value};
+use crate::planning::BuildInventory;
+use crate::{ArtifactBundle, ProtocolLairProgram};
 use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 
 pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v1";
@@ -39,6 +41,8 @@ const KNOWN_ADAPTERS: [&str; 6] = [
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterServices {
     pub planning: bool,
+    /// This adapter can lower a complete checked Lab program into device artifacts.
+    pub lowering: bool,
     pub simulation: bool,
     pub runtime: bool,
 }
@@ -113,6 +117,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [OPENTRONS_PYTHON_PROTOCOL],
                 AdapterServices {
                     planning: true,
+                    lowering: true,
                     simulation: false,
                     runtime: false,
                 },
@@ -129,6 +134,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [OPENTRONS_PROTOCOL_DESIGNER],
                 AdapterServices {
                     planning: true,
+                    lowering: true,
                     simulation: false,
                     runtime: false,
                 },
@@ -145,6 +151,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [STAR_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
+                    lowering: true,
                     simulation: true,
                     runtime: true,
                 },
@@ -161,6 +168,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [THERMOCYCLE_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
+                    lowering: false,
                     simulation: true,
                     runtime: true,
                 },
@@ -177,6 +185,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [],
                 AdapterServices {
                     planning: false,
+                    lowering: false,
                     simulation: false,
                     runtime: false,
                 },
@@ -193,6 +202,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [SIMULATION_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
+                    lowering: false,
                     simulation: true,
                     runtime: false,
                 },
@@ -283,6 +293,107 @@ pub fn validate_adapter_profile(
     })
 }
 
+/// Lowers one complete checked program through an explicitly selected adapter.
+///
+/// Selection has already happened through facility allocation. This function cannot infer a
+/// driver from an Asset's manufacturer or model and cannot select a different adapter. The
+/// profile is private operational configuration for the exact Asset binding, not a second target.
+pub fn lower_dependency_build_with_adapter(
+    driver: &str,
+    name: &str,
+    contents: &str,
+    protocol: &ProtocolLairProgram,
+    inventory: &BuildInventory,
+) -> Result<ArtifactBundle, AdapterLoweringError> {
+    match driver {
+        "opentrons.ot2" => {
+            let profile = Ot2TargetProfile::parse(name, contents).map_err(|error| {
+                AdapterLoweringError::InvalidProfile {
+                    driver: driver.to_owned(),
+                    message: error.to_string(),
+                }
+            })?;
+            lab_compiler_ot2(protocol, &profile, inventory).map_err(|message| {
+                AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                }
+            })
+        }
+        "opentrons.flex" => {
+            let profile = FlexTargetProfile::parse(name, contents).map_err(|error| {
+                AdapterLoweringError::InvalidProfile {
+                    driver: driver.to_owned(),
+                    message: error.to_string(),
+                }
+            })?;
+            lab_compiler_flex(protocol, &profile, inventory).map_err(|message| {
+                AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                }
+            })
+        }
+        "hamilton.star" => {
+            let profile = StarTargetProfile::parse(name, contents).map_err(|error| {
+                AdapterLoweringError::InvalidProfile {
+                    driver: driver.to_owned(),
+                    message: error.to_string(),
+                }
+            })?;
+            lab_compiler_star(protocol, &profile, inventory).map_err(|message| {
+                AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                }
+            })
+        }
+        _ => Err(AdapterLoweringError::Unsupported {
+            driver: driver.to_owned(),
+        }),
+    }
+}
+
+fn lab_compiler_ot2(
+    protocol: &ProtocolLairProgram,
+    profile: &Ot2TargetProfile,
+    inventory: &BuildInventory,
+) -> Result<ArtifactBundle, String> {
+    crate::backend::opentrons::ot2::compile_dependency_build(protocol, profile, inventory)
+        .map(|bundle| bundle.artifacts().clone())
+        .map_err(|error| error.to_string())
+}
+
+fn lab_compiler_flex(
+    protocol: &ProtocolLairProgram,
+    profile: &FlexTargetProfile,
+    inventory: &BuildInventory,
+) -> Result<ArtifactBundle, String> {
+    crate::backend::opentrons::flex::compile_dependency_build(protocol, profile, inventory)
+        .map(|bundle| bundle.artifacts().clone())
+        .map_err(|error| error.to_string())
+}
+
+fn lab_compiler_star(
+    protocol: &ProtocolLairProgram,
+    profile: &StarTargetProfile,
+    inventory: &BuildInventory,
+) -> Result<ArtifactBundle, String> {
+    crate::backend::hamilton::star::compile_dependency_build(protocol, profile, inventory)
+        .map(|bundle| bundle.artifacts().clone())
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum AdapterLoweringError {
+    #[error("adapter '{driver}' does not provide whole-program lowering")]
+    Unsupported { driver: String },
+    #[error("invalid operational profile for adapter '{driver}': {message}")]
+    InvalidProfile { driver: String, message: String },
+    #[error("adapter '{driver}' could not lower the allocated program: {message}")]
+    Lowering { driver: String, message: String },
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EmptyAdapterProfile {}
@@ -349,6 +460,7 @@ mod tests {
         assert!(!star.capabilities.contains("eight-channel"));
         assert!(star.control_modes.contains(ControlMode::Api.iri()));
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
+        assert!(star.services.lowering);
         assert!(star.services.runtime);
 
         let simulator = catalog
@@ -357,6 +469,7 @@ mod tests {
             .find(|adapter| adapter.id == "lab.simulator")
             .unwrap();
         assert!(simulator.services.simulation);
+        assert!(!simulator.services.lowering);
         assert!(!simulator.services.runtime);
         assert!(
             simulator
