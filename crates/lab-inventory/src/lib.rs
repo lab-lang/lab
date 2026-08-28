@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-use sbol_inventory::{InventoryDocument, InventoryValidationReport};
+use sbol_inventory::vocabulary::{ControlMode, Qualification};
+use sbol_inventory::{CandidateQuery, InventoryDocument, InventoryValidationReport};
 use sbol3::{Iri, RdfFormat, ReadError, Resource};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -23,6 +24,29 @@ pub struct InventorySnapshot {
 pub struct MaterialLotCatalog {
     facility: Iri,
     by_component: BTreeMap<Iri, Vec<Iri>>,
+}
+
+/// Owned planning facts for one exact Asset governed by the selected facility.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FacilityAsset {
+    pub identity: Iri,
+    pub located_in: Option<Iri>,
+    pub part_of: Option<Iri>,
+    pub position: Option<String>,
+    pub manufacturer: Option<String>,
+    pub model: Option<String>,
+    pub offerings: Vec<FacilityCapabilityOffering>,
+}
+
+/// One exact installed capability offering owned by a [`FacilityAsset`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FacilityCapabilityOffering {
+    pub identity: Iri,
+    pub capability_kind: Iri,
+    pub qualification: Qualification,
+    pub control_mode: ControlMode,
+    /// True only when both the offering and its complete Asset/Zone containment chain are active.
+    pub effectively_active: bool,
 }
 
 impl MaterialLotCatalog {
@@ -165,6 +189,128 @@ impl InventorySnapshot {
             by_component,
         })
     }
+
+    /// Resolves an exact Asset IRI and owns the profile facts facility planning may inspect.
+    pub fn facility_asset(&self, asset: &str) -> Result<FacilityAsset, FacilityAssetError> {
+        let identity =
+            Iri::new(asset.to_owned()).map_err(|error| FacilityAssetError::InvalidAssetIri {
+                asset: asset.to_owned(),
+                message: error.to_string(),
+            })?;
+        let resource = Resource::Iri(identity.clone());
+        let view =
+            self.document
+                .asset(&resource)
+                .ok_or_else(|| FacilityAssetError::AssetNotFound {
+                    asset: identity.clone(),
+                })?;
+        let selected_facility = Resource::Iri(self.facility.clone());
+        if view.facility_id() != Some(&selected_facility) {
+            return Err(FacilityAssetError::WrongFacility {
+                asset: identity,
+                selected: self.facility.clone(),
+                actual: view
+                    .facility_id()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "none".to_owned()),
+            });
+        }
+
+        let validated = self.validated();
+        let mut offerings = Vec::new();
+        for offering in view.capabilities() {
+            let offering_identity = required_iri(
+                offering.identity(),
+                &resource,
+                FacilityAssetReference::CapabilityOffering,
+            )?;
+            let capability_kind = offering
+                .kind()
+                .expect("validated offerings have exactly one capability kind")
+                .clone();
+            let qualification = offering
+                .qualification()
+                .expect("validated offerings have a known qualification");
+            let control_mode = offering
+                .control_mode()
+                .expect("validated offerings have a known control mode");
+            let query = CandidateQuery::new(capability_kind.clone(), Qualification::Discovered)
+                .within_facility(self.facility.clone());
+            let effectively_active =
+                validated
+                    .find_qualified_assets(&query)
+                    .iter()
+                    .any(|candidate| {
+                        candidate.asset().identity() == &resource
+                            && candidate.offering().identity() == offering.identity()
+                    });
+            offerings.push(FacilityCapabilityOffering {
+                identity: offering_identity,
+                capability_kind,
+                qualification,
+                control_mode,
+                effectively_active,
+            });
+        }
+        offerings.sort_by(|left, right| left.identity.cmp(&right.identity));
+
+        Ok(FacilityAsset {
+            identity,
+            located_in: optional_iri(
+                view.located_in_id(),
+                &resource,
+                FacilityAssetReference::Location,
+            )?,
+            part_of: optional_iri(
+                view.part_of_id(),
+                &resource,
+                FacilityAssetReference::ParentAsset,
+            )?,
+            position: view.position().map(str::to_owned),
+            manufacturer: view.manufacturer().map(str::to_owned),
+            model: view.model().map(str::to_owned),
+            offerings,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FacilityAssetReference {
+    CapabilityOffering,
+    Location,
+    ParentAsset,
+}
+
+impl std::fmt::Display for FacilityAssetReference {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::CapabilityOffering => "capability offering",
+            Self::Location => "location",
+            Self::ParentAsset => "parent Asset",
+        })
+    }
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum FacilityAssetError {
+    #[error("adapter asset `{asset}` is not an absolute IRI: {message}")]
+    InvalidAssetIri { asset: String, message: String },
+    #[error("adapter asset `{asset}` is not a fac:Asset in the inventory document")]
+    AssetNotFound { asset: Iri },
+    #[error(
+        "adapter asset `{asset}` belongs to facility `{actual}`, not selected facility `{selected}`"
+    )]
+    WrongFacility {
+        asset: Iri,
+        selected: Iri,
+        actual: String,
+    },
+    #[error("adapter asset `{asset}` has a non-IRI {reference} `{value}`")]
+    NonIriReference {
+        asset: Resource,
+        reference: FacilityAssetReference,
+        value: Resource,
+    },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -302,6 +448,31 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn optional_iri(
+    value: Option<&Resource>,
+    asset: &Resource,
+    reference: FacilityAssetReference,
+) -> Result<Option<Iri>, FacilityAssetError> {
+    value
+        .map(|value| required_iri(value, asset, reference))
+        .transpose()
+}
+
+fn required_iri(
+    value: &Resource,
+    asset: &Resource,
+    reference: FacilityAssetReference,
+) -> Result<Iri, FacilityAssetError> {
+    value
+        .as_iri()
+        .cloned()
+        .ok_or_else(|| FacilityAssetError::NonIriReference {
+            asset: asset.clone(),
+            reference,
+            value: value.clone(),
+        })
 }
 
 #[cfg(test)]
@@ -460,5 +631,74 @@ ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
         );
         let display_name = Iri::new("https://example.org/design".to_owned()).unwrap();
         assert!(catalog.candidates(&display_name).is_empty());
+    }
+
+    #[test]
+    fn resolves_exact_asset_and_capability_offering_facts() {
+        let package = TempDir::new().unwrap();
+        write_inventory(package.path(), MINIMAL);
+        let snapshot =
+            InventorySnapshot::load(package.path(), "inventory/catalog.ttl", None).unwrap();
+
+        let asset = snapshot
+            .facility_asset("https://example.org/sbolinventory/cycler")
+            .unwrap();
+
+        assert_eq!(
+            asset.identity.as_str(),
+            "https://example.org/sbolinventory/cycler"
+        );
+        assert_eq!(
+            asset.located_in.as_ref().map(Iri::as_str),
+            Some("https://example.org/sbolinventory/room")
+        );
+        assert_eq!(asset.offerings.len(), 1);
+        let offering = &asset.offerings[0];
+        assert_eq!(
+            offering.identity.as_str(),
+            "https://example.org/sbolinventory/cycler/thermal_cycling"
+        );
+        assert_eq!(
+            offering.capability_kind.as_str(),
+            "https://draggon.org/ns/capability#ThermalCycling"
+        );
+        assert_eq!(offering.qualification, Qualification::Plannable);
+        assert_eq!(offering.control_mode, ControlMode::ReviewedFile);
+        assert!(offering.effectively_active);
+    }
+
+    #[test]
+    fn exact_asset_resolution_rejects_missing_and_cross_facility_assets() {
+        let package = TempDir::new().unwrap();
+        let several = format!(
+            "{MINIMAL}\nex:second a sbol:TopLevel, fac:Facility ; sbol:displayId \"second\" ; sbol:hasNamespace <https://example.org/sbolinventory> .\n"
+        );
+        write_inventory(package.path(), &several);
+
+        let first = InventorySnapshot::load(
+            package.path(),
+            "inventory/catalog.ttl",
+            Some("https://example.org/sbolinventory/facility"),
+        )
+        .unwrap();
+        assert!(matches!(
+            first.facility_asset("not-an-iri"),
+            Err(FacilityAssetError::InvalidAssetIri { .. })
+        ));
+        assert!(matches!(
+            first.facility_asset("https://example.org/sbolinventory/missing"),
+            Err(FacilityAssetError::AssetNotFound { .. })
+        ));
+
+        let second = InventorySnapshot::load(
+            package.path(),
+            "inventory/catalog.ttl",
+            Some("https://example.org/sbolinventory/second"),
+        )
+        .unwrap();
+        assert!(matches!(
+            second.facility_asset("https://example.org/sbolinventory/cycler"),
+            Err(FacilityAssetError::WrongFacility { .. })
+        ));
     }
 }

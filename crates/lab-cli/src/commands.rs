@@ -165,6 +165,22 @@ pub(crate) fn build(
     fs::write(&capability_requirements_path, capability_requirements_json)
         .with_context(|| format!("failed to write {}", capability_requirements_path.display()))?;
 
+    let adapter_bindings_artifact = if let Some(snapshot) = package_inventory_snapshot(package)? {
+        if let Some(bindings) = crate::adapters::resolve_package_bindings(package, &snapshot)? {
+            let artifact = PathBuf::from("adapter_bindings.json");
+            let path = output_root.join(&artifact);
+            let mut json = serde_json::to_string_pretty(&bindings)?;
+            json.push('\n');
+            fs::write(&path, json)
+                .with_context(|| format!("failed to write {}", path.display()))?;
+            Some(artifact)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let mut artifacts = Vec::new();
     for compiled_module in &compiled.modules {
         let source = &compiled_module.source;
@@ -190,7 +206,7 @@ pub(crate) fn build(
     }
 
     let index = BuildIndex {
-        schema_version: 3,
+        schema_version: 4,
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         edition: package.manifest.package.edition.clone(),
@@ -198,6 +214,7 @@ pub(crate) fn build(
         members: compiled.members.clone(),
         modules: artifacts,
         capability_requirements: capability_requirements_artifact,
+        adapter_bindings: adapter_bindings_artifact,
     };
     let index_path = output_root.join("package.json");
     let mut json = serde_json::to_string_pretty(&index)?;
@@ -503,19 +520,27 @@ fn load_package(path: &Path) -> Result<LabPackage> {
 
 fn validate_project_inventories(project: &LabProject) -> Result<()> {
     for package in project.member_packages() {
-        let inventory = &package.manifest.inventory;
-        let Some(document) = inventory.document.as_ref() else {
+        let Some(snapshot) = package_inventory_snapshot(package)? else {
             continue;
         };
-        InventorySnapshot::load(&package.root, document, inventory.facility.as_deref())
-            .with_context(|| {
-                format!(
-                    "failed to load inventory for package '{}'",
-                    package.manifest.package.name
-                )
-            })?;
+        crate::adapters::resolve_package_bindings(package, &snapshot)?;
     }
     Ok(())
+}
+
+fn package_inventory_snapshot(package: &LabPackage) -> Result<Option<InventorySnapshot>> {
+    let inventory = &package.manifest.inventory;
+    let Some(document) = inventory.document.as_ref() else {
+        return Ok(None);
+    };
+    InventorySnapshot::load(&package.root, document, inventory.facility.as_deref())
+        .map(Some)
+        .with_context(|| {
+            format!(
+                "failed to load inventory for package '{}'",
+                package.manifest.package.name
+            )
+        })
 }
 
 fn validate_package_name(name: &str) -> Result<()> {
@@ -599,6 +624,8 @@ struct BuildIndex {
     members: Vec<String>,
     modules: Vec<BuildModule>,
     capability_requirements: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    adapter_bindings: Option<PathBuf>,
 }
 
 #[derive(Serialize)]

@@ -19,7 +19,7 @@ lab check
 lab build
 ```
 
-`lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. `lab build` writes verified portable module IR, `capability_requirements.json`, and a package index under `.lab/build/`, plus a deterministic `lab.lock` at the project root. The requirement file describes checked workflow templates and contains no facility allocation.
+`lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. `lab build` writes verified portable module IR, `capability_requirements.json`, an optional `adapter_bindings.json`, and a package index under `.lab/build/`, plus a deterministic `lab.lock` at the project root. The requirement file describes checked workflow templates and contains no facility allocation. The adapter-binding file freezes exact Asset, compatible CapabilityOffering, profile-hash, qualification, control-mode, and service-eligibility facts but does not allocate a workflow requirement.
 
 A `lab.toml` may instead declare a workspace, grouping member packages under one root:
 

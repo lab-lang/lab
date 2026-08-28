@@ -51,7 +51,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
     let index_path = project.join(".lab/build/package.json");
     let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
-    assert_eq!(index["schema_version"], 3);
+    assert_eq!(index["schema_version"], 4);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
     assert_eq!(
@@ -146,6 +146,83 @@ fn check_validates_a_configured_sbol_inventory() {
         String::from_utf8_lossy(&rejected.stderr).contains("does not conform to SBOLInventory"),
         "{}",
         String::from_utf8_lossy(&rejected.stderr)
+    );
+
+    std::fs::remove_dir_all(&project).unwrap();
+}
+
+#[test]
+fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
+    let project = temporary_project();
+    let project_text = project.to_string_lossy().into_owned();
+    let created = run(&["new", &project_text]);
+    assert!(created.status.success());
+
+    let manifest = project.join("lab.toml");
+    let mut text = std::fs::read_to_string(&manifest).unwrap();
+    text.push_str(
+        "\n[inventory]\ndocument = \"inventory/catalog.ttl\"\n\n[[execution.adapters]]\nasset = \"https://example.org/sbolinventory/cycler\"\ndriver = \"opentrons.ot2\"\nprofile = \"adapters/cycler.toml\"\n",
+    );
+    std::fs::write(&manifest, text).unwrap();
+    std::fs::create_dir(project.join("inventory")).unwrap();
+    std::fs::write(
+        project.join("inventory/catalog.ttl"),
+        include_str!("fixtures/minimal-inventory.ttl"),
+    )
+    .unwrap();
+    std::fs::create_dir(project.join("adapters")).unwrap();
+    std::fs::write(project.join("adapters/cycler.toml"), "").unwrap();
+
+    let checked = run(&["check", &project_text]);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let built = run(&["build", &project_text]);
+    assert!(
+        built.status.success(),
+        "{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let index: Value =
+        serde_json::from_slice(&std::fs::read(project.join(".lab/build/package.json")).unwrap())
+            .unwrap();
+    assert_eq!(index["schema_version"], 4);
+    assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
+    let bindings: Value = serde_json::from_slice(
+        &std::fs::read(project.join(".lab/build/adapter_bindings.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v1");
+    assert_eq!(
+        bindings["facility"],
+        "https://example.org/sbolinventory/facility"
+    );
+    assert_eq!(bindings["bindings"][0]["driver"], "opentrons.ot2");
+    assert_eq!(
+        bindings["bindings"][0]["asset"],
+        "https://example.org/sbolinventory/cycler"
+    );
+    assert_eq!(
+        bindings["bindings"][0]["offerings"][0]["offering"],
+        "https://example.org/sbolinventory/cycler/thermal_cycling"
+    );
+    assert_eq!(
+        bindings["bindings"][0]["offerings"][0]["planning_eligible"],
+        true
+    );
+    assert_eq!(
+        bindings["bindings"][0]["offerings"][0]["execution_eligible"],
+        false
+    );
+    assert_eq!(
+        bindings["bindings"][0]["profile_sha256"]
+            .as_str()
+            .unwrap()
+            .len(),
+        64
     );
 
     std::fs::remove_dir_all(&project).unwrap();
