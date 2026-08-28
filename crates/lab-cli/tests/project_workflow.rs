@@ -96,11 +96,11 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert_eq!(requirements["requirements"].as_array().unwrap().len(), 1);
     assert_eq!(
         requirements["requirements"][0]["capability_kind"],
-        "https://draggon.org/ns/capability#ArtifactRealization"
+        "https://sbol.io/ns/capability#ArtifactRealization"
     );
     assert_eq!(
         requirements["requirements"][0]["minimum_qualification"],
-        "https://draggon.org/ns/facility#Plannable"
+        "https://sbol.io/ns/facility#Plannable"
     );
     assert_eq!(
         requirements["requirements"][0]["value_inputs"][0]["argument"],
@@ -182,9 +182,9 @@ workflow main() -> Material<Plasmid>:
     .unwrap();
     std::fs::write(
         project.join("inventory/catalog.ttl"),
-        r#"@prefix cap: <https://draggon.org/ns/capability#> .
+        r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
-@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix fac: <https://sbol.io/ns/facility#> .
 @prefix sbol: <http://sbols.org/v3#> .
 
 ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
@@ -683,7 +683,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         .unwrap()
         .iter()
         .filter(|binding| {
-            binding["capability_kind"] == "https://draggon.org/ns/capability#LiquidHandling"
+            binding["capability_kind"] == "https://sbol.io/ns/capability#LiquidHandling"
         })
         .collect::<Vec<_>>();
     assert!(!liquid_handling.is_empty());
@@ -847,7 +847,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         .unwrap()
         .iter()
         .filter(|binding| {
-            binding["capability_kind"] == "https://draggon.org/ns/capability#LiquidHandling"
+            binding["capability_kind"] == "https://sbol.io/ns/capability#LiquidHandling"
         })
         .collect::<Vec<_>>();
     assert!(!liquid_handling.is_empty());

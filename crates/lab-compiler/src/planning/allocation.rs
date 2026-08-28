@@ -594,9 +594,9 @@ mod tests {
 
     use super::*;
 
-    const INVENTORY: &str = r#"@prefix cap: <https://draggon.org/ns/capability#> .
+    const INVENTORY: &str = r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
-@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix fac: <https://sbol.io/ns/facility#> .
 @prefix sbol: <http://sbols.org/v3#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 

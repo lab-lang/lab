@@ -1,786 +1,786 @@
 <https://example.org/ebef/amsco_630ls> <http://sbols.org/v3#displayId> "amsco_630ls" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Large basement autoclave" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/amsco_630ls/steam_sterilization> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#model> "AMSCO 630LS" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/amsco_630ls/steam_sterilization> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#model> "AMSCO 630LS" .
 <https://example.org/ebef/amsco_630ls/steam_sterilization> <http://sbols.org/v3#displayId> "steam_sterilization" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#SteamSterilization> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#SteamSterilization> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/anaerobic_chamber_1> <http://sbols.org/v3#displayId> "anaerobic_chamber_1" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Anaerobic chamber 1" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#EnvironmentController> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/anaerobic_chamber_1/anaerobic_environment_control> ;
-	<https://draggon.org/ns/facility#establishesZone> <https://example.org/ebef/anaerobic_chamber_1_interior> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Coy Laboratory Products" ;
-	<https://draggon.org/ns/facility#model> "Vinyl anaerobic chamber" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/anaerobic_chamber_1/anaerobic_environment_control> ;
+	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/anaerobic_chamber_1_interior> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Coy Laboratory Products" ;
+	<https://sbol.io/ns/facility#model> "Vinyl anaerobic chamber" .
 <https://example.org/ebef/anaerobic_chamber_1/anaerobic_environment_control> <http://sbols.org/v3#displayId> "anaerobic_environment_control" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#AnaerobicEnvironmentControl> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#AnaerobicEnvironmentControl> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/anaerobic_chamber_1_interior> <http://sbols.org/v3#displayId> "anaerobic_chamber_1_interior" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Anaerobic chamber 1 interior" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#condition> <https://example.org/ebef/anaerobic_chamber_1_interior/hydrogen_fraction> , <https://example.org/ebef/anaerobic_chamber_1_interior/maximum_added_co2> , <https://example.org/ebef/anaerobic_chamber_1_interior/nitrogen_fraction> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#ContainmentZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#condition> <https://example.org/ebef/anaerobic_chamber_1_interior/hydrogen_fraction> , <https://example.org/ebef/anaerobic_chamber_1_interior/maximum_added_co2> , <https://example.org/ebef/anaerobic_chamber_1_interior/nitrogen_fraction> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#ContainmentZone> .
 <https://example.org/ebef/anaerobic_chamber_1_interior/hydrogen_fraction> <http://sbols.org/v3#displayId> "hydrogen_fraction" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/hydrogen_fraction> ;
-	<https://draggon.org/ns/facility#realValue> "5"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/hydrogen_fraction> ;
+	<https://sbol.io/ns/facility#realValue> "5"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
 <https://example.org/ebef/anaerobic_chamber_1_interior/maximum_added_co2> <http://sbols.org/v3#displayId> "maximum_added_co2" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_added_co2> ;
-	<https://draggon.org/ns/facility#realValue> "20"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_added_co2> ;
+	<https://sbol.io/ns/facility#realValue> "20"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
 <https://example.org/ebef/anaerobic_chamber_1_interior/nitrogen_fraction> <http://sbols.org/v3#displayId> "nitrogen_fraction" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/nitrogen_fraction> ;
-	<https://draggon.org/ns/facility#realValue> "95"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/nitrogen_fraction> ;
+	<https://sbol.io/ns/facility#realValue> "95"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
 <https://example.org/ebef/anaerobic_chamber_2> <http://sbols.org/v3#displayId> "anaerobic_chamber_2" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Anaerobic chamber 2" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#EnvironmentController> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/anaerobic_chamber_2/anaerobic_environment_control> ;
-	<https://draggon.org/ns/facility#establishesZone> <https://example.org/ebef/anaerobic_chamber_2_interior> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Coy Laboratory Products" ;
-	<https://draggon.org/ns/facility#model> "Extra-wide vinyl anaerobic chamber" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/anaerobic_chamber_2/anaerobic_environment_control> ;
+	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/anaerobic_chamber_2_interior> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Coy Laboratory Products" ;
+	<https://sbol.io/ns/facility#model> "Extra-wide vinyl anaerobic chamber" .
 <https://example.org/ebef/anaerobic_chamber_2/anaerobic_environment_control> <http://sbols.org/v3#displayId> "anaerobic_environment_control" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#AnaerobicEnvironmentControl> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#AnaerobicEnvironmentControl> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/anaerobic_chamber_2_interior> <http://sbols.org/v3#displayId> "anaerobic_chamber_2_interior" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Anaerobic chamber 2 interior" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#condition> <https://example.org/ebef/anaerobic_chamber_2_interior/hydrogen_fraction> , <https://example.org/ebef/anaerobic_chamber_2_interior/maximum_added_co2> , <https://example.org/ebef/anaerobic_chamber_2_interior/nitrogen_fraction> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#ContainmentZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#condition> <https://example.org/ebef/anaerobic_chamber_2_interior/hydrogen_fraction> , <https://example.org/ebef/anaerobic_chamber_2_interior/maximum_added_co2> , <https://example.org/ebef/anaerobic_chamber_2_interior/nitrogen_fraction> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#ContainmentZone> .
 <https://example.org/ebef/anaerobic_chamber_2_interior/hydrogen_fraction> <http://sbols.org/v3#displayId> "hydrogen_fraction" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/hydrogen_fraction> ;
-	<https://draggon.org/ns/facility#realValue> "5"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/hydrogen_fraction> ;
+	<https://sbol.io/ns/facility#realValue> "5"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
 <https://example.org/ebef/anaerobic_chamber_2_interior/maximum_added_co2> <http://sbols.org/v3#displayId> "maximum_added_co2" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_added_co2> ;
-	<https://draggon.org/ns/facility#realValue> "20"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_added_co2> ;
+	<https://sbol.io/ns/facility#realValue> "20"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
 <https://example.org/ebef/anaerobic_chamber_2_interior/nitrogen_fraction> <http://sbols.org/v3#displayId> "nitrogen_fraction" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/nitrogen_fraction> ;
-	<https://draggon.org/ns/facility#realValue> "95"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/nitrogen_fraction> ;
+	<https://sbol.io/ns/facility#realValue> "95"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/PERCENT> .
 <https://example.org/ebef/anaerobic_swinging_bucket_centrifuge> <http://sbols.org/v3#displayId> "anaerobic_swinging_bucket_centrifuge" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Anaerobic swinging-bucket centrifuge" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/anaerobic_swinging_bucket_centrifuge/centrifugation> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_2_interior> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/anaerobic_swinging_bucket_centrifuge/centrifugation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_2_interior> .
 <https://example.org/ebef/anaerobic_swinging_bucket_centrifuge/centrifugation> <http://sbols.org/v3#displayId> "centrifugation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#Centrifugation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#Centrifugation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/azure_300> <http://sbols.org/v3#displayId> "azure_300" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Gel imager" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/azure_300/gel_imaging> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#model> "Azure 300" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/azure_300/gel_imaging> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#model> "Azure 300" .
 <https://example.org/ebef/azure_300/gel_imaging> <http://sbols.org/v3#displayId> "gel_imaging" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#GelImaging> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#GelImaging> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/basement_main_lab> <http://sbols.org/v3#displayId> "basement_main_lab" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Main lab (basement)" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#Room> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#Room> .
 <https://example.org/ebef/biotek_epoch_2> <http://sbols.org/v3#displayId> "biotek_epoch_2" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Epoch 2 plate reader" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/biotek_epoch_2/absorbance_measurement> , <https://example.org/ebef/biotek_epoch_2/incubation> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Agilent BioTek" ;
-	<https://draggon.org/ns/facility#model> "Epoch 2" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/biotek_epoch_2/absorbance_measurement> , <https://example.org/ebef/biotek_epoch_2/incubation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Agilent BioTek" ;
+	<https://sbol.io/ns/facility#model> "Epoch 2" .
 <https://example.org/ebef/biotek_epoch_2/absorbance_measurement> <http://sbols.org/v3#displayId> "absorbance_measurement" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#AbsorbanceMeasurement> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/biotek_epoch_2/absorbance_measurement/supported_plate_wells> , <https://example.org/ebef/biotek_epoch_2/absorbance_measurement/supports_fluorescence> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#AbsorbanceMeasurement> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/biotek_epoch_2/absorbance_measurement/supported_plate_wells> , <https://example.org/ebef/biotek_epoch_2/absorbance_measurement/supports_fluorescence> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/biotek_epoch_2/absorbance_measurement/supported_plate_wells> <http://sbols.org/v3#displayId> "supported_plate_wells" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 96 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supported_plate_wells> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 96 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supported_plate_wells> .
 <https://example.org/ebef/biotek_epoch_2/absorbance_measurement/supports_fluorescence> <http://sbols.org/v3#displayId> "supports_fluorescence" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> false ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_fluorescence> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> false ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_fluorescence> .
 <https://example.org/ebef/biotek_epoch_2/incubation> <http://sbols.org/v3#displayId> "incubation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#Incubation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/biotek_epoch_2/incubation/maximum_temperature> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#Incubation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/biotek_epoch_2/incubation/maximum_temperature> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/biotek_epoch_2/incubation/maximum_temperature> <http://sbols.org/v3#displayId> "maximum_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_temperature> ;
-	<https://draggon.org/ns/facility#realValue> "65"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_temperature> ;
+	<https://sbol.io/ns/facility#realValue> "65"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
 <https://example.org/ebef/cold_storage_group> <http://sbols.org/v3#description> "Placeholder group pending identifiers for each reservable unit." ;
 	<http://sbols.org/v3#displayId> "cold_storage_group" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Publicly documented cold-storage units" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#StorageAsset> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/cold_storage_group/cold_storage> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/freezer_room> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#StorageAsset> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/cold_storage_group/cold_storage> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/freezer_room> .
 <https://example.org/ebef/cold_storage_group/cold_storage> <http://sbols.org/v3#displayId> "cold_storage" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ColdStorage> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/cold_storage_group/cold_storage/documented_temperatures> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ColdStorage> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/cold_storage_group/cold_storage/documented_temperatures> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/cold_storage_group/cold_storage/documented_temperatures> <http://sbols.org/v3#displayId> "documented_temperatures" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/documented_temperatures> ;
-	<https://draggon.org/ns/facility#textValue> "4 C, -20 C, and -70 C" .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/documented_temperatures> ;
+	<https://sbol.io/ns/facility#textValue> "4 C, -20 C, and -70 C" .
 <https://example.org/ebef/conviron_gen1000_1> <http://sbols.org/v3#displayId> "conviron_gen1000_1" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant chamber Gen1000 1" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#EnvironmentController> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/conviron_gen1000_1/plant_growth> ;
-	<https://draggon.org/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen1000_1_interior> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Conviron" ;
-	<https://draggon.org/ns/facility#model> "Gen1000" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gen1000_1/plant_growth> ;
+	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen1000_1_interior> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
+	<https://sbol.io/ns/facility#model> "Gen1000" .
 <https://example.org/ebef/conviron_gen1000_1/plant_growth> <http://sbols.org/v3#displayId> "plant_growth" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#PlantGrowth> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/conviron_gen1000_1/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gen1000_1/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gen1000_1/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gen1000_1/plant_growth/programmable_temperature> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#PlantGrowth> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/conviron_gen1000_1/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gen1000_1/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gen1000_1/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gen1000_1/plant_growth/programmable_temperature> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/conviron_gen1000_1/plant_growth/additive_co2> <http://sbols.org/v3#displayId> "additive_co2" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
 <https://example.org/ebef/conviron_gen1000_1/plant_growth/additive_humidity> <http://sbols.org/v3#displayId> "additive_humidity" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
 <https://example.org/ebef/conviron_gen1000_1/plant_growth/programmable_light> <http://sbols.org/v3#displayId> "programmable_light" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
 <https://example.org/ebef/conviron_gen1000_1/plant_growth/programmable_temperature> <http://sbols.org/v3#displayId> "programmable_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
 <https://example.org/ebef/conviron_gen1000_1_interior> <http://sbols.org/v3#displayId> "conviron_gen1000_1_interior" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant chamber Gen1000 1 interior" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#EnvironmentZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#EnvironmentZone> .
 <https://example.org/ebef/conviron_gen1000_2> <http://sbols.org/v3#displayId> "conviron_gen1000_2" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant chamber Gen1000 2" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#EnvironmentController> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/conviron_gen1000_2/plant_growth> ;
-	<https://draggon.org/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen1000_2_interior> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Conviron" ;
-	<https://draggon.org/ns/facility#model> "Gen1000" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gen1000_2/plant_growth> ;
+	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen1000_2_interior> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
+	<https://sbol.io/ns/facility#model> "Gen1000" .
 <https://example.org/ebef/conviron_gen1000_2/plant_growth> <http://sbols.org/v3#displayId> "plant_growth" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#PlantGrowth> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/conviron_gen1000_2/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gen1000_2/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gen1000_2/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gen1000_2/plant_growth/programmable_temperature> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#PlantGrowth> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/conviron_gen1000_2/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gen1000_2/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gen1000_2/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gen1000_2/plant_growth/programmable_temperature> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/conviron_gen1000_2/plant_growth/additive_co2> <http://sbols.org/v3#displayId> "additive_co2" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
 <https://example.org/ebef/conviron_gen1000_2/plant_growth/additive_humidity> <http://sbols.org/v3#displayId> "additive_humidity" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
 <https://example.org/ebef/conviron_gen1000_2/plant_growth/programmable_light> <http://sbols.org/v3#displayId> "programmable_light" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
 <https://example.org/ebef/conviron_gen1000_2/plant_growth/programmable_temperature> <http://sbols.org/v3#displayId> "programmable_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
 <https://example.org/ebef/conviron_gen1000_2_interior> <http://sbols.org/v3#displayId> "conviron_gen1000_2_interior" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant chamber Gen1000 2 interior" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#EnvironmentZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#EnvironmentZone> .
 <https://example.org/ebef/conviron_gen2000> <http://sbols.org/v3#displayId> "conviron_gen2000" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant chamber Gen2000" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#EnvironmentController> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/conviron_gen2000/plant_growth> ;
-	<https://draggon.org/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen2000_interior> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Conviron" ;
-	<https://draggon.org/ns/facility#model> "Gen2000" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gen2000/plant_growth> ;
+	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen2000_interior> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
+	<https://sbol.io/ns/facility#model> "Gen2000" .
 <https://example.org/ebef/conviron_gen2000/plant_growth> <http://sbols.org/v3#displayId> "plant_growth" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#PlantGrowth> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/conviron_gen2000/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gen2000/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gen2000/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gen2000/plant_growth/programmable_temperature> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#PlantGrowth> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/conviron_gen2000/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gen2000/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gen2000/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gen2000/plant_growth/programmable_temperature> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/conviron_gen2000/plant_growth/additive_co2> <http://sbols.org/v3#displayId> "additive_co2" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
 <https://example.org/ebef/conviron_gen2000/plant_growth/additive_humidity> <http://sbols.org/v3#displayId> "additive_humidity" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
 <https://example.org/ebef/conviron_gen2000/plant_growth/programmable_light> <http://sbols.org/v3#displayId> "programmable_light" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
 <https://example.org/ebef/conviron_gen2000/plant_growth/programmable_temperature> <http://sbols.org/v3#displayId> "programmable_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
 <https://example.org/ebef/conviron_gen2000_interior> <http://sbols.org/v3#displayId> "conviron_gen2000_interior" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant chamber Gen2000 interior" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#EnvironmentZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#EnvironmentZone> .
 <https://example.org/ebef/conviron_gr48> <http://sbols.org/v3#displayId> "conviron_gr48" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Walk-in plant chamber" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#EnvironmentController> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/conviron_gr48/plant_growth> ;
-	<https://draggon.org/ns/facility#establishesZone> <https://example.org/ebef/conviron_gr48_interior> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Conviron" ;
-	<https://draggon.org/ns/facility#model> "GR48" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gr48/plant_growth> ;
+	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gr48_interior> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
+	<https://sbol.io/ns/facility#model> "GR48" .
 <https://example.org/ebef/conviron_gr48/plant_growth> <http://sbols.org/v3#displayId> "plant_growth" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#PlantGrowth> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/conviron_gr48/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gr48/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gr48/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gr48/plant_growth/programmable_temperature> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#PlantGrowth> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/conviron_gr48/plant_growth/additive_co2> , <https://example.org/ebef/conviron_gr48/plant_growth/additive_humidity> , <https://example.org/ebef/conviron_gr48/plant_growth/programmable_light> , <https://example.org/ebef/conviron_gr48/plant_growth/programmable_temperature> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/conviron_gr48/plant_growth/additive_co2> <http://sbols.org/v3#displayId> "additive_co2" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_co2> .
 <https://example.org/ebef/conviron_gr48/plant_growth/additive_humidity> <http://sbols.org/v3#displayId> "additive_humidity" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/additive_humidity> .
 <https://example.org/ebef/conviron_gr48/plant_growth/programmable_light> <http://sbols.org/v3#displayId> "programmable_light" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_light> .
 <https://example.org/ebef/conviron_gr48/plant_growth/programmable_temperature> <http://sbols.org/v3#displayId> "programmable_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/programmable_temperature> .
 <https://example.org/ebef/conviron_gr48_interior> <http://sbols.org/v3#displayId> "conviron_gr48_interior" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Walk-in plant chamber interior" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#EnvironmentZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/plant_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#EnvironmentZone> .
 <https://example.org/ebef/dragonfly_confocal> <http://sbols.org/v3#displayId> "dragonfly_confocal" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Dragonfly spinning disk confocal microscope" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/dragonfly_confocal/confocal_microscopy> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microscopy_lab> ;
-	<https://draggon.org/ns/facility#model> "Dragonfly spinning disk confocal" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/dragonfly_confocal/confocal_microscopy> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microscopy_lab> ;
+	<https://sbol.io/ns/facility#model> "Dragonfly spinning disk confocal" .
 <https://example.org/ebef/dragonfly_confocal/confocal_microscopy> <http://sbols.org/v3#displayId> "confocal_microscopy" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ConfocalMicroscopy> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/camera_pixels_x> , <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/camera_pixels_y> , <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/supports_timelapse> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ConfocalMicroscopy> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/camera_pixels_x> , <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/camera_pixels_y> , <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/supports_timelapse> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/camera_pixels_x> <http://sbols.org/v3#displayId> "camera_pixels_x" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 2048 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/camera_pixels_x> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 2048 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/camera_pixels_x> .
 <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/camera_pixels_y> <http://sbols.org/v3#displayId> "camera_pixels_y" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 2048 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/camera_pixels_y> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 2048 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/camera_pixels_y> .
 <https://example.org/ebef/dragonfly_confocal/confocal_microscopy/supports_timelapse> <http://sbols.org/v3#displayId> "supports_timelapse" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_timelapse> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_timelapse> .
 <https://example.org/ebef/electrophoresis_station> <http://sbols.org/v3#displayId> "electrophoresis_station" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "DNA and protein electrophoresis station" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Workstation> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/electrophoresis_station/electrophoresis> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Workstation> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/electrophoresis_station/electrophoresis> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 <https://example.org/ebef/electrophoresis_station/electrophoresis> <http://sbols.org/v3#displayId> "electrophoresis" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#Electrophoresis> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#Electrophoresis> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/eppendorf_s44i_1> <http://sbols.org/v3#displayId> "eppendorf_s44i_1" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Shaking incubator 1" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Eppendorf" ;
-	<https://draggon.org/ns/facility#model> "S44i" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Eppendorf" ;
+	<https://sbol.io/ns/facility#model> "S44i" .
 <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation> <http://sbols.org/v3#displayId> "shaking_incubation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ShakingIncubation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/minimum_temperature> , <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/supports_photosynthetic_lighting> , <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/supports_refrigeration> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ShakingIncubation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/minimum_temperature> , <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/supports_photosynthetic_lighting> , <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/supports_refrigeration> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/minimum_temperature> <http://sbols.org/v3#displayId> "minimum_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/minimum_temperature> ;
-	<https://draggon.org/ns/facility#realValue> "30"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/minimum_temperature> ;
+	<https://sbol.io/ns/facility#realValue> "30"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
 <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/supports_photosynthetic_lighting> <http://sbols.org/v3#displayId> "supports_photosynthetic_lighting" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> false ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_photosynthetic_lighting> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> false ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_photosynthetic_lighting> .
 <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation/supports_refrigeration> <http://sbols.org/v3#displayId> "supports_refrigeration" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> false ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_refrigeration> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> false ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_refrigeration> .
 <https://example.org/ebef/eppendorf_s44i_2> <http://sbols.org/v3#displayId> "eppendorf_s44i_2" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Shaking incubator 2" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Eppendorf" ;
-	<https://draggon.org/ns/facility#model> "S44i" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Eppendorf" ;
+	<https://sbol.io/ns/facility#model> "S44i" .
 <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation> <http://sbols.org/v3#displayId> "shaking_incubation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ShakingIncubation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation/supports_photosynthetic_lighting> , <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation/supports_refrigeration> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ShakingIncubation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation/supports_photosynthetic_lighting> , <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation/supports_refrigeration> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation/supports_photosynthetic_lighting> <http://sbols.org/v3#displayId> "supports_photosynthetic_lighting" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_photosynthetic_lighting> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_photosynthetic_lighting> .
 <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation/supports_refrigeration> <http://sbols.org/v3#displayId> "supports_refrigeration" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_refrigeration> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_refrigeration> .
 <https://example.org/ebef/eppendorf_s44i_3> <http://sbols.org/v3#displayId> "eppendorf_s44i_3" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Shaking incubator 3" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#manufacturer> "Eppendorf" ;
-	<https://draggon.org/ns/facility#model> "S44i" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#manufacturer> "Eppendorf" ;
+	<https://sbol.io/ns/facility#model> "S44i" .
 <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation> <http://sbols.org/v3#displayId> "shaking_incubation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ShakingIncubation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation/supports_photosynthetic_lighting> , <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation/supports_refrigeration> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ShakingIncubation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation/supports_photosynthetic_lighting> , <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation/supports_refrigeration> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation/supports_photosynthetic_lighting> <http://sbols.org/v3#displayId> "supports_photosynthetic_lighting" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_photosynthetic_lighting> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_photosynthetic_lighting> .
 <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation/supports_refrigeration> <http://sbols.org/v3#displayId> "supports_refrigeration" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_refrigeration> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_refrigeration> .
 <https://example.org/ebef/facility> <http://sbols.org/v3#description> "Public-data example catalog for a multi-user BSL2+ microbiology, microscopy, and plant cultivation facility; source accessed 2026-08-26." ;
 	<http://sbols.org/v3#displayId> "facility" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Resnick Ecology and Biosphere Engineering Facility" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Facility> ;
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Facility> ;
 	<http://www.w3.org/ns/prov#wasDerivedFrom> <https://resnick.caltech.edu/resource-centers/ecology-and-biosphere-engineering-facility-ebef> .
 <https://example.org/ebef/freezer_room> <http://sbols.org/v3#displayId> "freezer_room" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Freezer room" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#StorageZone> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#StorageZone> .
 <https://example.org/ebef/main_biosafety_cabinet> <http://sbols.org/v3#displayId> "main_biosafety_cabinet" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Main-lab biosafety cabinet" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment> <http://sbols.org/v3#displayId> "biosafety_containment" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#BiosafetyContainment> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment/width_feet> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#BiosafetyContainment> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment/width_feet> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment/width_feet> <http://sbols.org/v3#displayId> "width_feet" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/width_feet> ;
-	<https://draggon.org/ns/facility#realValue> "6"^^<http://www.w3.org/2001/XMLSchema#double> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/width_feet> ;
+	<https://sbol.io/ns/facility#realValue> "6"^^<http://www.w3.org/2001/XMLSchema#double> .
 <https://example.org/ebef/media_prep_room> <http://sbols.org/v3#displayId> "media_prep_room" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Media preparation room" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#WorkArea> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#WorkArea> .
 <https://example.org/ebef/media_prep_station> <http://sbols.org/v3#displayId> "media_prep_station" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Media and buffer preparation station" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Workstation> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/media_prep_station/media_preparation> , <https://example.org/ebef/media_prep_station/ph_measurement> , <https://example.org/ebef/media_prep_station/water_purification> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/media_prep_room> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Workstation> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/media_prep_station/media_preparation> , <https://example.org/ebef/media_prep_station/ph_measurement> , <https://example.org/ebef/media_prep_station/water_purification> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/media_prep_room> .
 <https://example.org/ebef/media_prep_station/media_preparation> <http://sbols.org/v3#displayId> "media_preparation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#MediaPreparation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#MediaPreparation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/media_prep_station/ph_measurement> <http://sbols.org/v3#displayId> "ph_measurement" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#PhMeasurement> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#PhMeasurement> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/media_prep_station/water_purification> <http://sbols.org/v3#displayId> "water_purification" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#WaterPurification> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#WaterPurification> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/microbiology_lab> <http://sbols.org/v3#displayId> "microbiology_lab" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Microbiology lab (basement)" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#WorkArea> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#WorkArea> .
 <https://example.org/ebef/microlab_prep> <http://sbols.org/v3#displayId> "microlab_prep" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Anaerobic liquid handler" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/microlab_prep/liquid_handling> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> ;
-	<https://draggon.org/ns/facility#manufacturer> "Hamilton" ;
-	<https://draggon.org/ns/facility#model> "Microlab Prep" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/microlab_prep/liquid_handling> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> ;
+	<https://sbol.io/ns/facility#manufacturer> "Hamilton" ;
+	<https://sbol.io/ns/facility#model> "Microlab Prep" .
 <https://example.org/ebef/microlab_prep/liquid_handling> <http://sbols.org/v3#displayId> "liquid_handling" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#LiquidHandling> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/microlab_prep/liquid_handling/supported_plate_wells> , <https://example.org/ebef/microlab_prep/liquid_handling/supports_serial_dilution> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#LiquidHandling> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/microlab_prep/liquid_handling/supported_plate_wells> , <https://example.org/ebef/microlab_prep/liquid_handling/supports_serial_dilution> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/microlab_prep/liquid_handling/supported_plate_wells> <http://sbols.org/v3#displayId> "supported_plate_wells" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 96 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supported_plate_wells> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 96 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supported_plate_wells> .
 <https://example.org/ebef/microlab_prep/liquid_handling/supports_serial_dilution> <http://sbols.org/v3#displayId> "supports_serial_dilution" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supports_serial_dilution> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supports_serial_dilution> .
 <https://example.org/ebef/microscopy_lab> <http://sbols.org/v3#displayId> "microscopy_lab" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Microscopy lab (basement)" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#WorkArea> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parentZone> <https://example.org/ebef/basement_main_lab> ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#WorkArea> .
 <https://example.org/ebef/plant_autoclave> <http://sbols.org/v3#displayId> "plant_autoclave" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant-lab soil and waste autoclave" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/plant_autoclave/steam_sterilization> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/plant_autoclave/steam_sterilization> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> .
 <https://example.org/ebef/plant_autoclave/steam_sterilization> <http://sbols.org/v3#displayId> "steam_sterilization" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#SteamSterilization> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/plant_autoclave/steam_sterilization/optional_effluent_decontamination> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#SteamSterilization> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/plant_autoclave/steam_sterilization/optional_effluent_decontamination> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/plant_autoclave/steam_sterilization/optional_effluent_decontamination> <http://sbols.org/v3#displayId> "optional_effluent_decontamination" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#booleanValue> true ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/optional_effluent_decontamination> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#booleanValue> true ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/optional_effluent_decontamination> .
 <https://example.org/ebef/plant_biosafety_cabinet> <http://sbols.org/v3#displayId> "plant_biosafety_cabinet" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant-lab biosafety cabinet" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> .
 <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment> <http://sbols.org/v3#displayId> "biosafety_containment" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#BiosafetyContainment> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment/width_feet> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#BiosafetyContainment> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment/width_feet> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment/width_feet> <http://sbols.org/v3#displayId> "width_feet" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/width_feet> ;
-	<https://draggon.org/ns/facility#realValue> "4"^^<http://www.w3.org/2001/XMLSchema#double> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/width_feet> ;
+	<https://sbol.io/ns/facility#realValue> "4"^^<http://www.w3.org/2001/XMLSchema#double> .
 <https://example.org/ebef/plant_lab> <http://sbols.org/v3#displayId> "plant_lab" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plant lab (first floor)" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Zone> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#zoneKind> <https://draggon.org/ns/facility#Room> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Zone> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#zoneKind> <https://sbol.io/ns/facility#Room> .
 <https://example.org/ebef/plasma_cleaner> <http://sbols.org/v3#displayId> "plasma_cleaner" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Plasma cleaner" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/plasma_cleaner/plasma_cleaning> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microscopy_lab> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/plasma_cleaner/plasma_cleaning> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microscopy_lab> .
 <https://example.org/ebef/plasma_cleaner/plasma_cleaning> <http://sbols.org/v3#displayId> "plasma_cleaning" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#PlasmaCleaning> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#PlasmaCleaning> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/potentiostat_96_well> <http://sbols.org/v3#displayId> "potentiostat_96_well" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "96-well potentiostat" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> .
 <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement> <http://sbols.org/v3#displayId> "electrochemical_measurement" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ElectrochemicalMeasurement> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement/supported_plate_wells> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ElectrochemicalMeasurement> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement/supported_plate_wells> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement/supported_plate_wells> <http://sbols.org/v3#displayId> "supported_plate_wells" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 96 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/supported_plate_wells> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 96 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/supported_plate_wells> .
 <https://example.org/ebef/proflex> <http://sbols.org/v3#description> "Composite parent; independently runnable blocks are child assets." ;
 	<http://sbols.org/v3#displayId> "proflex" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "ProFlex thermocycler" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Instrument> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
-	<https://draggon.org/ns/facility#model> "ProFlex PCR System" .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#model> "ProFlex PCR System" .
 <https://example.org/ebef/proflex_block_1> <http://sbols.org/v3#displayId> "proflex_block_1" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "ProFlex independent block 1" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#FunctionalUnit> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/proflex_block_1/thermal_cycling> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#partOf> <https://example.org/ebef/proflex> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#FunctionalUnit> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/proflex_block_1/thermal_cycling> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#partOf> <https://example.org/ebef/proflex> .
 <https://example.org/ebef/proflex_block_1/thermal_cycling> <http://sbols.org/v3#displayId> "thermal_cycling" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ThermalCycling> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/proflex_block_1/thermal_cycling/temperature_zones> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ThermalCycling> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/proflex_block_1/thermal_cycling/temperature_zones> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/proflex_block_1/thermal_cycling/temperature_zones> <http://sbols.org/v3#displayId> "temperature_zones" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 2 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/temperature_zones> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 2 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/temperature_zones> .
 <https://example.org/ebef/proflex_block_2> <http://sbols.org/v3#displayId> "proflex_block_2" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "ProFlex independent block 2" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#FunctionalUnit> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/proflex_block_2/thermal_cycling> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#partOf> <https://example.org/ebef/proflex> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#FunctionalUnit> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/proflex_block_2/thermal_cycling> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#partOf> <https://example.org/ebef/proflex> .
 <https://example.org/ebef/proflex_block_2/thermal_cycling> <http://sbols.org/v3#displayId> "thermal_cycling" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ThermalCycling> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/proflex_block_2/thermal_cycling/temperature_zones> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ThermalCycling> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/proflex_block_2/thermal_cycling/temperature_zones> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/proflex_block_2/thermal_cycling/temperature_zones> <http://sbols.org/v3#displayId> "temperature_zones" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 2 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/temperature_zones> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 2 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/temperature_zones> .
 <https://example.org/ebef/proflex_block_3> <http://sbols.org/v3#displayId> "proflex_block_3" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "ProFlex independent block 3" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#FunctionalUnit> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/proflex_block_3/thermal_cycling> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#partOf> <https://example.org/ebef/proflex> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#FunctionalUnit> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/proflex_block_3/thermal_cycling> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#partOf> <https://example.org/ebef/proflex> .
 <https://example.org/ebef/proflex_block_3/thermal_cycling> <http://sbols.org/v3#displayId> "thermal_cycling" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#ThermalCycling> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/proflex_block_3/thermal_cycling/temperature_zones> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#ThermalCycling> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/proflex_block_3/thermal_cycling/temperature_zones> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/proflex_block_3/thermal_cycling/temperature_zones> <http://sbols.org/v3#displayId> "temperature_zones" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#integerValue> 2 ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/temperature_zones> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#integerValue> 2 ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/temperature_zones> .
 <https://example.org/ebef/static_incubator_group> <http://sbols.org/v3#description> "Public page describes several units; individual asset IDs are not public." ;
 	<http://sbols.org/v3#displayId> "static_incubator_group" ;
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef> ;
 	<http://sbols.org/v3#name> "Static incubators" ;
-	a <http://sbols.org/v3#TopLevel> , <https://draggon.org/ns/facility#Asset> ;
-	<https://draggon.org/ns/facility#assetKind> <https://draggon.org/ns/facility#Workstation> ;
-	<https://draggon.org/ns/facility#capability> <https://example.org/ebef/static_incubator_group/static_incubation> ;
-	<https://draggon.org/ns/facility#facility> <https://example.org/ebef/facility> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Workstation> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/static_incubator_group/static_incubation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 <https://example.org/ebef/static_incubator_group/static_incubation> <http://sbols.org/v3#displayId> "static_incubation" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#CapabilityOffering> ;
-	<https://draggon.org/ns/facility#capabilityKind> <https://draggon.org/ns/capability#StaticIncubation> ;
-	<https://draggon.org/ns/facility#controlMode> <https://draggon.org/ns/facility#UnspecifiedControl> ;
-	<https://draggon.org/ns/facility#isActive> true ;
-	<https://draggon.org/ns/facility#parameter> <https://example.org/ebef/static_incubator_group/static_incubation/maximum_temperature> , <https://example.org/ebef/static_incubator_group/static_incubation/minimum_temperature> ;
-	<https://draggon.org/ns/facility#qualification> <https://draggon.org/ns/facility#Described> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#StaticIncubation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#UnspecifiedControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#parameter> <https://example.org/ebef/static_incubator_group/static_incubation/maximum_temperature> , <https://example.org/ebef/static_incubator_group/static_incubation/minimum_temperature> ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Described> .
 <https://example.org/ebef/static_incubator_group/static_incubation/maximum_temperature> <http://sbols.org/v3#displayId> "maximum_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_temperature> ;
-	<https://draggon.org/ns/facility#realValue> "70"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/maximum_temperature> ;
+	<https://sbol.io/ns/facility#realValue> "70"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
 <https://example.org/ebef/static_incubator_group/static_incubation/minimum_temperature> <http://sbols.org/v3#displayId> "minimum_temperature" ;
-	a <http://sbols.org/v3#Identified> , <https://draggon.org/ns/facility#PropertyValue> ;
-	<https://draggon.org/ns/facility#propertyKind> <https://example.org/ebef/property/minimum_temperature> ;
-	<https://draggon.org/ns/facility#realValue> "17"^^<http://www.w3.org/2001/XMLSchema#double> ;
-	<https://draggon.org/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#PropertyValue> ;
+	<https://sbol.io/ns/facility#propertyKind> <https://example.org/ebef/property/minimum_temperature> ;
+	<https://sbol.io/ns/facility#realValue> "17"^^<http://www.w3.org/2001/XMLSchema#double> ;
+	<https://sbol.io/ns/facility#unit> <http://qudt.org/vocab/unit/DEG_C> .

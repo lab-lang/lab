@@ -249,9 +249,9 @@ mod tests {
 
     use super::*;
 
-    const INVENTORY: &str = r#"@prefix cap: <https://draggon.org/ns/capability#> .
+    const INVENTORY: &str = r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
-@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix fac: <https://sbol.io/ns/facility#> .
 @prefix sbol: <http://sbols.org/v3#> .
 
 ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
@@ -312,7 +312,7 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         assert_eq!(offering.parameters.len(), 1);
         assert_eq!(
             offering.parameters[0].property_kind,
-            "https://draggon.org/ns/capability#SupportedPlateWells"
+            "https://sbol.io/ns/capability#SupportedPlateWells"
         );
         assert_eq!(
             offering.parameters[0].value,

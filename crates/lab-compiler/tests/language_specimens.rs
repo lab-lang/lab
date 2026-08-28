@@ -218,7 +218,7 @@ fn inventory_specimen_preserves_properties_and_resolved_operations() {
 
     let serialized = serde_json::to_string(&module).unwrap();
     assert!(serialized.contains("std.bio.build.realize"));
-    assert!(serialized.contains("https://draggon.org/ns/capability#ArtifactRealization"));
+    assert!(serialized.contains("https://sbol.io/ns/capability#ArtifactRealization"));
 }
 
 #[test]

@@ -200,29 +200,29 @@ impl StatementBlock {
 /// The closed SBOLInventory qualification vocabulary, used here as a typed minimum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RequirementQualification {
-    #[serde(rename = "https://draggon.org/ns/facility#Discovered")]
+    #[serde(rename = "https://sbol.io/ns/facility#Discovered")]
     Discovered,
-    #[serde(rename = "https://draggon.org/ns/facility#Described")]
+    #[serde(rename = "https://sbol.io/ns/facility#Described")]
     Described,
-    #[serde(rename = "https://draggon.org/ns/facility#Plannable")]
+    #[serde(rename = "https://sbol.io/ns/facility#Plannable")]
     Plannable,
-    #[serde(rename = "https://draggon.org/ns/facility#Simulatable")]
+    #[serde(rename = "https://sbol.io/ns/facility#Simulatable")]
     Simulatable,
-    #[serde(rename = "https://draggon.org/ns/facility#Executable")]
+    #[serde(rename = "https://sbol.io/ns/facility#Executable")]
     Executable,
-    #[serde(rename = "https://draggon.org/ns/facility#Qualified")]
+    #[serde(rename = "https://sbol.io/ns/facility#Qualified")]
     Qualified,
 }
 
 impl RequirementQualification {
     pub const fn iri(self) -> &'static str {
         match self {
-            Self::Discovered => "https://draggon.org/ns/facility#Discovered",
-            Self::Described => "https://draggon.org/ns/facility#Described",
-            Self::Plannable => "https://draggon.org/ns/facility#Plannable",
-            Self::Simulatable => "https://draggon.org/ns/facility#Simulatable",
-            Self::Executable => "https://draggon.org/ns/facility#Executable",
-            Self::Qualified => "https://draggon.org/ns/facility#Qualified",
+            Self::Discovered => "https://sbol.io/ns/facility#Discovered",
+            Self::Described => "https://sbol.io/ns/facility#Described",
+            Self::Plannable => "https://sbol.io/ns/facility#Plannable",
+            Self::Simulatable => "https://sbol.io/ns/facility#Simulatable",
+            Self::Executable => "https://sbol.io/ns/facility#Executable",
+            Self::Qualified => "https://sbol.io/ns/facility#Qualified",
         }
     }
 }
@@ -230,19 +230,19 @@ impl RequirementQualification {
 /// The closed SBOLInventory control-mode vocabulary, used here as a typed accepted set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RequirementControlMode {
-    #[serde(rename = "https://draggon.org/ns/facility#UnspecifiedControl")]
+    #[serde(rename = "https://sbol.io/ns/facility#UnspecifiedControl")]
     Unspecified,
-    #[serde(rename = "https://draggon.org/ns/facility#ManualControl")]
+    #[serde(rename = "https://sbol.io/ns/facility#ManualControl")]
     Manual,
-    #[serde(rename = "https://draggon.org/ns/facility#ReviewedFileControl")]
+    #[serde(rename = "https://sbol.io/ns/facility#ReviewedFileControl")]
     ReviewedFile,
-    #[serde(rename = "https://draggon.org/ns/facility#VendorSessionControl")]
+    #[serde(rename = "https://sbol.io/ns/facility#VendorSessionControl")]
     VendorSession,
-    #[serde(rename = "https://draggon.org/ns/facility#ApiControl")]
+    #[serde(rename = "https://sbol.io/ns/facility#ApiControl")]
     Api,
-    #[serde(rename = "https://draggon.org/ns/facility#SiLA2Control")]
+    #[serde(rename = "https://sbol.io/ns/facility#SiLA2Control")]
     Sila2,
-    #[serde(rename = "https://draggon.org/ns/facility#OpcUaControl")]
+    #[serde(rename = "https://sbol.io/ns/facility#OpcUaControl")]
     OpcUa,
 }
 
@@ -258,13 +258,13 @@ impl RequirementControlMode {
 
     pub const fn iri(self) -> &'static str {
         match self {
-            Self::Unspecified => "https://draggon.org/ns/facility#UnspecifiedControl",
-            Self::Manual => "https://draggon.org/ns/facility#ManualControl",
-            Self::ReviewedFile => "https://draggon.org/ns/facility#ReviewedFileControl",
-            Self::VendorSession => "https://draggon.org/ns/facility#VendorSessionControl",
-            Self::Api => "https://draggon.org/ns/facility#ApiControl",
-            Self::Sila2 => "https://draggon.org/ns/facility#SiLA2Control",
-            Self::OpcUa => "https://draggon.org/ns/facility#OpcUaControl",
+            Self::Unspecified => "https://sbol.io/ns/facility#UnspecifiedControl",
+            Self::Manual => "https://sbol.io/ns/facility#ManualControl",
+            Self::ReviewedFile => "https://sbol.io/ns/facility#ReviewedFileControl",
+            Self::VendorSession => "https://sbol.io/ns/facility#VendorSessionControl",
+            Self::Api => "https://sbol.io/ns/facility#ApiControl",
+            Self::Sila2 => "https://sbol.io/ns/facility#SiLA2Control",
+            Self::OpcUa => "https://sbol.io/ns/facility#OpcUaControl",
         }
     }
 }
@@ -855,7 +855,7 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         assert_eq!(requirement.id, "standalone::preserve::body[0]");
         assert_eq!(
             requirement.capability_kind,
-            "https://draggon.org/ns/capability#ColdStorage"
+            "https://sbol.io/ns/capability#ColdStorage"
         );
         assert_eq!(
             requirement.minimum_qualification,
@@ -877,7 +877,7 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         assert_eq!(requirement.parameter_constraints[0].argument, "temperature");
         assert_eq!(
             requirement.parameter_constraints[0].property_kind,
-            "https://draggon.org/ns/capability#Temperature"
+            "https://sbol.io/ns/capability#Temperature"
         );
         assert_eq!(
             requirement.parameter_constraints[0].unit.as_deref(),
@@ -892,8 +892,8 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         assert!(requirement.parent_requirement.is_none());
 
         let json = serde_json::to_string(&catalog).unwrap();
-        assert!(json.contains("https://draggon.org/ns/facility#Plannable"));
-        assert!(json.contains("https://draggon.org/ns/facility#ManualControl"));
+        assert!(json.contains("https://sbol.io/ns/facility#Plannable"));
+        assert!(json.contains("https://sbol.io/ns/facility#ManualControl"));
         assert_eq!(
             serde_json::from_str::<CapabilityRequirements>(&json).unwrap(),
             catalog

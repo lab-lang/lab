@@ -1228,10 +1228,10 @@ pub(crate) mod tests {
     use crate::events::{RecordingSink, RunEvent};
     use crate::operator::AutoOperator;
 
-    const INVENTORY: &str = r#"@prefix cap: <https://draggon.org/ns/capability#> .
+    const INVENTORY: &str = r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
-@prefix fac: <https://draggon.org/ns/facility#> .
-@prefix inv: <https://draggon.org/ns/inventory#> .
+@prefix fac: <https://sbol.io/ns/facility#> .
+@prefix inv: <https://sbol.io/ns/inventory#> .
 @prefix sbol: <http://sbols.org/v3#> .
 
 ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
@@ -1327,12 +1327,12 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             requirements: vec![ExecutionRequirementBinding {
                 requirement_instance: "workflow/main/liquid".to_owned(),
                 requirement_template: "workflow::main::liquid".to_owned(),
-                capability_kind: "https://draggon.org/ns/capability#LiquidHandling".to_owned(),
+                capability_kind: "https://sbol.io/ns/capability#LiquidHandling".to_owned(),
                 offering: "https://example.org/facility/star/liquid_handling".to_owned(),
                 asset: "https://example.org/facility/star".to_owned(),
-                minimum_qualification: "https://draggon.org/ns/facility#Executable".to_owned(),
-                observed_qualification: "https://draggon.org/ns/facility#Executable".to_owned(),
-                control_mode: "https://draggon.org/ns/facility#ReviewedFileControl".to_owned(),
+                minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
                 parameters: Vec::new(),
                 adapter: Some(ExecutionAdapterBinding {
                     driver: "hamilton.star".to_owned(),
@@ -1351,7 +1351,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                 namespace: "https://example.org/results".to_owned(),
                 display_id: "output_lot".to_owned(),
                 component: "https://example.org/facility/design".to_owned(),
-                material_kind: "https://draggon.org/ns/inventory#DnaSample".to_owned(),
+                material_kind: "https://sbol.io/ns/inventory#DnaSample".to_owned(),
                 located_in: Some("https://example.org/facility/room".to_owned()),
                 position: None,
                 derived_from: vec!["input".to_owned()],

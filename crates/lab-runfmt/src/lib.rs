@@ -735,12 +735,12 @@ mod tests {
             requirements: vec![ExecutionRequirementBinding {
                 requirement_instance: "example::main/body[0]".to_owned(),
                 requirement_template: "example::main::body[0]".to_owned(),
-                capability_kind: "https://draggon.org/ns/capability#Incubation".to_owned(),
+                capability_kind: "https://sbol.io/ns/capability#Incubation".to_owned(),
                 offering: "https://example.org/incubator/incubation".to_owned(),
                 asset: "https://example.org/incubator".to_owned(),
-                minimum_qualification: "https://draggon.org/ns/facility#Plannable".to_owned(),
-                observed_qualification: "https://draggon.org/ns/facility#Executable".to_owned(),
-                control_mode: "https://draggon.org/ns/facility#ReviewedFileControl".to_owned(),
+                minimum_qualification: "https://sbol.io/ns/facility#Plannable".to_owned(),
+                observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
                 parameters: Vec::new(),
                 adapter: Some(ExecutionAdapterBinding {
                     driver: "example.incubator".to_owned(),
@@ -868,7 +868,7 @@ mod tests {
             namespace: "https://example.org/results".to_owned(),
             display_id: "output".to_owned(),
             component: "https://example.org/design".to_owned(),
-            material_kind: "https://draggon.org/ns/inventory#DnaSample".to_owned(),
+            material_kind: "https://sbol.io/ns/inventory#DnaSample".to_owned(),
             located_in: None,
             position: None,
             derived_from: vec!["input".to_owned()],
@@ -924,7 +924,7 @@ mod tests {
             format: SIMULATION_RUN_FORMAT.to_owned(),
             id: "growth".to_owned(),
             title: "Simulate plate growth".to_owned(),
-            capability_kind: "https://draggon.org/ns/capability#Incubation".to_owned(),
+            capability_kind: "https://sbol.io/ns/capability#Incubation".to_owned(),
             assumptions: vec!["No physical hardware is contacted.".to_owned()],
         };
         let text = serde_json::to_string_pretty(&document).unwrap();

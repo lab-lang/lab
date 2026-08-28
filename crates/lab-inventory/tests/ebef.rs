@@ -37,7 +37,7 @@ fn public_ebef_catalog_is_a_valid_described_facility() {
     assert_eq!(inventory.capability_offerings().count(), 30);
     assert_eq!(
         snapshot.source_sha256(),
-        "9e04768ac8ad2d3e060b38811079b61c5ba3da385ee46ee3dca57912dfbd0392"
+        "b965b1ed8ed5a02fdffdde591c1532f3dbec1bb6fc40b022941ef7b0e4f0677a"
     );
 
     let chamber = inventory

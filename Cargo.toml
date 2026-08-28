@@ -41,8 +41,8 @@ rusb = "0.9"
 # SBOL 3 terms, serialization, and validation. Designs are read from and
 # written to SBOL documents, so the standard's object model is the compiler's
 # own rather than something a backend projects onto at the end.
-sbol3 = { git = "https://github.com/SynBioDex/sbol-rs", rev = "42806cdb708e2265f19aab668cf177c68f019846" }
-sbol-inventory = { git = "https://github.com/SynBioDex/sbol-rs", rev = "42806cdb708e2265f19aab668cf177c68f019846" }
+sbol3 = { git = "https://github.com/SynBioDex/sbol-rs", rev = "2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4" }
+sbol-inventory = { git = "https://github.com/SynBioDex/sbol-rs", rev = "2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4" }
 semver = "1"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting"] }

@@ -568,9 +568,9 @@ mod tests {
 
     use super::*;
 
-    const MINIMAL: &str = r#"@prefix cap: <https://draggon.org/ns/capability#> .
+    const MINIMAL: &str = r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/sbolinventory/> .
-@prefix fac: <https://draggon.org/ns/facility#> .
+@prefix fac: <https://sbol.io/ns/facility#> .
 @prefix sbol: <http://sbols.org/v3#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
@@ -678,7 +678,7 @@ ex:cycler a sbol:TopLevel, fac:Asset ; sbol:displayId "cycler" ;
         let package = TempDir::new().unwrap();
         let contents = format!(
             r#"{MINIMAL}
-@prefix inv: <https://draggon.org/ns/inventory#> .
+@prefix inv: <https://sbol.io/ns/inventory#> .
 
 ex:design a sbol:Component ; sbol:displayId "design" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ;
@@ -753,7 +753,7 @@ ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
         );
         assert_eq!(
             offering.capability_kind.as_str(),
-            "https://draggon.org/ns/capability#ThermalCycling"
+            "https://sbol.io/ns/capability#ThermalCycling"
         );
         assert_eq!(offering.qualification, Qualification::Plannable);
         assert_eq!(offering.control_mode, ControlMode::ReviewedFile);
@@ -764,7 +764,7 @@ ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
         );
         assert_eq!(
             offering.parameters[0].property_kind.as_str(),
-            "https://draggon.org/ns/capability#Temperature"
+            "https://sbol.io/ns/capability#Temperature"
         );
         assert_eq!(
             offering.parameters[0].value,
