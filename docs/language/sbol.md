@@ -613,69 +613,28 @@ catalogs expose sequences, provenance, and versions "without reducing them to
 untyped properties or compiling changing catalog contents into `std`". This is
 how.
 
-### The execution boundary becomes PROV-O
+### Facility catalogs and execution records have distinct owners
 
-This is the layer the earlier design did not reach, and the correspondence is
-field for field.
+SBOLInventory supplies the persistent facility graph that core SBOL 3 deliberately does not define. Its extension classes and properties express the stable catalog and ledger facts:
 
-```rust
-pub struct WorkcellNode { pub id: String, pub after: Vec<String>, pub action: WorkcellAction }
-pub struct LedgerEntry { pub node: String, pub event: LedgerEvent, pub at_unix_seconds: u64 }
-pub enum LedgerEvent { Started, Confirmed, Completed, Failed }
+```text
+a facility contains zones
+zones locate assets and material lots
+assets expose capability offerings
+workflows require capabilities
+plans bind requirements to offerings and assets
+runs record material changes and evidence
 ```
 
-against
+The first three statements and the persistent MaterialLot catalog belong to SBOLInventory. Workflow requirements belong to compiler IR. Allocation and scheduling belong to the Lab planner. The reviewed plan freezes every requirement-to-offering-to-Asset binding, exact MaterialLot binding, adapter profile, document digest, and dependency edge without translating the facility graph into a private TOML inventory model.
 
-```rust
-pub struct Activity { ..., pub started_at_time: Option<String>, pub ended_at_time: Option<String>,
-                      pub was_informed_by: Vec<Resource>,
-                      pub qualified_usage: Vec<Resource>, pub qualified_association: Vec<Resource> }
-pub struct Association { ..., pub agent: Option<Resource>, pub had_role: Vec<Iri>, pub had_plan: Option<Resource> }
-pub struct Usage { ..., pub entity: Option<Resource>, pub had_role: Vec<Iri> }
-```
+The runtime then appends standard SBOL and PROV structure to a new inventory document. One completed plan becomes an `Activity`; exact Assets and input MaterialLots become qualified `Usage` entities with SBOLInventory roles; the reviewed plan, ledger, adapter profiles, and child documents become hashed `Attachment` evidence; and each live output MaterialLot is an `Implementation` carrying `prov:wasGeneratedBy` and exact lineage. The source inventory is never modified in place.
 
-`after` is `wasInformedBy`. `Started` and `Completed` are `startedAtTime` and
-`endedAtTime`. `Confirmed` is an `Association` naming the operator as an
-`Agent`. A `WorkcellStation { name, kind }` is an `Agent`. The emitted plan is a
-`Plan`. The ledger's own comment already describes what it is: "the run's memory
-and its evidence".
+The reviewed execution DAG remains a versioned Lab document rather than pretending that RDF is an ordered dispatch language. `Execute`, `MoveMaterial`, and `Manual` nodes need explicit dependencies, replay rules, confirmations, and a durable event ledger. The runtime is keyed by the reviewed plan digest and never re-plans from the graph.
 
-Today the design document and the run record are two files with no identity in
-common. Keyed by the same IRIs, the chain from a design through the run that
-executed it to the physical tube it produced is one graph. That is also where
-`accept` claims finally put their runtime evidence, which `support.md` lists as
-unresolved, and it is the point at which the emitted document stops being a
-protocol and becomes a laboratory notebook.
+This boundary also preserves claim strength. A catalog offering may be `Described`, `Plannable`, `Simulatable`, `Executable`, or `Qualified`, and the planner may bind it only when the workflow's minimum qualification is met. An adapter declaration does not promote catalog qualification, and catalog product metadata never selects a driver. Simulation and live execution use incompatible ledger state, and only live execution may mint physical output MaterialLots.
 
-The shape maps; the resolution does not, and four gaps are worth knowing before
-committing to this as the record format rather than an export of it.
-
-`Activity` carries one `started_at_time` and one `ended_at_time`, and neither
-`Association` nor `Usage` has a time field. The ledger timestamps every event,
-so a step-level timeline has nowhere standard to go; it fits only as one
-Activity per node, or as extension triples.
-
-There is no `prov:generated` forward edge. Outputs are discoverable only by
-scanning for objects whose `wasGeneratedBy` names the activity, and
-`Document::resolve` is a linear scan, so this is quadratic on a large document
-without an index of your own.
-
-`Agent` and `Plan` have no fields beyond the shared Identified and TopLevel
-data. An instrument, an operator, and a piece of software are distinguishable
-only by name, description, or extension predicates. There is also no delegation,
-so "operator supervised instrument" is not expressible, and no attestation
-concept at all, so `Confirmed` maps to a custom `hadRole` IRI and nothing
-validates it.
-
-`hadRole` is checked against a closed four-value vocabulary, design, build,
-test, and learn. Custom lab roles are neither accepted nor rejected, they are
-skipped. And using the standard roles has teeth: a `test` entity is required to
-be `ExperimentalData` and a `build` entity an `Implementation`.
-
-None of this blocks the work. It does mean the run record is Lab's format
-carrying PROV-O structure, rather than PROV-O being the format, and the
-extension triples that make up the difference should be designed deliberately
-rather than accumulated.
+The resulting chain is one identity-preserving graph: a design Component is realized by an exact MaterialLot, consumed by an Activity through an exact Asset offering, and related to any generated MaterialLots and evidence. Lab keeps compiler and dispatch state private while emitting the durable laboratory record through the SBOLInventory profile.
 
 ### Where it should not go
 

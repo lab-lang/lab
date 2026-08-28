@@ -4,9 +4,11 @@
 //! everything in this crate interprets those documents without ever
 //! planning or deriving new work. Two execution modes share one node walk:
 //!
-//! - **live execution** (`lab run`) drives real stations on a wall clock;
-//! - **dry run** validates every document and narrates the walk without
-//!   touching hardware.
+//! - **live execution** (`lab run`) drives exact bound Assets on a wall clock;
+//! - **simulation** (`lab run --simulate`) uses no-hardware executors and mode-bound evidence.
+//!
+//! A dry run validates every document and narrates the walk without opening a ledger or touching
+//! hardware.
 //!
 //! Facility execution is parameterized over a [`clock::Clock`], an
 //! [`operator::Operator`] for confirmations, an [`events::EventSink`] for

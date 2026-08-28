@@ -33,7 +33,7 @@ default-member = "packages/device"
 
 A workspace root owns membership and nothing else; each member stays an ordinary package. `default-member` names the package a single-package command acts on, and is required once a workspace has more than one member.
 
-## Building for a bench
+## Building for one device
 
 `lab build --target <name>` reads `targets/<name>.toml`, lowers the default member and everything it depends on as one program, and hands the verified result to the backend that profile names:
 
@@ -41,9 +41,9 @@ A workspace root owns membership and nothing else; each member stays an ordinary
 lab build --target opentrons-ot2
 ```
 
-The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable automation protocol it emitted, ready to hand to an instrument application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
+The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable automation protocol it emitted, ready to hand to an instrument application. These legacy target profiles configure one liquid-handler compiler with modules, labware, deck slots, pipettes, mounts, and capacity. They do not compose a facility. Reaction chemistry belongs to the designs in `src/`, while multi-Asset composition belongs to SBOLInventory ingestion and `lab plan`. Every profile field defaults to the backend's reference configuration, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
 
-Editors and control planes use the compiler-owned target contract rather than copying backend structs. It reports each backend's JSON Schema, complete default, catalog choices, capabilities, and workcell station kinds; validation runs the same cross-field semantics as a build and returns canonical TOML, canonical JSON, the compiler and schema versions, and a SHA-256:
+Editors and control planes use the compiler-owned target contract rather than copying backend structs. It reports each single-device backend's JSON Schema, complete default, catalog choices, and capabilities; validation runs the same cross-field semantics as a build and returns canonical TOML, canonical JSON, the compiler and schema versions, and a SHA-256:
 
 ```sh
 lab targets describe
@@ -53,7 +53,7 @@ lab targets validate targets/flex-bay-1.toml
 lab --json targets render targets/flex-bay-1.toml
 ```
 
-The shipped backends are `opentrons.ot2`, `opentrons.flex`, `hamilton.star`, and `workcell`. `describe` is the discovery authority for the exact compiler binary in use; consumers should not assume that list remains fixed.
+The shipped single-device target backends are `opentrons.ot2`, `opentrons.flex`, and `hamilton.star`. `describe` is the discovery authority for the exact compiler binary in use; consumers should not assume that list remains fixed.
 
 `lab adapters describe` is the facility-facing discovery authority. Its `lab.adapter-catalog.v1` output keeps semantic SBOLInventory capability IRIs separate from implementation features and declares accepted control modes, run-document formats, configuration schemas, and actual planning, simulation, and runtime support. `lab adapters validate <driver> <profile>` selects the parser from the explicit driver binding; manufacturer and model never select code.
 
@@ -92,4 +92,4 @@ lab check --json
 
 Path dependencies may optionally carry a semver requirement, which is checked against the dependency manifest. Registry dependencies remain explicitly unsupported and fail closed; adding them requires a registry protocol and integrity model rather than silent fallback.
 
-`lab run <run-directory> --dry-run` validates and narrates reviewed Hamilton STAR or workcell run documents without touching hardware. A live workcell run connects the supported stations, confirms every handoff with the operator, and appends a durable node ledger so `--resume` can continue without repeating completed motion.
+`lab run <reviewed-plan-directory> --dry-run` validates the frozen inventory, exact bindings, adapter profiles, child documents, and dependency DAG, then narrates every node without touching hardware. `lab run <reviewed-plan-directory> --simulate` walks the same exact plan through simulation adapters and writes `inventory-simulation.ttl`; `lab run <reviewed-plan-directory>` uses live executors and writes `inventory-after.ttl`. Both modes append a durable node ledger so `--resume` can continue without repeating completed work, but simulation and live ledgers are intentionally incompatible. Material movements and manual nodes remain explicit operator confirmations in either mode.

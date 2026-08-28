@@ -60,7 +60,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0028: Schemas are contributed to](language/decisions/0028-schemas-are-contributed-to.md) | several packages describe one artifact kind |
 | [0029: Backend dispatch](language/decisions/0029-backend-dispatch.md) | a profile's `backend` key selects its backend; a registry stays deferred |
 | [0030: Reviewed frames are the execution boundary](language/decisions/0030-reviewed-frames-are-the-execution-boundary.md) | the runtime interprets reviewed run documents and never plans |
-| [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | a workcell target composes stations; assignment is planning, not language |
+| [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | superseded historical design for compiler-specific multi-device composition |
 | [0032: Provenance blocks](language/decisions/0032-provenance-blocks.md) | a provenance verb can open a block |
 | [0033: Typeset protocol documents](language/decisions/0033-typeset-protocol-documents.md) | protocol documents are typeset PDFs emitted beside their sources |
 | [0039: Roles carry ontology terms](language/decisions/0039-roles-carry-ontology-terms.md) | roles may name the ontology terms they stand for, grounding Lab types in shared vocabularies |
@@ -68,6 +68,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0041: Typed SBOL authoring separates design from provenance](language/decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md) | typed Python designs preserve biological kinds while explicit declarations state build or buy provenance |
 | [0042: Robotics incubates separately](language/decisions/0042-robotics-incubates-separately.md) | simulation, visualization, embodied robotics, and their compute control plane live in the robotics repository |
 | [0043: Sequences are first-class design values](language/decisions/0043-sequences-are-first-class-design-values.md) | DNA and protein sequences are independent typed values referenced by designs |
+| [0044: Facility graphs replace workcell targets](language/decisions/0044-facility-graphs-replace-workcell-targets.md) | SBOLInventory facilities compose exact capability, Asset, material, plan, and run bindings |
 
 ## Implementation and embedding
 

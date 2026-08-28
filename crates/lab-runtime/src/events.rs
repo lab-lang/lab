@@ -72,7 +72,7 @@ pub enum RunEvent {
     AttentionReleased {
         node: String,
     },
-    /// Labware physically moved between stations.
+    /// Labware moved between exact facility locations or Assets.
     LabwareMoved {
         labware: String,
         from: String,

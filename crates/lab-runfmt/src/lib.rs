@@ -474,7 +474,7 @@ fn validate_acyclic(nodes: &BTreeMap<&str, &ExecutionPlanNode>) -> Result<(), St
 }
 
 /// One `lab.thermocycle-run.v0` document: a device-neutral thermal program
-/// for one plate. The station's kind decides which instrument executes it;
+/// for one plate. The exact Asset and adapter binding selects the executor;
 /// the document never names a vendor.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThermocycleRunDocument {

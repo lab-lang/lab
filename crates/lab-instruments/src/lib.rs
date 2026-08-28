@@ -1,15 +1,15 @@
 //! Lab's instrument capabilities: the traits the runtime holds, the
-//! neutral vocabulary compiled documents speak, and the station types
+//! neutral vocabulary compiled documents speak, and the adapter types
 //! that implement the traits over vendor driver crates.
 //!
-//! This crate is Lab-internal. Vendor driver crates know nothing of it —
-//! they speak their instruments' native types — and each station type
+//! This crate is Lab-internal. Vendor driver crates know nothing of it;
+//! they speak their instruments' native types, and each adapter type
 //! here wraps one vendor session and translates between the vendor's
-//! vocabulary and the neutral one. The stations are the whole seam: if a
+//! vocabulary and the neutral one. The adapters are the whole seam: if a
 //! vendor someday publishes a good Rust crate of their own, its adapter
 //! lands here and ours retires. The compiler uses only the data model (a
 //! `lab.thermocycle-run.v0` document embeds a [`ThermalProfile`]); only
-//! the runtime uses the traits and stations. Nothing here may depend on
+//! the runtime uses the traits and adapters. Nothing here may depend on
 //! the rest of the toolchain.
 //!
 //! Each trait is one *capability*, not one device category. A device

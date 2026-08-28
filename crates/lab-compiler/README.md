@@ -12,9 +12,9 @@ The source tree follows semantic ownership and dependency direction:
 
 - `src/lair/` contains Design, Workflow, and Protocol dialects; the Workflow-to-Protocol dialect conversion; material-linearity analysis and pass; stage contracts; and the textual IR session;
 - `src/planning/` resolves artifact graphs against inventory without robot knowledge;
-- `src/backend/` defines the adapter registry and concrete device compilers, grouped by vendor family under `opentrons/` and `hamilton/`; the legacy `workcell/` composition remains only until generic facility planning reaches execution parity;
+- `src/backend/` defines the adapter registry and concrete single-device compilers, grouped by vendor family under `opentrons/` and `hamilton/`;
 - `src/artifact/` defines generated files independently of filesystem persistence;
-- `src/runfmt/` defines the run-document formats the `lab` runner interprets (`lab.workcell-run.v0`, `lab.star-run.v0`, `lab.thermocycle-run.v0`, `lab.plate-read.v0`); and
+- `lab-runfmt` defines the reviewed documents the `lab` runner interprets, including `lab.execution-plan.v1`, `lab.simulation-run.v1`, `lab.star-run.v0`, `lab.thermocycle-run.v0`, and `lab.plate-read.v0`; and
 - `src/bin/labc/` and `src/bin/lab-opt/` contain developer-facing command orchestration.
 
 The dependency direction is language model → planning/LAIR → backend → artifacts, with command-line applications owning filesystem writes. LAIR and generic planning do not depend on concrete robots.

@@ -1,4 +1,4 @@
-//! Thermal profiles, the thermocycler interface, and its stations.
+//! Thermal profiles, the thermocycler interface, and concrete adapters.
 
 mod inheco_odtc;
 

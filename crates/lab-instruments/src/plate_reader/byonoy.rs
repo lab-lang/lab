@@ -1,4 +1,4 @@
-//! The Byonoy Absorbance 96 as a workcell plate-reader station.
+//! The Byonoy Absorbance 96 adapter for Lab's plate-reader capability.
 
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ pub enum ByonoyStationError {
     #[error(transparent)]
     Device(#[from] Absorbance96Error),
     #[error(
-        "the Absorbance 96 has no luminescence optics; a luminescence read needs a different station"
+        "the Absorbance 96 has no luminescence optics; a luminescence read needs a different plate reader"
     )]
     LuminescenceUnsupported,
 }

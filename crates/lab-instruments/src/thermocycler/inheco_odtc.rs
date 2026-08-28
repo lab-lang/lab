@@ -1,4 +1,4 @@
-//! The Inheco ODTC as a workcell thermocycler station.
+//! The Inheco ODTC adapter for Lab's thermocycler capability.
 
 use crate::{
     ProfileProgress, RunHandle, SensorReading, ThermalLimits, ThermalProfile, ThermalReadings,
@@ -24,7 +24,7 @@ pub fn odtc_thermal_limits() -> ThermalLimits {
 pub enum OdtcStationError {
     #[error(transparent)]
     Device(#[from] OdtcError),
-    #[error("run handle {handle} names no run this station started")]
+    #[error("run handle {handle} names no run this adapter started")]
     UnknownRun { handle: u64 },
 }
 

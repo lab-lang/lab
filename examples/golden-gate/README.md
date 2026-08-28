@@ -99,25 +99,7 @@ without hardware, or execute it on the connected machine:
 lab run examples/golden-gate/.lab/build/hamilton-star/wave-001 --dry-run
 ```
 
-`targets/workcell-star.toml` composes the same STARlet with an Inheco ODTC
-thermocycler and a human carrying the plate between them. Its
-`backend = "workcell"` selects the multi-station backend:
-
-```bash
-lab build --target workcell-star
-```
-
-Each wave then holds per-station packages under `stations/` and a
-`plan.workcell.json` coordination plan: the STAR's runs, the thermal
-programs that would otherwise be operator prose (now `*.odtc.json`
-documents the cycler executes), and an explicit handoff node for every
-plate movement. `lab run` walks the plan, gates every handoff on the
-operator, and records each node in `run-ledger.jsonl` so an interrupted
-wave continues with `--resume`:
-
-```bash
-lab run examples/golden-gate/.lab/build/workcell-star/wave-001 --dry-run
-```
+Multi-instrument composition is not a build target. A package selects an SBOLInventory document, `lab plan` binds reachable capability requirements to exact offerings and Assets, and `lab.execution-plan.v1` represents device execution, material movement, and manual work in one reviewed dependency DAG. Existing single-device Golden Gate targets remain useful protocol emitters, but they do not define the facility taxonomy.
 
 ## See the deck
 

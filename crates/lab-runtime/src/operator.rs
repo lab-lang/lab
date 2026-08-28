@@ -11,7 +11,7 @@ use anyhow::Result;
 pub enum ConfirmKind {
     /// The gate before any motion starts.
     PreRun,
-    /// A labware movement between stations.
+    /// A material or labware movement between exact facility locations or Assets.
     Handoff,
     /// A by-hand step that is not a movement.
     Manual,
