@@ -36,6 +36,7 @@ impl EventSink for HumanSink {
             RunEvent::Connected { station } => println!("connected; {station} is ready"),
             RunEvent::NodeSkipped { id } => println!("skipping {id} (completed in the ledger)"),
             RunEvent::NodeStarted { .. } | RunEvent::NodeCompleted { .. } => {}
+            RunEvent::DocumentStarted { .. } => {}
             RunEvent::ProgramStarted {
                 station,
                 title,

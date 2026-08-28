@@ -25,6 +25,13 @@ pub enum RunEvent {
     NodeCompleted {
         id: String,
     },
+    /// One reviewed child document is about to execute through its exact Asset/adapter binding.
+    DocumentStarted {
+        asset: String,
+        driver: String,
+        format: String,
+        title: String,
+    },
     /// A station program began: a STAR frame sequence or a thermal profile.
     ProgramStarted {
         station: String,
