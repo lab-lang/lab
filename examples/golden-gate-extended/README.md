@@ -9,6 +9,14 @@ once the interesting parts are in.
 lab build
 ```
 
+The package uses the same `inventory/facility.ttl` facility snapshot as the smaller example. Its exact MaterialLots include the ordered reference plasmid, and `lab plan` binds reachable capability requirements across the Opentrons OT-2 installation and the manual workstation.
+
+```bash
+lab check
+lab plan
+lab run .lab/plan --dry-run
+```
+
 ## What it shows
 
 **Provenance per thing.** Two plasmids are assembled here and one is ordered from

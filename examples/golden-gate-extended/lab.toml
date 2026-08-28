@@ -8,26 +8,9 @@ entry = "src/programs/panel.lab"
 target = "opentrons-ot2"
 
 [inventory]
-materials = [
-  "BL21",
-  # BsaI states a supplier identity, so that is what an order names.
-  "NEB-R0535",
-  "DH5alpha",
-  # This example still exercises the temporary symbolic migration form. SBOL
-  # Component IRIs remain separate from the supplier identifiers listed here.
-  "B0015",
-  "B0034",
-  "GFP",
-  "J23101",
-  "J23106",
-  "RFP",
-  "T4_DNA_ligase",
-  "T4_DNA_ligase_buffer",
-  "chloramphenicol",
-  "nuclease_free_water",
-  "pSB1C3",
-  "recovery_medium",
-  # The reference plasmid is ordered, so the build asks for it as stock.
-  "Addgene-#134516",
-]
-artifacts = []
+document = "inventory/facility.ttl"
+
+[[execution.adapters]]
+asset = "https://example.org/golden-gate/opentrons_ot2"
+driver = "opentrons.ot2"
+profile = "targets/opentrons-ot2.toml"

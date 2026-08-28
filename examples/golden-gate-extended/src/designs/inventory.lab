@@ -13,27 +13,46 @@
 
 use std.bio.designs
 
+record Reagent
+
+artifact Reagent:
+  description?: String
+
 buy:
-  backbone pSB1C3
+  backbone pSB1C3:
+    sbol_identity = "https://example.org/golden-gate/materials/pSB1C3"
 
   /** BsaI cuts at 37 C, so every plasmid it opens digests the same way. */
   restriction_enzyme BsaI:
+    sbol_identity = "https://example.org/golden-gate/materials/BsaI"
     supplier_identity = "NEB-R0535"
     digest_temperature = 37 C
     digest_duration = 2 min
 
+  reagent T4_DNA_ligase:
+    sbol_identity = "https://example.org/golden-gate/materials/T4_DNA_ligase"
+  reagent T4_DNA_ligase_buffer:
+    sbol_identity = "https://example.org/golden-gate/materials/T4_DNA_ligase_buffer"
+  reagent nuclease_free_water:
+    sbol_identity = "https://example.org/golden-gate/materials/nuclease_free_water"
+  reagent recovery_medium:
+    sbol_identity = "https://example.org/golden-gate/materials/recovery_medium"
+
   // Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
   // Both are transformed the way competent cells are: chilled, shocked, recovered.
   chassis DH5alpha:
+    sbol_identity = "https://example.org/golden-gate/materials/DH5alpha"
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C
     recovery_duration = 60 min
 
   chassis BL21:
+    sbol_identity = "https://example.org/golden-gate/materials/BL21"
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C
     recovery_duration = 60 min
 
-  antibiotic chloramphenicol
+  antibiotic chloramphenicol:
+    sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"

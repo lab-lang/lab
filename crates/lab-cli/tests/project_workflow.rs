@@ -653,6 +653,106 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     std::fs::remove_dir_all(out_dir).unwrap();
 }
 
+#[test]
+fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate-extended")
+        .canonicalize()
+        .unwrap();
+    let output_root = temporary_project();
+    let build_dir = output_root.join("build");
+    let plan_dir = output_root.join("plan");
+
+    let built = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "build",
+            example.to_str().unwrap(),
+            "--out-dir",
+            build_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "extended Golden Gate build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let result: Value = serde_json::from_slice(&built.stdout).unwrap();
+    assert_eq!(result["result"]["target"], "opentrons-ot2");
+    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 5);
+
+    let manifest: Value = serde_json::from_slice(
+        &std::fs::read(build_dir.join("opentrons-ot2/dependency_manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["inventory"]["kind"], "sbol_inventory");
+    assert_eq!(
+        manifest["inventory"]["facility"],
+        "https://example.org/golden-gate/facility"
+    );
+    let reference_binding = manifest["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|node| node["material_lot_bindings"].as_array().unwrap())
+        .find(|binding| binding["symbol"] == "reference_gfp")
+        .unwrap();
+    assert_eq!(
+        reference_binding["component"],
+        "https://example.org/golden-gate/materials/reference_gfp"
+    );
+    assert_eq!(
+        reference_binding["material_lot"],
+        "https://example.org/golden-gate/lots/reference_gfp_lot"
+    );
+
+    let planned = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "plan",
+            example.to_str().unwrap(),
+            "--out-dir",
+            plan_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        planned.status.success(),
+        "extended Golden Gate facility plan failed: {}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+    let allocation: Value =
+        serde_json::from_slice(&std::fs::read(plan_dir.join("facility_allocation.json")).unwrap())
+            .unwrap();
+    assert_eq!(allocation["allocations"].as_array().unwrap().len(), 30);
+    let liquid_handling = allocation["allocations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|binding| {
+            binding["capability_kind"] == "https://draggon.org/ns/capability#LiquidHandling"
+        })
+        .collect::<Vec<_>>();
+    assert!(!liquid_handling.is_empty());
+    assert!(liquid_handling.iter().all(|binding| {
+        binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
+            && binding["adapter"]["driver"] == "opentrons.ot2"
+    }));
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", plan_dir.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "extended Golden Gate plan failed preflight: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+
+    std::fs::remove_dir_all(output_root).unwrap();
+}
+
 /// The `backend` key a profile declares selects the backend, so the same
 /// program builds for a Flex without a source edit.
 #[test]
