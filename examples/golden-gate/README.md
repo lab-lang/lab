@@ -1,18 +1,12 @@
 # Golden Gate cloning on an Opentrons OT-2
 
-This is Lab's end-to-end example: a package that describes a small reporter
-panel biologically, and compiles it into the automation protocols that build it.
+This is Lab's end-to-end facility example: a package describes a small reporter panel biologically, compiles it into portable capability requirements, allocates those requirements against an SBOLInventory facility, and lowers the resulting OT-2 bindings into automation protocols.
 
-It reproduces the three-stage workflow from
-[PUDU](https://pudu.readthedocs.io/en/latest/guide/workflow.html) — Golden Gate
-assembly, heat-shock transformation, and serial dilution with selective plating
-— from two composite plasmids into four engineered strains.
+It reproduces the three-stage workflow from [PUDU](https://pudu.readthedocs.io/en/latest/guide/workflow.html): Golden Gate assembly, heat-shock transformation, and serial dilution with selective plating from two composite plasmids into four engineered strains.
 
 ## What it builds
 
-Two transcription units, each a promoter driving a fluorescent reporter, are
-assembled into the same backbone. Each is then introduced into two different
-host organisms:
+Two transcription units, each a promoter driving a fluorescent reporter, are assembled into the same backbone. Each is then introduced into two different host organisms:
 
 ```text
 composite_plasmid_1 (J23101 → GFP)      composite_plasmid_2 (J23106 → RFP)
@@ -20,131 +14,73 @@ composite_plasmid_1 (J23101 → GFP)      composite_plasmid_2 (J23106 → RFP)
    └── composite_strain_3  (BL21)          └── composite_strain_4  (BL21)
 ```
 
-One plasmid feeding two strains is the point of the example. A strain is its
-own artifact, so DH5alpha carrying `composite_plasmid_1` and BL21 carrying the
-same plasmid are two separate things to build and accept. Nothing in the source
-says which order to build them in; the compiler derives that from the material
-each workflow consumes.
+One plasmid feeding two strains is the point of the example. A strain is its own artifact, so DH5alpha carrying `composite_plasmid_1` and BL21 carrying the same plasmid are two separate things to build and accept. Nothing in the source says which order to build them in; the compiler derives that from the material each workflow consumes.
 
-The DNA sequences are first-class values declared independently of the designs
-that reference them. Provenance is separate again: `buy` marks catalogued parts
-and reagents, while `build` marks the plasmids and strains this laboratory makes.
+The DNA sequences are first-class values declared independently of the designs that reference them. Provenance is separate again: `buy` marks catalogued parts and reagents, while `build` marks the plasmids and strains this laboratory makes.
 
-## Check and plan the facility
+## Check and build the portable experiment
 
-The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the example laboratory's zones, an Opentrons OT-2 installation, a manual workstation, exact stock MaterialLots, and capability offerings. The OT-2 offers plannable liquid handling and thermal cycling through reviewed-file control; its adapter binding reuses the same checked profile as the legacy single-device target.
+From `examples/golden-gate`, run:
 
 ```bash
 lab check
+lab build
+```
+
+`lab build` emits checked module IR, reachable capability requirements, and exact inventory and adapter-binding snapshots under `.lab/build/`. It does not select an instrument or emit device protocols.
+
+## Plan and lower against the facility
+
+The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the laboratory's zones, exact stock MaterialLots, a manual workstation, and an Opentrons OT-2 Asset with plannable liquid-handling and thermal-cycling offerings. The local adapter binding states that Lab's `opentrons.ot2` implementation can operate that exact Asset.
+
+```bash
 lab plan
 lab run .lab/plan --dry-run
 ```
 
-`lab plan` binds each reachable workflow requirement to one exact CapabilityOffering and Asset. This remains a planning-only reviewed plan until Lab attaches the target-emitted Opentrons child documents to its `Execute` nodes.
-
-## Build it
-
-From the `examples/golden-gate` directory, run:
-
-```bash
-lab build
-```
-
-The manifest declares `[build] target = "opentrons-ot2"`, so a plain
-`lab build` compiles for the OT-2 bench. `lab build --target <name>` compiles
-for another bench, and `lab build --no-target` stops at portable module IR.
-
-The build writes protocols under `.lab/build/opentrons-ot2/`, one directory
-per planning wave, and prints the path of every runnable automation protocol.
-
-The build output holds, per target directory:
+`lab plan` binds every reachable requirement to one exact CapabilityOffering and Asset. Because the allocated OT-2 has an installed lowering adapter, the same command emits three OT-2 Python protocols without reading a package target.
 
 | Path | Contents |
 | --- | --- |
-| `dependency_manifest.json` | machine-readable graph, waves, and blockers |
-| `dependency_report.pdf` | typeset dependency and blocker summary (`.typ` source beside it) |
-| `manual_protocol.pdf` | typeset bench instructions in execution order (`.typ` source beside it) |
-| `lab-style.typ` | the shared document style; every directory holding a document carries a copy |
-| `wave-001/` | assembly of both plasmids: one deck, one run |
-| `wave-002/` | transformation and plating of all four strains |
+| `.lab/plan/facility_allocation.json` | requirement-to-offering-to-Asset allocation and rejected candidates |
+| `.lab/plan/facility_lowering.json` | exact Asset, adapter, profile digest, triggering requirements, emitted artifacts, and artifact digests |
+| `.lab/plan/plan.execution.json` | reviewed facility-wide requirement and execution DAG |
+| `.lab/plan/lowerings/<asset>/opentrons-ot2/dependency_manifest.json` | material graph, exact MaterialLot bindings, waves, and blockers |
+| `.lab/plan/lowerings/<asset>/opentrons-ot2/dependency_report.pdf` | typeset dependency and blocker summary |
+| `.lab/plan/lowerings/<asset>/opentrons-ot2/manual_protocol.pdf` | typeset bench instructions in execution order |
+| `.lab/plan/lowerings/<asset>/opentrons-ot2/wave-001/` | assembly of both plasmids |
+| `.lab/plan/lowerings/<asset>/opentrons-ot2/wave-002/` | transformation and plating of all four strains |
 
-Each output directory is a self-contained [Typst](https://typst.app) project:
-`lab build` typesets the PDFs in-process (fonts embedded, no network), and
-anyone with the `typst` CLI can restyle `lab-style.typ` and re-typeset a
-document without the Lab toolchain.
+Artifacts in the same wave have no ordering constraint between them, so a wave is one robot run over one deck. Wave 2 cannot start until wave 1's plasmids physically exist and have been accepted as suitable inputs.
 
-Artifacts in the same wave have no ordering constraint between them, so a wave
-is a single robot run over a single deck. Wave 2 cannot start until wave 1's
-plasmids physically exist and have been accepted as suitable inputs.
+The OT-2 offerings are `Plannable` with `ReviewedFileControl`. The plan can therefore be inspected with `--dry-run`, but it does not claim that this example Asset is hardware-qualified for live execution.
 
-## Build it for a different instrument
+## Use another instrument
 
-`targets/opentrons-flex.toml` describes an Opentrons Flex. It declares
-`[target] backend = "opentrons.flex"`, and that key is what selects the
-backend:
+Another facility can run the same experiment by supplying an SBOLInventory document with compatible offerings and explicit adapter bindings for its exact Assets. Instrument choice is a facility-allocation result; the workflow does not use `--target` or name a backend.
 
-```bash
-lab build --target opentrons-flex
-```
+## Inspect the OT-2 deck
 
-The same programs, designs, and inventory produce the same waves under
-`.lab/build/opentrons-flex/`, with each stage emitted as an Opentrons JSON
-protocol (schema 8) rather than Python. Verify them with:
+Find the emitted protocols with:
 
 ```bash
-scripts/analyze-opentrons-flex.sh examples/golden-gate/.lab/build/opentrons-flex
+find .lab/plan/lowerings -name '*_protocol.py' -print
 ```
 
-`targets/hamilton-star.toml` describes a Hamilton STARlet. Its
-`backend = "hamilton.star"` selects the firmware-protocol backend:
+Open the Opentrons app, go to **Protocols**, and import one of those files. The app must have OT-2 support; use the 8.4.x app or the `Opentrons-OT2` build because a 9.x app rejects OT-2 protocols.
 
-```bash
-lab build --target hamilton-star
-```
-
-Each wave then contains `*.star.json` run documents — ordered, reviewable
-Hamilton firmware frames with an operator description per step — plus the
-manual protocol that interleaves the off-deck thermal work. Review a wave
-without hardware, or execute it on the connected machine:
-
-```bash
-lab run examples/golden-gate/.lab/build/hamilton-star/wave-001 --dry-run
-```
-
-Multi-instrument composition is not a build target. A package selects an SBOLInventory document, `lab plan` binds reachable capability requirements to exact offerings and Assets, and `lab.execution-plan.v1` represents device execution, material movement, and manual work in one reviewed dependency DAG. Existing single-device Golden Gate targets remain useful protocol emitters, but they do not define the facility taxonomy.
-
-## See the deck
-
-`targets/opentrons-ot2.toml` describes an OT-2 (`lab build --target
-opentrons-ot2` emits `*_protocol.py` under `.lab/build/opentrons-ot2/`).
-Open the Opentrons app, go to **Protocols**, and either drag one of those
-protocol files onto the window or use **Import a Protocol → Choose file** and
-paste the path the build printed. The app analyzes it and draws the deck.
-
-The app must have OT-2 support. Opentrons split that into a separate
-application at version 9, so use the 8.4.x app or the `Opentrons-OT2` build; a
-9.x app rejects these protocols with a message pointing at the OT-2 download.
-
-To check a protocol without the GUI, run the app's own analyzer over it:
+To check a protocol without the GUI, run the app's analyzer over the selected file:
 
 ```bash
 /Applications/Opentrons.app/Contents/Resources/python/bin/python3.10 \
   -m opentrons.cli analyze --json-output /tmp/analysis.json \
-  examples/golden-gate/.lab/build/opentrons-ot2/wave-002/transformation_protocol.py
+  "$(find .lab/plan/lowerings -name transformation_protocol.py -print -quit)"
 ```
 
-The JSON reports `errors` plus the full deck — modules, labware with slot
-assignments, and pipettes with mounts — which is what the deck map renders.
-
-## Verify the generated code
+To lint, typecheck, and simulate the complete emitted OT-2 package:
 
 ```bash
-scripts/check-opentrons-target.sh examples/golden-gate/.lab/build/opentrons-ot2
+ot2_output="$(find .lab/plan/lowerings -type d -name opentrons-ot2 -print -quit)"
+../../scripts/check-opentrons-target.sh "$ot2_output"
+../../scripts/simulate-opentrons.sh "$ot2_output"
 ```
-
-```bash
-scripts/simulate-opentrons.sh examples/golden-gate/.lab/build/opentrons-ot2
-```
-
-The first lints and typechecks every emitted protocol; the second runs them
-through the official Opentrons simulator.

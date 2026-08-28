@@ -1,6 +1,5 @@
-# The bench this workspace compiles for. Its filename is its name: this is
-# `opentrons-ot2`, built by `lab build --target opentrons-ot2` or by the
-# `[build] target` the manifest declares.
+# Private operational configuration for the exact OT-2 Asset bound in `lab.toml`.
+# The facility allocation selects the Asset and adapter; this file cannot select a target.
 #
 # Everything here describes the laboratory, not the science: which modules are
 # installed, what labware sits in which deck slot, and which pipette is on
@@ -10,10 +9,6 @@
 # Every field has a default matching the reference bench, so a profile states
 # only what differs. This one is written out in full because it is the
 # example's subject.
-
-[target]
-backend = "opentrons.ot2"
-api_level = "2.21"
 
 [instruments.small]
 model = "p20_single_gen2"

@@ -5,7 +5,6 @@ edition = "2026"
 
 [build]
 entry = "src/programs/reporter_panel.lab"
-target = "opentrons-ot2"
 
 [inventory]
 document = "inventory/facility.ttl"
@@ -13,4 +12,4 @@ document = "inventory/facility.ttl"
 [[execution.adapters]]
 asset = "https://example.org/golden-gate/opentrons_ot2"
 driver = "opentrons.ot2"
-profile = "targets/opentrons-ot2.toml"
+profile = "adapters/opentrons-ot2.toml"

@@ -428,13 +428,13 @@ fn a_target_build_freezes_exact_material_lot_bindings() {
 }
 
 #[test]
-fn a_target_build_emits_automation_protocols_for_every_wave() {
+fn facility_lowering_emits_automation_protocols_for_every_wave() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
         .unwrap();
     let out_dir = std::env::temp_dir().join(format!(
-        "lab-golden-gate-target-{}-{}",
+        "lab-golden-gate-facility-lowering-{}-{}",
         std::process::id(),
         line!()
     ));
@@ -444,10 +444,8 @@ fn a_target_build_emits_automation_protocols_for_every_wave() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
-            "build",
+            "plan",
             example.to_str().unwrap(),
-            "--target",
-            "opentrons-ot2",
             "--out-dir",
             out_dir.to_str().unwrap(),
             "--json",
@@ -456,17 +454,12 @@ fn a_target_build_emits_automation_protocols_for_every_wave() {
         .unwrap();
     assert!(
         output.status.success(),
-        "target build failed: {}",
+        "facility plan failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(result["status"], "built");
-    assert_eq!(result["result"]["target"], "opentrons-ot2");
-    assert_eq!(
-        result["result"]["modules"], 6,
-        "designs, workflows, and the program lower as one program"
-    );
-    // The build names every runnable protocol, so a path can go straight into
+    assert_eq!(result["status"], "planned");
+    // Planning names every runnable protocol, so a path can go straight into
     // a device application.
     let protocols = result["result"]["protocols"].as_array().unwrap();
     assert_eq!(protocols.len(), 3);
@@ -478,10 +471,8 @@ fn a_target_build_emits_automation_protocols_for_every_wave() {
     );
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
-            "build",
+            "plan",
             example.to_str().unwrap(),
-            "--target",
-            "opentrons-ot2",
             "--out-dir",
             out_dir.to_str().unwrap(),
         ])
@@ -494,7 +485,10 @@ fn a_target_build_emits_automation_protocols_for_every_wave() {
         "{printed}"
     );
 
-    let target_root = out_dir.join("opentrons-ot2");
+    let lowering: Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
+            .unwrap();
+    let target_root = out_dir.join(lowering["routes"][0]["output"].as_str().unwrap());
     // Assembly precedes transformation, and every artifact in a wave shares
     // one robot run.
     assert!(target_root.join("wave-001/assembly_protocol.py").is_file());
@@ -514,20 +508,20 @@ fn a_target_build_emits_automation_protocols_for_every_wave() {
     assert_eq!(
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
         serde_json::json!(["5", "6"]),
-        "the emitted plan carries the deck the target profile declared"
+        "the allocated adapter emits the concrete deck plan"
     );
 
     std::fs::remove_dir_all(out_dir).unwrap();
 }
 
 #[test]
-fn the_manifest_target_builds_automation_protocols_without_naming_one() {
+fn build_stays_portable_when_a_package_describes_an_operational_facility() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
         .unwrap();
     let out_dir = std::env::temp_dir().join(format!(
-        "lab-golden-gate-default-target-{}-{}",
+        "lab-golden-gate-portable-build-{}-{}",
         std::process::id(),
         line!()
     ));
@@ -535,7 +529,7 @@ fn the_manifest_target_builds_automation_protocols_without_naming_one() {
         std::fs::remove_dir_all(&out_dir).unwrap();
     }
 
-    let default_target = Command::new(env!("CARGO_BIN_EXE_lab"))
+    let built = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
             "build",
             example.to_str().unwrap(),
@@ -546,41 +540,18 @@ fn the_manifest_target_builds_automation_protocols_without_naming_one() {
         .output()
         .unwrap();
     assert!(
-        default_target.status.success(),
-        "default target build failed: {}",
-        String::from_utf8_lossy(&default_target.stderr)
+        built.status.success(),
+        "portable build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
     );
-    let result: Value = serde_json::from_slice(&default_target.stdout).unwrap();
-    assert_eq!(result["result"]["target"], "opentrons-ot2");
-    assert!(
-        out_dir
-            .join("opentrons-ot2/wave-001/assembly_protocol.py")
-            .is_file()
-    );
-
-    // The default is reversible: a build can still stop at portable module IR.
-    std::fs::remove_dir_all(&out_dir).unwrap();
-    let ir_only = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args([
-            "build",
-            example.to_str().unwrap(),
-            "--out-dir",
-            out_dir.to_str().unwrap(),
-            "--no-target",
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        ir_only.status.success(),
-        "{}",
-        String::from_utf8_lossy(&ir_only.stderr)
-    );
-    let result: Value = serde_json::from_slice(&ir_only.stdout).unwrap();
+    let result: Value = serde_json::from_slice(&built.stdout).unwrap();
     assert_eq!(result["result"]["target"], Value::Null);
     assert!(result["result"]["protocols"].as_array().unwrap().is_empty());
     assert!(!out_dir.join("opentrons-ot2").exists());
     assert!(out_dir.join("package.json").is_file());
+    let index: Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("package.json")).unwrap()).unwrap();
+    assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
 
     std::fs::remove_dir_all(out_dir).unwrap();
 }
@@ -688,30 +659,38 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         .canonicalize()
         .unwrap();
     let output_root = temporary_project();
-    let build_dir = output_root.join("build");
     let plan_dir = output_root.join("plan");
 
-    let built = Command::new(env!("CARGO_BIN_EXE_lab"))
+    let planned = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
-            "build",
+            "plan",
             example.to_str().unwrap(),
             "--out-dir",
-            build_dir.to_str().unwrap(),
+            plan_dir.to_str().unwrap(),
             "--json",
         ])
         .output()
         .unwrap();
     assert!(
-        built.status.success(),
-        "extended Golden Gate build failed: {}",
-        String::from_utf8_lossy(&built.stderr)
+        planned.status.success(),
+        "extended Golden Gate facility plan failed: {}",
+        String::from_utf8_lossy(&planned.stderr)
     );
-    let result: Value = serde_json::from_slice(&built.stdout).unwrap();
-    assert_eq!(result["result"]["target"], "opentrons-ot2");
+    let result: Value = serde_json::from_slice(&planned.stdout).unwrap();
     assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 5);
 
+    let lowering: Value =
+        serde_json::from_slice(&std::fs::read(plan_dir.join("facility_lowering.json")).unwrap())
+            .unwrap();
+    assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
+    let route = &lowering["routes"][0];
     let manifest: Value = serde_json::from_slice(
-        &std::fs::read(build_dir.join("opentrons-ot2/dependency_manifest.json")).unwrap(),
+        &std::fs::read(
+            plan_dir
+                .join(route["output"].as_str().unwrap())
+                .join("dependency_manifest.json"),
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(manifest["inventory"]["kind"], "sbol_inventory");
@@ -735,21 +714,6 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         "https://example.org/golden-gate/lots/reference_gfp_lot"
     );
 
-    let planned = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args([
-            "plan",
-            example.to_str().unwrap(),
-            "--out-dir",
-            plan_dir.to_str().unwrap(),
-            "--json",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        planned.status.success(),
-        "extended Golden Gate facility plan failed: {}",
-        String::from_utf8_lossy(&planned.stderr)
-    );
     let allocation: Value =
         serde_json::from_slice(&std::fs::read(plan_dir.join("facility_allocation.json")).unwrap())
             .unwrap();
