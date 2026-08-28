@@ -30,6 +30,18 @@ The DNA sequences are first-class values declared independently of the designs
 that reference them. Provenance is separate again: `buy` marks catalogued parts
 and reagents, while `build` marks the plasmids and strains this laboratory makes.
 
+## Check and plan the facility
+
+The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the example laboratory's zones, an Opentrons OT-2 installation, a manual workstation, exact stock MaterialLots, and capability offerings. The OT-2 offers plannable liquid handling and thermal cycling through reviewed-file control; its adapter binding reuses the same checked profile as the legacy single-device target.
+
+```bash
+lab check
+lab plan
+lab run .lab/plan --dry-run
+```
+
+`lab plan` binds each reachable workflow requirement to one exact CapabilityOffering and Asset. This remains a planning-only reviewed plan until Lab attaches the target-emitted Opentrons child documents to its `Execute` nodes.
+
 ## Build it
 
 From the `examples/golden-gate` directory, run:

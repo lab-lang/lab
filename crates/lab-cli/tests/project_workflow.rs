@@ -585,6 +585,74 @@ fn the_manifest_target_builds_automation_protocols_without_naming_one() {
     std::fs::remove_dir_all(out_dir).unwrap();
 }
 
+#[test]
+fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let out_dir = std::env::temp_dir().join(format!(
+        "lab-golden-gate-plan-{}-{}",
+        std::process::id(),
+        line!()
+    ));
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "plan",
+            example.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "facility plan failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let allocation: Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("facility_allocation.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        allocation["facility"],
+        "https://example.org/golden-gate/facility"
+    );
+    assert_eq!(allocation["allocations"].as_array().unwrap().len(), 28);
+    let liquid_handling = allocation["allocations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|binding| {
+            binding["capability_kind"] == "https://draggon.org/ns/capability#LiquidHandling"
+        })
+        .collect::<Vec<_>>();
+    assert!(!liquid_handling.is_empty());
+    assert!(liquid_handling.iter().all(|binding| {
+        binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
+            && binding["offering"]
+                == "https://example.org/golden-gate/opentrons_ot2_liquid_handling"
+            && binding["adapter"]["driver"] == "opentrons.ot2"
+    }));
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", out_dir.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "reviewed plan failed preflight: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+
+    std::fs::remove_dir_all(out_dir).unwrap();
+}
+
 /// The `backend` key a profile declares selects the backend, so the same
 /// program builds for a Flex without a source edit.
 #[test]
