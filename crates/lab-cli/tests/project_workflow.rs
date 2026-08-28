@@ -617,7 +617,20 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     );
     let printed = String::from_utf8(human.stdout).unwrap();
     assert!(printed.contains("Asset bundles:"), "{printed}");
-    assert!(printed.contains("\n  assets/opentrons_ot2"), "{printed}");
+    assert!(
+        printed.contains(&format!(
+            "\n  {}",
+            out_dir.join("assets/opentrons_ot2").display()
+        )),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(&format!(
+            "Allocation: {}",
+            out_dir.join("facility_allocation.json").display()
+        )),
+        "{printed}"
+    );
     assert!(printed.contains("Automation protocols:"), "{printed}");
     assert!(printed.contains("assembly_protocol.py"), "{printed}");
     assert!(printed.contains("Documents:"), "{printed}");

@@ -267,9 +267,9 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
             facility.facility,
             facility.allocated_requirements,
             facility.adapter_lowerings,
-            artifact_path(facility, &facility.allocation),
-            artifact_path(facility, &facility.lowering),
-            artifact_path(facility, &facility.execution_plan)
+            human_path(&facility.allocation),
+            human_path(&facility.lowering),
+            human_path(&facility.execution_plan)
         ));
         append_facility_artifacts(&mut human, facility);
     }
@@ -329,7 +329,7 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         planned.allocated_requirements,
         planned.adapter_lowerings,
         human_path(&planned.output),
-        artifact_path(&planned, &planned.execution_plan)
+        human_path(&planned.execution_plan)
     );
     append_facility_artifacts(&mut human, &planned);
     output.success("planned", planned, human)
@@ -448,28 +448,21 @@ fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {
     if !planned.bundles.is_empty() {
         human.push_str("\n\nAsset bundles:");
         for bundle in &planned.bundles {
-            human.push_str(&format!("\n  {}", artifact_path(planned, bundle)));
+            human.push_str(&format!("\n  {}", human_path(bundle)));
         }
     }
     if !planned.protocols.is_empty() {
         human.push_str("\n\nAutomation protocols:");
         for protocol in &planned.protocols {
-            human.push_str(&format!("\n  {}", artifact_path(planned, protocol)));
+            human.push_str(&format!("\n  {}", human_path(protocol)));
         }
     }
     if !planned.documents.is_empty() {
         human.push_str("\n\nDocuments:");
         for document in &planned.documents {
-            human.push_str(&format!("\n  {}", artifact_path(planned, document)));
+            human.push_str(&format!("\n  {}", human_path(document)));
         }
     }
-}
-
-fn artifact_path(planned: &PlanCompleted, path: &Path) -> String {
-    path.strip_prefix(&planned.output)
-        .unwrap_or(path)
-        .display()
-        .to_string()
 }
 
 fn human_path(path: &Path) -> String {
