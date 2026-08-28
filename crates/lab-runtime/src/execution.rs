@@ -840,6 +840,12 @@ fn load_reviewed_document(
                     STAR_RUN_FORMAT
                 );
             }
+            if !document.manual_after.is_empty() {
+                bail!(
+                    "{} carries manual-after steps; facility execution requires explicit Manual plan nodes",
+                    path.display()
+                );
+            }
             let commands = document
                 .steps
                 .iter()

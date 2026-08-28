@@ -13,6 +13,7 @@
 //! narration, and a [`stations::Connector`] that opens station sessions.
 
 pub mod clock;
+pub mod device_executors;
 pub mod events;
 pub mod execution;
 pub mod ledger;

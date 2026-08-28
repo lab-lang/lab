@@ -1,5 +1,6 @@
 mod adapters;
 mod commands;
+mod execution_run;
 mod run;
 mod targets;
 mod typeset;
@@ -80,14 +81,9 @@ enum Command {
         #[command(subcommand)]
         command: AdaptersCommand,
     },
-    /// Execute an emitted run package — a Hamilton STAR package or a
-    /// workcell wave — on the connected stations, or review it with
-    /// --dry-run.
+    /// Execute a reviewed facility plan or a legacy emitted run package, or review it with --dry-run.
     Run {
-        /// A run directory produced by `lab build` (the target output
-        /// directory, or one wave directory of a dependency build). A
-        /// directory holding `plan.workcell.json` runs as a workcell
-        /// wave; anything else runs as a Hamilton STAR package.
+        /// A directory containing plan.execution.json, or a legacy target run directory.
         path: PathBuf,
         /// Validate and print the full step table without touching
         /// hardware.
@@ -97,13 +93,11 @@ enum Command {
         /// require the operator.
         #[arg(long)]
         yes: bool,
-        /// Continue a workcell wave from its ledger, skipping nodes it
-        /// records as completed.
+        /// Continue the exact reviewed plan from its durable ledger.
         #[arg(long)]
         resume: bool,
-        /// Where a networked station answers on this bench, as
-        /// NAME=ADDRESS (repeatable). Compiled artifacts never carry
-        /// addresses; the bench supplies them at run time.
+        /// Where a networked Asset answers, as ASSET_IRI=ADDRESS (repeatable).
+        /// Legacy workcell waves continue to accept NAME=ADDRESS.
         #[arg(long = "station", value_name = "NAME=ADDRESS")]
         station: Vec<String>,
     },
@@ -231,7 +225,9 @@ fn run() -> Result<()> {
             resume,
             station,
         } => {
-            if workcell_run::is_workcell_directory(&path) {
+            if execution_run::is_execution_directory(&path) {
+                execution_run::run_execution_command(path, dry_run, yes, resume, station, &output)
+            } else if workcell_run::is_workcell_directory(&path) {
                 workcell_run::run_workcell_command(path, dry_run, yes, resume, station, &output)
             } else if resume || !station.is_empty() {
                 anyhow::bail!(

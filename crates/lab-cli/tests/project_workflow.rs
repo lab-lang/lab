@@ -216,6 +216,21 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
         plan["nodes"][0]["requirement"],
         plan["requirements"][0]["requirement_instance"]
     );
+
+    let plan_directory = project.join(".lab/plan");
+    let reviewed = run(&["run", plan_directory.to_str().unwrap(), "--dry-run"]);
+    assert!(
+        reviewed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reviewed.stderr)
+    );
+    assert!(String::from_utf8_lossy(&reviewed.stdout).contains("all frozen inputs validated"));
+    assert!(String::from_utf8_lossy(&reviewed.stdout).contains("planning-only bindings"));
+
+    let live = run(&["run", plan_directory.to_str().unwrap(), "--yes"]);
+    assert!(!live.status.success());
+    assert!(String::from_utf8_lossy(&live.stderr).contains("reviewed plan is not executable"));
+    assert!(!plan_directory.join("run-ledger.jsonl").exists());
 }
 
 #[test]
