@@ -65,6 +65,11 @@ fn new_check_build_and_metadata_form_one_project_loop() {
         "{}",
         String::from_utf8_lossy(&built.stderr)
     );
+    let build_output = String::from_utf8_lossy(&built.stdout);
+    assert!(
+        build_output.contains("Build products:\n  plasmid starter"),
+        "{build_output}"
+    );
     let index_path = project.join(".lab/build/package.json");
     let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
     assert_eq!(index["schema_version"], 5);
@@ -519,6 +524,23 @@ fn build_stays_portable_when_a_package_describes_an_operational_facility() {
     assert!(result["result"].get("target").is_none());
     assert!(result["result"].get("protocols").is_none());
     assert!(result["result"].get("documents").is_none());
+    assert_eq!(result["result"]["products"].as_array().unwrap().len(), 6);
+    assert_eq!(
+        result["result"]["products"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|product| product["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "composite_plasmid_1",
+            "composite_plasmid_2",
+            "composite_strain_1",
+            "composite_strain_2",
+            "composite_strain_3",
+            "composite_strain_4",
+        ]
+    );
     assert!(!out_dir.join("opentrons-ot2").exists());
     assert!(out_dir.join("package.json").is_file());
     let index: Value =

@@ -6,10 +6,12 @@ use lab_compiler::planning::{
     CapabilityRequirements, ExecutionPlanOptions, FacilityAllocation, build_execution_plan,
     reviewed_lowering_bundles,
 };
-use lab_compiler::{DiagnosticSeverity, SourceId, analyze_module, render_diagnostic};
+use lab_compiler::{
+    CheckedDeclaration, DiagnosticSeverity, SourceId, analyze_module, render_diagnostic,
+};
 use lab_inventory::InventorySnapshot;
 use lab_package::{LabPackage, PackageManifest};
-use lab_project::{LOCK_FILE, LabProject};
+use lab_project::{CompiledModule, LOCK_FILE, LabProject};
 use lab_runfmt::{EXECUTION_PLAN_FILE, ExecutionPlanDocument};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -138,6 +140,7 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         .with_context(|| format!("failed to create {}", output_root.display()))?;
 
     let program_packages = project.program_packages();
+    let products = build_products(&compiled.modules, &program_packages);
     let program_modules = compiled
         .modules
         .iter()
@@ -229,13 +232,21 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
     fs::write(&lock_path, lock)
         .with_context(|| format!("failed to write {}", lock_path.display()))?;
 
-    let human = format!(
-        "Built {} {} ({} modules)\n  Artifacts: {}",
+    let mut human = format!(
+        "Built {} {} ({} modules)",
         index.package,
         index.version,
-        index.modules.len(),
-        output_root.display()
+        index.modules.len()
     );
+    if products.is_empty() {
+        human.push_str("\n\nBuild products: none");
+    } else {
+        human.push_str("\n\nBuild products:");
+        for product in &products {
+            human.push_str(&format!("\n  {} {}", product.kind, product.name));
+        }
+    }
+    human.push_str(&format!("\n\nCompiler output: {}", output_root.display()));
     output.success(
         "built",
         BuildCompleted {
@@ -243,9 +254,33 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
             version: index.version.clone(),
             modules: index.modules.len(),
             output: output_root.clone(),
+            products,
         },
         human,
     )
+}
+
+/// Every biological artifact that the compiled program declares with `build`.
+/// Bought declarations lower to catalog entries instead and therefore never
+/// appear in this summary.
+fn build_products(modules: &[CompiledModule], program_packages: &[String]) -> Vec<BuildProduct> {
+    modules
+        .iter()
+        .filter(|module| program_packages.contains(&module.package))
+        .flat_map(|module| {
+            module.module.declarations.iter().filter_map(|declaration| {
+                let CheckedDeclaration::Artifact { artifact, name, .. } = declaration else {
+                    return None;
+                };
+                Some(BuildProduct {
+                    package: module.package.clone(),
+                    module: module.source.module.clone(),
+                    kind: artifact.clone(),
+                    name: name.clone(),
+                })
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
@@ -584,6 +619,15 @@ struct BuildCompleted {
     version: String,
     modules: usize,
     output: PathBuf,
+    products: Vec<BuildProduct>,
+}
+
+#[derive(Serialize)]
+struct BuildProduct {
+    package: String,
+    module: String,
+    kind: String,
+    name: String,
 }
 
 #[derive(Serialize)]
