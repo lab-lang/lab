@@ -136,6 +136,10 @@ pub struct ExecutionPlanDocument {
     pub materials: Vec<ExecutionMaterialBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<ExecutionMaterialOutput>,
+    /// Immutable whole-program adapter outputs that implement several semantic requirements
+    /// together and therefore cannot be attached honestly to one Execute node.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lowerings: Vec<ExecutionLoweringBundle>,
     pub nodes: Vec<ExecutionPlanNode>,
 }
 
@@ -220,6 +224,123 @@ impl ExecutionPlanDocument {
             }
         }
 
+        let mut lowering_ids = BTreeSet::new();
+        let mut lowered_requirements = BTreeSet::new();
+        let mut lowering_artifact_paths = BTreeSet::new();
+        for lowering in &self.lowerings {
+            if lowering.id.is_empty() || !lowering_ids.insert(lowering.id.as_str()) {
+                return Err(format!(
+                    "adapter lowering ID '{}' is empty or repeated",
+                    lowering.id
+                ));
+            }
+            if lowering.asset.is_empty() {
+                return Err(format!(
+                    "adapter lowering '{}' has an empty Asset IRI",
+                    lowering.id
+                ));
+            }
+            require_relative_path("adapter lowering profile", &lowering.adapter.profile_path)?;
+            require_sha256(
+                &format!("adapter lowering profile for '{}'", lowering.id),
+                &lowering.adapter.profile_sha256,
+            )?;
+            if lowering.requirements.is_empty() {
+                return Err(format!(
+                    "adapter lowering '{}' does not identify any triggering requirements",
+                    lowering.id
+                ));
+            }
+            let mut route_requirements = BTreeSet::new();
+            for requirement_id in &lowering.requirements {
+                if !route_requirements.insert(requirement_id.as_str()) {
+                    return Err(format!(
+                        "adapter lowering '{}' repeats requirement '{}'",
+                        lowering.id, requirement_id
+                    ));
+                }
+                if !lowered_requirements.insert(requirement_id.as_str()) {
+                    return Err(format!(
+                        "requirement '{}' belongs to more than one adapter lowering",
+                        requirement_id
+                    ));
+                }
+                let requirement = requirements.get(requirement_id.as_str()).ok_or_else(|| {
+                    format!(
+                        "adapter lowering '{}' references unknown requirement '{}'",
+                        lowering.id, requirement_id
+                    )
+                })?;
+                if requirement.asset != lowering.asset {
+                    return Err(format!(
+                        "adapter lowering '{}' binds Asset '{}', but requirement '{}' binds '{}'",
+                        lowering.id, lowering.asset, requirement_id, requirement.asset
+                    ));
+                }
+                if requirement.adapter.as_ref() != Some(&lowering.adapter) {
+                    return Err(format!(
+                        "adapter lowering '{}' does not match the frozen adapter for requirement '{}'",
+                        lowering.id, requirement_id
+                    ));
+                }
+            }
+            if lowering.artifacts.is_empty() {
+                return Err(format!(
+                    "adapter lowering '{}' has no reviewed artifacts",
+                    lowering.id
+                ));
+            }
+            let mut device_protocols = 0;
+            for artifact in &lowering.artifacts {
+                require_relative_path("reviewed lowering artifact", &artifact.path)?;
+                require_sha256(
+                    &format!(
+                        "reviewed lowering artifact '{}' in '{}'",
+                        artifact.path, lowering.id
+                    ),
+                    &artifact.sha256,
+                )?;
+                if artifact.media_type.is_empty() {
+                    return Err(format!(
+                        "reviewed lowering artifact '{}' in '{}' has no media type",
+                        artifact.path, lowering.id
+                    ));
+                }
+                if !lowering_artifact_paths.insert(artifact.path.as_str()) {
+                    return Err(format!(
+                        "reviewed lowering artifact path '{}' is repeated",
+                        artifact.path
+                    ));
+                }
+                match artifact.role {
+                    ReviewedLoweringArtifactRole::DeviceProtocol => {
+                        device_protocols += 1;
+                        if artifact.format.as_deref().is_none_or(str::is_empty) {
+                            return Err(format!(
+                                "device protocol '{}' in '{}' has no run-document format",
+                                artifact.path, lowering.id
+                            ));
+                        }
+                    }
+                    ReviewedLoweringArtifactRole::OperatorDocument
+                    | ReviewedLoweringArtifactRole::Support => {
+                        if artifact.format.is_some() {
+                            return Err(format!(
+                                "non-protocol artifact '{}' in '{}' declares a run-document format",
+                                artifact.path, lowering.id
+                            ));
+                        }
+                    }
+                }
+            }
+            if device_protocols == 0 {
+                return Err(format!(
+                    "adapter lowering '{}' has no reviewed device protocol",
+                    lowering.id
+                ));
+            }
+        }
+
         let mut nodes = BTreeMap::new();
         for node in &self.nodes {
             if node.id.is_empty() || nodes.insert(node.id.as_str(), node).is_some() {
@@ -257,6 +378,12 @@ impl ExecutionPlanDocument {
                         ));
                     }
                     if let Some(document) = document {
+                        if lowered_requirements.contains(requirement.as_str()) {
+                            return Err(format!(
+                                "execute node '{}' attaches a single run document to requirement '{}', which already belongs to whole-program adapter lowering",
+                                node.id, requirement
+                            ));
+                        }
                         require_relative_path("reviewed run document", &document.path)?;
                         require_sha256(
                             &format!("reviewed run document for node '{}'", node.id),
@@ -342,6 +469,35 @@ pub struct ExecutionAdapterBinding {
     pub driver: String,
     pub profile_path: String,
     pub profile_sha256: String,
+}
+
+/// One immutable adapter invocation whose device artifacts jointly realize several requirements.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionLoweringBundle {
+    pub id: String,
+    pub asset: String,
+    pub adapter: ExecutionAdapterBinding,
+    pub requirements: Vec<String>,
+    pub artifacts: Vec<ReviewedLoweringArtifact>,
+}
+
+/// One hash-addressed child of a reviewed whole-program adapter lowering.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewedLoweringArtifact {
+    pub path: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub role: ReviewedLoweringArtifactRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewedLoweringArtifactRole {
+    DeviceProtocol,
+    OperatorDocument,
+    Support,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -594,6 +750,7 @@ mod tests {
             }],
             materials: Vec::new(),
             outputs: Vec::new(),
+            lowerings: Vec::new(),
             nodes: vec![ExecutionPlanNode {
                 id: "execute-0001".to_owned(),
                 after: Vec::new(),
@@ -657,6 +814,44 @@ mod tests {
         let mut plan = execution_plan();
         plan.inventory.source_sha256 = "not-a-digest".to_owned();
         assert!(plan.validate().unwrap_err().contains("SHA-256"));
+    }
+
+    #[test]
+    fn execution_plan_validation_freezes_whole_program_adapter_lowerings() {
+        let mut plan = execution_plan();
+        let adapter = plan.requirements[0].adapter.clone().unwrap();
+        plan.lowerings.push(ExecutionLoweringBundle {
+            id: "example-incubator-a1b2c3d4e5f6".to_owned(),
+            asset: "https://example.org/incubator".to_owned(),
+            adapter,
+            requirements: vec!["example::main/body[0]".to_owned()],
+            artifacts: vec![ReviewedLoweringArtifact {
+                path: "lowerings/incubator/run.json".to_owned(),
+                media_type: "application/json".to_owned(),
+                sha256: "c".repeat(64),
+                role: ReviewedLoweringArtifactRole::DeviceProtocol,
+                format: Some("example.incubator-run.v1".to_owned()),
+            }],
+        });
+        plan.validate().unwrap();
+
+        let mut wrong_asset = plan.clone();
+        wrong_asset.lowerings[0].asset = "https://example.org/other".to_owned();
+        assert!(
+            wrong_asset
+                .validate()
+                .unwrap_err()
+                .contains("but requirement")
+        );
+
+        let mut missing_format = plan;
+        missing_format.lowerings[0].artifacts[0].format = None;
+        assert!(
+            missing_format
+                .validate()
+                .unwrap_err()
+                .contains("no run-document format")
+        );
     }
 
     #[test]

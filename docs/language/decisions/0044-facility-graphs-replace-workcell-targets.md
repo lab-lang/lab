@@ -33,6 +33,8 @@ Operational configuration is an overlay keyed by exact Asset IRI. An adapter des
 
 The reviewed coordination artifact is `lab.execution-plan.v1`. It freezes inventory, requirement, offering, Asset, MaterialLot, adapter-profile, and reviewed-document hashes in one dependency DAG containing `Execute`, `MoveMaterial`, and `Manual` nodes. Device-specific reviewed formats remain independent child documents.
 
+When an adapter still lowers a whole program rather than one capability requirement at a time, the plan freezes a reviewed adapter-lowering bundle containing the exact triggering requirements and every emitted artifact path, role, format, and digest. Lab does not assign one bundle protocol arbitrarily to one requirement. Runtime preflight verifies the complete bundle, while its Execute nodes remain planning-only until a requirement-aware adapter can attach independently executable child documents.
+
 The runtime executes only the frozen bindings through a registry keyed by Asset IRI, adapter ID, and document format. It never re-queries the facility or substitutes an Asset. Its durable ledger is bound to the plan digest, inventory digest, and execution mode. Live and simulation resume state are deliberately incompatible.
 
 A completed live run writes a new `inventory-after.ttl`; a completed simulation writes `inventory-simulation.ttl`. Both preserve the source graph and add a PROV Activity, exact Asset and input MaterialLot Usages, reviewed evidence Attachments, and timing. Only live execution may generate output MaterialLots.

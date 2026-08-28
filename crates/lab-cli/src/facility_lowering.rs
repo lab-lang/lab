@@ -82,14 +82,27 @@ pub(crate) fn lower_allocated_adapters(
         if !descriptor.services.lowering {
             continue;
         }
+        let mut emitted_formats = descriptor.emitted_run_formats.iter();
+        let automation_format = emitted_formats.next().cloned().with_context(|| {
+            format!(
+                "adapter '{}' provides lowering but declares no emitted run-document format",
+                descriptor.id
+            )
+        })?;
+        if emitted_formats.next().is_some() {
+            bail!(
+                "adapter '{}' provides whole-program lowering with several emitted run-document formats; the lowering API must identify each artifact format explicitly",
+                descriptor.id
+            );
+        }
         requirements
             .sort_by(|left, right| left.requirement_instance.cmp(&right.requirement_instance));
-        lowerable.push((key, requirements));
+        lowerable.push((key, requirements, automation_format));
     }
     if lowerable.len() > 1 {
         let routes = lowerable
             .iter()
-            .map(|((asset, driver, _, _), _)| format!("{asset} through {driver}"))
+            .map(|((asset, driver, _, _), _, _)| format!("{asset} through {driver}"))
             .collect::<Vec<_>>()
             .join(", ");
         bail!(
@@ -108,7 +121,12 @@ pub(crate) fn lower_allocated_adapters(
             .context("failed to select a concrete protocol for facility adapter lowering")?;
         let build_inventory = semantic_build_inventory(modules, inventory)?;
 
-        for ((asset, driver, source_profile_path, profile_sha256), requirements) in lowerable {
+        for (
+            (asset, driver, source_profile_path, profile_sha256),
+            requirements,
+            automation_format,
+        ) in lowerable
+        {
             let source = package.root.join(&source_profile_path);
             let profile =
                 crate::adapters::load_and_validate(&driver, &source).with_context(|| {
@@ -142,10 +160,12 @@ pub(crate) fn lower_allocated_adapters(
                 &bundle,
                 output_root,
                 &relative_output,
+                &automation_format,
                 &mut protocols,
                 &mut documents,
             )?;
             routes.push(FacilityLoweringRoute {
+                id: facility_lowering_id(&asset, &driver),
                 asset,
                 driver: driver.clone(),
                 profile_path: staged_adapter_profile_path(&driver, &profile_sha256),
@@ -221,10 +241,16 @@ fn facility_lowering_directory(asset: &str, driver: &str) -> PathBuf {
         .join(driver_name)
 }
 
+fn facility_lowering_id(asset: &str, driver: &str) -> String {
+    let asset_hash = sha256_hex(asset.as_bytes());
+    format!("{}-{}", driver.replace('.', "-"), &asset_hash[..12])
+}
+
 fn write_facility_artifacts(
     bundle: &ArtifactBundle,
     output_root: &Path,
     relative_output: &Path,
+    automation_format: &str,
     protocols: &mut Vec<PathBuf>,
     documents: &mut Vec<PathBuf>,
 ) -> Result<Vec<FacilityLoweredArtifact>> {
@@ -254,6 +280,8 @@ fn write_facility_artifacts(
             media_type: artifact.media_type().to_owned(),
             sha256: sha256_hex(artifact.contents()),
             role,
+            format: (role == FacilityLoweredArtifactRole::AutomationProtocol)
+                .then(|| automation_format.to_owned()),
         });
     }
 
@@ -276,6 +304,7 @@ fn write_facility_artifacts(
             media_type: "application/pdf".to_owned(),
             sha256: sha256_hex(&pdf_bytes),
             role: FacilityLoweredArtifactRole::OperatorDocument,
+            format: None,
         });
     }
     artifacts.sort_by(|left, right| left.path.cmp(&right.path));

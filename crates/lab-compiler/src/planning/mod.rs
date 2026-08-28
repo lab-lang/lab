@@ -34,7 +34,8 @@ pub use execution::{
 pub use inventory::BuildInventoryError;
 pub use lowering::{
     FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
-    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
+    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringProjectionError,
+    FacilityLoweringRoute, reviewed_lowering_bundles,
 };
 pub use model::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,

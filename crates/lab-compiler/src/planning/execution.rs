@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use lab_language::{CheckedExpression, TypedExpression};
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
-    ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,
-    ExecutionPlanAction, ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding,
-    ReviewedRunDocument,
+    ExecutionLoweringBundle, ExecutionMaterialBinding, ExecutionParameterBinding,
+    ExecutionParameterValue, ExecutionPlanAction, ExecutionPlanDocument, ExecutionPlanNode,
+    ExecutionRequirementBinding, ReviewedRunDocument,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -29,6 +29,8 @@ pub struct ExecutionPlanOptions {
     pub movements: Vec<PlannedMaterialMove>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lowerings: Vec<ExecutionLoweringBundle>,
 }
 
 impl Default for ExecutionPlanOptions {
@@ -39,6 +41,7 @@ impl Default for ExecutionPlanOptions {
             outputs: Vec::new(),
             movements: Vec::new(),
             reviewed_documents: BTreeMap::new(),
+            lowerings: Vec::new(),
         }
     }
 }
@@ -193,6 +196,7 @@ pub fn build_execution_plan(
         requirements,
         materials: options.materials,
         outputs: options.outputs,
+        lowerings: options.lowerings,
         nodes,
     };
     plan.validate()
@@ -356,6 +360,7 @@ mod tests {
                     before_requirement: "example::main/read".to_owned(),
                 }],
                 reviewed_documents: BTreeMap::new(),
+                lowerings: Vec::new(),
             },
         )
         .unwrap();

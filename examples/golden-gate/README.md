@@ -44,7 +44,7 @@ lab run .lab/plan --dry-run
 | --- | --- |
 | `.lab/plan/facility_allocation.json` | requirement-to-offering-to-Asset allocation and rejected candidates |
 | `.lab/plan/facility_lowering.json` | exact Asset, adapter, profile digest, triggering requirements, emitted artifacts, and artifact digests |
-| `.lab/plan/plan.execution.json` | reviewed facility-wide requirement and execution DAG |
+| `.lab/plan/plan.execution.json` | reviewed facility-wide DAG and hash-addressed adapter-lowering child bundle |
 | `.lab/plan/lowerings/<asset>/opentrons-ot2/dependency_manifest.json` | material graph, exact MaterialLot bindings, waves, and blockers |
 | `.lab/plan/lowerings/<asset>/opentrons-ot2/dependency_report.pdf` | typeset dependency and blocker summary |
 | `.lab/plan/lowerings/<asset>/opentrons-ot2/manual_protocol.pdf` | typeset bench instructions in execution order |
@@ -53,7 +53,7 @@ lab run .lab/plan --dry-run
 
 Artifacts in the same wave have no ordering constraint between them, so a wave is one robot run over one deck. Wave 2 cannot start until wave 1's plasmids physically exist and have been accepted as suitable inputs.
 
-The OT-2 offerings are `Plannable` with `ReviewedFileControl`. The plan can therefore be inspected with `--dry-run`, but it does not claim that this example Asset is hardware-qualified for live execution.
+The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/plan --dry-run` verifies every frozen protocol and support-artifact digest before narrating the plan. The Execute nodes remain planning-only because the current OT-2 lowerer emits one whole-program bundle rather than an independently executable document per capability requirement; the example does not claim that this Asset is hardware-qualified for live execution.
 
 ## Use another instrument
 

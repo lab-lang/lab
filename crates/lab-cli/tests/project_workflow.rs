@@ -623,6 +623,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "https://example.org/golden-gate/opentrons_ot2"
     );
     assert_eq!(route["driver"], "opentrons.ot2");
+    assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["requirements"].as_array().unwrap().len(), 6);
     let protocols = route["artifacts"]
         .as_array()
@@ -632,11 +633,36 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         .collect::<Vec<_>>();
     assert_eq!(protocols.len(), 3);
     assert!(protocols.iter().all(|artifact| {
-        artifact["sha256"].as_str().unwrap().len() == 64
+        artifact["format"] == "opentrons.python-protocol"
+            && artifact["sha256"].as_str().unwrap().len() == 64
             && out_dir
                 .join(route["output"].as_str().unwrap())
                 .join(artifact["path"].as_str().unwrap())
                 .is_file()
+    }));
+
+    let execution_plan: Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("plan.execution.json")).unwrap())
+            .unwrap();
+    let reviewed_lowering = &execution_plan["lowerings"][0];
+    assert_eq!(reviewed_lowering["id"], route["id"]);
+    assert_eq!(reviewed_lowering["asset"], route["asset"]);
+    assert_eq!(reviewed_lowering["adapter"]["driver"], "opentrons.ot2");
+    assert_eq!(
+        reviewed_lowering["requirements"].as_array().unwrap().len(),
+        6
+    );
+    let reviewed_protocols = reviewed_lowering["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|artifact| artifact["role"] == "device_protocol")
+        .collect::<Vec<_>>();
+    assert_eq!(reviewed_protocols.len(), 3);
+    assert!(reviewed_protocols.iter().all(|artifact| {
+        artifact["format"] == "opentrons.python-protocol"
+            && artifact["sha256"].as_str().unwrap().len() == 64
+            && out_dir.join(artifact["path"].as_str().unwrap()).is_file()
     }));
 
     let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -647,6 +673,20 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         dry_run.status.success(),
         "reviewed plan failed preflight: {}",
         String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert!(String::from_utf8_lossy(&dry_run.stdout).contains("reviewed adapter lowerings"));
+
+    let tampered = reviewed_protocols[0]["path"].as_str().unwrap();
+    std::fs::write(out_dir.join(tampered), "# changed after review\n").unwrap();
+    let rejected = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", out_dir.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("SHA-256"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
     );
 
     std::fs::remove_dir_all(out_dir).unwrap();

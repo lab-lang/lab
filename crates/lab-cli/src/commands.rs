@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use lab_compiler::backend::{TargetProfile, parse_target_profile};
 use lab_compiler::planning::{
     BuildInventory, CapabilityRequirements, ExecutionPlanOptions, FacilityAllocation,
-    build_execution_plan,
+    build_execution_plan, reviewed_lowering_bundles,
 };
 use lab_compiler::{
     DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module, render_diagnostic,
@@ -359,6 +359,8 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
         &output_root,
     )?;
     let inventory_document = staged_inventory_name(&inventory)?;
+    let reviewed_lowerings = reviewed_lowering_bundles(&lowered.manifest)
+        .context("failed to freeze allocated adapter lowerings into the reviewed plan")?;
     let mut execution_plan = build_execution_plan(
         &allocation,
         ExecutionPlanOptions {
@@ -368,6 +370,10 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
     )
     .context("failed to construct the reviewed execution plan")?;
     stage_execution_inputs(package, &inventory, &mut execution_plan, &output_root)?;
+    execution_plan.lowerings = reviewed_lowerings;
+    execution_plan
+        .validate()
+        .map_err(|message| anyhow::anyhow!("reviewed execution plan is invalid: {message}"))?;
     let requirements_path = output_root.join("capability_requirements.json");
     let instances_path = output_root.join("capability_instances.json");
     let allocation_path = output_root.join("facility_allocation.json");

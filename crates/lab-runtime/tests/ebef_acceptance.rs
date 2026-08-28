@@ -281,6 +281,7 @@ fn materialize_reviewed_simulation() -> tempfile::TempDir {
             material_lot: ASSAY_LOT.to_owned(),
         }],
         outputs: Vec::new(),
+        lowerings: Vec::new(),
         nodes: vec![
             ExecutionPlanNode {
                 id: "move-to-liquid-handler".to_owned(),
