@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2026"
 
 [inventory]
+# This points to the SBOLInventory RDF graph; facility facts do not live in TOML.
+# The selector is omitted because the document contains exactly one Facility.
 document = "inventory/ebef.ttl"
