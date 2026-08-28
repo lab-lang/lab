@@ -11,8 +11,6 @@ use anyhow::Result;
 #[cfg(feature = "hardware")]
 use anyhow::{Context, bail};
 #[cfg(feature = "hardware")]
-use hamilton_star::RawCommand;
-#[cfg(feature = "hardware")]
 use lab_instruments::Thermocycler as _;
 
 use crate::events::EventSink;
@@ -99,10 +97,7 @@ impl DocumentExecutor for HamiltonStarExecutor {
                 index: index + 1,
                 description: step.description.clone(),
             });
-            if let Err(error) = session.execute_raw(command) {
-                let retract = RawCommand::parse("C0ZA")
-                    .expect("the retract frame is a constant well-formed frame");
-                let _ = session.execute_raw(&retract);
+            if let Err(error) = crate::star::execute_frame(session, command) {
                 bail!(
                     "firmware error at frame {}: {error}; channels were retracted to Z-safety",
                     index + 1

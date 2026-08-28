@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use lab_compiler::backend::{adapter_catalog, hamilton::star::StarAdapterProfile};
-use lab_runfmt::{EXECUTION_PLAN_FILE, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
+use lab_runfmt::{STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 use lab_runtime::clock::WallClock;
 use lab_runtime::device_executors::{
     HamiltonStarExecutor, OdtcExecutor, ReviewedDocumentSimulationExecutor,
@@ -22,10 +22,6 @@ use lab_runtime::operator::StdinOperator;
 use lab_runtime::provenance::{inventory_result_file, write_inventory_result};
 
 use crate::Output;
-
-pub(crate) fn is_execution_directory(directory: &Path) -> bool {
-    directory.join(EXECUTION_PLAN_FILE).is_file()
-}
 
 pub(crate) fn run_execution_command(
     directory: PathBuf,

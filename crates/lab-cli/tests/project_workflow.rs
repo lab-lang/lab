@@ -250,6 +250,25 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
 }
 
 #[test]
+fn run_requires_a_reviewed_facility_plan() {
+    let directory = temporary_project();
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(
+        directory.join("automation_manifest.json"),
+        r#"{"schema_version":"lab.automation.v1","adapter":"hamilton.star"}"#,
+    )
+    .unwrap();
+
+    let attempted = run(&["run", directory.to_str().unwrap(), "--dry-run"]);
+
+    assert!(!attempted.status.success());
+    let stderr = String::from_utf8_lossy(&attempted.stderr);
+    assert!(stderr.contains("failed to read reviewed plan"), "{stderr}");
+    assert!(stderr.contains("plan.execution.json"), "{stderr}");
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn registry_dependencies_fail_closed_without_being_ignored() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();

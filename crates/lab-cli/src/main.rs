@@ -2,7 +2,6 @@ mod adapters;
 mod commands;
 mod execution_run;
 mod facility_lowering;
-mod run;
 mod typeset;
 mod update;
 
@@ -66,9 +65,9 @@ enum Command {
         #[command(subcommand)]
         command: AdaptersCommand,
     },
-    /// Execute a reviewed facility plan or a legacy STAR package, or review it with --dry-run.
+    /// Execute a reviewed facility plan, or validate and review it with --dry-run.
     Run {
-        /// A directory containing plan.execution.json, or a legacy target run directory.
+        /// A directory containing plan.execution.json.
         path: PathBuf,
         /// Validate and print the full step table without touching
         /// hardware.
@@ -179,25 +178,15 @@ fn run() -> Result<()> {
             yes,
             resume,
             asset_endpoint,
-        } => {
-            if execution_run::is_execution_directory(&path) {
-                execution_run::run_execution_command(
-                    path,
-                    dry_run,
-                    simulate,
-                    yes,
-                    resume,
-                    asset_endpoint,
-                    &output,
-                )
-            } else if simulate || resume || !asset_endpoint.is_empty() {
-                anyhow::bail!(
-                    "--simulate, --resume, and --asset-endpoint apply to reviewed facility plans; this directory holds a legacy Hamilton STAR package"
-                )
-            } else {
-                run::run(path, dry_run, yes, &output)
-            }
-        }
+        } => execution_run::run_execution_command(
+            path,
+            dry_run,
+            simulate,
+            yes,
+            resume,
+            asset_endpoint,
+            &output,
+        ),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }
