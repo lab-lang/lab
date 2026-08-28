@@ -8,7 +8,7 @@
 use std::collections::BTreeSet;
 
 use sbol_inventory::vocabulary::{
-    ABSORBANCE_MEASUREMENT, ControlMode, LIQUID_HANDLING, THERMAL_CYCLING,
+    ABSORBANCE_MEASUREMENT, ControlMode, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use crate::backend::hamilton::star::StarTargetProfile;
 use crate::backend::opentrons::flex::FlexTargetProfile;
 use crate::backend::opentrons::ot2::Ot2TargetProfile;
 use crate::backend::target_profiles::{TargetProfile, TargetProfileContractError, schema_value};
-use lab_runfmt::{STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
+use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 
 pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v1";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v1";
@@ -27,12 +27,13 @@ pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v1";
 const OPENTRONS_PYTHON_PROTOCOL: &str = "opentrons.python-protocol";
 const OPENTRONS_PROTOCOL_DESIGNER: &str = "opentrons.protocol-designer-json";
 
-const KNOWN_ADAPTERS: [&str; 5] = [
+const KNOWN_ADAPTERS: [&str; 6] = [
     "opentrons.ot2",
     "opentrons.flex",
     "hamilton.star",
     "inheco.odtc",
     "byonoy.absorbance96",
+    "lab.simulator",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +182,22 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
+            descriptor(
+                "lab.simulator",
+                "Lab semantic capability simulator",
+                None,
+                [LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT],
+                ["no-hardware", "semantic-simulation"],
+                [ControlMode::ReviewedFile],
+                [SIMULATION_RUN_FORMAT],
+                [SIMULATION_RUN_FORMAT],
+                AdapterServices {
+                    planning: true,
+                    simulation: true,
+                    runtime: false,
+                },
+                schema_value::<EmptyAdapterProfile>()?,
+            )?,
         ],
     })
 }
@@ -247,7 +264,7 @@ pub fn validate_adapter_profile(
         "hamilton.star" => StarTargetProfile::parse(name, contents)
             .map(TargetProfile::Star)
             .map_err(|error| invalid(driver, error))?,
-        "inheco.odtc" | "byonoy.absorbance96" => {
+        "inheco.odtc" | "byonoy.absorbance96" | "lab.simulator" => {
             let _: EmptyAdapterProfile = toml::from_str(contents)?;
             return Ok(empty_profile(driver, name));
         }
@@ -333,6 +350,23 @@ mod tests {
         assert!(star.control_modes.contains(ControlMode::Api.iri()));
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
         assert!(star.services.runtime);
+
+        let simulator = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "lab.simulator")
+            .unwrap();
+        assert!(simulator.services.simulation);
+        assert!(!simulator.services.runtime);
+        assert!(
+            simulator
+                .accepted_run_formats
+                .contains(SIMULATION_RUN_FORMAT)
+        );
+        assert_eq!(
+            simulator.capabilities,
+            strings([LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT])
+        );
     }
 
     #[test]

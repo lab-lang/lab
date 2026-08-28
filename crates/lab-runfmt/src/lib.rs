@@ -24,6 +24,9 @@ pub const THERMOCYCLE_RUN_FORMAT: &str = "lab.thermocycle-run.v0";
 /// The format string every `lab.plate-read.v0` document declares.
 pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 
+/// The format string every semantic capability simulation document declares.
+pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
+
 /// The reviewed, facility-wide execution plan format.
 pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v1";
 
@@ -99,6 +102,13 @@ pub fn load_thermocycle(path: &Path) -> Result<ThermocycleRunDocument, RunDocume
 pub fn load_plate_read(path: &Path) -> Result<PlateReadDocument, RunDocumentError> {
     let document: PlateReadDocument = load_document(path)?;
     check_format(path, PLATE_READ_FORMAT, &document.format)?;
+    Ok(document)
+}
+
+/// Load and format-check one `lab.simulation-run.v1` document.
+pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocumentError> {
+    let document: SimulationRunDocument = load_document(path)?;
+    check_format(path, SIMULATION_RUN_FORMAT, &document.format)?;
     Ok(document)
 }
 
@@ -502,6 +512,22 @@ pub enum PlateReadMode {
     Luminescence { integration_seconds: f64 },
 }
 
+/// One reviewed semantic simulation step.
+///
+/// This document records what a simulator is asked to model. It is never a hardware protocol and
+/// never implies that a physical Asset has a compatible control path.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SimulationRunDocument {
+    /// Always [`SIMULATION_RUN_FORMAT`].
+    pub format: String,
+    pub id: String,
+    pub title: String,
+    /// Exact capability-kind IRI this simulation models.
+    pub capability_kind: String,
+    /// Human-readable scope or assumptions reviewed with the simulation.
+    pub assumptions: Vec<String>,
+}
+
 /// One replayable Hamilton STAR step: the id-less firmware frame and the
 /// operator's view of it. `module` and `code` repeat the frame's first four
 /// characters so a reviewer can scan the document without decoding frames.
@@ -695,6 +721,22 @@ mod tests {
         let text = serde_json::to_string_pretty(&document).expect("the document serializes");
         let back: StarRunDocument = serde_json::from_str(&text).expect("the document parses");
         assert_eq!(back, document, "emitter and runner read the same schema");
+    }
+
+    #[test]
+    fn a_capability_simulation_document_round_trips() {
+        let document = SimulationRunDocument {
+            format: SIMULATION_RUN_FORMAT.to_owned(),
+            id: "growth".to_owned(),
+            title: "Simulate plate growth".to_owned(),
+            capability_kind: "https://draggon.org/ns/capability#Incubation".to_owned(),
+            assumptions: vec!["No physical hardware is contacted.".to_owned()],
+        };
+        let text = serde_json::to_string_pretty(&document).unwrap();
+        assert_eq!(
+            serde_json::from_str::<SimulationRunDocument>(&text).unwrap(),
+            document
+        );
     }
 
     #[test]
