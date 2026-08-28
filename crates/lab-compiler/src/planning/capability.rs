@@ -214,6 +214,19 @@ pub enum RequirementQualification {
     Qualified,
 }
 
+impl RequirementQualification {
+    pub const fn iri(self) -> &'static str {
+        match self {
+            Self::Discovered => "https://draggon.org/ns/facility#Discovered",
+            Self::Described => "https://draggon.org/ns/facility#Described",
+            Self::Plannable => "https://draggon.org/ns/facility#Plannable",
+            Self::Simulatable => "https://draggon.org/ns/facility#Simulatable",
+            Self::Executable => "https://draggon.org/ns/facility#Executable",
+            Self::Qualified => "https://draggon.org/ns/facility#Qualified",
+        }
+    }
+}
+
 /// The closed SBOLInventory control-mode vocabulary, used here as a typed accepted set.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RequirementControlMode {
@@ -242,6 +255,18 @@ impl RequirementControlMode {
         Self::Sila2,
         Self::OpcUa,
     ];
+
+    pub const fn iri(self) -> &'static str {
+        match self {
+            Self::Unspecified => "https://draggon.org/ns/facility#UnspecifiedControl",
+            Self::Manual => "https://draggon.org/ns/facility#ManualControl",
+            Self::ReviewedFile => "https://draggon.org/ns/facility#ReviewedFileControl",
+            Self::VendorSession => "https://draggon.org/ns/facility#VendorSessionControl",
+            Self::Api => "https://draggon.org/ns/facility#ApiControl",
+            Self::Sila2 => "https://draggon.org/ns/facility#SiLA2Control",
+            Self::OpcUa => "https://draggon.org/ns/facility#OpcUaControl",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

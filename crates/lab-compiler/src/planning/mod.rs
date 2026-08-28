@@ -1,6 +1,7 @@
 //! Target-neutral planning shared by compiler backends.
 
 mod adapters;
+mod allocation;
 mod capability;
 mod inventory;
 mod model;
@@ -10,6 +11,11 @@ pub use adapters::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
     AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
     BoundCapabilityParameterValue, ResolvedAdapterBinding,
+};
+pub use allocation::{
+    AllocatedAdapter, AllocationScalarValue, CandidateRejectionReason, EligibleCapabilityCandidate,
+    FACILITY_ALLOCATION_SCHEMA_VERSION, FacilityAllocation, FacilityAllocationError,
+    MatchedCapabilityParameter, RejectedCapabilityCandidate, RequirementAllocation,
 };
 pub use capability::{
     CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION, CAPABILITY_REQUIREMENTS_SCHEMA_VERSION,

@@ -327,6 +327,28 @@ impl InventorySnapshot {
             offerings,
         })
     }
+
+    /// Owns every Asset governed by the selected facility in deterministic IRI order.
+    pub fn facility_assets(&self) -> Result<Vec<FacilityAsset>, FacilityAssetError> {
+        let selected = Resource::Iri(self.facility.clone());
+        let mut identities = self
+            .document
+            .assets()
+            .filter(|asset| asset.facility_id() == Some(&selected))
+            .map(|asset| {
+                asset.identity().as_iri().cloned().ok_or_else(|| {
+                    FacilityAssetError::NonIriAssetIdentity {
+                        identity: asset.identity().clone(),
+                    }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        identities.sort();
+        identities
+            .iter()
+            .map(|identity| self.facility_asset(identity.as_str()))
+            .collect()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,6 +374,8 @@ pub enum FacilityAssetError {
     InvalidAssetIri { asset: String, message: String },
     #[error("adapter asset `{asset}` is not a fac:Asset in the inventory document")]
     AssetNotFound { asset: Iri },
+    #[error("validated fac:Asset `{identity}` does not have an IRI identity")]
+    NonIriAssetIdentity { identity: Resource },
     #[error(
         "adapter asset `{asset}` belongs to facility `{actual}`, not selected facility `{selected}`"
     )]
@@ -709,7 +733,10 @@ ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
         let asset = snapshot
             .facility_asset("https://example.org/sbolinventory/cycler")
             .unwrap();
+        let assets = snapshot.facility_assets().unwrap();
 
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0], asset);
         assert_eq!(
             asset.identity.as_str(),
             "https://example.org/sbolinventory/cycler"
