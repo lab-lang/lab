@@ -45,6 +45,7 @@ sbol3 = { git = "https://github.com/SynBioDex/sbol-rs", rev = "42806cdb708e2265f
 sbol-inventory = { git = "https://github.com/SynBioDex/sbol-rs", rev = "42806cdb708e2265f19aab668cf177c68f019846" }
 semver = "1"
 thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
 toml = "0.8"
 lsp-server = "0.7"
 lsp-types = "0.97"

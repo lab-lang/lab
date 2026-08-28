@@ -97,6 +97,8 @@ pub struct ExecutionLedger {
     plan_sha256: String,
     valid_nodes: BTreeSet<String>,
     completed: BTreeSet<String>,
+    started_at_unix_seconds: u64,
+    last_completed_at_unix_seconds: Option<u64>,
 }
 
 impl ExecutionLedger {
@@ -109,11 +111,12 @@ impl ExecutionLedger {
         clock: &dyn Clock,
     ) -> Result<Self> {
         let path = directory.join(LEDGER_FILE);
+        let started_at_unix_seconds = clock.now_unix();
         let header = ExecutionLedgerRecord::Header {
             format: EXECUTION_LEDGER_FORMAT.to_owned(),
             plan_sha256: plan_sha256.to_owned(),
             inventory_sha256: inventory_sha256.to_owned(),
-            started_at_unix_seconds: clock.now_unix(),
+            started_at_unix_seconds,
         };
         let mut line = serde_json::to_string(&header)?;
         line.push('\n');
@@ -136,6 +139,8 @@ impl ExecutionLedger {
             plan_sha256: plan_sha256.to_owned(),
             valid_nodes,
             completed: BTreeSet::new(),
+            started_at_unix_seconds,
+            last_completed_at_unix_seconds: None,
         })
     }
 
@@ -173,7 +178,7 @@ impl ExecutionLedger {
             format,
             plan_sha256: recorded_plan,
             inventory_sha256: recorded_inventory,
-            ..
+            started_at_unix_seconds,
         }) = records.first()
         else {
             bail!(
@@ -206,8 +211,10 @@ impl ExecutionLedger {
                 inventory_sha256
             );
         }
+        let started_at_unix_seconds = *started_at_unix_seconds;
 
         let mut completed = BTreeSet::new();
+        let mut last_completed_at_unix_seconds: Option<u64> = None;
         for record in records.into_iter().skip(1) {
             match record {
                 ExecutionLedgerRecord::Header { .. } => {
@@ -217,7 +224,7 @@ impl ExecutionLedger {
                     plan_sha256: entry_plan,
                     node,
                     event,
-                    ..
+                    at_unix_seconds,
                 } => {
                     if entry_plan != plan_sha256 {
                         bail!(
@@ -236,6 +243,10 @@ impl ExecutionLedger {
                     }
                     if event == LedgerEvent::Completed {
                         completed.insert(node);
+                        last_completed_at_unix_seconds = Some(
+                            last_completed_at_unix_seconds
+                                .map_or(at_unix_seconds, |prior| prior.max(at_unix_seconds)),
+                        );
                     }
                 }
             }
@@ -245,6 +256,8 @@ impl ExecutionLedger {
             plan_sha256: plan_sha256.to_owned(),
             valid_nodes,
             completed,
+            started_at_unix_seconds,
+            last_completed_at_unix_seconds,
         })
     }
 
@@ -252,16 +265,25 @@ impl ExecutionLedger {
         &self.completed
     }
 
+    pub fn started_at_unix_seconds(&self) -> u64 {
+        self.started_at_unix_seconds
+    }
+
+    pub fn last_completed_at_unix_seconds(&self) -> Option<u64> {
+        self.last_completed_at_unix_seconds
+    }
+
     /// Appends and syncs one node transition before the runner proceeds.
     pub fn append(&mut self, node: &str, event: LedgerEvent, clock: &dyn Clock) -> Result<()> {
         if !self.valid_nodes.contains(node) {
             bail!("cannot record unknown execution-plan node '{node}'");
         }
+        let at_unix_seconds = clock.now_unix();
         let record = ExecutionLedgerRecord::Node {
             plan_sha256: self.plan_sha256.clone(),
             node: node.to_owned(),
             event,
-            at_unix_seconds: clock.now_unix(),
+            at_unix_seconds,
         };
         let mut line = serde_json::to_string(&record)?;
         line.push('\n');
@@ -275,6 +297,7 @@ impl ExecutionLedger {
             .with_context(|| format!("failed to sync {}", self.path.display()))?;
         if event == LedgerEvent::Completed {
             self.completed.insert(node.to_owned());
+            self.last_completed_at_unix_seconds = Some(at_unix_seconds);
         }
         Ok(())
     }

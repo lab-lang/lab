@@ -19,6 +19,7 @@ use lab_runfmt::{
     PlateReadDocument, STAR_RUN_FORMAT, StarRunDocument, THERMOCYCLE_RUN_FORMAT,
     ThermocycleRunDocument,
 };
+use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
 
 use crate::clock::Clock;
@@ -218,10 +219,20 @@ pub struct ExecutionRunConfig {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ExecutionOutcome {
-    Completed { executed: usize, skipped: usize },
+    Completed {
+        executed: usize,
+        skipped: usize,
+        started_at_unix_seconds: u64,
+        ended_at_unix_seconds: u64,
+    },
     Cancelled,
-    Declined { node: String },
-    Failed { node: String, error: String },
+    Declined {
+        node: String,
+    },
+    Failed {
+        node: String,
+        error: String,
+    },
 }
 
 /// Renders the fully preflighted facility walk without requiring runtime connectors.
@@ -426,9 +437,14 @@ pub fn run_execution_plan(
             }
         }
     }
+    let ended_at_unix_seconds = ledger
+        .last_completed_at_unix_seconds()
+        .unwrap_or_else(|| clock.now_unix());
     Ok(ExecutionOutcome::Completed {
         executed,
         skipped: completed.len(),
+        started_at_unix_seconds: ledger.started_at_unix_seconds(),
+        ended_at_unix_seconds,
     })
 }
 
@@ -766,7 +782,7 @@ fn validate_catalog_bindings(
 
     let lots = inventory.active_material_lots()?;
     for material in &plan.materials {
-        let component = sbol3::Iri::new(material.component.clone())
+        let component = Iri::new(material.component.clone())
             .with_context(|| format!("material '{}' has an invalid Component IRI", material.id))?;
         if !lots
             .candidates(&component)
@@ -779,6 +795,166 @@ fn validate_catalog_bindings(
                 material.material_lot,
                 material.component
             );
+        }
+    }
+    validate_output_bindings(plan, inventory)?;
+    Ok(())
+}
+
+fn validate_output_bindings(
+    plan: &ExecutionPlanDocument,
+    inventory: &InventorySnapshot,
+) -> Result<()> {
+    let document = inventory.document();
+    let selected_facility = Resource::Iri(inventory.facility().clone());
+    let mut planned_occupancy = BTreeSet::new();
+    for output in &plan.outputs {
+        let namespace = Namespace::new(output.namespace.clone()).with_context(|| {
+            format!(
+                "output material '{}' has an invalid SBOL namespace",
+                output.id
+            )
+        })?;
+        DisplayId::new(output.display_id.clone()).with_context(|| {
+            format!(
+                "output material '{}' has an invalid SBOL displayId",
+                output.id
+            )
+        })?;
+        let identity = Resource::Iri(Iri::new(output.material_lot.clone()).with_context(|| {
+            format!(
+                "output material '{}' has an invalid MaterialLot IRI",
+                output.id
+            )
+        })?);
+        if identity.to_string() != format!("{}/{}", namespace.as_str(), output.display_id) {
+            bail!(
+                "output material '{}' identity is inconsistent with its namespace and displayId",
+                output.id
+            );
+        }
+        if document.as_sbol_document().get(&identity).is_some() {
+            bail!(
+                "output MaterialLot '{}' already exists in the reviewed inventory",
+                output.material_lot
+            );
+        }
+        Iri::new(output.material_kind.clone()).with_context(|| {
+            format!(
+                "output material '{}' has an invalid material-kind IRI",
+                output.id
+            )
+        })?;
+        let component = Resource::Iri(Iri::new(output.component.clone()).with_context(|| {
+            format!(
+                "output material '{}' has an invalid Component IRI",
+                output.id
+            )
+        })?);
+        let component_object = document
+            .as_sbol_document()
+            .get(&component)
+            .with_context(|| {
+                format!(
+                    "output material '{}' references missing Component '{}'",
+                    output.id, output.component
+                )
+            })?;
+        if !component_object
+            .rdf_types()
+            .iter()
+            .any(|kind| kind.as_str() == sbol_inventory::vocabulary::SBOL_COMPONENT)
+        {
+            bail!(
+                "output material '{}' built target '{}' is not an SBOL Component",
+                output.id,
+                output.component
+            );
+        }
+
+        let Some(location) = output.located_in.as_ref() else {
+            if output.position.is_some() {
+                bail!(
+                    "output material '{}' has a position without a location",
+                    output.id
+                );
+            }
+            continue;
+        };
+        let location = Resource::Iri(Iri::new(location.clone()).with_context(|| {
+            format!(
+                "output material '{}' has an invalid location IRI",
+                output.id
+            )
+        })?);
+        if let Some(zone) = document.zone(&location) {
+            if zone.facility_id() != Some(&selected_facility) {
+                bail!(
+                    "output material '{}' is located in a Zone outside the selected facility",
+                    output.id
+                );
+            }
+            if output.position.is_some() {
+                bail!(
+                    "output material '{}' cannot name a position when located directly in a Zone",
+                    output.id
+                );
+            }
+            continue;
+        }
+        let asset = document.asset(&location).with_context(|| {
+            format!(
+                "output material '{}' location '{}' is not a local Zone or Asset",
+                output.id, location
+            )
+        })?;
+        if asset.facility_id() != Some(&selected_facility) {
+            bail!(
+                "output material '{}' is located in an Asset outside the selected facility",
+                output.id
+            );
+        }
+        let allowed = asset.allowed_positions().collect::<BTreeSet<_>>();
+        if !allowed.is_empty()
+            && output
+                .position
+                .as_deref()
+                .is_none_or(|position| !allowed.contains(position))
+        {
+            bail!(
+                "output material '{}' needs one of Asset '{}' positions: {}",
+                output.id,
+                location,
+                allowed.into_iter().collect::<Vec<_>>().join(", ")
+            );
+        }
+        if let Some(position) = output.position.as_deref() {
+            if position.trim().is_empty() {
+                bail!("output material '{}' has a blank position", output.id);
+            }
+            let occupied_by_asset = document.assets().any(|candidate| {
+                candidate.located_in_id() == Some(&location)
+                    && candidate.position() == Some(position)
+            });
+            let occupied_by_material = document.material_lots().any(|candidate| {
+                candidate.located_in_id() == Some(&location)
+                    && candidate.position() == Some(position)
+            });
+            if occupied_by_asset || occupied_by_material {
+                bail!(
+                    "output material '{}' targets occupied position '{}' on Asset '{}'",
+                    output.id,
+                    position,
+                    location
+                );
+            }
+            if !planned_occupancy.insert((location.clone(), position.to_owned())) {
+                bail!(
+                    "several output materials target position '{}' on Asset '{}'",
+                    position,
+                    location
+                );
+            }
         }
     }
     Ok(())
@@ -945,13 +1121,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::{Arc, Mutex};
 
     use lab_runfmt::{
-        ExecutionAdapterBinding, ExecutionInventoryReference, ExecutionPlanAction,
-        ExecutionPlanNode, ExecutionRequirementBinding, ReviewedRunDocument, RunStep,
-        STAR_RUN_FORMAT, StarRunDocument,
+        ExecutionAdapterBinding, ExecutionInventoryReference, ExecutionMaterialBinding,
+        ExecutionMaterialOutput, ExecutionPlanAction, ExecutionPlanNode,
+        ExecutionRequirementBinding, ReviewedRunDocument, RunStep, STAR_RUN_FORMAT,
+        StarRunDocument,
     };
 
     use super::*;
@@ -962,6 +1139,7 @@ mod tests {
     const INVENTORY: &str = r#"@prefix cap: <https://draggon.org/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
 @prefix fac: <https://draggon.org/ns/facility#> .
+@prefix inv: <https://draggon.org/ns/inventory#> .
 @prefix sbol: <http://sbols.org/v3#> .
 
 ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
@@ -977,6 +1155,13 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
     a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid_handling" ;
     fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Executable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
+ex:design a sbol:Component ; sbol:displayId "design" ;
+    sbol:hasNamespace <https://example.org/facility> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
+    sbol:hasNamespace <https://example.org/facility> ; sbol:built ex:design ;
+    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive true ;
+    fac:locatedIn ex:room .
 "#;
 
     struct FixedClock;
@@ -1015,7 +1200,7 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         registry
     }
 
-    fn write_execution_package() -> tempfile::TempDir {
+    pub(crate) fn write_execution_package() -> tempfile::TempDir {
         let directory = tempfile::tempdir().unwrap();
         fs::create_dir_all(directory.path().join("adapters")).unwrap();
         fs::create_dir_all(directory.path().join("runs")).unwrap();
@@ -1063,7 +1248,22 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
                     profile_sha256: sha256_hex(b""),
                 }),
             }],
-            materials: Vec::new(),
+            materials: vec![ExecutionMaterialBinding {
+                id: "input".to_owned(),
+                component: "https://example.org/facility/design".to_owned(),
+                material_lot: "https://example.org/facility/input_lot".to_owned(),
+            }],
+            outputs: vec![ExecutionMaterialOutput {
+                id: "output".to_owned(),
+                material_lot: "https://example.org/results/output_lot".to_owned(),
+                namespace: "https://example.org/results".to_owned(),
+                display_id: "output_lot".to_owned(),
+                component: "https://example.org/facility/design".to_owned(),
+                material_kind: "https://draggon.org/ns/inventory#DnaSample".to_owned(),
+                located_in: Some("https://example.org/facility/room".to_owned()),
+                position: None,
+                derived_from: vec!["input".to_owned()],
+            }],
             // Serialized order is intentionally not dependency order.
             nodes: vec![
                 ExecutionPlanNode {
@@ -1199,6 +1399,24 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
     }
 
     #[test]
+    fn preflight_validates_planned_output_materials_before_execution() {
+        let directory = write_execution_package();
+        let plan_path = directory.path().join(EXECUTION_PLAN_FILE);
+        let mut plan: ExecutionPlanDocument =
+            serde_json::from_slice(&fs::read(&plan_path).unwrap()).unwrap();
+        plan.outputs[0].component = "https://example.org/facility/missing".to_owned();
+        let mut bytes = serde_json::to_vec_pretty(&plan).unwrap();
+        bytes.push(b'\n');
+        fs::write(&plan_path, bytes).unwrap();
+
+        let error = load_execution_directory(directory.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("references missing Component"), "{error}");
+        assert!(!directory.path().join(LEDGER_FILE).exists());
+    }
+
+    #[test]
     fn the_generic_runner_uses_only_the_exact_registered_executor_and_resumes() {
         let directory = write_execution_package();
         let loaded = load_execution_directory(directory.path()).unwrap();
@@ -1223,7 +1441,9 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
             outcome,
             ExecutionOutcome::Completed {
                 executed: 2,
-                skipped: 0
+                skipped: 0,
+                started_at_unix_seconds: 1_725_000_000,
+                ended_at_unix_seconds: 1_725_000_000,
             }
         );
         assert_eq!(*calls.lock().unwrap(), ["Transfer liquids"]);
@@ -1253,7 +1473,9 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
             resumed,
             ExecutionOutcome::Completed {
                 executed: 0,
-                skipped: 2
+                skipped: 2,
+                started_at_unix_seconds: 1_725_000_000,
+                ended_at_unix_seconds: 1_725_000_000,
             }
         );
         assert_eq!(

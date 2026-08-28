@@ -16,6 +16,7 @@ use lab_runtime::execution::{
     load_execution_directory, render_execution_dry_run, run_execution_plan,
 };
 use lab_runtime::operator::StdinOperator;
+use lab_runtime::provenance::{INVENTORY_RESULT_FILE, write_inventory_result};
 
 use crate::Output;
 
@@ -62,17 +63,41 @@ pub(crate) fn run_execution_command(
         &mut events,
         &WallClock,
     )? {
-        ExecutionOutcome::Completed { executed, skipped } => output.success(
-            "run",
-            serde_json::json!({
-                "plan_sha256": loaded.plan_sha256,
-                "executed": executed,
-                "skipped": skipped,
-            }),
-            format!(
-                "Completed reviewed facility plan: {executed} node(s) executed, {skipped} skipped"
-            ),
-        ),
+        ExecutionOutcome::Completed {
+            executed,
+            skipped,
+            started_at_unix_seconds,
+            ended_at_unix_seconds,
+        } => {
+            let existing = loaded.directory.join(INVENTORY_RESULT_FILE);
+            let result = if executed == 0 && existing.is_file() {
+                None
+            } else {
+                Some(write_inventory_result(
+                    &loaded,
+                    started_at_unix_seconds,
+                    ended_at_unix_seconds,
+                )?)
+            };
+            let result_path = result
+                .as_ref()
+                .map_or(existing.as_path(), |result| result.path.as_path());
+            output.success(
+                "run",
+                serde_json::json!({
+                    "plan_sha256": loaded.plan_sha256,
+                    "executed": executed,
+                    "skipped": skipped,
+                    "inventory_result": result_path,
+                    "activity": result.as_ref().map(|result| result.activity.as_str()),
+                    "output_materials": result.as_ref().map(|result| &result.output_materials),
+                }),
+                format!(
+                    "Completed reviewed facility plan: {executed} node(s) executed, {skipped} skipped\n  Inventory result: {}",
+                    result_path.display()
+                ),
+            )
+        }
         ExecutionOutcome::Cancelled => bail!("run cancelled before any motion"),
         ExecutionOutcome::Declined { node } => bail!(
             "node '{node}' stopped because the operator declined; resolve the facility and continue the same reviewed plan with --resume"

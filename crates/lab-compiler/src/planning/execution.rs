@@ -24,6 +24,8 @@ pub struct ExecutionPlanOptions {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<ExecutionMaterialBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<lab_runfmt::ExecutionMaterialOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub movements: Vec<PlannedMaterialMove>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
@@ -34,6 +36,7 @@ impl Default for ExecutionPlanOptions {
         Self {
             inventory_document: "inventory-source.ttl".to_owned(),
             materials: Vec::new(),
+            outputs: Vec::new(),
             movements: Vec::new(),
             reviewed_documents: BTreeMap::new(),
         }
@@ -189,6 +192,7 @@ pub fn build_execution_plan(
         },
         requirements,
         materials: options.materials,
+        outputs: options.outputs,
         nodes,
     };
     plan.validate()
@@ -341,6 +345,7 @@ mod tests {
             ExecutionPlanOptions {
                 inventory_document: "inventory-source.ttl".to_owned(),
                 materials: vec![material],
+                outputs: Vec::new(),
                 movements: vec![PlannedMaterialMove {
                     id: "move-plate".to_owned(),
                     material: "plate".to_owned(),

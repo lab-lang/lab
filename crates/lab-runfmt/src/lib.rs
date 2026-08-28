@@ -138,6 +138,8 @@ pub struct ExecutionPlanDocument {
     pub requirements: Vec<ExecutionRequirementBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<ExecutionMaterialBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<ExecutionMaterialOutput>,
     pub nodes: Vec<ExecutionPlanNode>,
 }
 
@@ -182,6 +184,43 @@ impl ExecutionPlanDocument {
                     "material binding ID '{}' is empty or repeated",
                     material.id
                 ));
+            }
+        }
+        let mut material_lots = self
+            .materials
+            .iter()
+            .map(|material| material.material_lot.as_str())
+            .collect::<BTreeSet<_>>();
+        for output in &self.outputs {
+            if output.id.is_empty() || !materials.insert(output.id.as_str()) {
+                return Err(format!(
+                    "output material binding ID '{}' is empty or repeated",
+                    output.id
+                ));
+            }
+            if output.namespace.ends_with('/')
+                || output.namespace.is_empty()
+                || output.display_id.is_empty()
+                || output.material_lot != format!("{}/{}", output.namespace, output.display_id)
+            {
+                return Err(format!(
+                    "output material '{}' identity must equal namespace/display_id",
+                    output.id
+                ));
+            }
+            if !material_lots.insert(output.material_lot.as_str()) {
+                return Err(format!(
+                    "material lot IRI '{}' is bound more than once",
+                    output.material_lot
+                ));
+            }
+            for source in &output.derived_from {
+                if !self.materials.iter().any(|material| material.id == *source) {
+                    return Err(format!(
+                        "output material '{}' derives from unknown input material '{}'",
+                        output.id, source
+                    ));
+                }
             }
         }
 
@@ -314,6 +353,23 @@ pub struct ExecutionMaterialBinding {
     pub id: String,
     pub component: String,
     pub material_lot: String,
+}
+
+/// One new MaterialLot whose exact identity and lineage are frozen before execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionMaterialOutput {
+    pub id: String,
+    pub material_lot: String,
+    pub namespace: String,
+    pub display_id: String,
+    pub component: String,
+    pub material_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub located_in: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -580,6 +636,7 @@ mod tests {
                 }),
             }],
             materials: Vec::new(),
+            outputs: Vec::new(),
             nodes: vec![ExecutionPlanNode {
                 id: "execute-0001".to_owned(),
                 after: Vec::new(),
@@ -643,6 +700,46 @@ mod tests {
         let mut plan = execution_plan();
         plan.inventory.source_sha256 = "not-a-digest".to_owned();
         assert!(plan.validate().unwrap_err().contains("SHA-256"));
+    }
+
+    #[test]
+    fn execution_plan_validation_freezes_output_material_identity_and_lineage() {
+        let mut plan = execution_plan();
+        plan.materials.push(ExecutionMaterialBinding {
+            id: "input".to_owned(),
+            component: "https://example.org/design".to_owned(),
+            material_lot: "https://example.org/input".to_owned(),
+        });
+        plan.outputs.push(ExecutionMaterialOutput {
+            id: "output".to_owned(),
+            material_lot: "https://example.org/results/output".to_owned(),
+            namespace: "https://example.org/results".to_owned(),
+            display_id: "output".to_owned(),
+            component: "https://example.org/design".to_owned(),
+            material_kind: "https://draggon.org/ns/inventory#DnaSample".to_owned(),
+            located_in: None,
+            position: None,
+            derived_from: vec!["input".to_owned()],
+        });
+        plan.validate().unwrap();
+
+        let mut wrong_identity = plan.clone();
+        wrong_identity.outputs[0].material_lot = "https://example.org/results/other".to_owned();
+        assert!(
+            wrong_identity
+                .validate()
+                .unwrap_err()
+                .contains("namespace/display_id")
+        );
+
+        let mut unknown_source = plan;
+        unknown_source.outputs[0].derived_from = vec!["missing".to_owned()];
+        assert!(
+            unknown_source
+                .validate()
+                .unwrap_err()
+                .contains("unknown input material")
+        );
     }
 
     #[test]

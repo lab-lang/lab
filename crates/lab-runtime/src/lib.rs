@@ -18,6 +18,7 @@ pub mod events;
 pub mod execution;
 pub mod ledger;
 pub mod operator;
+pub mod provenance;
 pub mod star;
 pub mod stations;
 pub mod workcell;
