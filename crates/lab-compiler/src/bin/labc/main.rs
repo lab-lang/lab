@@ -4,8 +4,8 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use lab_compiler::ProtocolLairProgram;
 use lab_compiler::backend::Backend;
-use lab_compiler::backend::opentrons::flex::{FlexBackend, FlexTargetProfile};
-use lab_compiler::backend::opentrons::ot2::{Ot2Backend, Ot2TargetProfile};
+use lab_compiler::backend::opentrons::flex::{FlexAdapterProfile, FlexBackend};
+use lab_compiler::backend::opentrons::ot2::{Ot2AdapterProfile, Ot2Backend};
 use lab_compiler::planning::{BuildInventory, LegacyBuildInventory};
 use lab_compiler::{PortableLairProgram, compile_module, parse_module, render_checked_module};
 
@@ -51,16 +51,16 @@ enum Emit {
 }
 
 enum AdapterProfile {
-    Ot2(Ot2TargetProfile),
-    Flex(FlexTargetProfile),
+    Ot2(Ot2AdapterProfile),
+    Flex(FlexAdapterProfile),
 }
 
 fn parse_adapter_profile(driver: &str, name: &str, contents: &str) -> Result<AdapterProfile> {
     match driver {
-        "opentrons.ot2" => Ok(AdapterProfile::Ot2(Ot2TargetProfile::parse(
+        "opentrons.ot2" => Ok(AdapterProfile::Ot2(Ot2AdapterProfile::parse(
             name, contents,
         )?)),
-        "opentrons.flex" => Ok(AdapterProfile::Flex(FlexTargetProfile::parse(
+        "opentrons.flex" => Ok(AdapterProfile::Flex(FlexAdapterProfile::parse(
             name, contents,
         )?)),
         other => bail!(
@@ -108,7 +108,7 @@ fn load_inventory(cli: &Cli) -> Result<BuildInventory> {
     }
 }
 
-fn emit_ot2(cli: &Cli, protocol: &ProtocolLairProgram, profile: Ot2TargetProfile) -> Result<()> {
+fn emit_ot2(cli: &Cli, protocol: &ProtocolLairProgram, profile: Ot2AdapterProfile) -> Result<()> {
     use lab_compiler::backend::opentrons::ot2::{compile_dependency_build, emit_program};
 
     if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {
@@ -165,7 +165,7 @@ fn emit_ot2(cli: &Cli, protocol: &ProtocolLairProgram, profile: Ot2TargetProfile
     Ok(())
 }
 
-fn emit_flex(cli: &Cli, protocol: &ProtocolLairProgram, profile: FlexTargetProfile) -> Result<()> {
+fn emit_flex(cli: &Cli, protocol: &ProtocolLairProgram, profile: FlexAdapterProfile) -> Result<()> {
     use lab_compiler::backend::opentrons::flex::{compile_dependency_build, emit_program};
 
     if matches!(cli.emit, Emit::DependencyPlan | Emit::FullBuildBundle) {

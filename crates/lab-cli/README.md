@@ -60,7 +60,7 @@ lab plan
 lab run .lab/plan --dry-run
 ```
 
-`lab adapters describe` is the discovery authority for the exact compiler binary. Its `lab.adapter-catalog.v1` output keeps semantic SBOLInventory capability IRIs separate from implementation features and declares accepted control modes, emitted document formats, configuration schemas, and actual planning, lowering, simulation, and runtime services. The explicit driver argument selects validation code; neither an adapter profile nor an Asset's manufacturer or model can select another implementation.
+`lab adapters describe` is the discovery authority for the exact compiler binary. Its `lab.adapter-catalog.v1` output keeps semantic SBOLInventory capability IRIs separate from implementation features and declares accepted control modes, emitted document formats, configuration schemas, and actual planning, lowering, simulation, and runtime services. The explicit driver argument selects validation code; neither an adapter profile nor an Asset's manufacturer or model can select another implementation. `lab.adapter-profile.v2` contains no backend or Asset selector, rejects the removed `[target]` table, and places OT-2 API-version configuration under `[protocol]`.
 
 ```sh
 lab adapters describe

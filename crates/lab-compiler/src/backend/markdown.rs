@@ -91,12 +91,12 @@ mod tests {
         let mut doc = Doc::new(DocMeta {
             title: "Manual protocol".into(),
             subtitle: "Operator manual".into(),
-            target: "bench-1".into(),
+            adapter_profile: "adapter-1".into(),
             instrument: "Test rig".into(),
         });
         doc.notice([
             text("Generated concept protocol for "),
-            code("bench-1"),
+            code("adapter-1"),
             text("."),
         ]);
         doc.heading(1, [text("Stage 1")]);
@@ -112,7 +112,7 @@ mod tests {
 
         let rendered = render(&doc);
         assert!(rendered.starts_with("# Manual protocol\n"));
-        assert!(rendered.contains("> Generated concept protocol for `bench-1`."));
+        assert!(rendered.contains("> Generated concept protocol for `adapter-1`."));
         assert!(rendered.contains("## Stage 1"));
         assert!(rendered.contains("Keep everything at 4 °C."));
         assert!(rendered.contains("- Volume: 30 µL"));

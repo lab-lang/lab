@@ -7,7 +7,7 @@
 use crate::backend::document::{Block, Column, Doc, DocMeta, bold, code, text};
 use crate::backend::hamilton::star::catalog;
 use crate::backend::hamilton::star::plan::StarExecutionPlan;
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
 fn fragment() -> Doc {
     Doc::new(DocMeta::new("", "", "", ""))
@@ -15,12 +15,12 @@ fn fragment() -> Doc {
 
 /// The machine, the runner, and the deck: everything that holds for any run
 /// compiled against this bench profile.
-pub(in crate::backend) fn bench_blocks(profile: &StarTargetProfile) -> Vec<Block> {
+pub(in crate::backend) fn bench_blocks(profile: &StarAdapterProfile) -> Vec<Block> {
     let mut doc = fragment();
     doc.para([
         text(format!(
             "Compiled for bench {} ({} deck, {} channels). Robot steps live in the ",
-            profile.target.name,
+            profile.name,
             profile.machine.variant.name(),
             profile.machine.channels,
         )),
@@ -229,7 +229,7 @@ pub(in crate::backend) fn render_manual_protocol(plan: &StarExecutionPlan) -> Do
     let mut doc = Doc::new(DocMeta::new(
         "Hamilton STAR run",
         "Operator instructions for one machine session",
-        &profile.target.name,
+        &profile.name,
         "Hamilton STAR",
     ));
     doc.notice([text(

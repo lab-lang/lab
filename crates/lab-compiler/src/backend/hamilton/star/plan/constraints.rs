@@ -3,7 +3,7 @@
 //! vessel-volume checks a deck without modules needs: everything a well
 //! accumulates must fit the labware planning placed it in.
 
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 use crate::backend::trace::{AssemblyTrace, StrainTrace};
 
 use crate::backend::hamilton::star::BACKEND;
@@ -28,8 +28,8 @@ pub(super) fn validate_assembly_constraints(
         + trace.chemistry(context, "enzyme_volume_ul")
         + trace.chemistry(context, "part_volume_ul") * dna_pieces;
     if required_ul > reaction_volume_ul {
-        return Err(TargetConstraintError::CapacityExceeded {
-            target: BACKEND.into(),
+        return Err(AdapterConstraintError::CapacityExceeded {
+            adapter: BACKEND.into(),
             operation: "assembly".into(),
             subject: artifact,
             resource: "reaction_volume".into(),
@@ -40,8 +40,8 @@ pub(super) fn validate_assembly_constraints(
         .into());
     }
     if f64::from(reaction_volume_ul) > reaction_well_capacity_ul {
-        return Err(TargetConstraintError::CapacityExceeded {
-            target: BACKEND.into(),
+        return Err(AdapterConstraintError::CapacityExceeded {
+            adapter: BACKEND.into(),
             operation: "assembly".into(),
             subject: artifact,
             resource: "reaction_plate_well".into(),
@@ -79,8 +79,8 @@ pub(super) fn validate_strain_constraints(
         + trace.chemistry(context, "dna_volume_ul") * plasmids
         + trace.chemistry(context, "recovery_volume_ul");
     if f64::from(culture_ul) > reaction_well_capacity_ul {
-        return Err(TargetConstraintError::CapacityExceeded {
-            target: BACKEND.into(),
+        return Err(AdapterConstraintError::CapacityExceeded {
+            adapter: BACKEND.into(),
             operation: "transformation".into(),
             subject: artifact,
             resource: "reaction_plate_well".into(),
@@ -100,8 +100,8 @@ fn require_range(
     maximum: u8,
 ) -> Result<(), StarPlanningError> {
     if !(1..=maximum).contains(&value) {
-        return Err(TargetConstraintError::ParameterOutOfRange {
-            target: BACKEND.into(),
+        return Err(AdapterConstraintError::ParameterOutOfRange {
+            adapter: BACKEND.into(),
             subject: artifact.to_owned(),
             parameter: parameter.into(),
             minimum: 1,
@@ -132,8 +132,8 @@ pub(super) fn validate_uniform_batch_settings(
             trace.serial_dilutions(context),
         ) != expected
     }) {
-        Err(TargetConstraintError::NonUniformParameters {
-            target: BACKEND.into(),
+        Err(AdapterConstraintError::NonUniformParameters {
+            adapter: BACKEND.into(),
             subject: "automation_batch".into(),
             parameters: vec![
                 "transformation_replicates".into(),
@@ -153,8 +153,8 @@ pub(super) fn plate_capacity_error(
     required: usize,
     capacity: usize,
 ) -> StarPlanningError {
-    TargetConstraintError::CapacityExceeded {
-        target: BACKEND.into(),
+    AdapterConstraintError::CapacityExceeded {
+        adapter: BACKEND.into(),
         operation: stage.into(),
         subject: "automation_batch".into(),
         resource: resource.into(),

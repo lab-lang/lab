@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::backend::opentrons::flex::profile::FlexTargetProfile;
+use crate::backend::opentrons::flex::profile::FlexAdapterProfile;
 
 pub use crate::backend::resources::Well as FlexWell;
 
@@ -15,12 +15,10 @@ pub use crate::backend::resources::Well as FlexWell;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FlexExecutionPlan {
     pub schema_version: String,
-    /// The backend that produced this plan, spelled exactly as a target
-    /// profile declares it.
-    pub target: String,
-    /// The bench this plan was allocated against. Emission reads every labware
-    /// name, deck slot, and mount from here rather than from a constant.
-    pub deck: FlexTargetProfile,
+    /// The explicit adapter implementation that produced this device plan.
+    pub adapter: String,
+    /// Checked implementation configuration for the allocated Asset binding.
+    pub deck: FlexAdapterProfile,
     pub assembly_source_wells: BTreeMap<String, String>,
     pub transformation_source_wells: BTreeMap<String, String>,
     /// DNA-plate well holding each plasmid a strain is transformed from. A

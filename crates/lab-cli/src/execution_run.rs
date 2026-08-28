@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::{adapter_catalog, hamilton::star::StarTargetProfile};
+use lab_compiler::backend::{adapter_catalog, hamilton::star::StarAdapterProfile};
 use lab_runfmt::{EXECUTION_PLAN_FILE, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 use lab_runtime::clock::WallClock;
 use lab_runtime::device_executors::{
@@ -283,7 +283,7 @@ fn build_hardware_registry(
                     .file_stem()
                     .and_then(|name| name.to_str())
                     .context("a STAR adapter profile needs a UTF-8 file name")?;
-                let profile = StarTargetProfile::parse(name, &text).with_context(|| {
+                let profile = StarAdapterProfile::parse(name, &text).with_context(|| {
                     format!("failed to parse frozen profile {}", path.display())
                 })?;
                 registry.register(

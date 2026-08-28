@@ -1,6 +1,6 @@
 //! OT-2-specific parameter and batch-capacity validation.
 
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::plan::Ot2PlanningError;
@@ -24,8 +24,8 @@ pub(super) fn validate_assembly_constraints(
         + trace.chemistry(context, "enzyme_volume_ul")
         + trace.chemistry(context, "part_volume_ul") * dna_pieces;
     if required_ul > reaction_volume_ul {
-        return Err(TargetConstraintError::CapacityExceeded {
-            target: BACKEND.into(),
+        return Err(AdapterConstraintError::CapacityExceeded {
+            adapter: BACKEND.into(),
             operation: "assembly".into(),
             subject: artifact,
             resource: "reaction_volume".into(),
@@ -64,8 +64,8 @@ fn require_range(
     maximum: u8,
 ) -> Result<(), Ot2PlanningError> {
     if !(1..=maximum).contains(&value) {
-        return Err(TargetConstraintError::ParameterOutOfRange {
-            target: BACKEND.into(),
+        return Err(AdapterConstraintError::ParameterOutOfRange {
+            adapter: BACKEND.into(),
             subject: artifact.to_owned(),
             parameter: parameter.into(),
             minimum: 1,
@@ -96,8 +96,8 @@ pub(super) fn validate_uniform_batch_settings(
             trace.serial_dilutions(context),
         ) != expected
     }) {
-        Err(TargetConstraintError::NonUniformParameters {
-            target: BACKEND.into(),
+        Err(AdapterConstraintError::NonUniformParameters {
+            adapter: BACKEND.into(),
             subject: "automation_batch".into(),
             parameters: vec![
                 "transformation_replicates".into(),
@@ -117,8 +117,8 @@ pub(super) fn plate_capacity_error(
     required: usize,
     capacity: usize,
 ) -> Ot2PlanningError {
-    TargetConstraintError::CapacityExceeded {
-        target: BACKEND.into(),
+    AdapterConstraintError::CapacityExceeded {
+        adapter: BACKEND.into(),
         operation: stage.into(),
         subject: "automation_batch".into(),
         resource: resource.into(),
@@ -136,8 +136,8 @@ pub(super) fn require_tip_capacity(
     capacity: usize,
 ) -> Result<(), Ot2PlanningError> {
     if required > capacity {
-        Err(TargetConstraintError::CapacityExceeded {
-            target: BACKEND.into(),
+        Err(AdapterConstraintError::CapacityExceeded {
+            adapter: BACKEND.into(),
             operation: stage.into(),
             subject: "automation_batch".into(),
             resource: format!("{pipette}_tip_rack"),

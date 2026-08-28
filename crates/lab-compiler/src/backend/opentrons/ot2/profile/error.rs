@@ -1,16 +1,11 @@
-//! Errors from parsing and validating an OT-2 target profile.
+//! Errors from parsing and validating OT-2 adapter configuration.
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Ot2ProfileError {
-    #[error("failed to parse OT-2 target profile: {0}")]
+    #[error("failed to parse OT-2 adapter profile: {0}")]
     Parse(#[from] toml::de::Error),
-    #[error("target profile declares backend '{found}', but this backend is '{expected}'")]
-    WrongBackend {
-        expected: &'static str,
-        found: String,
-    },
     #[error("{context} names deck slot '{slot}', which an OT-2 does not address")]
     UnknownSlot { context: String, slot: String },
     #[error(

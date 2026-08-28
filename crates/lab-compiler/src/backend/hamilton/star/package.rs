@@ -12,7 +12,7 @@ use crate::backend::hamilton::star::emit::StarBundle;
 use crate::backend::hamilton::star::plan::{
     StarBuildError, plan_selected_build, protocol_build_graph,
 };
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::package::{render_full_build_instructions, render_report};
 use crate::backend::typst;
 use crate::planning::{BuildInventory, DependencyBuildManifest};
@@ -65,7 +65,7 @@ pub enum StarDependencyBuildError {
 /// are owned by this module.
 pub fn compile_dependency_build(
     protocol: &ProtocolLairProgram,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
     inventory: &BuildInventory,
 ) -> Result<StarDependencyBuildBundle, StarDependencyBuildError> {
     let graph =
@@ -106,7 +106,7 @@ pub fn compile_dependency_build(
             DocMeta::new(
                 "Dependency report",
                 "Artifact graph, wave schedule, and blockers",
-                &profile.target.name,
+                &profile.name,
                 "Hamilton STAR",
             ),
             &manifest,
@@ -154,7 +154,7 @@ pub fn compile_dependency_build(
             DocMeta::new(
                 "Automated plasmid build",
                 "Operator instructions for the full dependency-driven build",
-                &profile.target.name,
+                &profile.name,
                 "Hamilton STAR",
             ),
             &manifest,

@@ -179,7 +179,7 @@ mod tests {
     fn file_validation_uses_the_explicit_driver_and_file_stem() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("star-1.toml");
-        fs::write(&path, "[target]\nbackend = \"hamilton.star\"\n").unwrap();
+        fs::write(&path, "").unwrap();
 
         let profile = load_and_validate("hamilton.star", &path).unwrap();
 

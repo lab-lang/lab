@@ -2,7 +2,7 @@
 set -eu
 
 repository=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-project="$repository/crates/lab-compiler/src/backend/opentrons_ot2/python"
+project="$repository/crates/lab-compiler/src/backend/opentrons/ot2/python"
 
 if [ "$#" -gt 1 ]; then
   echo "usage: $0 [generated-bundle-directory]" >&2

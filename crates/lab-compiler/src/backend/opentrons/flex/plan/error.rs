@@ -1,19 +1,19 @@
 use thiserror::Error;
 
 use crate::ArtifactError;
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 use crate::backend::error::PlanningError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum FlexPlanningError {
     #[error(transparent)]
-    Constraint(Box<TargetConstraintError>),
+    Constraint(Box<AdapterConstraintError>),
     #[error("invalid target-selected Protocol LAIR: {0}")]
     InvalidProtocol(String),
 }
 
-impl From<TargetConstraintError> for FlexPlanningError {
-    fn from(error: TargetConstraintError) -> Self {
+impl From<AdapterConstraintError> for FlexPlanningError {
+    fn from(error: AdapterConstraintError) -> Self {
         Self::Constraint(Box::new(error))
     }
 }

@@ -1,22 +1,22 @@
 use thiserror::Error;
 
 use crate::ArtifactError;
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 use crate::backend::error::PlanningError;
 use crate::backend::hamilton::star::profile::StarProfileError;
 
 #[derive(Debug, Error, PartialEq)]
 pub enum StarPlanningError {
     #[error(transparent)]
-    Constraint(Box<TargetConstraintError>),
+    Constraint(Box<AdapterConstraintError>),
     #[error("invalid target-selected Protocol LAIR: {0}")]
     InvalidProtocol(String),
     #[error(transparent)]
     Profile(#[from] StarProfileError),
 }
 
-impl From<TargetConstraintError> for StarPlanningError {
-    fn from(error: TargetConstraintError) -> Self {
+impl From<AdapterConstraintError> for StarPlanningError {
+    fn from(error: AdapterConstraintError) -> Self {
         Self::Constraint(Box::new(error))
     }
 }

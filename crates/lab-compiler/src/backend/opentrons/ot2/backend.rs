@@ -8,21 +8,21 @@ use crate::{ArtifactBundle, ProtocolLairProgram};
 use crate::backend::opentrons::ot2::plan::{
     Ot2EmissionError, Ot2ExecutionPlan, Ot2PlanningError, emit_program, plan_build,
 };
-use crate::backend::opentrons::ot2::profile::Ot2TargetProfile;
+use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 
 /// The OT-2 backend bound to one bench. Planning reads every deck, labware, and
 /// instrument decision from the profile it carries.
 #[derive(Clone, Debug, Default)]
 pub struct Ot2Backend {
-    profile: Ot2TargetProfile,
+    profile: Ot2AdapterProfile,
 }
 
 impl Ot2Backend {
-    pub fn new(profile: Ot2TargetProfile) -> Self {
+    pub fn new(profile: Ot2AdapterProfile) -> Self {
         Self { profile }
     }
 
-    pub fn profile(&self) -> &Ot2TargetProfile {
+    pub fn profile(&self) -> &Ot2AdapterProfile {
         &self.profile
     }
 }

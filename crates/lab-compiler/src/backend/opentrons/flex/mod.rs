@@ -11,9 +11,7 @@ mod package;
 mod plan;
 mod profile;
 
-/// This backend's identity. A target profile declares it, planning stamps it
-/// into every execution plan and target-constraint error, and no other
-/// spelling of it exists.
+/// Stable adapter identity used by explicit Asset bindings, device plans, and adapter diagnostics.
 pub(in crate::backend::opentrons::flex) const BACKEND: &str = "opentrons.flex";
 
 pub use crate::backend::opentrons::flex::backend::{FlexBackend, FlexCompileError};
@@ -25,4 +23,4 @@ pub use crate::backend::opentrons::flex::plan::{
     FlexExecutionPlan, FlexPlanningError, FlexPlatingPlan, FlexStrainChemistry, FlexStrainPlan,
     FlexTransformationPlan, compile_build, emit_program, plan_build,
 };
-pub use crate::backend::opentrons::flex::profile::{FlexProfileError, FlexTargetProfile};
+pub use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, FlexProfileError};

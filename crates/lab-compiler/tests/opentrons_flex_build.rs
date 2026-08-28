@@ -139,9 +139,9 @@ fn writes_a_complete_flex_automation_bundle_of_json_protocols() {
         &std::fs::read_to_string(output_dir.join("automation_manifest.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(manifest["target"], "opentrons.flex");
-    assert_eq!(manifest["schema_version"], "lab.automation.v0");
-    assert_eq!(manifest["deck"]["target"]["backend"], "opentrons.flex");
+    assert_eq!(manifest["adapter"], "opentrons.flex");
+    assert_eq!(manifest["schema_version"], "lab.automation.v1");
+    assert!(manifest["deck"].get("target").is_none());
     assert_eq!(manifest["assemblies"].as_array().unwrap().len(), 2);
     assert_eq!(manifest["strains"].as_array().unwrap().len(), 2);
 

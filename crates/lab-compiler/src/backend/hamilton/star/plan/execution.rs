@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
 /// A well on a named plan resource. Resource keys are stable strings the
 /// deck summary and emitters share: `source_rack`, `reaction_plate`,
@@ -33,12 +33,10 @@ impl StarWell {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StarExecutionPlan {
     pub schema_version: String,
-    /// The backend that produced this plan, spelled exactly as a target
-    /// profile declares it.
-    pub target: String,
-    /// The bench this plan was allocated against. Emission reads every
-    /// carrier, site, and labware decision from here.
-    pub deck: StarTargetProfile,
+    /// The explicit adapter implementation that produced this device plan.
+    pub adapter: String,
+    /// Checked implementation configuration for the allocated Asset binding.
+    pub deck: StarAdapterProfile,
     /// Source-rack well for each assembly-stage reagent, DNA, and enzyme
     /// key.
     pub assembly_source_wells: BTreeMap<String, String>,

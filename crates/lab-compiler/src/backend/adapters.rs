@@ -15,15 +15,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
-use crate::backend::hamilton::star::StarTargetProfile;
-use crate::backend::opentrons::flex::FlexTargetProfile;
-use crate::backend::opentrons::ot2::Ot2TargetProfile;
+use crate::backend::hamilton::star::StarAdapterProfile;
+use crate::backend::opentrons::flex::FlexAdapterProfile;
+use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::BuildInventory;
 use crate::{ArtifactBundle, ProtocolLairProgram};
 use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 
 pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v1";
-pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v1";
+pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
 
 const OPENTRONS_PYTHON_PROTOCOL: &str = "opentrons.python-protocol";
 const OPENTRONS_PROTOCOL_DESIGNER: &str = "opentrons.protocol-designer-json";
@@ -120,7 +120,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
-                schema_value::<Ot2TargetProfile>()?,
+                schema_value::<Ot2AdapterProfile>()?,
             )?,
             descriptor(
                 "opentrons.flex",
@@ -137,7 +137,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
-                schema_value::<FlexTargetProfile>()?,
+                schema_value::<FlexAdapterProfile>()?,
             )?,
             descriptor(
                 "hamilton.star",
@@ -154,7 +154,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: true,
                     runtime: true,
                 },
-                schema_value::<StarTargetProfile>()?,
+                schema_value::<StarAdapterProfile>()?,
             )?,
             descriptor(
                 "inheco.odtc",
@@ -266,17 +266,17 @@ pub fn validate_adapter_profile(
     match driver {
         "opentrons.ot2" => {
             let profile =
-                Ot2TargetProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
+                Ot2AdapterProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
             canonical_adapter_profile(driver, name, &profile)
         }
         "opentrons.flex" => {
-            let profile =
-                FlexTargetProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
+            let profile = FlexAdapterProfile::parse(name, contents)
+                .map_err(|error| invalid(driver, error))?;
             canonical_adapter_profile(driver, name, &profile)
         }
         "hamilton.star" => {
-            let profile =
-                StarTargetProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
+            let profile = StarAdapterProfile::parse(name, contents)
+                .map_err(|error| invalid(driver, error))?;
             canonical_adapter_profile(driver, name, &profile)
         }
         "inheco.odtc" | "byonoy.absorbance96" | "lab.simulator" => {
@@ -301,7 +301,7 @@ pub fn lower_dependency_build_with_adapter(
 ) -> Result<ArtifactBundle, AdapterLoweringError> {
     match driver {
         "opentrons.ot2" => {
-            let profile = Ot2TargetProfile::parse(name, contents).map_err(|error| {
+            let profile = Ot2AdapterProfile::parse(name, contents).map_err(|error| {
                 AdapterLoweringError::InvalidProfile {
                     driver: driver.to_owned(),
                     message: error.to_string(),
@@ -315,7 +315,7 @@ pub fn lower_dependency_build_with_adapter(
             })
         }
         "opentrons.flex" => {
-            let profile = FlexTargetProfile::parse(name, contents).map_err(|error| {
+            let profile = FlexAdapterProfile::parse(name, contents).map_err(|error| {
                 AdapterLoweringError::InvalidProfile {
                     driver: driver.to_owned(),
                     message: error.to_string(),
@@ -329,7 +329,7 @@ pub fn lower_dependency_build_with_adapter(
             })
         }
         "hamilton.star" => {
-            let profile = StarTargetProfile::parse(name, contents).map_err(|error| {
+            let profile = StarAdapterProfile::parse(name, contents).map_err(|error| {
                 AdapterLoweringError::InvalidProfile {
                     driver: driver.to_owned(),
                     message: error.to_string(),
@@ -350,7 +350,7 @@ pub fn lower_dependency_build_with_adapter(
 
 fn lab_compiler_ot2(
     protocol: &ProtocolLairProgram,
-    profile: &Ot2TargetProfile,
+    profile: &Ot2AdapterProfile,
     inventory: &BuildInventory,
 ) -> Result<ArtifactBundle, String> {
     crate::backend::opentrons::ot2::compile_dependency_build(protocol, profile, inventory)
@@ -360,7 +360,7 @@ fn lab_compiler_ot2(
 
 fn lab_compiler_flex(
     protocol: &ProtocolLairProgram,
-    profile: &FlexTargetProfile,
+    profile: &FlexAdapterProfile,
     inventory: &BuildInventory,
 ) -> Result<ArtifactBundle, String> {
     crate::backend::opentrons::flex::compile_dependency_build(protocol, profile, inventory)
@@ -370,7 +370,7 @@ fn lab_compiler_flex(
 
 fn lab_compiler_star(
     protocol: &ProtocolLairProgram,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
     inventory: &BuildInventory,
 ) -> Result<ArtifactBundle, String> {
     crate::backend::hamilton::star::compile_dependency_build(protocol, profile, inventory)
@@ -447,20 +447,18 @@ fn canonical_adapter_profile<T: Serialize>(
     name: &str,
     profile: &T,
 ) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    let mut canonical_json = serde_json::to_value(profile)
+    let canonical_json = serde_json::to_value(profile)
         .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
-    remove_derived_name(&mut canonical_json);
 
-    let mut toml_value = toml::Value::try_from(profile)
+    let toml_value = toml::Value::try_from(profile)
         .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
-    remove_derived_toml_name(&mut toml_value);
     let mut canonical_toml = toml::to_string_pretty(&toml_value)
         .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
     if !canonical_toml.ends_with('\n') {
         canonical_toml.push('\n');
     }
     Ok(ValidatedAdapterProfile {
-        format: "lab.adapter-profile-validation.v1".to_owned(),
+        format: "lab.adapter-profile-validation.v2".to_owned(),
         schema_version: ADAPTER_PROFILE_SCHEMA_VERSION.to_owned(),
         compiler_version: env!("CARGO_PKG_VERSION").to_owned(),
         name: name.to_owned(),
@@ -471,18 +469,6 @@ fn canonical_adapter_profile<T: Serialize>(
     })
 }
 
-fn remove_derived_name(value: &mut Value) {
-    if let Some(target) = value.get_mut("target").and_then(Value::as_object_mut) {
-        target.remove("name");
-    }
-}
-
-fn remove_derived_toml_name(value: &mut toml::Value) {
-    if let Some(target) = value.get_mut("target").and_then(toml::Value::as_table_mut) {
-        target.remove("name");
-    }
-}
-
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EmptyAdapterProfile {}
@@ -491,7 +477,7 @@ fn empty_profile(driver: &str, name: &str) -> ValidatedAdapterProfile {
     let canonical_toml = String::new();
     let sha256 = sha256(canonical_toml.as_bytes());
     ValidatedAdapterProfile {
-        format: "lab.adapter-profile-validation.v1".to_owned(),
+        format: "lab.adapter-profile-validation.v2".to_owned(),
         schema_version: ADAPTER_PROFILE_SCHEMA_VERSION.to_owned(),
         compiler_version: env!("CARGO_PKG_VERSION").to_owned(),
         name: name.to_owned(),
@@ -581,7 +567,23 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(wrong.contains("hamilton.star"), "{wrong}");
-        assert!(wrong.contains("opentrons.ot2"), "{wrong}");
+        assert!(wrong.contains("target"), "{wrong}");
+
+        let flex = validate_adapter_profile("opentrons.flex", "flex-1", "").unwrap();
+        assert_eq!(flex.driver, "opentrons.flex");
+        assert!(flex.canonical_json.get("target").is_none());
+        assert!(!flex.canonical_toml.contains("[target]"));
+        let flex_descriptor = adapter_catalog()
+            .unwrap()
+            .adapters
+            .into_iter()
+            .find(|adapter| adapter.id == "opentrons.flex")
+            .unwrap();
+        assert!(
+            flex_descriptor.profile_schema["properties"]
+                .get("target")
+                .is_none()
+        );
 
         let profile = validate_adapter_profile("inheco.odtc", "cycler-1", "").unwrap();
         assert_eq!(profile.driver, "inheco.odtc");

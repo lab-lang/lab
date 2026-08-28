@@ -1,20 +1,9 @@
 //! Reference-bench default values for every Flex profile field.
 
-use crate::backend::opentrons::flex::BACKEND;
 use crate::backend::opentrons::flex::profile::schema::{
     AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TemperatureModule, Thermocycler,
     TipRacks, TransformationStage, Trash,
 };
-
-/// Bench name for a build that named no profile: the reference bench this
-/// backend was developed against.
-pub(super) fn default_bench_name() -> String {
-    "reference-bench".to_owned()
-}
-
-pub(super) fn default_backend() -> String {
-    BACKEND.to_owned()
-}
 
 pub(super) fn default_small_pipette() -> Pipette {
     Pipette {

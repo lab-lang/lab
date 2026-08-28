@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::backend::opentrons::ot2::profile::Ot2TargetProfile;
+use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 
 pub use crate::backend::resources::Well as Ot2Well;
 
@@ -15,13 +15,11 @@ pub use crate::backend::resources::Well as Ot2Well;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ot2ExecutionPlan {
     pub schema_version: String,
-    /// The backend that produced this plan, spelled exactly as a target
-    /// profile declares it.
-    pub target: String,
+    /// The explicit adapter implementation that produced this device plan.
+    pub adapter: String,
     pub api_level: String,
-    /// The bench this plan was allocated against. Emission reads every labware
-    /// name, deck slot, and mount from here rather than from a constant.
-    pub deck: Ot2TargetProfile,
+    /// Checked implementation configuration for the allocated Asset binding.
+    pub deck: Ot2AdapterProfile,
     pub assembly_source_wells: BTreeMap<String, String>,
     pub transformation_source_wells: BTreeMap<String, String>,
     /// DNA-plate well holding each plasmid a strain is transformed from. A

@@ -1,21 +1,8 @@
-//! Compiler backend contracts, the planning every backend shares, and the
-//! concrete execution targets.
+//! Compiler backend contracts, shared device planning, and concrete adapter implementations.
 //!
-//! Three layers live here. The contracts — [`Backend`], [`BackendEmitter`],
-//! [`AdapterDescriptor`], [`TargetConstraintError`] — say what a backend is.
-//! The modules beside them are planning that holds for any liquid handler and
-//! names no robot: provenance analysis over Protocol LAIR, projection into the
-//! target-independent build graph, SBS plate geometry and well allocation, the
-//! labware groupings every bench profile declares, and the rendering of a
-//! dependency-driven build. Backend identity enters that planning only as a
-//! parameter, so a capacity error names the machine that planned the build.
+//! Three layers live here. The contracts, including [`Backend`], [`BackendEmitter`], [`AdapterDescriptor`], and [`AdapterConstraintError`], define implementation behavior. The modules beside them hold planning shared by liquid-handler adapters: provenance analysis over Protocol LAIR, projection into the portable build graph, SBS plate geometry and well allocation, checked resource groupings, and dependency-build rendering. Adapter identity enters that planning only as a parameter, so a capacity error names the implementation that planned the device run.
 //!
-//! Below both sits one module per vendor family — [`opentrons`] and
-//! [`hamilton`] — holding one module per machine. A target implementation
-//! owns the selection from
-//! verified LAIR into a target IR, target validation and resource planning,
-//! and concrete emitters. The language frontend and generic output renderers
-//! deliberately do not depend on any target module.
+//! Below both sits one module per vendor family, [`opentrons`] and [`hamilton`], holding one module per adapter. An adapter owns selection from verified LAIR into a device IR, implementation validation and resource planning, and concrete emitters. The language frontend and generic output renderers deliberately do not depend on a device implementation.
 
 mod adapters;
 mod constraints;
@@ -38,5 +25,5 @@ pub use adapters::{
     adapter_catalog, default_adapter_profile, lower_dependency_build_with_adapter,
     validate_adapter_profile,
 };
-pub use constraints::TargetConstraintError;
+pub use constraints::AdapterConstraintError;
 pub use traits::{Backend, BackendEmitter};

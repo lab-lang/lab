@@ -19,9 +19,8 @@ pub(in crate::backend) struct DocMeta {
     /// The line under the title that says what kind of document this is,
     /// e.g. "Operator manual for one robot session".
     pub subtitle: String,
-    /// Target profile name, e.g. "hamilton-star". Empty when the document
-    /// is not tied to one profile.
-    pub target: String,
+    /// Exact adapter-profile label. Empty when the document is implementation-independent.
+    pub adapter_profile: String,
     /// Instrument label, e.g. "Opentrons OT-2".
     pub instrument: String,
 }
@@ -30,13 +29,13 @@ impl DocMeta {
     pub fn new(
         title: impl Into<String>,
         subtitle: impl Into<String>,
-        target: impl Into<String>,
+        adapter_profile: impl Into<String>,
         instrument: impl Into<String>,
     ) -> Self {
         Self {
             title: title.into(),
             subtitle: subtitle.into(),
-            target: target.into(),
+            adapter_profile: adapter_profile.into(),
             instrument: instrument.into(),
         }
     }

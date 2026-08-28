@@ -820,7 +820,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         &std::fs::read_to_string(target_root.join("wave-002/automation_manifest.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(manifest["target"], "opentrons.flex");
+    assert_eq!(manifest["adapter"], "opentrons.flex");
     assert_eq!(
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
         serde_json::json!(["B2", "B3"]),

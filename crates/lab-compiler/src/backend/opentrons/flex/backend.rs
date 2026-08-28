@@ -8,21 +8,21 @@ use crate::{ArtifactBundle, ProtocolLairProgram};
 use crate::backend::opentrons::flex::plan::{
     FlexEmissionError, FlexExecutionPlan, FlexPlanningError, emit_program, plan_build,
 };
-use crate::backend::opentrons::flex::profile::FlexTargetProfile;
+use crate::backend::opentrons::flex::profile::FlexAdapterProfile;
 
 /// The Flex backend bound to one bench. Planning reads every deck, labware,
 /// and instrument decision from the profile it carries.
 #[derive(Clone, Debug, Default)]
 pub struct FlexBackend {
-    profile: FlexTargetProfile,
+    profile: FlexAdapterProfile,
 }
 
 impl FlexBackend {
-    pub fn new(profile: FlexTargetProfile) -> Self {
+    pub fn new(profile: FlexAdapterProfile) -> Self {
         Self { profile }
     }
 
-    pub fn profile(&self) -> &FlexTargetProfile {
+    pub fn profile(&self) -> &FlexAdapterProfile {
         &self.profile
     }
 }

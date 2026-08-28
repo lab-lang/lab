@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{ArtifactBundle, ArtifactError, ProtocolLairProgram};
 
-use crate::backend::opentrons::ot2::profile::Ot2TargetProfile;
+use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 use crate::planning::{BuildInventory, DependencyBuildManifest};
 use crate::planning::{DependencyGraphError, resolve_dependency_graph};
 
@@ -61,7 +61,7 @@ pub enum DependencyBuildError {
 /// owned by this module.
 pub fn compile_dependency_build(
     protocol: &ProtocolLairProgram,
-    profile: &Ot2TargetProfile,
+    profile: &Ot2AdapterProfile,
     inventory: &BuildInventory,
 ) -> Result<DependencyBuildBundle, DependencyBuildError> {
     let graph = protocol_build_graph(protocol).map_err(|source| DependencyBuildError::Backend {
@@ -96,7 +96,7 @@ pub fn compile_dependency_build(
             DocMeta::new(
                 "Dependency report",
                 "Artifact graph, wave schedule, and blockers",
-                &profile.target.name,
+                &profile.name,
                 "Opentrons OT-2",
             ),
             &manifest,
@@ -144,7 +144,7 @@ pub fn compile_dependency_build(
             DocMeta::new(
                 "Automated plasmid build",
                 "Operator instructions for the full dependency-driven build",
-                &profile.target.name,
+                &profile.name,
                 "Opentrons OT-2",
             ),
             &manifest,
@@ -280,7 +280,7 @@ workflow build_final_host(
             .unwrap();
 
         let bundle =
-            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
+            compile_dependency_build(&protocol, &Ot2AdapterProfile::default(), &inventory).unwrap();
 
         assert_eq!(bundle.manifest.schema_version, "lab.dependency-build.v1");
         assert_eq!(bundle.manifest.nodes.len(), 1);
@@ -301,7 +301,7 @@ workflow build_final_host(
             .select_protocol()
             .unwrap();
         let bundle =
-            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory())
+            compile_dependency_build(&protocol, &Ot2AdapterProfile::default(), &inventory())
                 .unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         assert_eq!(bundle.manifest.roots, ["final_host"]);
@@ -366,7 +366,7 @@ workflow build_final_host(
             .unwrap();
         let bundle = compile_dependency_build(
             &protocol,
-            &Ot2TargetProfile::default(),
+            &Ot2AdapterProfile::default(),
             &BuildInventory::default(),
         )
         .unwrap();
@@ -391,7 +391,7 @@ workflow build_final_host(
         legacy.available_materials.remove("source_part");
         legacy.available_materials.remove("carrier");
         let bundle =
-            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
+            compile_dependency_build(&protocol, &Ot2AdapterProfile::default(), &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         let intermediate = bundle
             .manifest
@@ -422,7 +422,7 @@ workflow build_final_host(
             .select_protocol()
             .unwrap();
         let bundle =
-            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory())
+            compile_dependency_build(&protocol, &Ot2AdapterProfile::default(), &inventory())
                 .unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Partial);
         assert!(
@@ -441,7 +441,7 @@ workflow build_final_host(
             .available_artifacts
             .insert("final_artifact".into());
         let bundle =
-            compile_dependency_build(&protocol, &Ot2TargetProfile::default(), &inventory).unwrap();
+            compile_dependency_build(&protocol, &Ot2AdapterProfile::default(), &inventory).unwrap();
         assert_eq!(bundle.manifest.status, DependencyBuildStatus::Complete);
         assert_eq!(
             bundle

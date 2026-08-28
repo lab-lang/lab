@@ -122,7 +122,7 @@ An SBOLInventory document describes the laboratory that can realize an experimen
 
 An adapter profile cannot choose a machine or backend. `lab.toml` binds one explicit driver and profile path to one exact Asset IRI, and the selected facility offering determines whether that binding participates in a plan. The profile contains non-secret implementation configuration that the driver needs but the portable catalog does not carry; endpoints and credentials remain local runtime inputs.
 
-Every adapter-profile field has a checked default, and unknown keys are rejected rather than ignored. The reviewed plan stages the canonical profile and records its SHA-256 beside the exact Asset and driver binding.
+Every adapter-profile field has a checked default, and unknown keys are rejected rather than ignored. The `lab.adapter-profile.v2` contract contains no backend or Asset selector; the removed `[target]` table is invalid, and implementation-specific protocol settings such as the OT-2 API level live under `[protocol]`. The reviewed plan stages the canonical profile and records its SHA-256 beside the exact Asset and driver binding.
 
 Within a module, examples conventionally put providers before consumers: imports first, then shared data types, inventory values, biological declarations, and finally workflows. Dependency correctness still comes from resolved symbols and typed dataflow rather than textual order, filenames, or names such as “level 1” and “level 2.”
 

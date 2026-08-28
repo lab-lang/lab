@@ -1,18 +1,18 @@
 use thiserror::Error;
 
 use crate::ArtifactError;
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Ot2PlanningError {
     #[error(transparent)]
-    Constraint(Box<TargetConstraintError>),
+    Constraint(Box<AdapterConstraintError>),
     #[error("invalid target-selected Protocol LAIR: {0}")]
     InvalidProtocol(String),
 }
 
-impl From<TargetConstraintError> for Ot2PlanningError {
-    fn from(error: TargetConstraintError) -> Self {
+impl From<AdapterConstraintError> for Ot2PlanningError {
+    fn from(error: AdapterConstraintError) -> Self {
         Self::Constraint(Box::new(error))
     }
 }

@@ -30,7 +30,7 @@ use crate::backend::hamilton::star::plan::liquids::{
     AGAR_SPOT_HEIGHT_MM, DeckIndex, LiquidState, PLATE_DEAD_VOLUME_UL, TROUGH_DEAD_VOLUME_UL,
     TUBE_DEAD_VOLUME_UL,
 };
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::resources::{
     PlateAllocator, assembly_source_keys, assign_source_wells, plate_wells,
     transformation_source_keys,
@@ -42,14 +42,14 @@ use crate::backend::trace::{AssemblyTrace, ProtocolTraces, StrainTrace, analyze_
 /// by the run and Markdown emitters.
 pub fn plan_build(
     protocol: &ProtocolLairProgram,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
 ) -> Result<StarExecutionPlan, StarPlanningError> {
     plan_selected_build(protocol, profile, None)
 }
 
 pub(in crate::backend) fn plan_selected_build(
     protocol: &ProtocolLairProgram,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
     selected_artifacts: Option<&BTreeSet<String>>,
 ) -> Result<StarExecutionPlan, StarPlanningError> {
     profile.validate()?;
@@ -101,8 +101,8 @@ pub(in crate::backend) fn plan_selected_build(
     let (runs, tip_usage) = choreograph_program(profile, &deck, &science, &mut liquids)?;
 
     Ok(StarExecutionPlan {
-        schema_version: "lab.automation.v0".into(),
-        target: BACKEND.into(),
+        schema_version: "lab.automation.v1".into(),
+        adapter: BACKEND.into(),
         deck: profile.clone(),
         assembly_source_wells,
         transformation_source_wells,
@@ -213,7 +213,7 @@ fn build_assembly_plans(
 fn allocate_dna_wells(
     traces: &[StrainTrace],
     context: &Context,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
 ) -> Result<BTreeMap<String, StarWell>, StarPlanningError> {
     let carried = traces
         .iter()
@@ -245,7 +245,7 @@ fn build_strain_plans(
     context: &Context,
     reaction_plate: &[String],
     dna_source_wells: &BTreeMap<String, StarWell>,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
 ) -> Result<Vec<StarStrainPlan>, StarPlanningError> {
     let mut culture_cursor = 0;
     let mut dilutions = PlateAllocator::new(
@@ -371,7 +371,7 @@ fn assign_stage_source_wells(
 /// Lowers the whole program into runs. Deterministic: called twice, once to
 /// discover consumption and once over the seeded bench.
 fn choreograph_program(
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
     deck: &DeckIndex,
     science: &Science<'_>,
     liquids: &mut LiquidState,
@@ -893,8 +893,8 @@ fn compute_fills(
         let load = consumed + dead;
         let (_, working_ul, _) = deck.vessel(&location.resource);
         if load > working_ul {
-            return Err(crate::backend::TargetConstraintError::CapacityExceeded {
-                target: BACKEND.into(),
+            return Err(crate::backend::AdapterConstraintError::CapacityExceeded {
+                adapter: BACKEND.into(),
                 operation: "source_loading".into(),
                 subject: key.clone(),
                 resource: location.resource.clone(),
@@ -953,10 +953,10 @@ mod tests {
     #[test]
     fn allocates_both_stages_against_the_reference_bench() {
         let protocol = golden_gate_protocol();
-        let plan = plan_build(&protocol, &StarTargetProfile::default())
+        let plan = plan_build(&protocol, &StarAdapterProfile::default())
             .expect("the example compiles for the reference bench");
-        assert_eq!(plan.target, "hamilton.star");
-        assert_eq!(plan.schema_version, "lab.automation.v0");
+        assert_eq!(plan.adapter, "hamilton.star");
+        assert_eq!(plan.schema_version, "lab.automation.v1");
         assert_eq!(plan.assemblies.len(), 2, "two plasmids are assembled");
         assert_eq!(plan.strains.len(), 4, "one plasmid feeds two chassis");
         assert_eq!(plan.assemblies[0].assembly_wells, ["A1"]);
@@ -976,7 +976,7 @@ mod tests {
     fn source_fills_cover_consumption_plus_dead_volume() {
         let protocol = golden_gate_protocol();
         let plan =
-            plan_build(&protocol, &StarTargetProfile::default()).expect("the example compiles");
+            plan_build(&protocol, &StarAdapterProfile::default()).expect("the example compiles");
         let water = plan
             .source_fills
             .iter()
@@ -996,7 +996,7 @@ mod tests {
     fn every_run_returns_its_tips_to_the_waste() {
         let protocol = golden_gate_protocol();
         let plan =
-            plan_build(&protocol, &StarTargetProfile::default()).expect("the example compiles");
+            plan_build(&protocol, &StarAdapterProfile::default()).expect("the example compiles");
         for run in &plan.runs {
             let picked: usize = run
                 .operations
@@ -1026,7 +1026,7 @@ mod tests {
     fn tip_usage_stays_within_every_rack() {
         let protocol = golden_gate_protocol();
         let plan =
-            plan_build(&protocol, &StarTargetProfile::default()).expect("the example compiles");
+            plan_build(&protocol, &StarAdapterProfile::default()).expect("the example compiles");
         for (resource, used) in &plan.tip_usage {
             assert!(
                 *used <= 96,
@@ -1038,7 +1038,7 @@ mod tests {
     #[test]
     fn an_agar_capacity_that_contradicts_the_catalog_is_a_profile_error() {
         let protocol = golden_gate_protocol();
-        let mut wrong = StarTargetProfile::default();
+        let mut wrong = StarAdapterProfile::default();
         wrong.stages.plating.agar_plate.capacity = 15;
         let error =
             plan_build(&protocol, &wrong).expect_err("the catalog plate holds 96 wells, not 15");

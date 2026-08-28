@@ -31,8 +31,13 @@ pub(in crate::backend) fn render(doc: &Doc) -> String {
         )
         .unwrap();
     }
-    if !doc.meta.target.is_empty() {
-        writeln!(output, "  target: \"{}\",", escape_string(&doc.meta.target)).unwrap();
+    if !doc.meta.adapter_profile.is_empty() {
+        writeln!(
+            output,
+            "  adapter-profile: \"{}\",",
+            escape_string(&doc.meta.adapter_profile)
+        )
+        .unwrap();
     }
     if !doc.meta.instrument.is_empty() {
         writeln!(
@@ -240,7 +245,7 @@ mod tests {
         let mut doc = Doc::new(DocMeta {
             title: "Manual protocol".into(),
             subtitle: "Operator manual".into(),
-            target: "bench-1".into(),
+            adapter_profile: "adapter-1".into(),
             instrument: "Test rig".into(),
         });
         doc.heading(1, [text("Stage 1 — assembly")]);
@@ -254,7 +259,7 @@ mod tests {
         assert_eq!(rendered.matches("#show: protocol-doc.with(").count(), 1);
         assert!(rendered.contains("#import \"lab-style.typ\""));
         assert!(rendered.contains("title: \"Manual protocol\","));
-        assert!(rendered.contains("target: \"bench-1\","));
+        assert!(rendered.contains("adapter-profile: \"adapter-1\","));
         assert!(rendered.contains("= Stage 1 — assembly"));
         assert!(rendered.contains("Store `p_gfp` at 4 °C."));
         assert!(rendered.contains("align: (left, right,),"));

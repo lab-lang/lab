@@ -1,14 +1,9 @@
-# Private operational configuration for the exact OT-2 Asset bound in `lab.toml`.
-# The facility allocation selects the Asset and adapter; this file cannot select a target.
-#
-# Everything here describes the laboratory, not the science: which modules are
-# installed, what labware sits in which deck slot, and which pipette is on
-# which mount. Another laboratory running the same programs supplies its own
-# profile and changes no Lab source.
-#
-# Every field has a default matching the reference bench, so a profile states
-# only what differs. This one is written out in full because it is the
-# example's subject.
+# Checked implementation configuration for the exact OT-2 Asset binding in `lab.toml`.
+# Facility identity, composition, and capabilities belong to `inventory/facility.ttl`; this file cannot select an Asset or adapter.
+# The current lowerer still needs device-specific protocol, layout, and labware mappings. Every field has a checked default; this example writes them out to make that residual implementation boundary explicit.
+
+[protocol]
+api_level = "2.21"
 
 [instruments.small]
 model = "p20_single_gen2"

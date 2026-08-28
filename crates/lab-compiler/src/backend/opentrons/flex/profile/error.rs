@@ -1,16 +1,11 @@
-//! Errors from parsing and validating a Flex target profile.
+//! Errors from parsing and validating Flex adapter configuration.
 
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FlexProfileError {
-    #[error("failed to parse Flex target profile: {0}")]
+    #[error("failed to parse Flex adapter profile: {0}")]
     Parse(#[from] toml::de::Error),
-    #[error("target profile declares backend '{found}', but this backend is '{expected}'")]
-    WrongBackend {
-        expected: &'static str,
-        found: String,
-    },
     #[error(
         "the {instrument} instrument names pipette '{model}', which is not a Flex pipette; Flex pipettes are p50_single_flex, p50_multi_flex, p1000_single_flex, p1000_multi_flex, and p1000_96"
     )]

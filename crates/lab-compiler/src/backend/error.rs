@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 
 /// A failure from robot-neutral planning. Each backend converts this into its
 /// own planning error, so the rendered message keeps that backend's identity
@@ -10,13 +10,13 @@ use crate::backend::TargetConstraintError;
 #[derive(Debug, Error, PartialEq, Eq)]
 pub(in crate::backend) enum PlanningError {
     #[error(transparent)]
-    Constraint(Box<TargetConstraintError>),
+    Constraint(Box<AdapterConstraintError>),
     #[error("{0}")]
     InvalidProtocol(String),
 }
 
-impl From<TargetConstraintError> for PlanningError {
-    fn from(error: TargetConstraintError) -> Self {
+impl From<AdapterConstraintError> for PlanningError {
+    fn from(error: AdapterConstraintError) -> Self {
         Self::Constraint(Box::new(error))
     }
 }

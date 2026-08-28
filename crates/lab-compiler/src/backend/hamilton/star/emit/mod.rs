@@ -17,7 +17,7 @@ use crate::backend::hamilton::star::emit::runs::render_run;
 use crate::backend::hamilton::star::plan::{
     StarBuildError, StarEmissionError, StarExecutionPlan, plan_build,
 };
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::{markdown, typst};
 
 pub use crate::backend::hamilton::star::emit::runs::RunStep;
@@ -116,7 +116,7 @@ impl StarBundle {
 
 pub fn compile_build(
     protocol: &ProtocolLairProgram,
-    profile: &StarTargetProfile,
+    profile: &StarAdapterProfile,
 ) -> Result<StarBundle, StarBuildError> {
     Ok(StarBundle::from_plan(plan_build(protocol, profile)?)?)
 }

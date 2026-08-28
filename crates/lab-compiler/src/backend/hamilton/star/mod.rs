@@ -15,9 +15,7 @@ mod package;
 pub mod plan;
 pub mod profile;
 
-/// This backend's identity. A target profile declares it, planning stamps it
-/// into every execution plan and target-constraint error, and no other
-/// spelling of it exists.
+/// Stable adapter identity used by explicit Asset bindings, device plans, and adapter diagnostics.
 pub(in crate::backend::hamilton::star) const BACKEND: &str = "hamilton.star";
 
 pub use crate::backend::hamilton::star::backend::{StarBackend, StarCompileError};
@@ -28,4 +26,4 @@ pub use crate::backend::hamilton::star::package::{
 pub use crate::backend::hamilton::star::plan::{
     ManualStep, StarBuildError, StarEmissionError, StarExecutionPlan, StarPlanningError, plan_build,
 };
-pub use crate::backend::hamilton::star::profile::{StarProfileError, StarTargetProfile};
+pub use crate::backend::hamilton::star::profile::{StarAdapterProfile, StarProfileError};

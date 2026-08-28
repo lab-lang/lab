@@ -25,7 +25,7 @@ pub(in crate::backend) fn render_full_build_instructions(
         "Generated concept protocol. Review and qualify every run for the actual laboratory before execution. Planning success is not physical-build or acceptance evidence.",
     )]);
 
-    let profile_name = doc.meta.target.clone();
+    let profile_name = doc.meta.adapter_profile.clone();
     doc.heading(1, [text("How this package fits together")]);
     doc.para([
         text("The Lab toolchain compiled this package from the project's "),

@@ -9,21 +9,21 @@ use crate::backend::hamilton::star::emit::emit_program;
 use crate::backend::hamilton::star::plan::{
     StarEmissionError, StarExecutionPlan, StarPlanningError, plan_build,
 };
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
 /// The STAR backend bound to one bench. Planning reads every carrier,
 /// labware, and tip decision from the profile it carries.
 #[derive(Clone, Debug, Default)]
 pub struct StarBackend {
-    profile: StarTargetProfile,
+    profile: StarAdapterProfile,
 }
 
 impl StarBackend {
-    pub fn new(profile: StarTargetProfile) -> Self {
+    pub fn new(profile: StarAdapterProfile) -> Self {
         Self { profile }
     }
 
-    pub fn profile(&self) -> &StarTargetProfile {
+    pub fn profile(&self) -> &StarAdapterProfile {
         &self.profile
     }
 }
