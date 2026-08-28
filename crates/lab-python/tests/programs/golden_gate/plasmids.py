@@ -46,6 +46,7 @@ composite_plasmid_1 = Plasmid.build(
     J23101 drives GFP through the shared RBS and terminator, assembled by Golden
     Gate with BsaI. Accepted only if the built sequence matches the design.
     """,
+    sbol_identity="https://example.org/golden-gate/designs/composite_plasmid_1",
     sequence=composite_plasmid_1_sequence,
     backbone=pSB1C3,
     components=[J23101, B0034, GFP, B0015],
@@ -70,6 +71,7 @@ composite_plasmid_2 = Plasmid.build(
     J23106 promoter, so the panel reports two promoter strengths against two
     reporters.
     """,
+    sbol_identity="https://example.org/golden-gate/designs/composite_plasmid_2",
     sequence=composite_plasmid_2_sequence,
     backbone=pSB1C3,
     components=[J23106, B0034, RFP, B0015],

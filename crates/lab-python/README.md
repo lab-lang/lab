@@ -82,6 +82,16 @@ That emits the `use` lines too. `Plasmid` imported from `lab.bio.golden_gate` is
 
 A declaration takes its Lab name from the Python name it is bound to, so nothing is spelled twice; one generated in a loop states its own `name`. A claim is a function so that the artifact's properties arrive through a parameter rather than appearing from nowhere, which is also what lets a typechecker see them.
 
+A package can contribute an artifact kind without extending Lab's grammar. `lab.artifact` names its produced type and typed property schema, returns the same `build` and `buy` declaration interface as a standard-library kind, and treats `T | None` as an optional property:
+
+```python
+Reagent = lab.artifact("Reagent", description=str | None)
+
+T4_DNA_ligase = Reagent.buy(
+    sbol_identity="https://example.org/materials/T4_DNA_ligase",
+)
+```
+
 `lab.check` emits the modules in dependency order and hands the result to the compiler:
 
 ```python
