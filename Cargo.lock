@@ -1829,9 +1829,13 @@ dependencies = [
  "anyhow",
  "hamilton-star",
  "lab-instruments",
+ "lab-inventory",
  "lab-runfmt",
+ "sbol-inventory",
+ "sbol3",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
 ]

@@ -16,9 +16,13 @@ hardware = ["hamilton-star/usb"]
 anyhow = { workspace = true }
 hamilton-star = { workspace = true }
 lab-instruments = { workspace = true }
+lab-inventory = { workspace = true }
 lab-runfmt = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+sbol-inventory = { workspace = true }
+sbol3 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
