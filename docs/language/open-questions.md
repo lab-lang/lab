@@ -28,33 +28,25 @@ A catalogued item is declared with `buy` against an imported kind, states the fi
 
 What a kind *is* now travels with it: a role may name an ontology term and a kind plays roles, so `Plasmid` states that it is a nucleic acid and an engineered region ([`0039`](decisions/0039-roles-carry-ontology-terms.md)). A sequence can now be declared as a named `DNA` value and referenced from one or more designs ([`0043`](decisions/0043-sequences-are-first-class-design-values.md)). Exact identity is no longer ambiguous: `sbol_identity` names an SBOL Component and `supplier_identity` names a supplier order line. What remains open is the catalog record around that value: its provenance chain and version, whether its sequence was asserted or derived, and how biological catalogs expose those richer declarations without compiling changing catalog contents into `std`. The intended direction is recorded in [`sbol.md`](sbol.md).
 
-## Target contracts
+## Adapter lowering contracts
 
-A kind now declares a schema, so the language states which properties an artifact
-may hold and what each contains. What it still cannot state is which of them a
-*target* consumes: the OT-2 backend reads `reaction_volume` and
-`digest_temperature` by name, and a schema gives it something to validate against
-without telling it what to expect. This is why moving `plasmid` into
-`std.bio.designs` removes biology from the frontend and not from the toolchain.
+A kind now declares a schema, so the language states which properties an artifact may hold and what each contains. What it still cannot state is which properties a capability-aware adapter consumes: the OT-2 implementation reads `reaction_volume` and `digest_temperature` by name, and a schema gives it something to validate against without telling it what to expect. This is why moving `plasmid` into `std.bio.designs` removes biology from the frontend and not from the toolchain.
 
-Schema composition is also unresolved. A kind cannot extend or refine another, so
-a target-specific chemistry schema has no way to say it adds to the design one.
+Schema composition is also unresolved. A kind cannot extend or refine another, so an adapter-specific chemistry schema has no way to say that it adds constraints to the design schema.
 
-## Property schemas and target contracts
+Artifact properties are backend-neutral typed expressions, while the initial OT-2 specialization requires a documented property set. Packages still need reusable property schemas, defaults, refinements, and capability-lowering contracts. Such a contract should allow an adapter to state what it consumes without adding experiment-specific property names or diagnostics to the core checker.
 
-Artifact properties are backend-neutral typed expressions, while the initial OT-2 specialization requires a documented property set. Packages still need a way to declare reusable property schemas, defaults, refinements, and target capability contracts. This should allow a target to state what it consumes without adding experiment-specific property names or diagnostics to the core checker.
+Reaction chemistry is the sharpest case. A design states `reaction_volume: 20 uL`, and the facility-selected OT-2 adapter interprets it, but nothing in the language says which properties a Golden Gate assembly requires or what their units must be. The unit check lives in adapter lowering rather than a declared schema, so another adapter that wanted the same parameters would restate them.
 
-Reaction chemistry is the sharpest case. A design states `reaction_volume: 20 uL`, and the OT-2 target interprets it, but nothing in the language says which properties a Golden Gate assembly requires or what their units must be. The unit check lives in the target's lowering rather than in a declared schema, so a target that wanted the same parameters would restate them.
+## Facility configuration and allocation policy
 
-## Target profiles and backend selection
+Independent target profiles and backend selection have been removed from the package workflow. The open composition problem is now sharper: stable physical facts should be represented once in SBOLInventory, while private or runtime-only implementation configuration remains in the exact Asset-to-adapter overlay. The current liquid-handler adapters still accept detailed deck configuration that should move into typed Asset composition, positions, and offering parameters where the profile can represent it efficaciously.
 
-A target profile configures one backend for one bench, and `lab build --target` resolves it by filename under `targets/`. The profile's `backend` field is validated but not dispatched on: there is one backend, and it is named concretely. A second backend needs a registry, a way for a profile to select among installed backends, and a rule for what a program may assume about a target it has not been compiled for.
-
-Profile composition is also unresolved. Sites that share most of a layout have no way to express one profile in terms of another, and nothing distinguishes a capability a bench has from a choice its operator made.
+Allocation policy is also unresolved. Deterministic candidate ordering deliberately does not choose between equally eligible offerings, and sites need an explicit, reviewable way to express preferences, reservations, capacity sharing, and scheduling without putting those transient decisions into the persistent facility catalog.
 
 ## Inventory identity, availability, and provenance
 
-Design identity and physical availability are now separate. `sbol_identity` names an exact SBOL Component; target planning loads a validated SBOLInventory document, restricts active MaterialLots to the selected facility, joins them through `sbol:built`, rejects ambiguity, and freezes the selected lot together with the facility and document hash. Quantity, expiration, containment, reservation, allocation policy beyond refusing ambiguity, trust policy, and asynchronous availability remain open.
+Design identity and physical availability are now separate. `sbol_identity` names an exact SBOL Component; facility planning loads a validated SBOLInventory document, restricts active MaterialLots to the selected facility, joins them through `sbol:built`, rejects ambiguity, and freezes the selected lot together with the facility and document hash. Quantity, expiration, containment, reservation, allocation policy beyond refusing ambiguity, trust policy, and asynchronous availability remain open.
 
 ## Package resolution
 

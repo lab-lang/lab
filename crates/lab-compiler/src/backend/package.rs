@@ -32,8 +32,8 @@ pub(in crate::backend) fn render_full_build_instructions(
         code(".lab"),
         text(" sources against the "),
         code(profile_name),
-        text(" bench profile. Every artifact volume, well address, and deck position in this document was planned at compile time, and the robot files, the machine-readable manifests, and this document are all projections of the same execution plan, so they cannot disagree with one another. Nothing here is meant to be edited by hand: to change what a run does, change the sources or the target profile and run "),
-        code("lab build"),
+        text(" allocated facility adapter. Every artifact volume, well address, and deck position in this document was planned at compile time, and the robot files, the machine-readable manifests, and this document are all projections of the same execution plan, so they cannot disagree with one another. Nothing here is meant to be edited by hand: to change what a run does, change the sources, facility inventory, or exact Asset-to-adapter configuration and run "),
+        code("lab plan"),
         text(" again."),
     ]);
     doc.bullets([

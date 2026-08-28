@@ -77,10 +77,6 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
-    /// Target profile a build compiles for when none is named on the command
-    /// line, resolved by filename under `targets/`. A package without one
-    /// builds portable module IR and stops.
-    pub target: Option<String>,
 }
 
 /// The facility catalog a package may plan against.
@@ -194,13 +190,6 @@ impl PackageManifest {
             return Err(PackageError::UnsupportedEdition(
                 self.package.edition.clone(),
             ));
-        }
-        // A target is a filename under `targets/`, so it must not be able to
-        // reach outside that directory.
-        if let Some(target) = &self.build.target
-            && !valid_target_name(target)
-        {
-            return Err(PackageError::InvalidTarget(target.clone()));
         }
         self.inventory.validate()?;
         self.execution.validate(&self.inventory)?;
@@ -331,13 +320,6 @@ fn default_edition() -> String {
     "2026".to_owned()
 }
 
-fn valid_target_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.chars().all(|character| {
-            character.is_ascii_alphanumeric() || character == '-' || character == '_'
-        })
-}
-
 fn valid_adapter_id(value: &str) -> bool {
     !value.is_empty()
         && value.split('.').all(|segment| {
@@ -459,7 +441,7 @@ default-member = "packages/device"
     }
 
     #[test]
-    fn reads_the_default_target_and_rejects_one_that_is_not_a_profile_name() {
+    fn build_metadata_rejects_the_removed_target_selector() {
         let manifest = PackageManifest::parse(
             r#"[package]
 name = "tet-reporter"
@@ -469,23 +451,15 @@ version = "0.1.0"
 entry = "src/programs/main.lab"
 target = "opentrons-ot2"
 "#,
-        )
-        .unwrap();
-        assert_eq!(manifest.build.target.as_deref(), Some("opentrons-ot2"));
-        manifest.validate().unwrap();
-
-        let escaping = PackageManifest::parse(
-            "[package]\nname = \"tet-reporter\"\nversion = \"0.1.0\"\n\n[build]\ntarget = \"../benches/ot2\"\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            escaping.validate(),
-            Err(PackageError::InvalidTarget(_))
-        ));
+        );
+        assert!(
+            manifest.is_err(),
+            "facility allocation replaces build targets"
+        );
     }
 
     #[test]
-    fn reads_the_inventory_a_target_build_resolves_against() {
+    fn reads_the_legacy_symbolic_inventory() {
         let manifest = PackageManifest::parse(
             r#"[package]
 name = "tet-reporter"

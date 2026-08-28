@@ -27,9 +27,12 @@ struct Cli {
     /// JSON inventory used by dependency-plan and full-build-bundle.
     #[arg(long)]
     inventory: Option<PathBuf>,
-    /// TOML target profile describing the bench to compile for.
+    /// Explicit adapter implementation used by low-level backend emission.
+    #[arg(long, default_value = "opentrons.ot2")]
+    adapter: String,
+    /// TOML operational profile for the explicitly selected adapter.
     #[arg(long)]
-    target_profile: Option<PathBuf>,
+    adapter_profile: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -47,30 +50,21 @@ enum Emit {
     FullBuildBundle,
 }
 
-/// A target profile parsed for whichever backend it declares. The `backend`
-/// key is peeked out of the TOML before committing to a profile schema; an
-/// absent key means `opentrons.ot2`, matching that profile schema's default.
-enum TargetProfile {
+enum AdapterProfile {
     Ot2(Ot2TargetProfile),
     Flex(FlexTargetProfile),
 }
 
-fn parse_target_profile(name: &str, contents: &str) -> Result<TargetProfile> {
-    let table = contents
-        .parse::<toml::Table>()
-        .context("failed to parse target profile")?;
-    let backend = table
-        .get("target")
-        .and_then(|target| target.get("backend"))
-        .and_then(|backend| backend.as_str())
-        .unwrap_or("opentrons.ot2");
-    match backend {
-        "opentrons.ot2" => Ok(TargetProfile::Ot2(Ot2TargetProfile::parse(name, contents)?)),
-        "opentrons.flex" => Ok(TargetProfile::Flex(FlexTargetProfile::parse(
+fn parse_adapter_profile(driver: &str, name: &str, contents: &str) -> Result<AdapterProfile> {
+    match driver {
+        "opentrons.ot2" => Ok(AdapterProfile::Ot2(Ot2TargetProfile::parse(
+            name, contents,
+        )?)),
+        "opentrons.flex" => Ok(AdapterProfile::Flex(FlexTargetProfile::parse(
             name, contents,
         )?)),
         other => bail!(
-            "target profile declares backend '{other}', which this toolchain does not provide; known backends are 'opentrons.ot2' and 'opentrons.flex'"
+            "adapter '{other}' does not support this low-level emitter; known adapters are 'opentrons.ot2' and 'opentrons.flex'"
         ),
     }
 }
@@ -261,23 +255,21 @@ fn main() -> Result<()> {
             cli.source.display()
         )
     })?;
-    let profile = match &cli.target_profile {
+    let profile = match &cli.adapter_profile {
         Some(path) => {
             let contents = std::fs::read_to_string(path)
-                .with_context(|| format!("failed to read target profile {}", path.display()))?;
-            // A profile is named by its file, the same way `lab build`
-            // resolves one under `targets/`.
+                .with_context(|| format!("failed to read adapter profile {}", path.display()))?;
             let name = path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
-                .with_context(|| format!("target profile {} has no name", path.display()))?;
-            parse_target_profile(name, &contents)
-                .with_context(|| format!("failed to load target profile {}", path.display()))?
+                .with_context(|| format!("adapter profile {} has no name", path.display()))?;
+            parse_adapter_profile(&cli.adapter, name, &contents)
+                .with_context(|| format!("failed to load adapter profile {}", path.display()))?
         }
-        None => TargetProfile::Ot2(Ot2TargetProfile::default()),
+        None => parse_adapter_profile(&cli.adapter, &cli.adapter, "")?,
     };
     match profile {
-        TargetProfile::Ot2(profile) => emit_ot2(&cli, &protocol, profile),
-        TargetProfile::Flex(profile) => emit_flex(&cli, &protocol, profile),
+        AdapterProfile::Ot2(profile) => emit_ot2(&cli, &protocol, profile),
+        AdapterProfile::Flex(profile) => emit_flex(&cli, &protocol, profile),
     }
 }

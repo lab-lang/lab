@@ -172,7 +172,7 @@ pub(crate) struct AssemblyRecipeIntent {
 
 /// Golden Gate reaction chemistry. These are scientific choices stated by the
 /// design, not properties of the bench that runs it, so they travel with the
-/// artifact rather than with a target profile.
+/// artifact rather than with facility or adapter configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct AssemblyChemistryIntent {
     pub reaction_volume_ul: u16,

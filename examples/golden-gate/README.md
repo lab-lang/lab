@@ -81,6 +81,6 @@ To lint, typecheck, and simulate the complete emitted OT-2 package:
 
 ```bash
 ot2_output="$(find .lab/plan/lowerings -type d -name opentrons-ot2 -print -quit)"
-../../scripts/check-opentrons-target.sh "$ot2_output"
+../../scripts/check-opentrons-bundle.sh "$ot2_output"
 ../../scripts/simulate-opentrons.sh "$ot2_output"
 ```

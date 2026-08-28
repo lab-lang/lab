@@ -39,7 +39,7 @@ The runtime executes only the frozen bindings through a registry keyed by Asset 
 
 A completed live run writes a new `inventory-after.ttl`; a completed simulation writes `inventory-simulation.ttl`. Both preserve the source graph and add a PROV Activity, exact Asset and input MaterialLot Usages, reviewed evidence Attachments, and timing. Only live execution may generate output MaterialLots.
 
-The workcell target, station taxonomy, `lab.workcell-run.v0`, and workcell runtime are removed. Single-device target profiles remain as legacy compilation interfaces while facility composition happens through inventory, allocation, and reviewed execution plans.
+The workcell target, station taxonomy, `lab.workcell-run.v0`, workcell runtime, independent single-device target profiles, `[build] target`, `lab build --target`, and `lab targets` are removed. Device backends are reachable through explicit Asset-to-adapter bindings only after facility allocation.
 
 ## Consequences
 

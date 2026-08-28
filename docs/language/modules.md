@@ -68,7 +68,9 @@ An idiomatic project separates reusable intent from the runnable composition:
 
 ```text
 lab.toml
-targets/
+inventory/
+  facility.ttl
+adapters/
   opentrons-ot2.toml
 src/
   designs/
@@ -86,6 +88,7 @@ tests/
   build_plasmid.lab
 .lab/
   build/
+  plan/
   runs/
 ```
 
@@ -93,10 +96,11 @@ tests/
 - `policies` holds site- or project-specific scientific acceptance decisions.
 - `workflows` holds reusable durable orchestration.
 - `programs` wires designs, policies, parameters, and workflows into runnable entry points.
-- `targets` holds site configuration: one file per bench a project compiles for.
+- `inventory` holds portable SBOLInventory facility catalogs and material ledgers.
+- `adapters` holds non-secret operational configuration bound to exact facility Assets by `lab.toml`.
 - `.lab/` is generated output and runtime state, never hand-authored source.
 
-These names are conventions rather than keywords, except `targets`, which `lab build --target <name>` resolves by path. The module system should not give a directory magical semantics merely because it is called `workflows`.
+These directory names are conventions rather than language keywords. `lab.toml` names the inventory and adapter-profile paths explicitly; the module system does not give a directory magical semantics merely because it is called `workflows`.
 
 A program's modules are lowered together, so an artifact declared in `designs` may be realized by a workflow in `workflows`, and either may come from a dependency package.
 
@@ -112,23 +116,13 @@ default-member = "packages/golden-gate"
 
 `default-member` names the package a command acting on one package operates on, and is required once a workspace has more than one member. Generated artifacts and `lab.lock` live at the workspace root; each member keeps its own `src/`, dependencies, and version.
 
-## Target profiles
+## Facility inventory and adapter profiles
 
-A target profile describes one bench. `lab build --target opentrons-ot2`, or a `[build] target = "opentrons-ot2"` in the manifest, reads `targets/opentrons-ot2.toml` and hands it to the backend the profile names:
+An SBOLInventory document describes the laboratory that can realize an experiment: Facilities contain Zones, Zones locate Assets and MaterialLots, and Assets own qualified CapabilityOfferings. `lab plan` allocates each reachable workflow requirement to an exact offering and Asset before any backend is invoked.
 
-```toml
-[target]
-backend = "opentrons.ot2"
-api_level = "2.21"
+An adapter profile cannot choose a machine or backend. `lab.toml` binds one explicit driver and profile path to one exact Asset IRI, and the selected facility offering determines whether that binding participates in a plan. The profile contains non-secret implementation configuration that the driver needs but the portable catalog does not carry; endpoints and credentials remain local runtime inputs.
 
-[stages.plating.agar_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["5", "6"]
-```
-
-A profile's filename is its name, so the file does not state one and cannot disagree with the name a build resolved it by. Emitted plans carry that name, so an operator reading a protocol can see which bench it was compiled for. `backend` names the backend that consumes the profile, spelled the one way that backend spells itself; a profile written for another backend is rejected rather than compiled.
-
-Every field has a default, so a profile states only what differs from the backend's reference bench. Unknown keys are rejected rather than ignored: a misspelled slot that silently fell back to a default is how a protocol ends up aspirating from the wrong place.
+Every adapter-profile field has a checked default, and unknown keys are rejected rather than ignored. The reviewed plan stages the canonical profile and records its SHA-256 beside the exact Asset and driver binding.
 
 Within a module, examples conventionally put providers before consumers: imports first, then shared data types, inventory values, biological declarations, and finally workflows. Dependency correctness still comes from resolved symbols and typed dataflow rather than textual order, filenames, or names such as “level 1” and “level 2.”
 
@@ -144,7 +138,6 @@ edition = "2026"
 
 [build]
 entry = "src/programs/main.lab"
-target = "opentrons-ot2"
 
 [inventory]
 document = "inventory/facility.ttl"
@@ -169,9 +162,7 @@ The old `materials` and `artifacts` arrays remain as a mutually exclusive legacy
 
 Each `[[execution.adapters]]` entry explicitly binds one exact SBOLInventory Asset IRI to a stable Lab driver and a package-relative, non-secret adapter profile. Adapter bindings require an inventory document. They do not duplicate the Asset's manufacturer, model, location, capability offerings, qualification, or control mode, and Lab never infers a driver from those catalog facts. Runtime endpoints and credentials do not belong in this portable manifest or profile. `lab check` resolves every binding against the selected facility and requires at least one exact capability-kind and control-mode match. `lab build` freezes those joins and profile hashes in `adapter_bindings.json`; planning, simulation, and execution eligibility are derived separately from effective activity, the offering's stated qualification, and the adapter's actual services.
 
-`lab plan` is the explicit facility-allocation command. It requires `inventory.document` and a runnable `build.entry`, follows only capability instances reachable from that entry's `main`, and writes the reviewed generic plan under `.lab/plan/` by default. It does not require an adapter for semantic or manual planning, does not infer a driver, and does not silently resolve candidate or adapter ambiguity.
-
-`[build] target` names the profile a plain `lab build` compiles for, so the command a laboratory runs every day produces the protocols its robots execute rather than intermediate IR. It names a profile under `targets/` and nothing else: a value carrying a path separator is rejected. `--target` compiles for a different bench and `--no-target` stops at portable module IR, so a package that declares a default keeps both. A package that declares no default builds module IR alone.
+`lab build` always emits portable experiment artifacts and never selects an instrument. `lab plan` is the explicit facility-allocation and specialization command. It requires `inventory.document` and a runnable `build.entry`, follows only capability instances reachable from that entry's `main`, binds them to exact offerings and Assets, and invokes only compatible adapters attached to those selected Assets. It does not require an adapter for semantic or manual planning, does not infer a driver, and does not silently resolve candidate or adapter ambiguity.
 
 Source modules are discovered recursively beneath `src`. Their names are the normalized package name followed by their relative path, so `src/workflows/build-plasmid.lab` becomes `tet_reporter.workflows.build_plasmid`.
 

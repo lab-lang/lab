@@ -1,9 +1,9 @@
 //! WebAssembly host API for browser editors and embedded desktop surfaces.
 
 use lab_compiler::backend::{
-    default_target_profile as compiler_default_target_profile,
-    target_capabilities as compiler_target_capabilities,
-    validate_target_profile as compiler_validate_target_profile,
+    adapter_catalog as compiler_adapter_catalog,
+    default_adapter_profile as compiler_default_adapter_profile,
+    validate_adapter_profile as compiler_validate_adapter_profile,
 };
 use lab_ide::Workspace;
 use lab_language::{ModuleId, SourceId};
@@ -111,28 +111,30 @@ impl Default for LabWorkspace {
     }
 }
 
-/// The compiler-owned target catalog used by browser control planes.
-#[wasm_bindgen(js_name = targetCapabilities)]
-pub fn target_capabilities() -> Result<JsValue, JsValue> {
-    serialize(
-        &compiler_target_capabilities().map_err(|error| JsValue::from_str(&error.to_string()))?,
-    )
+/// The compiler-owned adapter catalog used by browser control planes.
+#[wasm_bindgen(js_name = adapterCatalog)]
+pub fn adapter_catalog() -> Result<JsValue, JsValue> {
+    serialize(&compiler_adapter_catalog().map_err(|error| JsValue::from_str(&error.to_string()))?)
 }
 
-/// A complete reference profile for a backend, validated by this compiler.
-#[wasm_bindgen(js_name = defaultTargetProfile)]
-pub fn default_target_profile(backend: String, name: String) -> Result<JsValue, JsValue> {
+/// A complete reference profile for an explicitly selected adapter.
+#[wasm_bindgen(js_name = defaultAdapterProfile)]
+pub fn default_adapter_profile(driver: String, name: String) -> Result<JsValue, JsValue> {
     serialize(
-        &compiler_default_target_profile(&backend, &name)
+        &compiler_default_adapter_profile(&driver, &name)
             .map_err(|error| JsValue::from_str(&error.to_string()))?,
     )
 }
 
-/// Parse, semantically validate, canonicalize, and hash target TOML.
-#[wasm_bindgen(js_name = validateTargetProfile)]
-pub fn validate_target_profile(name: String, contents: String) -> Result<JsValue, JsValue> {
+/// Parse, semantically validate, canonicalize, and hash adapter TOML.
+#[wasm_bindgen(js_name = validateAdapterProfile)]
+pub fn validate_adapter_profile(
+    driver: String,
+    name: String,
+    contents: String,
+) -> Result<JsValue, JsValue> {
     serialize(
-        &compiler_validate_target_profile(&name, &contents)
+        &compiler_validate_adapter_profile(&driver, &name, &contents)
             .map_err(|error| JsValue::from_str(&error.to_string()))?,
     )
 }

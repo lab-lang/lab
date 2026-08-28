@@ -28,7 +28,6 @@ pub mod opentrons;
 mod package;
 mod profile;
 mod resources;
-mod target_profiles;
 mod trace;
 mod traits;
 mod typst;
@@ -40,10 +39,4 @@ pub use adapters::{
     validate_adapter_profile,
 };
 pub use constraints::TargetConstraintError;
-pub use target_profiles::{
-    CAPABILITIES_FORMAT, KNOWN_BACKENDS, PROFILE_SCHEMA_VERSION, TargetCapabilitiesDocument,
-    TargetCapability, TargetKind, TargetProfile, TargetProfileContractError, VALIDATION_FORMAT,
-    ValidatedTargetProfile, default_target_profile, parse_target_profile, target_capabilities,
-    validate_target_profile,
-};
 pub use traits::{Backend, BackendEmitter};

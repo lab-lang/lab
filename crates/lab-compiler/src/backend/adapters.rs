@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, ControlMode, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
 };
-use schemars::JsonSchema;
+use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -18,7 +18,6 @@ use thiserror::Error;
 use crate::backend::hamilton::star::StarTargetProfile;
 use crate::backend::opentrons::flex::FlexTargetProfile;
 use crate::backend::opentrons::ot2::Ot2TargetProfile;
-use crate::backend::target_profiles::{TargetProfile, TargetProfileContractError, schema_value};
 use crate::planning::BuildInventory;
 use crate::{ArtifactBundle, ProtocolLairProgram};
 use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
@@ -94,7 +93,7 @@ pub enum AdapterProfileContractError {
     #[error("invalid {driver} adapter profile: {message}")]
     Invalid { driver: String, message: String },
     #[error("failed to describe adapter profiles: {0}")]
-    Contract(#[from] TargetProfileContractError),
+    Contract(String),
     #[error("failed to parse adapter profile TOML: {0}")]
     Toml(#[from] toml::de::Error),
 }
@@ -264,33 +263,28 @@ pub fn validate_adapter_profile(
     name: &str,
     contents: &str,
 ) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    let target = match driver {
-        "opentrons.ot2" => Ot2TargetProfile::parse(name, contents)
-            .map(TargetProfile::Ot2)
-            .map_err(|error| invalid(driver, error))?,
-        "opentrons.flex" => FlexTargetProfile::parse(name, contents)
-            .map(TargetProfile::Flex)
-            .map_err(|error| invalid(driver, error))?,
-        "hamilton.star" => StarTargetProfile::parse(name, contents)
-            .map(TargetProfile::Star)
-            .map_err(|error| invalid(driver, error))?,
+    match driver {
+        "opentrons.ot2" => {
+            let profile =
+                Ot2TargetProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
+            canonical_adapter_profile(driver, name, &profile)
+        }
+        "opentrons.flex" => {
+            let profile =
+                FlexTargetProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
+            canonical_adapter_profile(driver, name, &profile)
+        }
+        "hamilton.star" => {
+            let profile =
+                StarTargetProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
+            canonical_adapter_profile(driver, name, &profile)
+        }
         "inheco.odtc" | "byonoy.absorbance96" | "lab.simulator" => {
             let _: EmptyAdapterProfile = toml::from_str(contents)?;
-            return Ok(empty_profile(driver, name));
+            Ok(empty_profile(driver, name))
         }
-        other => return Err(unknown_driver(other)),
-    };
-    let profile = target.canonical(name)?;
-    Ok(ValidatedAdapterProfile {
-        format: "lab.adapter-profile-validation.v1".to_owned(),
-        schema_version: ADAPTER_PROFILE_SCHEMA_VERSION.to_owned(),
-        compiler_version: profile.compiler_version.to_owned(),
-        name: profile.name,
-        driver: driver.to_owned(),
-        canonical_toml: profile.canonical_toml,
-        canonical_json: profile.canonical_json,
-        sha256: profile.sha256,
-    })
+        other => Err(unknown_driver(other)),
+    }
 }
 
 /// Lowers one complete checked program through an explicitly selected adapter.
@@ -392,6 +386,101 @@ pub enum AdapterLoweringError {
     InvalidProfile { driver: String, message: String },
     #[error("adapter '{driver}' could not lower the allocated program: {message}")]
     Lowering { driver: String, message: String },
+}
+
+fn schema_value<T: JsonSchema>() -> Result<Value, AdapterProfileContractError> {
+    let mut schema = serde_json::to_value(schema_for!(T))
+        .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
+    sanitize_schema_defaults(&mut schema);
+    Ok(schema)
+}
+
+fn sanitize_schema_defaults(value: &mut Value) {
+    let definitions = value.get("$defs").cloned().unwrap_or(Value::Null);
+    sanitize_schema_node(value, &definitions);
+}
+
+fn sanitize_schema_node(value: &mut Value, definitions: &Value) {
+    if let Some(object) = value.as_object_mut() {
+        let property_names = closed_object_properties(object, definitions);
+        if let (Some(property_names), Some(default)) = (
+            property_names,
+            object.get_mut("default").and_then(Value::as_object_mut),
+        ) {
+            default.retain(|name, _| property_names.contains(name));
+        }
+        for child in object.values_mut() {
+            sanitize_schema_node(child, definitions);
+        }
+    } else if let Some(array) = value.as_array_mut() {
+        for child in array {
+            sanitize_schema_node(child, definitions);
+        }
+    }
+}
+
+fn closed_object_properties(
+    object: &serde_json::Map<String, Value>,
+    definitions: &Value,
+) -> Option<BTreeSet<String>> {
+    let closed_object = if object.get("additionalProperties") == Some(&Value::Bool(false)) {
+        Some(object)
+    } else {
+        object
+            .get("$ref")
+            .and_then(Value::as_str)
+            .and_then(|reference| reference.strip_prefix("#/$defs/"))
+            .and_then(|name| definitions.get(name))
+            .and_then(Value::as_object)
+            .filter(|definition| {
+                definition.get("additionalProperties") == Some(&Value::Bool(false))
+            })
+    }?;
+    closed_object
+        .get("properties")
+        .and_then(Value::as_object)
+        .map(|properties| properties.keys().cloned().collect())
+}
+
+fn canonical_adapter_profile<T: Serialize>(
+    driver: &str,
+    name: &str,
+    profile: &T,
+) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
+    let mut canonical_json = serde_json::to_value(profile)
+        .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
+    remove_derived_name(&mut canonical_json);
+
+    let mut toml_value = toml::Value::try_from(profile)
+        .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
+    remove_derived_toml_name(&mut toml_value);
+    let mut canonical_toml = toml::to_string_pretty(&toml_value)
+        .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
+    if !canonical_toml.ends_with('\n') {
+        canonical_toml.push('\n');
+    }
+    Ok(ValidatedAdapterProfile {
+        format: "lab.adapter-profile-validation.v1".to_owned(),
+        schema_version: ADAPTER_PROFILE_SCHEMA_VERSION.to_owned(),
+        compiler_version: env!("CARGO_PKG_VERSION").to_owned(),
+        name: name.to_owned(),
+        driver: driver.to_owned(),
+        sha256: sha256(canonical_toml.as_bytes()),
+        canonical_toml,
+        canonical_json,
+    })
+}
+
+fn remove_derived_name(value: &mut Value) {
+    if let Some(target) = value.get_mut("target").and_then(Value::as_object_mut) {
+        target.remove("name");
+    }
+}
+
+fn remove_derived_toml_name(value: &mut toml::Value) {
+    if let Some(target) = value.get_mut("target").and_then(toml::Value::as_table_mut) {
+        target.remove("name");
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]

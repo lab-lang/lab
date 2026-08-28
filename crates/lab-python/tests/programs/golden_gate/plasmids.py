@@ -7,8 +7,7 @@ under `components`, in that order, so the design stays true once the compiler
 computes an assembled sequence rather than taking one on trust.
 
 The reaction chemistry in each design is scientific intent and travels with
-the artifact; where the reaction physically happens is a target profile's
-concern.
+the artifact; facility allocation determines where it physically happens.
 """
 
 import lab

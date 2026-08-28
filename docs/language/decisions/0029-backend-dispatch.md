@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes the single-backend position of 0014.
+Superseded by [0044: Facility graphs and capability binding replace workcell targets](0044-facility-graphs-replace-workcell-targets.md). This records the historical direct-target dispatch design.
 
 ## Context
 

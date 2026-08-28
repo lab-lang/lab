@@ -139,10 +139,6 @@ pub enum PackageError {
     UnsupportedEdition(String),
     #[error("invalid dependency '{name}': {message}")]
     InvalidDependency { name: String, message: String },
-    #[error(
-        "invalid default target '{0}'; a target names a profile under 'targets/' using letters, digits, '-' or '_'"
-    )]
-    InvalidTarget(String),
     #[error("invalid inventory configuration: {0}")]
     InvalidInventory(String),
     #[error("invalid execution configuration: {0}")]

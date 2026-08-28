@@ -1,4 +1,4 @@
-//! `lab build` typesets every emitted protocol document to PDF, in-process
+//! `lab plan` typesets every emitted protocol document to PDF, in-process
 //! and hermetically: fonts are embedded in the binary and the documents
 //! import only the bundled style sheet, so this runs offline everywhere.
 
@@ -22,28 +22,27 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 #[test]
-fn build_typesets_every_document_to_pdf() {
+fn facility_plan_typesets_every_document_to_pdf() {
     let example = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/golden-gate");
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("golden-gate");
     copy_dir(&example, &project);
 
     let output = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args([
-            "build",
-            project.to_str().unwrap(),
-            "--target",
-            "opentrons-ot2",
-        ])
+        .args(["plan", project.to_str().unwrap()])
         .output()
         .unwrap();
     assert!(
         output.status.success(),
-        "build failed: {}",
+        "facility plan failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let target_root = project.join(".lab/build/opentrons-ot2");
+    let plan_root = project.join(".lab/plan");
+    let lowering: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(plan_root.join("facility_lowering.json")).unwrap())
+            .unwrap();
+    let target_root = plan_root.join(lowering["routes"][0]["output"].as_str().unwrap());
     for document in [
         "manual_protocol.pdf",
         "dependency_report.pdf",
@@ -63,6 +62,6 @@ fn build_typesets_every_document_to_pdf() {
     let human = String::from_utf8_lossy(&output.stdout);
     assert!(
         human.contains("Documents:"),
-        "build output lists the typeset documents: {human}"
+        "plan output lists the typeset documents: {human}"
     );
 }

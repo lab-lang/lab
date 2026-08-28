@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -19,6 +19,22 @@ fn temporary_project() -> PathBuf {
         std::process::id(),
         NEXT_TEST.fetch_add(1, Ordering::Relaxed)
     ))
+}
+
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name() == ".lab" {
+            continue;
+        }
+        let destination = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &destination);
+        } else {
+            std::fs::copy(entry.path(), destination).unwrap();
+        }
+    }
 }
 
 #[test]
@@ -364,70 +380,6 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
 }
 
 #[test]
-fn a_target_build_freezes_exact_material_lot_bindings() {
-    let project = temporary_project();
-    std::fs::create_dir_all(project.join("src/programs")).unwrap();
-    std::fs::create_dir_all(project.join("inventory")).unwrap();
-    std::fs::create_dir_all(project.join("targets")).unwrap();
-    std::fs::write(
-        project.join("lab.toml"),
-        "[package]\nname = \"material-lot-build\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[build]\nentry = \"src/programs/main.lab\"\ntarget = \"opentrons-ot2\"\n\n[inventory]\ndocument = \"inventory/catalog.ttl\"\n",
-    )
-    .unwrap();
-    std::fs::write(
-        project.join("src/programs/main.lab"),
-        include_str!("fixtures/material-lot-build.lab"),
-    )
-    .unwrap();
-    let inventory = include_str!("fixtures/material-lot-inventory.ttl");
-    std::fs::write(project.join("inventory/catalog.ttl"), inventory).unwrap();
-    std::fs::write(
-        project.join("targets/opentrons-ot2.toml"),
-        "[target]\nbackend = \"opentrons.ot2\"\n",
-    )
-    .unwrap();
-
-    let built = run(&["build", project.to_str().unwrap(), "--json"]);
-
-    assert!(
-        built.status.success(),
-        "{}",
-        String::from_utf8_lossy(&built.stderr)
-    );
-    let manifest: Value = serde_json::from_slice(
-        &std::fs::read(project.join(".lab/build/opentrons-ot2/dependency_manifest.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest["schema_version"], "lab.dependency-build.v1");
-    assert_eq!(manifest["inventory"]["kind"], "sbol_inventory");
-    assert_eq!(
-        manifest["inventory"]["facility"],
-        "https://example.org/material-lot-test/facility"
-    );
-    assert_eq!(
-        manifest["inventory"]["source_sha256"]
-            .as_str()
-            .unwrap()
-            .len(),
-        64
-    );
-    let bindings = manifest["nodes"][0]["material_lot_bindings"]
-        .as_array()
-        .unwrap();
-    assert_eq!(bindings.len(), 6);
-    assert!(bindings.iter().all(|binding| {
-        binding["component"]
-            .as_str()
-            .unwrap()
-            .starts_with("https://example.org/material-lot-test/")
-            && binding["material_lot"].as_str().unwrap().ends_with("_lot")
-    }));
-    assert_eq!(manifest["nodes"][0]["resolution"], "generated");
-
-    std::fs::remove_dir_all(project).unwrap();
-}
-
-#[test]
 fn facility_lowering_emits_automation_protocols_for_every_wave() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
@@ -545,8 +497,9 @@ fn build_stays_portable_when_a_package_describes_an_operational_facility() {
         String::from_utf8_lossy(&built.stderr)
     );
     let result: Value = serde_json::from_slice(&built.stdout).unwrap();
-    assert_eq!(result["result"]["target"], Value::Null);
-    assert!(result["result"]["protocols"].as_array().unwrap().is_empty());
+    assert!(result["result"].get("target").is_none());
+    assert!(result["result"].get("protocols").is_none());
+    assert!(result["result"].get("documents").is_none());
     assert!(!out_dir.join("opentrons-ot2").exists());
     assert!(out_dir.join("package.json").is_file());
     let index: Value =
@@ -785,29 +738,40 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     std::fs::remove_dir_all(output_root).unwrap();
 }
 
-/// The `backend` key a profile declares selects the backend, so the same
-/// program builds for a Flex without a source edit.
+/// A different facility Asset and exact adapter binding lower the same experiment for a Flex
+/// without a source edit or an independently selected target.
 #[test]
-fn a_profile_selects_its_backend_and_that_backends_protocol_format() {
+fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
         .unwrap();
-    let out_dir = std::env::temp_dir().join(format!(
-        "lab-golden-gate-flex-{}-{}",
-        std::process::id(),
-        line!()
-    ));
-    if out_dir.exists() {
-        std::fs::remove_dir_all(&out_dir).unwrap();
-    }
+    let project = temporary_project();
+    copy_dir(&example, &project);
+    let inventory_path = project.join("inventory/facility.ttl");
+    let inventory = std::fs::read_to_string(&inventory_path)
+        .unwrap()
+        .replace("opentrons_ot2", "opentrons_flex")
+        .replace("Opentrons OT-2", "Opentrons Flex")
+        .replace(
+            "OT-2 with Thermocycler Module Gen2",
+            "Flex with Thermocycler Module Gen2",
+        );
+    std::fs::write(inventory_path, inventory).unwrap();
+    let manifest_path = project.join("lab.toml");
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("opentrons_ot2", "opentrons_flex")
+        .replace("opentrons.ot2", "opentrons.flex")
+        .replace("opentrons-ot2.toml", "opentrons-flex.toml");
+    std::fs::write(manifest_path, manifest).unwrap();
+    std::fs::write(project.join("adapters/opentrons-flex.toml"), "").unwrap();
+    let out_dir = project.join("review");
 
     let output = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
-            "build",
-            example.to_str().unwrap(),
-            "--target",
-            "opentrons-flex",
+            "plan",
+            project.to_str().unwrap(),
             "--out-dir",
             out_dir.to_str().unwrap(),
             "--json",
@@ -816,22 +780,30 @@ fn a_profile_selects_its_backend_and_that_backends_protocol_format() {
         .unwrap();
     assert!(
         output.status.success(),
-        "Flex target build failed: {}",
+        "Flex facility plan failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(result["result"]["target"], "opentrons-flex");
     let protocols = result["result"]["protocols"].as_array().unwrap();
     assert_eq!(protocols.len(), 3);
     assert!(
         protocols
             .iter()
             .all(|path| path.as_str().unwrap().ends_with("_protocol.json")),
-        "a Flex build emits JSON protocols: {protocols:?}"
+        "the allocated Flex adapter emits JSON protocols: {protocols:?}"
     );
 
-    let target_root = out_dir.join("opentrons-flex");
+    let lowering: Value =
+        serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
+            .unwrap();
+    let route = &lowering["routes"][0];
+    assert_eq!(
+        route["asset"],
+        "https://example.org/golden-gate/opentrons_flex"
+    );
+    assert_eq!(route["driver"], "opentrons.flex");
+    let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root
             .join("wave-001/assembly_protocol.json")
@@ -852,7 +824,7 @@ fn a_profile_selects_its_backend_and_that_backends_protocol_format() {
     assert_eq!(
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
         serde_json::json!(["B2", "B3"]),
-        "the emitted plan carries the deck the target profile declared"
+        "the emitted plan carries the allocated adapter's deck configuration"
     );
 
     let protocol: Value = serde_json::from_str(
@@ -862,58 +834,7 @@ fn a_profile_selects_its_backend_and_that_backends_protocol_format() {
     assert_eq!(protocol["schemaVersion"], 8);
     assert_eq!(protocol["robot"]["model"], "OT-3 Standard");
 
-    std::fs::remove_dir_all(out_dir).unwrap();
-}
-
-#[test]
-fn a_target_build_rejects_a_backend_this_toolchain_does_not_provide() {
-    let project = temporary_project();
-    std::fs::create_dir_all(project.join("src/programs")).unwrap();
-    std::fs::write(
-        project.join("lab.toml"),
-        "[package]\nname = \"unknown-backend\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[build]\nentry = \"src/programs/main.lab\"\n",
-    )
-    .unwrap();
-    std::fs::write(
-        project.join("src/programs/main.lab"),
-        "use std.bio.build\nuse std.bio.designs\n\nplasmid starter:\n  sequence = dna(\"ATGC\")\n  require topology == circular\n  accept sequence == design.sequence\n\nworkflow main() -> Material<Plasmid>:\n  product <- realize starter\n  return product\n",
-    )
-    .unwrap();
-    std::fs::create_dir_all(project.join("targets")).unwrap();
-    std::fs::write(
-        project.join("targets/evo.toml"),
-        "[target]\nbackend = \"tecan.evo\"\n",
-    )
-    .unwrap();
-
-    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args(["build", project.to_str().unwrap(), "--target", "evo"])
-        .output()
-        .unwrap();
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("tecan.evo"), "{stderr}");
-    assert!(stderr.contains("opentrons.flex"), "{stderr}");
-    assert!(stderr.contains("hamilton.star"), "{stderr}");
-
     std::fs::remove_dir_all(project).unwrap();
-}
-
-#[test]
-fn a_target_build_rejects_a_profile_that_does_not_exist() {
-    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/golden-gate")
-        .canonicalize()
-        .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args(["build", example.to_str().unwrap(), "--target", "no-such"])
-        .output()
-        .unwrap();
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("no target profile at"), "{stderr}");
 }
 
 #[test]

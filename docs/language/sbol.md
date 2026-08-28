@@ -352,7 +352,7 @@ The correspondence with `provenance.rs` is exact:
 | `across 3 biological replicates` | three Implementations with distinct `wasGeneratedBy` |
 | `accept concentration >= 100 ng/uL` | `ExperimentalData` and an OM `Measure`, gathered in an `Experiment` |
 | the workflow that built it | `prov:Plan`, with `Association.hadRole = DBTL_BUILD` |
-| the target profile and instrument | `prov:Agent` |
+| the allocated Asset and its execution adapter | `prov:Agent` |
 
 The property that matters: **independence survives the round trip.** A third
 party reading Lab's output can recompute which samples are biological replicates

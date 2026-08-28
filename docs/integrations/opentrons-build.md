@@ -13,11 +13,11 @@ The implementation has two mandatory target-neutral LAIR boundaries and one expl
 1. Design LAIR contains declarative artifact identity, sequence, topology, copy, and acceptance intent. It contains no build recipe or procedure fields.
 2. Workflow LAIR preserves source operations as typed material dataflow. `workflow.realize` owns abstract assembly inputs, artifact dependency identities, assembly policy, and reaction chemistry; `workflow.transform` realizes a strain from its chassis and carried plasmids; subsequent operations carry recovery, dilution, and plating intent on explicit use-def edges. Chemistry travels as a named dictionary rather than one attribute per reagent, so a recipe stays inspectable without the dialect growing a key per volume.
 3. Protocol LAIR is produced by a Pliron dialect conversion. It selects synthesis, Golden Gate assembly, provision, transformation, recovery, serial dilution, and selective plating operations, replaces Workflow values with Protocol values, erases Workflow operations, verifies the resulting module, and runs material-linearity analysis.
-4. `Ot2ExecutionPlan` is the backend-owned, validated, and resource-allocated robot plan, including source wells, reaction wells, DNA-plate wells, transformation mappings, dilution wells, and plating wells. It carries the target profile it was allocated against, so every projection reads one deck.
+4. `Ot2ExecutionPlan` is the adapter-owned, validated, and resource-allocated robot plan, including source wells, reaction wells, DNA-plate wells, transformation mappings, dilution wells, and plating wells. It carries the operational profile frozen for the exact allocated Asset, so every projection reads one deck.
 
 The JSON manifest, Markdown instructions, and all three Python protocols are projections of the same `Ot2ExecutionPlan`. This prevents an emitter from independently reconstructing or changing the robot plan. Robot-specific rendering stays under `crates/lab-compiler/src/backend/opentrons/ot2/`.
 
-Labware, deck slots, modules, pipettes, mounts, API level, and per-stage capacity come from a target profile rather than from constants. `profile.rs` parses and validates one: it rejects a slot an OT-2 does not address, a slot the installed thermocycler already occupies, two pieces of labware claiming one slot during a stage, and any key it does not recognize. Every field defaults to the reference bench, so a profile states only what differs.
+Labware, deck slots, modules, pipettes, mounts, API level, and per-stage capacity currently come from the allocated OT-2 adapter's checked operational profile rather than constants. `profile.rs` rejects a slot an OT-2 does not address, a slot the installed thermocycler already occupies, two pieces of labware claiming one slot during a stage, and any key it does not recognize. The profile cannot select the adapter or Asset; those are exact facility-plan bindings.
 
 Declaring more than one slot for a plate raises the batch size a bench holds. Well addresses are plate-and-well pairs, and allocation fills each declared plate in turn.
 
@@ -33,7 +33,7 @@ The OT-2 specialization selects the concrete realization used by this tutorial:
 - serial dilution for `dilute`; and
 - selective plating for `plate`.
 
-If source omits or misorders a required material transition, Workflow verification fails before Protocol selection. Other laboratory profiles can provide another Workflow-to-Protocol conversion, while another robot backend can consume the same verified Protocol operations and implement its own execution plan.
+If source omits or misorders a required material transition, Workflow verification fails before Protocol selection. Another facility can bind compatible offerings to different adapters, while those adapters consume the same verified Protocol operations and implement their own device plans.
 
 ## Generated package
 
@@ -43,7 +43,7 @@ Artifacts in one wave have no ordering constraint between them, so a wave is a s
 
 The implementation validates each design's reaction balance against its own stated volume, replicate and dilution bounds, plate capacity across every declared slot, source-rack capacity, and tip capacity. Generated Python is exercised with the official Opentrons simulator.
 
-Run `scripts/check-opentrons-target.sh <bundle>` to lint and typecheck the maintained Python target and every emitted protocol, followed by `scripts/simulate-opentrons.sh <bundle>` for Opentrons simulation.
+Run `scripts/check-opentrons-bundle.sh <bundle>` to lint and typecheck the maintained Python adapter and every emitted protocol, followed by `scripts/simulate-opentrons.sh <bundle>` for Opentrons simulation.
 
 ## Opening a protocol in the Opentrons app
 

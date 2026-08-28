@@ -53,7 +53,7 @@ labc docs/language/specimens/inventory-plasmid.lab --emit module-ir
 labc docs/language/specimens/dependency-build.lab --emit module-ir
 ```
 
-Portable module compilation resolves and checks the program but does not select a laboratory target, schedule work, or dispatch physical actions.
+Portable module compilation resolves and checks the program but does not select a facility Asset, schedule work, or dispatch physical actions.
 
 The latest accepted design records are:
 
@@ -62,7 +62,7 @@ The latest accepted design records are:
 - [`0011`](decisions/0011-dependencies-from-material-dataflow.md): dependency graphs derived from checked material dataflow;
 - [`0012`](decisions/0012-named-workflow-results.md): named typed workflow results and direct multi-value returns;
 - [`0013`](decisions/0013-strain-artifacts.md): engineered organisms as first-class artifacts;
-- [`0014`](decisions/0014-target-profiles-and-workspaces.md): target profiles for benches and workspaces for packages;
+- [`0014`](decisions/0014-target-profiles-and-workspaces.md): historical target profiles and the retained workspace design;
 - [`0015`](decisions/0015-roles-classify-types.md): roles classify types, and a role is not a type;
 - [`0016`](decisions/0016-callable-circuit-signatures.md): circuits declare callable signatures with inline type parameters;
 - [`0017`](decisions/0017-forgotten-type-arguments.md): a type argument may be deliberately forgotten;
@@ -77,7 +77,7 @@ The latest accepted design records are:
 - [`0026`](decisions/0026-lineage-and-replicates.md): replicate class is lineage, not a property;
 - [`0027`](decisions/0027-provenance-is-stated-per-thing.md): provenance is a fact about a thing, not about its type;
 - [`0028`](decisions/0028-schemas-are-contributed-to.md): several packages describe one kind;
-- [`0029`](decisions/0029-backend-dispatch.md): a profile's backend key selects its backend;
+- [`0029`](decisions/0029-backend-dispatch.md): superseded historical direct-target backend dispatch;
 - [`0030`](decisions/0030-reviewed-frames-are-the-execution-boundary.md): reviewed frames are the execution boundary;
 - [`0031`](decisions/0031-workcell-targets.md): superseded historical design for compiler-specific multi-device composition;
 - [`0032`](decisions/0032-provenance-blocks.md): a provenance verb can open a block;

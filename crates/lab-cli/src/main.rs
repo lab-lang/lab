@@ -3,7 +3,6 @@ mod commands;
 mod execution_run;
 mod facility_lowering;
 mod run;
-mod targets;
 mod typeset;
 mod update;
 
@@ -44,8 +43,7 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Build a package into verified portable module artifacts, and into
-    /// automation protocols when a target is named.
+    /// Build a package into verified portable experiment artifacts.
     Build {
         /// Package directory or any path inside a package.
         #[arg(default_value = ".")]
@@ -53,14 +51,6 @@ enum Command {
         /// Artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
-        /// Target profile to compile for, named by a file under `targets/`;
-        /// defaults to `[build] target` in the manifest.
-        #[arg(long)]
-        target: Option<String>,
-        /// Build portable module IR only, ignoring the manifest's default
-        /// target.
-        #[arg(long, conflicts_with = "target")]
-        no_target: bool,
     },
     /// Bind reachable workflow requirements to one validated facility and write a reviewed plan.
     Plan {
@@ -70,11 +60,6 @@ enum Command {
         /// Plan artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
-    },
-    /// Discover, validate, and render compiler-owned target profiles.
-    Targets {
-        #[command(subcommand)]
-        command: TargetsCommand,
     },
     /// Discover, validate, and render asset-bound adapter profiles.
     Adapters {
@@ -115,28 +100,6 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
-}
-
-#[derive(Debug, Subcommand)]
-enum TargetsCommand {
-    /// Describe every legacy single-device backend, or one backend in detail.
-    Describe {
-        /// Concrete `[target] backend` value to describe.
-        #[arg(long)]
-        backend: Option<String>,
-    },
-    /// Print the complete reference profile for one backend.
-    Default {
-        /// Concrete `[target] backend` value.
-        backend: String,
-        /// Profile filename stem used for validation metadata.
-        #[arg(long, default_value = "target")]
-        name: String,
-    },
-    /// Parse and semantically validate a target profile.
-    Validate { path: PathBuf },
-    /// Validate and print a complete canonical target profile.
-    Render { path: PathBuf },
 }
 
 #[derive(Debug, Subcommand)]
@@ -201,19 +164,8 @@ fn run() -> Result<()> {
     match cli.command {
         Command::New { path, name } => commands::new_project(path, name, &output),
         Command::Check { path } => commands::check(path, &output),
-        Command::Build {
-            path,
-            out_dir,
-            target,
-            no_target,
-        } => commands::build(path, out_dir, target, no_target, &output),
+        Command::Build { path, out_dir } => commands::build(path, out_dir, &output),
         Command::Plan { path, out_dir } => commands::plan(path, out_dir, &output),
-        Command::Targets { command } => match command {
-            TargetsCommand::Describe { backend } => targets::describe(backend, &output),
-            TargetsCommand::Default { backend, name } => targets::default(backend, name, &output),
-            TargetsCommand::Validate { path } => targets::validate(path, &output),
-            TargetsCommand::Render { path } => targets::render(path, &output),
-        },
         Command::Adapters { command } => match command {
             AdaptersCommand::Describe { driver } => adapters::describe(driver, &output),
             AdaptersCommand::Default { driver, name } => adapters::default(driver, name, &output),
@@ -257,23 +209,12 @@ mod tests {
 
     #[test]
     fn parses_package_build_options() {
-        let cli = Cli::try_parse_from([
-            "lab",
-            "build",
-            "project",
-            "--out-dir",
-            "dist",
-            "--target",
-            "opentrons-ot2",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["lab", "build", "project", "--out-dir", "dist"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Build { path, out_dir, target, no_target }
+            Command::Build { path, out_dir }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
-                    && target.as_deref() == Some("opentrons-ot2")
-                    && !no_target
         ));
     }
 
@@ -326,37 +267,15 @@ mod tests {
     }
 
     #[test]
-    fn rejects_naming_a_target_and_opting_out_of_one() {
-        assert!(
-            Cli::try_parse_from(["lab", "build", "--target", "opentrons-ot2", "--no-target"])
-                .is_err()
-        );
+    fn rejects_the_removed_target_surfaces() {
+        assert!(Cli::try_parse_from(["lab", "build", "--target", "opentrons-ot2"]).is_err());
+        assert!(Cli::try_parse_from(["lab", "targets", "describe"]).is_err());
     }
 
     #[test]
     fn accepts_global_json_after_the_subcommand() {
         let cli = Cli::try_parse_from(["lab", "check", "--json"]).unwrap();
         assert!(cli.json);
-    }
-
-    #[test]
-    fn parses_target_contract_commands() {
-        let cli = Cli::try_parse_from([
-            "lab",
-            "targets",
-            "describe",
-            "--backend",
-            "hamilton.star",
-            "--json",
-        ])
-        .unwrap();
-        assert!(cli.json);
-        assert!(matches!(
-            cli.command,
-            Command::Targets {
-                command: TargetsCommand::Describe { backend: Some(backend) }
-            } if backend == "hamilton.star"
-        ));
     }
 
     #[test]
