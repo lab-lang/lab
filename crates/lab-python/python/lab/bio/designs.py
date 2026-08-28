@@ -6,8 +6,8 @@ knows the shape. Whether any one thing was built or bought is stated by the
 declaration that names it, not by its kind.
 
 Each kind states the ontology terms it stands for, so what it is travels with
-it. A target reading a design knows a backbone is DNA and an antibiotic is a
-small molecule without being told separately.
+it. Any consumer reading a design knows a backbone is DNA and an antibiotic
+is a small molecule without being told separately.
 """
 
 # Generated from the Lab standard library by `python -m lab.codegen`. Do not edit.

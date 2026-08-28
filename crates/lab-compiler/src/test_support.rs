@@ -54,8 +54,8 @@ pub fn golden_gate_modules() -> Vec<CheckedModule> {
     modules
 }
 
-/// Those modules lowered together, the way a target build lowers the program
-/// a package's entry point forms.
+/// Those modules lowered together, the way a package build lowers the program
+/// formed by its entry point.
 pub fn golden_gate_lair() -> PortableLairProgram {
     let modules = golden_gate_modules();
     let borrowed = modules.iter().collect::<Vec<_>>();

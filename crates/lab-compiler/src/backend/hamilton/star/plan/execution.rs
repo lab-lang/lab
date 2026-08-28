@@ -156,7 +156,7 @@ pub struct StarRunPlan {
     pub manual_after: Vec<ManualStep>,
     /// The thermal programs behind this run's manual steps, structured for
     /// projection into separate thermocycler documents. On a standalone STAR
-    /// target the operator prose in `manual_after` is the whole story, so
+    /// adapter the operator prose in `manual_after` is the whole story, so
     /// these never reach the serialized manifest.
     #[serde(skip)]
     pub thermal_after: Vec<ThermalRequirement>,

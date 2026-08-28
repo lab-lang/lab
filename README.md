@@ -25,7 +25,7 @@ SBOL is not a third way in. It is the vocabulary designs are written and exchang
 
 Lab is working toward a world in which laboratory work is portable, inspectable, and reliable across manual benches, automation, and cloud labs.
 
-Today, protocols commonly entangle scientific intent with site-specific procedures. Lab separates them. A program describes biological designs, physical materials, workflows, and acceptance criteria; the compiler progressively specializes that program for the capabilities, policies, inventory, and hardware of a target laboratory.
+Today, protocols commonly entangle scientific intent with site-specific procedures. Lab separates them. A program describes biological designs, physical materials, workflows, and acceptance criteria; the compiler progressively specializes that program against the capabilities, policies, inventory, and hardware of a selected facility.
 
 One biological program should be adaptable to many valid execution environments without erasing what the scientist meant.
 
@@ -35,7 +35,7 @@ Lab treats laboratory automation as a compilation and control problem:
 
 - the type system models biological artifacts, physical materials, durable effects, and evidence;
 - two frontends, Python and Lab, lower to one checked module, which is the portable boundary nothing downstream reaches behind;
-- **LAIR**, the Lab Automation Intermediate Representation, preserves meaning as programs are progressively lowered from portable intent to target-specific operations;
+- **LAIR**, the Lab Automation Intermediate Representation, preserves meaning as programs are progressively lowered from portable intent to method-selected procedures and facility-bound device operations;
 - the compiler checks types, action contracts, and material ownership while keeping specialization decisions inspectable;
 - a durable runtime will execute idempotent actions, recover around failures, react to observations, and preserve lineage from intent to outcome.
 

@@ -1,6 +1,6 @@
 # 0011: Artifact dependencies derive from typed material dataflow
 
-Status: accepted, initial target lowering implemented
+Status: accepted, initial facility lowering implemented
 
 ## Decision
 
@@ -14,10 +14,10 @@ workflow assemble_reporter(
   product <- realize reporter from dependencies
 ```
 
-The workflow signature states what must already exist. The `Material<Plasmid>` value is affine, and the `realize` contract takes the dependency list. Checked IR therefore preserves both dependency identity and ownership transfer without target-specific graph annotations in the core language.
+The workflow signature states what must already exist. The `Material<Plasmid>` value is affine, and the `realize` contract takes the dependency list. Checked IR therefore preserves both dependency identity and ownership transfer without facility-specific graph annotations in the core language.
 
-A target lowerer may derive graph edges, roots, build waves, cycles, retries, and blockers from that checked dataflow. Inventory may satisfy a node without executing its recipe, which cuts the corresponding execution path while leaving the source dependency relation intact.
+A facility-independent planner may derive graph edges, roots, build waves, cycles, retries, and blockers from that checked dataflow. Inventory may satisfy a node without executing its recipe, which cuts the corresponding execution path while leaving the source dependency relation intact.
 
 ## Boundary
 
-The generic frontend resolves operations, checks types and ownership, and preserves dependency dataflow. It does not select Golden Gate, heat shock, deck layouts, reaction volumes, or any other hardware procedure. Those choices and their constraints belong to a narrow target specialization. A different target may lower the same source operations differently or reject unsupported properties and operation sequences explicitly.
+The generic frontend resolves operations, checks types and ownership, and preserves dependency dataflow. Method selection may choose Golden Gate and heat shock while remaining independent of any facility. Facility planning binds the resulting requirements to exact offerings and Assets, after which the bound adapter chooses deck layouts and device operations. A different supported method or compatible adapter may lower the same source operations differently or reject unsupported properties and operation sequences explicitly.

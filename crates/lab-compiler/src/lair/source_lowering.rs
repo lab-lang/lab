@@ -1,4 +1,4 @@
-//! Lower checked Lab modules into target-neutral Design and Workflow intent.
+//! Lower checked Lab modules into facility-independent Design and Workflow intent.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -57,8 +57,7 @@ pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
     EmptyBuild,
     #[error(
-        "the opentrons-ot2 target does not know how to build a '{kind}', which artifact \
-         '{artifact}' declares"
+        "portable LAIR lowering does not support artifact kind '{kind}' declared by '{artifact}'"
     )]
     UnsupportedArtifactKind { artifact: String, kind: String },
     #[error("artifact '{artifact}' is missing workflow input '{field}'")]
@@ -112,7 +111,7 @@ pub enum SourceLoweringError {
 
 /// One declared artifact together with the workflow that realizes it. The two
 /// kinds are separate because they name different materials and produce
-/// different laboratory stages, not because a target requires it.
+/// different laboratory stages, not because a device adapter requires it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BuildArtifactIntent {
     Plasmid(PlasmidArtifactIntent),
@@ -413,8 +412,8 @@ fn lower_artifact(
             },
             actions: flow.actions.clone(),
         })),
-        // This backend builds plasmids and strains. A package may declare other
-        // kinds; a target that does not know how to make one says so.
+        // The initial portable lowering supports plasmid and strain intents. A
+        // package may declare other kinds, which require their own lowering contract.
         other => Err(SourceLoweringError::UnsupportedArtifactKind {
             artifact: name.to_owned(),
             kind: other.to_owned(),

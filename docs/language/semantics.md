@@ -71,7 +71,7 @@ it. Provenance is discarded after the type system has done its work, not before.
 
 ## Declarations, properties, and identities
 
-A biological declaration is immutable intent. Its `name = value` entries are typed declarative properties: deterministic expressions evaluated once, never mutations and never durable effects. Portable module IR preserves them as named checked expressions without assigning target-specific meaning to every property name.
+A biological declaration is immutable intent. Its `name = value` entries are typed declarative properties: deterministic expressions evaluated once, never mutations and never durable effects. Portable module IR preserves them as named checked expressions without assigning method- or adapter-specific meaning to every property name.
 
 Inside a declaration body the two operators divide cleanly. `=` associates a name with a value; `:` gives a name a type. That is what lets a declaration's shape be read before its meaning is resolved, because one token after the name decides which is which without knowing the word that opened the block.
 
@@ -109,9 +109,9 @@ Heterogeneous reusable design values may acquire a union element type. A compone
 
 ## Chemistry and site configuration
 
-A declaration's quantity-valued properties state reaction chemistry: reagent volumes, cycle counts, and thermal holds. These are claims about the science, so they belong to the artifact and travel with it into every target.
+A declaration's quantity-valued properties state reaction chemistry: reagent volumes, cycle counts, and thermal holds. These are claims about the science, so they belong to the artifact and travel with it into every facility plan.
 
-Which labware sits in which deck slot, which pipette is on which mount, and how many plates a bench holds are claims about a laboratory. A target specialization reads them from its own configuration, not from source. The same program compiled against two benches produces two different robot plans and one unchanged set of designs.
+Which labware sits in which deck slot, which pipette is on which mount, and how many plates a bench holds are claims about a facility Asset. Stable physical facts belong in SBOLInventory where the profile can express them; private or runtime-only implementation configuration belongs in the exact Asset-to-adapter overlay. The same program planned against two compatible facilities can produce two different device plans from one unchanged set of designs and requirements.
 
 ## Acceptance
 
@@ -123,11 +123,11 @@ The compiler may establish that a workflow can produce the kinds of evidence req
 
 Only the third judgment produces an accepted physical material.
 
-## Portable semantics and target specialization
+## Portable semantics and facility specialization
 
-Portable module checking resolves module-provided contracts, types expressions, verifies workflow returns, and checks affine material ownership. It does not choose a robot, a deck, a reaction chemistry, or a laboratory schedule.
+Portable module checking resolves module-provided contracts, types expressions, verifies workflow returns, and checks affine material ownership. It does not choose a facility, Asset, deck, or laboratory schedule.
 
-A target specialization may interpret a documented set of checked properties and resolved operations. It must fail explicitly when required properties, capabilities, value shapes, capacities, or operation sequences are unsupported. Target diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
+Method selection may interpret a documented set of checked scientific properties and resolved operations while remaining facility-independent. Facility planning then binds the resulting requirements to exact capability offerings and Assets, and only the adapter bound to that Asset may interpret implementation-specific configuration. Each boundary must fail explicitly when required properties, capabilities, value shapes, capacities, or operation sequences are unsupported. Diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
 
 ## Reactive execution
 

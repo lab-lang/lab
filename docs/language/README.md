@@ -32,7 +32,7 @@ Actual executions are runtime records, not source modules. A program may be run 
 | [`plasmid-design.lab`](specimens/plasmid-design.lab) | circuits, typed composition, declarative plasmid properties, requirements, and acceptance |
 | [`sensor-panel.lab`](specimens/sensor-panel.lab) | roles, inline type parameters, a generic characterization workflow, and a panel that forgets which signal triggers it |
 | [`plasmid-build.lab`](specimens/plasmid-build.lab) | workflow signatures, durable effects, explicit state, reactive handlers, outcomes, and affine materials |
-| [`inventory-plasmid.lab`](specimens/inventory-plasmid.lab) | typed inventory identities, heterogeneous component lists, target-neutral properties, and one realization workflow |
+| [`inventory-plasmid.lab`](specimens/inventory-plasmid.lab) | typed inventory identities, heterogeneous component lists, facility-independent properties, and one realization workflow |
 | [`dependency-build.lab`](specimens/dependency-build.lab) | dependencies expressed as `Material<Plasmid>` workflow inputs and resolved `realize` operands |
 
 Specimens define provider symbols before declarations that depend on them. This is a readability convention, not an assembly-level system and not a replacement for name resolution.

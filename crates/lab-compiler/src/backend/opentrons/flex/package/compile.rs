@@ -56,7 +56,7 @@ pub enum FlexDependencyBuildError {
 }
 
 /// Specialize a source-derived dependency graph into independently executable
-/// Flex packages. Graph resolution itself is target-neutral; only the
+/// Flex packages. Graph resolution itself is facility-independent; only the
 /// requirements projected into each graph node and the emitted batches are
 /// owned by this module.
 pub fn compile_dependency_build(

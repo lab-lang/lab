@@ -739,7 +739,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
 }
 
 /// A different facility Asset and exact adapter binding lower the same experiment for a Flex
-/// without a source edit or an independently selected target.
+/// without a source edit or an independent device selector.
 #[test]
 fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

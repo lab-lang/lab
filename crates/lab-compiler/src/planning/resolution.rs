@@ -57,7 +57,7 @@ impl Availability {
 }
 
 /// Resolve graph waves against inventory without interpreting any biological
-/// operation, execution target, or assembly hierarchy.
+/// operation, execution device, or assembly hierarchy.
 pub fn resolve_dependency_graph(
     graph: &BuildGraph,
     inventory: &BuildInventory,
@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[test]
-    fn schedules_graph_waves_without_target_knowledge() {
+    fn schedules_graph_waves_without_facility_knowledge() {
         let graph = BuildGraph {
             nodes: BTreeMap::from([
                 (

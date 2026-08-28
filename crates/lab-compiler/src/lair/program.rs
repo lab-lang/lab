@@ -41,7 +41,7 @@ pub enum ProtocolLairError {
     Verification(String),
     #[error("generated Protocol LAIR failed material-linearity analysis: {0}")]
     MaterialLinearity(String),
-    #[error("generated LAIR does not satisfy the target-selected Protocol contract: {0}")]
+    #[error("generated LAIR does not satisfy the method-selected Protocol contract: {0}")]
     Stage(String),
 }
 
@@ -147,7 +147,7 @@ impl PortableLairProgram {
         self.module.get_operation().disp(&self.context).to_string()
     }
 
-    /// Consume target-neutral Workflow LAIR and select the supported concrete
+    /// Consume method-neutral Workflow LAIR and select the supported concrete
     /// plasmid-build Protocol. No backend planning occurs at this boundary.
     pub fn select_protocol(mut self) -> Result<ProtocolLairProgram, ProtocolLairError> {
         crate::lair::protocol_selection::select_plasmid_build_protocol(
@@ -167,9 +167,9 @@ impl PortableLairProgram {
             ProtocolLairError::MaterialLinearity(error.disp(&self.context).to_string())
         })?;
         let stage = detect_stage(&self.context, self.module).map_err(ProtocolLairError::Stage)?;
-        if stage != IrStage::TargetSelectedProtocol {
+        if stage != IrStage::MethodSelectedProtocol {
             return Err(ProtocolLairError::Stage(format!(
-                "expected target-selected-protocol, found {stage}"
+                "expected method-selected-protocol, found {stage}"
             )));
         }
         Ok(ProtocolLairProgram {
@@ -180,7 +180,7 @@ impl PortableLairProgram {
 }
 
 /// Owned, verifier-valid Protocol LAIR. Robot planners consume this boundary
-/// directly; it cannot be constructed from unchecked source or target IR.
+/// directly; it cannot be constructed from unchecked source or device IR.
 pub struct ProtocolLairProgram {
     context: Context,
     module: ModuleOp,

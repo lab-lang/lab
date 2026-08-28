@@ -56,7 +56,7 @@ pub enum DependencyBuildError {
 }
 
 /// Specialize a source-derived dependency graph into independently executable
-/// OT-2 packages. Graph resolution itself is target-neutral; only the
+/// OT-2 packages. Graph resolution itself is facility-independent; only the
 /// requirements projected into each graph node and the emitted batches are
 /// owned by this module.
 pub fn compile_dependency_build(

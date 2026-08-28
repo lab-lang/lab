@@ -291,7 +291,7 @@ pub fn validate_adapter_profile(
 ///
 /// Selection has already happened through facility allocation. This function cannot infer a
 /// driver from an Asset's manufacturer or model and cannot select a different adapter. The
-/// profile is private operational configuration for the exact Asset binding, not a second target.
+/// profile is private operational configuration for the exact Asset binding, not a second facility model.
 pub fn lower_dependency_build_with_adapter(
     driver: &str,
     name: &str,

@@ -81,7 +81,7 @@ pub struct MaterialLotBinding {
     pub material_lot: String,
 }
 
-/// A target-neutral artifact dependency graph.
+/// A facility-independent artifact dependency graph.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BuildGraph {
     pub nodes: BTreeMap<String, BuildGraphNode>,

@@ -8,7 +8,7 @@ The source declares plasmid and strain artifacts with checked properties, gives 
 
 `lab-language` does not contain an OT-2 recipe AST or a build-specific parser entry point. Source declarations are lowered into verifier-valid Design and Workflow LAIR before a concrete biological protocol is selected. The OT-2 backend accepts only `ProtocolLairProgram`; it has no API that can consume `CheckedModule` or `PortableLairProgram` directly.
 
-The implementation has two mandatory target-neutral LAIR boundaries and one explicit robot plan:
+The implementation has two mandatory facility-independent LAIR boundaries and one explicit robot plan:
 
 1. Design LAIR contains declarative artifact identity, sequence, topology, copy, and acceptance intent. It contains no build recipe or procedure fields.
 2. Workflow LAIR preserves source operations as typed material dataflow. `workflow.realize` owns abstract assembly inputs, artifact dependency identities, assembly policy, and reaction chemistry; `workflow.transform` realizes a strain from its chassis and carried plasmids; subsequent operations carry recovery, dilution, and plating intent on explicit use-def edges. Chemistry travels as a named dictionary rather than one attribute per reagent, so a recipe stays inspectable without the dialect growing a key per volume.

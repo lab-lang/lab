@@ -49,13 +49,13 @@ pub struct PassInfo {
 const MATERIAL_LINEARITY: PassInfo = PassInfo {
     name: "protocol-check-material-linearity",
     summary: "require every physical material value to have at most one consumer",
-    input: IrStage::TargetSelectedProtocol,
-    output: IrStage::TargetSelectedProtocol,
+    input: IrStage::MethodSelectedProtocol,
+    output: IrStage::MethodSelectedProtocol,
 };
 
 const REGISTERED_PASSES: [PassInfo; 1] = [MATERIAL_LINEARITY];
 
-/// Return the target-independent passes available to textual IR tooling.
+/// Return the facility-independent passes available to textual IR tooling.
 pub fn registered_passes() -> &'static [PassInfo] {
     &REGISTERED_PASSES
 }

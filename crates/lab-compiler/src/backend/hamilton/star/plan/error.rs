@@ -9,7 +9,7 @@ use crate::backend::hamilton::star::profile::StarProfileError;
 pub enum StarPlanningError {
     #[error(transparent)]
     Constraint(Box<AdapterConstraintError>),
-    #[error("invalid target-selected Protocol LAIR: {0}")]
+    #[error("invalid method-selected Protocol LAIR: {0}")]
     InvalidProtocol(String),
     #[error(transparent)]
     Profile(#[from] StarProfileError),

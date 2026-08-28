@@ -24,7 +24,7 @@ pub(crate) struct FacilityLoweringOutput {
 
 /// Derives concrete backend invocations from exact facility allocations.
 ///
-/// A package never names a target here. Each route exists only because a reachable semantic
+/// A package never selects a device implementation here. Each route exists only because a reachable semantic
 /// requirement was allocated to an offering, that offering belongs to an exact Asset, and the
 /// Asset has an explicit local adapter binding whose implementation provides lowering.
 pub(crate) fn lower_allocated_adapters(

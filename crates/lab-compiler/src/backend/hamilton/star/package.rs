@@ -60,7 +60,7 @@ pub enum StarDependencyBuildError {
 }
 
 /// Specialize a source-derived dependency graph into independently
-/// executable STAR packages. Graph resolution itself is target-neutral;
+/// executable STAR packages. Graph resolution itself is facility-independent;
 /// only the requirements projected into each node and the emitted batches
 /// are owned by this module.
 pub fn compile_dependency_build(

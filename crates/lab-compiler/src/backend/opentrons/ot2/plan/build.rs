@@ -533,7 +533,7 @@ workflow build_reporter_host(
 
     /// A method declares the unit each of its quantities is measured in, so a
     /// thousandfold error is caught where it is written rather than when a
-    /// target reads it.
+    /// adapter reads it.
     #[test]
     fn rejects_a_chemistry_quantity_in_the_wrong_unit() {
         let wrong = SOURCE.replace(

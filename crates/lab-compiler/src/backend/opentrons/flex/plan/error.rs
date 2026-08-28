@@ -8,7 +8,7 @@ use crate::backend::error::PlanningError;
 pub enum FlexPlanningError {
     #[error(transparent)]
     Constraint(Box<AdapterConstraintError>),
-    #[error("invalid target-selected Protocol LAIR: {0}")]
+    #[error("invalid method-selected Protocol LAIR: {0}")]
     InvalidProtocol(String),
 }
 

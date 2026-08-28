@@ -8,6 +8,6 @@ The analysis is place-sensitive. Taking `colony_result.plate` invalidates that p
 
 Every terminating control-flow path must transfer, return, store, or dispose all materials it owns. Continuing branches must agree on their owned material places. Reactive handlers begin from the same captured ownership state; a non-terminating invocation must preserve it for later events.
 
-This frontend analysis complements the existing SSA material-linearity analysis in the executable protocol IR. The frontend pass reasons about source workflow control flow before target selection, while the protocol pass verifies concrete lowered SSA consumers.
+This frontend analysis complements the existing SSA material-linearity analysis in method-selected Protocol IR. The frontend pass reasons about source workflow control flow before method selection, while the protocol pass verifies concrete lowered SSA consumers before facility allocation.
 
 Loops over collections containing materials are rejected for now. They require an explicit consuming iterator contract that defines ownership for zero, partial, completed, and early-return iteration.

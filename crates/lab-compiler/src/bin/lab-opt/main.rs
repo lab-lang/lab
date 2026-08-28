@@ -41,7 +41,7 @@ struct Cli {
     #[arg(long)]
     ir_printing_dir: Option<PathBuf>,
 
-    /// Print the registered target-independent passes and exit.
+    /// Print the registered facility-independent passes and exit.
     #[arg(long)]
     list_passes: bool,
 }

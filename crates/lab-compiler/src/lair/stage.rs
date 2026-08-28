@@ -10,12 +10,12 @@ use pliron::operation::Operation;
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IrStage {
-    /// Target-neutral biological artifact intent expressed only in Design IR.
+    /// Facility-independent biological artifact intent expressed only in Design IR.
     Design,
-    /// Target-neutral artifact intent plus explicit Workflow material dataflow.
+    /// Facility-independent artifact intent plus explicit Workflow material dataflow.
     DesignWorkflow,
-    /// Target-selected Protocol IR plus the retained Design value it currently consumes.
-    TargetSelectedProtocol,
+    /// Method-selected Protocol IR plus the retained Design value it currently consumes.
+    MethodSelectedProtocol,
 }
 
 impl Display for IrStage {
@@ -23,7 +23,7 @@ impl Display for IrStage {
         formatter.write_str(match self {
             Self::Design => "design",
             Self::DesignWorkflow => "design-workflow",
-            Self::TargetSelectedProtocol => "target-selected-protocol",
+            Self::MethodSelectedProtocol => "method-selected-protocol",
         })
     }
 }
@@ -35,9 +35,9 @@ impl FromStr for IrStage {
         match value {
             "design" => Ok(Self::Design),
             "design-workflow" => Ok(Self::DesignWorkflow),
-            "target-selected-protocol" => Ok(Self::TargetSelectedProtocol),
+            "method-selected-protocol" => Ok(Self::MethodSelectedProtocol),
             other => Err(format!(
-                "unknown IR stage '{other}'; expected design, design-workflow, or target-selected-protocol"
+                "unknown IR stage '{other}'; expected design, design-workflow, or method-selected-protocol"
             )),
         }
     }
@@ -75,10 +75,10 @@ pub(crate) fn detect_stage(context: &Context, module: ModuleOp) -> Result<IrStag
     match (design_operations, workflow_operations, protocol_operations) {
         (1.., 0, 0) => Ok(IrStage::Design),
         (1.., 1.., 0) => Ok(IrStage::DesignWorkflow),
-        (1.., 0, 1..) => Ok(IrStage::TargetSelectedProtocol),
+        (1.., 0, 1..) => Ok(IrStage::MethodSelectedProtocol),
         (0, _, _) => Err("a Lab Compiler module must contain at least one design operation".into()),
         (_, 1.., 1..) => Err(
-            "Workflow operations must be fully eliminated before the target-selected Protocol boundary"
+            "Workflow operations must be fully eliminated before the method-selected Protocol boundary"
                 .into(),
         ),
     }

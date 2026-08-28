@@ -55,5 +55,5 @@ fn plasmid_acceptance_uses_the_canonical_frontend_boundary() {
     assert!(human.contains("Lab module compiled"));
     assert!(human.contains("plasmid p_acceptance"));
     assert!(human.contains("3 acceptance claims"));
-    assert!(human.contains("no laboratory target was selected or executed"));
+    assert!(human.contains("no facility asset was allocated or executed"));
 }

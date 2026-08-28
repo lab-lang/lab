@@ -18,4 +18,4 @@ python -m golden_gate
 
 The command imports every module in dependency order and passes them to `lab.check`. A compiler diagnostic points back to the Python declaration or workflow statement that produced it.
 
-The current project CLI discovers written `.lab` and SBOL files, while Python modules enter through the SDK. This example therefore checks the same portable modules as the Lab version but does not invoke the target-specific `lab build` step.
+The current project CLI discovers written `.lab` and SBOL files, while Python modules enter through the SDK. This example therefore checks the same portable modules as the Lab version but does not invoke package-oriented `lab build` or facility planning.

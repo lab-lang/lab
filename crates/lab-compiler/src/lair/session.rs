@@ -144,7 +144,7 @@ impl CompilerSession {
             .map_err(SessionError::StageContract)
     }
 
-    /// Run a target-independent textual pass pipeline.
+    /// Run a facility-independent textual pass pipeline.
     pub fn run_pass_pipeline(&mut self, pipeline: &PassPipeline) -> Result<(), SessionError> {
         self.verify()?;
         for registered_pass in pipeline.passes() {

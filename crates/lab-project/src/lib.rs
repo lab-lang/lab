@@ -189,8 +189,8 @@ impl LabProject {
 
     /// The packages that make up one runnable program: the default member and
     /// everything it depends on, in dependency-first compilation order. A
-    /// target build lowers exactly these packages' modules together, so an
-    /// artifact declared in a dependency reaches the backend.
+    /// package build lowers exactly these packages' modules together, so an
+    /// artifact declared in a dependency reaches planning and adapter lowering.
     pub fn program_packages(&self) -> Vec<String> {
         let mut reachable = BTreeSet::new();
         self.collect_reachable(&self.default_member, &mut reachable);

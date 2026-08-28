@@ -40,5 +40,4 @@ temperature.
 
 ## Consequences
 
-`CheckedDeclaration::Catalog` carries the properties, so a target reads an item's
-datasheet from the IR rather than from a lookup table of its own.
+`CheckedDeclaration::Catalog` carries the properties, so method selection and adapter planning read an item's datasheet from the IR rather than from private lookup tables.

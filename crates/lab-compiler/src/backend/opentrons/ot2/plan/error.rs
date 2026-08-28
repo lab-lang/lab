@@ -7,7 +7,7 @@ use crate::backend::AdapterConstraintError;
 pub enum Ot2PlanningError {
     #[error(transparent)]
     Constraint(Box<AdapterConstraintError>),
-    #[error("invalid target-selected Protocol LAIR: {0}")]
+    #[error("invalid method-selected Protocol LAIR: {0}")]
     InvalidProtocol(String),
 }
 

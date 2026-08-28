@@ -934,7 +934,7 @@ fn validate_output_bindings(
             .any(|kind| kind.as_str() == sbol_inventory::vocabulary::SBOL_COMPONENT)
         {
             bail!(
-                "output material '{}' built target '{}' is not an SBOL Component",
+                "output material '{}' built identity '{}' is not an SBOL Component",
                 output.id,
                 output.component
             );
