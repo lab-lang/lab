@@ -1,8 +1,8 @@
 //! Machine-readable target-profile discovery and validation.
 //!
 //! This module is the compiler-owned contract for control planes and editors.
-//! Consumers discover schemas, defaults, catalog choices, and station kinds
-//! here instead of copying Rust profile structs into another codebase.
+//! Consumers discover schemas, defaults, and catalog choices here instead of
+//! copying Rust profile structs into another codebase.
 
 use std::collections::BTreeSet;
 
@@ -16,28 +16,21 @@ use crate::backend::hamilton::star::StarTargetProfile;
 use crate::backend::hamilton::star::catalog::{CARRIERS, LABWARE, LabwareRole};
 use crate::backend::opentrons::flex::FlexTargetProfile;
 use crate::backend::opentrons::ot2::Ot2TargetProfile;
-use crate::backend::workcell::{StationKind, WorkcellProfile};
 use crate::backend::{AdapterDescriptor, adapter_catalog};
 
-pub const CAPABILITIES_FORMAT: &str = "lab.target-capabilities.v0";
+pub const CAPABILITIES_FORMAT: &str = "lab.target-capabilities.v1";
 pub const PROFILE_SCHEMA_VERSION: &str = "lab.target-profile.v0";
 pub const VALIDATION_FORMAT: &str = "lab.target-profile-validation.v0";
 
-pub const KNOWN_BACKENDS: [&str; 4] = [
-    "opentrons.ot2",
-    "opentrons.flex",
-    "hamilton.star",
-    "workcell",
-];
+pub const KNOWN_BACKENDS: [&str; 3] = ["opentrons.ot2", "opentrons.flex", "hamilton.star"];
 
-/// All target schemas and station kinds shipped by this compiler build.
+/// All legacy single-device target schemas shipped by this compiler build.
 #[derive(Clone, Debug, Serialize)]
 pub struct TargetCapabilitiesDocument {
     pub format: &'static str,
     pub compiler_version: &'static str,
     pub profile_schema_version: &'static str,
     pub targets: Vec<TargetCapability>,
-    pub station_kinds: Vec<StationCapability>,
 }
 
 /// One concrete value accepted by `[target] backend`.
@@ -58,18 +51,6 @@ pub struct TargetCapability {
 #[serde(rename_all = "kebab-case")]
 pub enum TargetKind {
     LiquidHandler,
-    Workcell,
-}
-
-/// A station kind a workcell may declare.
-#[derive(Clone, Debug, Serialize)]
-pub struct StationCapability {
-    pub kind: &'static str,
-    pub display_name: &'static str,
-    pub manufacturer: &'static str,
-    pub capabilities: BTreeSet<String>,
-    pub runtime_executor: bool,
-    pub planner_assigns_work: bool,
 }
 
 /// The canonical result of parsing and semantically validating one profile.
@@ -106,7 +87,6 @@ pub enum TargetProfile {
     Ot2(Ot2TargetProfile),
     Flex(FlexTargetProfile),
     Star(StarTargetProfile),
-    Workcell(WorkcellProfile),
 }
 
 impl TargetProfile {
@@ -115,7 +95,6 @@ impl TargetProfile {
             Self::Ot2(_) => "opentrons.ot2",
             Self::Flex(_) => "opentrons.flex",
             Self::Star(_) => "hamilton.star",
-            Self::Workcell(_) => "workcell",
         }
     }
 
@@ -127,12 +106,11 @@ impl TargetProfile {
             Self::Ot2(profile) => canonical_profile(name, self.backend(), profile),
             Self::Flex(profile) => canonical_profile(name, self.backend(), profile),
             Self::Star(profile) => canonical_profile(name, self.backend(), profile),
-            Self::Workcell(profile) => canonical_profile(name, self.backend(), profile),
         }
     }
 }
 
-/// Describe every target and station kind this exact compiler binary provides.
+/// Describe every legacy single-device target this exact compiler binary provides.
 pub fn target_capabilities() -> Result<TargetCapabilitiesDocument, TargetProfileContractError> {
     let adapters = adapter_catalog()
         .map_err(|error| TargetProfileContractError::Serialize(error.to_string()))?
@@ -164,34 +142,7 @@ pub fn target_capabilities() -> Result<TargetCapabilitiesDocument, TargetProfile
                 adapter("hamilton.star"),
                 star_catalog(),
             )?,
-            TargetCapability {
-                backend: "workcell",
-                display_name: "Multi-station workcell".to_string(),
-                manufacturer: None,
-                kind: TargetKind::Workcell,
-                capabilities: BTreeSet::from([
-                    "coordination_plan".to_string(),
-                    "human_handoff".to_string(),
-                    "liquid_transfer".to_string(),
-                    "thermocycler".to_string(),
-                ]),
-                schema: schema_value::<WorkcellProfile>()?,
-                default_profile: default_target_profile("workcell", "workcell")?,
-                catalog: json!({
-                    "station_kinds": [
-                        "hamilton.star",
-                        "inheco.odtc",
-                        "byonoy.absorbance96"
-                    ],
-                    "transport": ["human"],
-                    "constraints": {
-                        "liquid_handlers": { "kind": "hamilton.star", "exactly": 1 },
-                        "instruments_of_each_kind": { "at_most": 1 }
-                    }
-                }),
-            },
         ],
-        station_kinds: station_capabilities(),
     })
 }
 
@@ -218,23 +169,6 @@ pub fn default_target_profile(
         "hamilton.star" => TargetProfile::Star(
             StarTargetProfile::parse(name, "").map_err(|error| invalid("hamilton.star", error))?,
         ),
-        "workcell" => TargetProfile::Workcell(
-            WorkcellProfile::parse(
-                name,
-                r#"[target]
-backend = "workcell"
-
-[[station]]
-name = "star-1"
-kind = "hamilton.star"
-profile = "hamilton-star"
-
-[transport]
-between = "human"
-"#,
-            )
-            .map_err(|error| invalid("workcell", error))?,
-        ),
         other => return Err(unknown_backend(other)),
     };
     profile.canonical(name)
@@ -260,9 +194,6 @@ pub fn parse_target_profile(
         "hamilton.star" => StarTargetProfile::parse(name, contents)
             .map(TargetProfile::Star)
             .map_err(|error| invalid("hamilton.star", error)),
-        "workcell" => WorkcellProfile::parse(name, contents)
-            .map(TargetProfile::Workcell)
-            .map_err(|error| invalid("workcell", error)),
         other => Err(unknown_backend(other)),
     }
 }
@@ -408,35 +339,6 @@ fn unknown_backend(found: &str) -> TargetProfileContractError {
     }
 }
 
-fn station_capabilities() -> Vec<StationCapability> {
-    vec![
-        StationCapability {
-            kind: StationKind::HamiltonStar.as_str(),
-            display_name: "Hamilton STAR/STARlet",
-            manufacturer: "Hamilton",
-            capabilities: BTreeSet::from(["liquid_transfer".to_string()]),
-            runtime_executor: true,
-            planner_assigns_work: true,
-        },
-        StationCapability {
-            kind: StationKind::InhecoOdtc.as_str(),
-            display_name: "Inheco ODTC",
-            manufacturer: "Inheco",
-            capabilities: BTreeSet::from(["thermocycler".to_string()]),
-            runtime_executor: true,
-            planner_assigns_work: true,
-        },
-        StationCapability {
-            kind: StationKind::ByonoyAbsorbance96.as_str(),
-            display_name: "Byonoy Absorbance 96",
-            manufacturer: "Byonoy",
-            capabilities: BTreeSet::from(["absorbance_plate_read".to_string()]),
-            runtime_executor: false,
-            planner_assigns_work: false,
-        },
-    ]
-}
-
 fn ot2_catalog() -> Value {
     json!({
         "slots": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
@@ -509,7 +411,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn discovery_names_every_backend_and_station_kind() {
+    fn discovery_names_every_legacy_single_device_backend() {
         let document = target_capabilities().unwrap();
         assert_eq!(
             document
@@ -518,15 +420,6 @@ mod tests {
                 .map(|target| target.backend)
                 .collect::<Vec<_>>(),
             KNOWN_BACKENDS
-        );
-        assert_eq!(document.station_kinds.len(), 3);
-        assert!(
-            document
-                .station_kinds
-                .iter()
-                .any(|station| station.kind == "byonoy.absorbance96"
-                    && !station.runtime_executor
-                    && !station.planner_assigns_work)
         );
     }
 

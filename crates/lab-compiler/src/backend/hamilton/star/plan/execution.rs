@@ -156,8 +156,8 @@ pub struct StarRunPlan {
     pub title: String,
     pub operations: Vec<StarOperation>,
     pub manual_after: Vec<ManualStep>,
-    /// The thermal programs behind this run's manual steps, structured so a
-    /// workcell can assign them to a thermocycler station. On a bare STAR
+    /// The thermal programs behind this run's manual steps, structured for
+    /// projection into separate thermocycler documents. On a standalone STAR
     /// target the operator prose in `manual_after` is the whole story, so
     /// these never reach the serialized manifest.
     #[serde(skip)]
@@ -166,8 +166,8 @@ pub struct StarRunPlan {
 
 /// A thermal program a run needs after its liquid handling. Each
 /// requirement shadows one step of `manual_after` (named by
-/// `fallback_index`): a workcell with a thermocycler station executes the
-/// profile and drops the prose; anything else keeps the prose verbatim.
+/// `fallback_index`) so a facility plan can replace the prose with an exact
+/// thermocycler binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThermalRequirement {
     /// Stable identity within the run, e.g. `assembly_thermocycle`.

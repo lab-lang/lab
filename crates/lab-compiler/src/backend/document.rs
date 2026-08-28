@@ -60,7 +60,6 @@ pub(in crate::backend) enum Block {
     /// disclaimer.
     Notice(Vec<Inline>),
     Bullets(Vec<Vec<Inline>>),
-    Numbered(Vec<Vec<Inline>>),
     Table {
         columns: Vec<Column>,
         rows: Vec<Vec<Vec<Inline>>>,
@@ -164,11 +163,6 @@ impl Doc {
     pub fn bullets(&mut self, items: impl IntoIterator<Item = Vec<Inline>>) {
         self.blocks
             .push(Block::Bullets(items.into_iter().collect()));
-    }
-
-    pub fn numbered(&mut self, items: impl IntoIterator<Item = Vec<Inline>>) {
-        self.blocks
-            .push(Block::Numbered(items.into_iter().collect()));
     }
 
     /// A table with no rows is dropped: a bare header rule carries no

@@ -83,12 +83,6 @@ fn render_blocks(blocks: &[Block]) -> String {
                 }
                 output.push('\n');
             }
-            Block::Numbered(items) => {
-                for item in items {
-                    writeln!(output, "+ {}", markup(item)).unwrap();
-                }
-                output.push('\n');
-            }
             Block::Table { columns, rows } => {
                 writeln!(output, "#lab-table(").unwrap();
                 let align = columns

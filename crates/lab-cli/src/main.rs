@@ -311,15 +311,6 @@ mod tests {
                 command: TargetsCommand::Describe { backend: Some(backend) }
             } if backend == "hamilton.star"
         ));
-
-        let cli = Cli::try_parse_from(["lab", "targets", "default", "workcell", "--name", "bench"])
-            .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Targets {
-                command: TargetsCommand::Default { backend, name }
-            } if backend == "workcell" && name == "bench"
-        ));
     }
 
     #[test]

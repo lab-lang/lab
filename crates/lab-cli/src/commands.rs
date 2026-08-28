@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::hamilton::star::StarTargetProfile;
 use lab_compiler::backend::{TargetProfile, parse_target_profile};
 use lab_compiler::planning::{
     BuildInventory, CapabilityRequirements, ExecutionPlanOptions, FacilityAllocation,
@@ -420,7 +419,6 @@ fn is_automation_protocol(path: &Path) -> bool {
                 || name.ends_with(".star.json")
                 || name.ends_with(".odtc.json")
                 || name.ends_with(".read.json")
-                || name == "plan.workcell.json"
         })
 }
 
@@ -516,36 +514,6 @@ fn build_for_target(
         TargetProfile::Star(profile) => {
             lab_compiler::backend::hamilton::star::compile_dependency_build(
                 &protocol, profile, &inventory,
-            )
-            .with_context(|| format!("failed to compile the {target} build"))?
-            .artifacts()
-            .clone()
-        }
-        TargetProfile::Workcell(profile) => {
-            let station = profile.liquid_handler();
-            let station_profile = station
-                .profile
-                .as_deref()
-                .expect("workcell validation requires the liquid handler to name a profile");
-            let station_path = project_root
-                .join("targets")
-                .join(format!("{station_profile}.toml"));
-            let station_contents = fs::read_to_string(&station_path).with_context(|| {
-                format!(
-                    "station '{}' names profile '{station_profile}', but there is no target profile at {}",
-                    station.name,
-                    station_path.display()
-                )
-            })?;
-            let star_profile = StarTargetProfile::parse(station_profile, &station_contents)
-                .with_context(|| {
-                    format!("failed to load station profile {}", station_path.display())
-                })?;
-            lab_compiler::backend::workcell::compile_dependency_build(
-                &protocol,
-                profile,
-                &star_profile,
-                &inventory,
             )
             .with_context(|| format!("failed to compile the {target} build"))?
             .artifacts()

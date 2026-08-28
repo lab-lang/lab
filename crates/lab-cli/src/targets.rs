@@ -77,19 +77,6 @@ fn render_capabilities(document: &TargetCapabilitiesDocument) -> String {
     for target in &document.targets {
         lines.push(format!("  {:<18} {}", target.backend, target.display_name));
     }
-    lines.push("\nWorkcell station kinds:".to_string());
-    for station in &document.station_kinds {
-        let execution = match (station.planner_assigns_work, station.runtime_executor) {
-            (true, true) => "planned and executable",
-            (true, false) => "planned; no runtime executor",
-            (false, true) => "executable; no planner assignment",
-            (false, false) => "declared only",
-        };
-        lines.push(format!(
-            "  {:<24} {} ({execution})",
-            station.kind, station.display_name
-        ));
-    }
     lines.join("\n")
 }
 

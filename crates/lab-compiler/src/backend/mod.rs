@@ -32,7 +32,6 @@ mod target_profiles;
 mod trace;
 mod traits;
 mod typst;
-pub mod workcell;
 
 pub use adapters::{
     ADAPTER_CATALOG_FORMAT, ADAPTER_PROFILE_SCHEMA_VERSION, AdapterCatalog, AdapterDescriptor,
@@ -41,9 +40,9 @@ pub use adapters::{
 };
 pub use constraints::TargetConstraintError;
 pub use target_profiles::{
-    CAPABILITIES_FORMAT, KNOWN_BACKENDS, PROFILE_SCHEMA_VERSION, StationCapability,
-    TargetCapabilitiesDocument, TargetCapability, TargetKind, TargetProfile,
-    TargetProfileContractError, VALIDATION_FORMAT, ValidatedTargetProfile, default_target_profile,
-    parse_target_profile, target_capabilities, validate_target_profile,
+    CAPABILITIES_FORMAT, KNOWN_BACKENDS, PROFILE_SCHEMA_VERSION, TargetCapabilitiesDocument,
+    TargetCapability, TargetKind, TargetProfile, TargetProfileContractError, VALIDATION_FORMAT,
+    ValidatedTargetProfile, default_target_profile, parse_target_profile, target_capabilities,
+    validate_target_profile,
 };
 pub use traits::{Backend, BackendEmitter};
