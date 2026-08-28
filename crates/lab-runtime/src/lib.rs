@@ -17,6 +17,7 @@ pub mod device_executors;
 pub mod events;
 pub mod execution;
 pub mod ledger;
+pub mod mode;
 pub mod operator;
 pub mod provenance;
 pub mod star;

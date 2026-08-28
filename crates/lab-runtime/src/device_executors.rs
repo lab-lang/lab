@@ -7,17 +7,36 @@
 #[cfg(feature = "hardware")]
 use std::net::SocketAddr;
 
+use anyhow::Result;
 #[cfg(feature = "hardware")]
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, bail};
 #[cfg(feature = "hardware")]
 use hamilton_star::RawCommand;
 #[cfg(feature = "hardware")]
 use lab_instruments::Thermocycler as _;
 
+use crate::events::EventSink;
 #[cfg(feature = "hardware")]
-use crate::events::{EventSink, ProgramExtent, RunEvent};
-#[cfg(feature = "hardware")]
+use crate::events::{ProgramExtent, RunEvent};
 use crate::execution::{DocumentExecutor, LoadedReviewedDocument};
+
+/// A no-hardware executor for an already validated reviewed document.
+///
+/// Semantic behavior belongs to the document producer or a future domain simulator. This
+/// executor deliberately performs no device I/O and exists only in an explicitly selected
+/// simulation registry.
+#[derive(Default)]
+pub struct ReviewedDocumentSimulationExecutor;
+
+impl DocumentExecutor for ReviewedDocumentSimulationExecutor {
+    fn execute(
+        &mut self,
+        _loaded: &LoadedReviewedDocument,
+        _events: &mut dyn EventSink,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
 
 /// Replays `lab.star-run.v0` on the exact Asset binding registered by the caller.
 #[cfg(feature = "hardware")]

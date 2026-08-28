@@ -229,7 +229,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
 
     let live = run(&["run", plan_directory.to_str().unwrap(), "--yes"]);
     assert!(!live.status.success());
-    assert!(String::from_utf8_lossy(&live.stderr).contains("reviewed plan is not executable"));
+    assert!(String::from_utf8_lossy(&live.stderr).contains("reviewed plan is not ready for live"));
     assert!(!plan_directory.join("run-ledger.jsonl").exists());
 }
 

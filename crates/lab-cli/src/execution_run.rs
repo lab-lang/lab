@@ -6,17 +6,20 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::hamilton::star::StarTargetProfile;
+use lab_compiler::backend::{adapter_catalog, hamilton::star::StarTargetProfile};
 use lab_runfmt::{EXECUTION_PLAN_FILE, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 use lab_runtime::clock::WallClock;
-use lab_runtime::device_executors::{HamiltonStarExecutor, OdtcExecutor};
+use lab_runtime::device_executors::{
+    HamiltonStarExecutor, OdtcExecutor, ReviewedDocumentSimulationExecutor,
+};
 use lab_runtime::events::{EventSink, ProgramExtent, RunEvent};
 use lab_runtime::execution::{
     ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, LoadedExecutionAction,
     load_execution_directory, render_execution_dry_run, run_execution_plan,
 };
+use lab_runtime::mode::ExecutionMode;
 use lab_runtime::operator::StdinOperator;
-use lab_runtime::provenance::{INVENTORY_RESULT_FILE, write_inventory_result};
+use lab_runtime::provenance::{inventory_result_file, write_inventory_result};
 
 use crate::Output;
 
@@ -27,6 +30,7 @@ pub(crate) fn is_execution_directory(directory: &Path) -> bool {
 pub(crate) fn run_execution_command(
     directory: PathBuf,
     dry_run: bool,
+    simulate: bool,
     yes: bool,
     resume: bool,
     asset_endpoints: Vec<String>,
@@ -41,15 +45,30 @@ pub(crate) fn run_execution_command(
                 "plan_sha256": loaded.plan_sha256,
                 "facility": loaded.plan.inventory.facility,
                 "nodes": loaded.nodes.len(),
-                "executable": loaded.is_executable(),
-                "readiness_issues": loaded.readiness_issues(),
+                "simulatable": loaded.is_ready(ExecutionMode::Simulation),
+                "simulation_readiness_issues": loaded.readiness_issues(ExecutionMode::Simulation),
+                "executable": loaded.is_ready(ExecutionMode::Live),
+                "execution_readiness_issues": loaded.readiness_issues(ExecutionMode::Live),
             }),
             render_execution_dry_run(&loaded),
         );
     }
 
-    let addresses = parse_asset_endpoints(&asset_endpoints)?;
-    let mut registry = build_hardware_registry(&loaded, &addresses)?;
+    let mode = if simulate {
+        if !asset_endpoints.is_empty() {
+            bail!("--asset-endpoint is only meaningful for live execution");
+        }
+        ExecutionMode::Simulation
+    } else {
+        ExecutionMode::Live
+    };
+    let mut registry = match mode {
+        ExecutionMode::Simulation => build_simulation_registry(&loaded)?,
+        ExecutionMode::Live => {
+            let addresses = parse_asset_endpoints(&asset_endpoints)?;
+            build_hardware_registry(&loaded, &addresses)?
+        }
+    };
     let mut operator = StdinOperator;
     let mut events = HumanSink;
     match run_execution_plan(
@@ -57,6 +76,7 @@ pub(crate) fn run_execution_command(
         ExecutionRunConfig {
             assume_yes: yes,
             resume,
+            mode,
         },
         &mut registry,
         &mut operator,
@@ -69,12 +89,13 @@ pub(crate) fn run_execution_command(
             started_at_unix_seconds,
             ended_at_unix_seconds,
         } => {
-            let existing = loaded.directory.join(INVENTORY_RESULT_FILE);
+            let existing = loaded.directory.join(inventory_result_file(mode));
             let result = if executed == 0 && existing.is_file() {
                 None
             } else {
                 Some(write_inventory_result(
                     &loaded,
+                    mode,
                     started_at_unix_seconds,
                     ended_at_unix_seconds,
                 )?)
@@ -83,8 +104,9 @@ pub(crate) fn run_execution_command(
                 .as_ref()
                 .map_or(existing.as_path(), |result| result.path.as_path());
             output.success(
-                "run",
+                mode.as_str(),
                 serde_json::json!({
+                    "mode": mode.as_str(),
                     "plan_sha256": loaded.plan_sha256,
                     "executed": executed,
                     "skipped": skipped,
@@ -93,7 +115,8 @@ pub(crate) fn run_execution_command(
                     "output_materials": result.as_ref().map(|result| &result.output_materials),
                 }),
                 format!(
-                    "Completed reviewed facility plan: {executed} node(s) executed, {skipped} skipped\n  Inventory result: {}",
+                    "Completed reviewed facility {}: {executed} node(s) executed, {skipped} skipped\n  Inventory result: {}",
+                    mode.as_str(),
                     result_path.display()
                 ),
             )
@@ -106,6 +129,79 @@ pub(crate) fn run_execution_command(
             "node '{node}' failed: {error}; resolve the facility and continue the same reviewed plan with --resume"
         ),
     }
+}
+
+fn build_simulation_registry(
+    loaded: &lab_runtime::execution::LoadedExecutionPlan,
+) -> Result<ExecutorRegistry> {
+    let catalog = adapter_catalog().context("failed to load the compiler adapter catalog")?;
+    let descriptors = catalog
+        .adapters
+        .iter()
+        .map(|descriptor| (descriptor.id.as_str(), descriptor))
+        .collect::<BTreeMap<_, _>>();
+    let mut keys = BTreeSet::new();
+    let mut registry = ExecutorRegistry::new();
+    for node in &loaded.nodes {
+        let LoadedExecutionAction::Execute {
+            requirement,
+            document: Some(document),
+        } = &node.action
+        else {
+            continue;
+        };
+        let adapter = requirement
+            .adapter
+            .as_ref()
+            .context("simulation requires a frozen adapter binding")?;
+        let descriptor = descriptors.get(adapter.driver.as_str()).with_context(|| {
+            format!(
+                "adapter '{}' is not present in this compiler build",
+                adapter.driver
+            )
+        })?;
+        if !descriptor.services.simulation {
+            bail!("adapter '{}' does not provide simulation", adapter.driver);
+        }
+        if !descriptor
+            .capabilities
+            .contains(&requirement.capability_kind)
+        {
+            bail!(
+                "adapter '{}' does not simulate capability '{}'",
+                adapter.driver,
+                requirement.capability_kind
+            );
+        }
+        if !descriptor.control_modes.contains(&requirement.control_mode) {
+            bail!(
+                "adapter '{}' does not accept control mode '{}'",
+                adapter.driver,
+                requirement.control_mode
+            );
+        }
+        if !descriptor.accepted_run_formats.contains(document.format()) {
+            bail!(
+                "adapter '{}' does not simulate reviewed format '{}'",
+                adapter.driver,
+                document.format()
+            );
+        }
+        let key = (
+            requirement.asset.clone(),
+            adapter.driver.clone(),
+            document.format().to_owned(),
+        );
+        if keys.insert(key.clone()) {
+            registry.register(
+                key.0,
+                key.1,
+                key.2,
+                Box::<ReviewedDocumentSimulationExecutor>::default(),
+            )?;
+        }
+    }
+    Ok(registry)
 }
 
 fn parse_asset_endpoints(entries: &[String]) -> Result<BTreeMap<String, SocketAddr>> {

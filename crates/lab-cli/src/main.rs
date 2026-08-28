@@ -88,6 +88,9 @@ enum Command {
         /// hardware.
         #[arg(long)]
         dry_run: bool,
+        /// Execute through simulation adapters without touching physical hardware.
+        #[arg(long, conflicts_with = "dry_run")]
+        simulate: bool,
         /// Skip the initial confirmation. Handoffs and manual steps still
         /// require the operator.
         #[arg(long)]
@@ -219,6 +222,7 @@ fn run() -> Result<()> {
         Command::Run {
             path,
             dry_run,
+            simulate,
             yes,
             resume,
             asset_endpoint,
@@ -227,14 +231,15 @@ fn run() -> Result<()> {
                 execution_run::run_execution_command(
                     path,
                     dry_run,
+                    simulate,
                     yes,
                     resume,
                     asset_endpoint,
                     &output,
                 )
-            } else if resume || !asset_endpoint.is_empty() {
+            } else if simulate || resume || !asset_endpoint.is_empty() {
                 anyhow::bail!(
-                    "--resume and --asset-endpoint apply to reviewed facility plans; this directory holds a legacy Hamilton STAR package"
+                    "--simulate, --resume, and --asset-endpoint apply to reviewed facility plans; this directory holds a legacy Hamilton STAR package"
                 )
             } else {
                 run::run(path, dry_run, yes, &output)
@@ -302,6 +307,20 @@ mod tests {
                 ..
             } if path.as_path() == std::path::Path::new("review")
                 && asset_endpoint == ["https://example.org/facility/odtc=192.0.2.1:8080"]
+        ));
+    }
+
+    #[test]
+    fn parses_explicit_facility_simulation_mode() {
+        let cli = Cli::try_parse_from(["lab", "run", "review", "--simulate", "--resume"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Run {
+                path,
+                simulate: true,
+                resume: true,
+                ..
+            } if path.as_path() == std::path::Path::new("review")
         ));
     }
 

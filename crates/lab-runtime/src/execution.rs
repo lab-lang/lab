@@ -16,8 +16,8 @@ use lab_inventory::{FacilityScalarValue, InventorySnapshot};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
     ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding, PLATE_READ_FORMAT,
-    PlateReadDocument, STAR_RUN_FORMAT, StarRunDocument, THERMOCYCLE_RUN_FORMAT,
-    ThermocycleRunDocument,
+    PlateReadDocument, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument,
+    StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
 };
 use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
@@ -25,6 +25,7 @@ use sha2::{Digest, Sha256};
 use crate::clock::Clock;
 use crate::events::{EventSink, RunEvent};
 use crate::ledger::{ExecutionLedger, LEDGER_FILE, LedgerEvent};
+use crate::mode::ExecutionMode;
 use crate::operator::{ConfirmKind, Operator};
 
 /// One facility-wide plan after every frozen input and catalog binding has passed preflight.
@@ -40,10 +41,20 @@ pub struct LoadedExecutionPlan {
 }
 
 impl LoadedExecutionPlan {
-    /// Reasons this valid reviewed plan cannot yet be run against physical devices.
+    /// Reasons this valid reviewed plan cannot run in the requested mode.
     /// Planning-only plans remain useful and can still be rendered as dry runs.
-    pub fn readiness_issues(&self) -> Vec<String> {
+    pub fn readiness_issues(&self, mode: ExecutionMode) -> Vec<String> {
         let mut issues = Vec::new();
+        let minimum = match mode {
+            ExecutionMode::Simulation => sbol_inventory::vocabulary::Qualification::Simulatable,
+            ExecutionMode::Live => sbol_inventory::vocabulary::Qualification::Executable,
+        };
+        if mode == ExecutionMode::Simulation && !self.plan.outputs.is_empty() {
+            issues.push(
+                "simulation plans cannot mint physical output MaterialLots; remove plan outputs or execute the reviewed plan live"
+                    .to_owned(),
+            );
+        }
         for node in &self.nodes {
             let LoadedExecutionAction::Execute {
                 requirement,
@@ -55,12 +66,13 @@ impl LoadedExecutionPlan {
             let qualification = sbol_inventory::vocabulary::Qualification::try_from(
                 requirement.observed_qualification.as_str(),
             );
-            if !qualification
-                .is_ok_and(|value| value >= sbol_inventory::vocabulary::Qualification::Executable)
-            {
+            if !qualification.is_ok_and(|value| value >= minimum) {
                 issues.push(format!(
-                    "node '{}' is bound only at qualification '{}'",
-                    node.id, requirement.observed_qualification
+                    "node '{}' is bound only at qualification '{}', below '{}' for {}",
+                    node.id,
+                    requirement.observed_qualification,
+                    minimum.iri(),
+                    mode.as_str()
                 ));
             }
             if requirement.adapter.is_none() {
@@ -73,8 +85,8 @@ impl LoadedExecutionPlan {
         issues
     }
 
-    pub fn is_executable(&self) -> bool {
-        self.readiness_issues().is_empty()
+    pub fn is_ready(&self, mode: ExecutionMode) -> bool {
+        self.readiness_issues(mode).is_empty()
     }
 }
 
@@ -111,6 +123,7 @@ pub enum LoadedReviewedDocument {
     },
     Thermocycle(ThermocycleRunDocument),
     PlateRead(PlateReadDocument),
+    Simulation(SimulationRunDocument),
 }
 
 impl LoadedReviewedDocument {
@@ -119,6 +132,7 @@ impl LoadedReviewedDocument {
             Self::Star { .. } => STAR_RUN_FORMAT,
             Self::Thermocycle(_) => THERMOCYCLE_RUN_FORMAT,
             Self::PlateRead(_) => PLATE_READ_FORMAT,
+            Self::Simulation(_) => SIMULATION_RUN_FORMAT,
         }
     }
 
@@ -127,6 +141,7 @@ impl LoadedReviewedDocument {
             Self::Star { document, .. } => &document.title,
             Self::Thermocycle(document) => &document.title,
             Self::PlateRead(document) => &document.title,
+            Self::Simulation(document) => &document.title,
         }
     }
 }
@@ -215,6 +230,7 @@ impl ExecutorRegistry {
 pub struct ExecutionRunConfig {
     pub assume_yes: bool,
     pub resume: bool,
+    pub mode: ExecutionMode,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -239,7 +255,7 @@ pub enum ExecutionOutcome {
 pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
     use std::fmt::Write as _;
 
-    let issues = loaded.readiness_issues();
+    let issues = loaded.readiness_issues(ExecutionMode::Live);
     let mut text = String::new();
     let _ = writeln!(
         text,
@@ -322,7 +338,7 @@ pub fn run_execution_plan(
     events: &mut dyn EventSink,
     clock: &dyn Clock,
 ) -> Result<ExecutionOutcome> {
-    let mut readiness = loaded.readiness_issues();
+    let mut readiness = loaded.readiness_issues(config.mode);
     for node in &loaded.nodes {
         let LoadedExecutionAction::Execute {
             requirement,
@@ -346,7 +362,8 @@ pub fn run_execution_plan(
     }
     if !readiness.is_empty() {
         bail!(
-            "reviewed plan is not executable:\n  - {}",
+            "reviewed plan is not ready for {}:\n  - {}",
+            config.mode.as_str(),
             readiness.join("\n  - ")
         );
     }
@@ -363,13 +380,15 @@ pub fn run_execution_plan(
             &loaded.plan_sha256,
             inventory_sha256,
             valid_nodes.clone(),
+            config.mode,
         )?)
     } else {
         let path = loaded.directory.join(LEDGER_FILE);
         if path.exists() {
             bail!(
-                "{} already exists; resume the reviewed plan instead of replacing durable physical state",
-                path.display()
+                "{} already exists; resume the reviewed plan instead of replacing durable {} state",
+                path.display(),
+                config.mode.as_str()
             );
         }
         None
@@ -386,7 +405,14 @@ pub fn run_execution_plan(
     if !config.assume_yes
         && !operator.confirm(
             ConfirmKind::PreRun,
-            "proceed with the exact reviewed facility plan? Devices may move. [y/N] ",
+            match config.mode {
+                ExecutionMode::Simulation => {
+                    "proceed with the exact reviewed facility simulation? [y/N] "
+                }
+                ExecutionMode::Live => {
+                    "proceed with the exact reviewed facility plan? Devices may move. [y/N] "
+                }
+            },
         )?
     {
         return Ok(ExecutionOutcome::Cancelled);
@@ -397,6 +423,7 @@ pub fn run_execution_plan(
             &loaded.plan_sha256,
             inventory_sha256,
             valid_nodes,
+            config.mode,
             clock,
         )?);
     }
@@ -635,6 +662,7 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                         Some(load_reviewed_document(
                             &adapter.driver,
                             &document.format,
+                            &binding.capability_kind,
                             &bytes,
                             &directory.join(&document.path),
                         )?)
@@ -1002,6 +1030,7 @@ fn read_frozen_input(
 fn load_reviewed_document(
     driver: &str,
     format: &str,
+    expected_capability_kind: &str,
     bytes: &[u8],
     path: &Path,
 ) -> Result<LoadedReviewedDocument> {
@@ -1062,6 +1091,29 @@ fn load_reviewed_document(
                 );
             }
             Ok(LoadedReviewedDocument::PlateRead(document))
+        }
+        ("lab.simulator", SIMULATION_RUN_FORMAT) => {
+            let document: SimulationRunDocument = parse_json_document(bytes, path)?;
+            if document.format != SIMULATION_RUN_FORMAT {
+                bail!(
+                    "{} declares format '{}', expected '{}'",
+                    path.display(),
+                    document.format,
+                    SIMULATION_RUN_FORMAT
+                );
+            }
+            Iri::new(document.capability_kind.clone()).with_context(|| {
+                format!("{} declares an invalid capability-kind IRI", path.display())
+            })?;
+            if document.capability_kind != expected_capability_kind {
+                bail!(
+                    "{} simulates capability '{}', but its frozen requirement binds '{}'",
+                    path.display(),
+                    document.capability_kind,
+                    expected_capability_kind
+                );
+            }
+            Ok(LoadedReviewedDocument::Simulation(document))
         }
         _ => bail!(
             "adapter '{driver}' has no runtime executor for reviewed document format '{format}'"
@@ -1304,7 +1356,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         assert_eq!(loaded.plan_sha256, sha256_hex(&plan_bytes));
         assert_eq!(loaded.nodes[0].id, "prepare");
         assert_eq!(loaded.nodes[1].id, "execute-0001");
-        assert!(loaded.is_executable());
+        assert!(loaded.is_ready(ExecutionMode::Live));
         let LoadedExecutionAction::Execute {
             document: Some(document),
             ..
@@ -1429,6 +1481,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             ExecutionRunConfig {
                 assume_yes: true,
                 resume: false,
+                mode: ExecutionMode::Live,
             },
             &mut registry,
             &mut AutoOperator { answer: true },
@@ -1462,6 +1515,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             ExecutionRunConfig {
                 assume_yes: true,
                 resume: true,
+                mode: ExecutionMode::Live,
             },
             &mut registry,
             &mut AutoOperator { answer: true },
@@ -1506,6 +1560,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             ExecutionRunConfig {
                 assume_yes: true,
                 resume: false,
+                mode: ExecutionMode::Live,
             },
             &mut wrong_registry,
             &mut AutoOperator { answer: true },
@@ -1534,6 +1589,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             ExecutionRunConfig {
                 assume_yes: false,
                 resume: false,
+                mode: ExecutionMode::Live,
             },
             &mut registry,
             &mut AutoOperator { answer: false },

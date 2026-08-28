@@ -12,12 +12,13 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::clock::Clock;
+use crate::mode::ExecutionMode;
 
 /// The ledger file a run accumulates beside its plan.
 pub const LEDGER_FILE: &str = "run-ledger.jsonl";
 
 /// The durable ledger format for generic facility-wide execution plans.
-pub const EXECUTION_LEDGER_FORMAT: &str = "lab.execution-ledger.v1";
+pub const EXECUTION_LEDGER_FORMAT: &str = "lab.execution-ledger.v2";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -45,6 +46,7 @@ impl ExecutionLedger {
         plan_sha256: &str,
         inventory_sha256: &str,
         valid_nodes: BTreeSet<String>,
+        mode: ExecutionMode,
         clock: &dyn Clock,
     ) -> Result<Self> {
         let path = directory.join(LEDGER_FILE);
@@ -53,6 +55,7 @@ impl ExecutionLedger {
             format: EXECUTION_LEDGER_FORMAT.to_owned(),
             plan_sha256: plan_sha256.to_owned(),
             inventory_sha256: inventory_sha256.to_owned(),
+            execution_mode: mode.as_str().to_owned(),
             started_at_unix_seconds,
         };
         let mut line = serde_json::to_string(&header)?;
@@ -87,6 +90,7 @@ impl ExecutionLedger {
         plan_sha256: &str,
         inventory_sha256: &str,
         valid_nodes: BTreeSet<String>,
+        mode: ExecutionMode,
     ) -> Result<Self> {
         let path = directory.join(LEDGER_FILE);
         let text = fs::read_to_string(&path).with_context(|| {
@@ -115,6 +119,7 @@ impl ExecutionLedger {
             format,
             plan_sha256: recorded_plan,
             inventory_sha256: recorded_inventory,
+            execution_mode,
             started_at_unix_seconds,
         }) = records.first()
         else {
@@ -146,6 +151,14 @@ impl ExecutionLedger {
                 path.display(),
                 recorded_inventory,
                 inventory_sha256
+            );
+        }
+        if execution_mode != mode.as_str() {
+            bail!(
+                "{} belongs to execution mode '{}', but this run requested '{}'; simulation and live execution never share resume state",
+                path.display(),
+                execution_mode,
+                mode.as_str()
             );
         }
         let started_at_unix_seconds = *started_at_unix_seconds;
@@ -247,6 +260,7 @@ enum ExecutionLedgerRecord {
         format: String,
         plan_sha256: String,
         inventory_sha256: String,
+        execution_mode: String,
         started_at_unix_seconds: u64,
     },
     Node {
@@ -284,6 +298,7 @@ mod tests {
             &"a".repeat(64),
             &"b".repeat(64),
             nodes(),
+            ExecutionMode::Live,
             &FixedClock,
         )
         .unwrap();
@@ -297,9 +312,14 @@ mod tests {
             .append("execute", LedgerEvent::Started, &FixedClock)
             .unwrap();
 
-        let resumed =
-            ExecutionLedger::resume(directory.path(), &"a".repeat(64), &"b".repeat(64), nodes())
-                .unwrap();
+        let resumed = ExecutionLedger::resume(
+            directory.path(),
+            &"a".repeat(64),
+            &"b".repeat(64),
+            nodes(),
+            ExecutionMode::Live,
+        )
+        .unwrap();
 
         assert_eq!(
             resumed.completed_nodes(),
@@ -324,20 +344,31 @@ mod tests {
             &"a".repeat(64),
             &"b".repeat(64),
             nodes(),
+            ExecutionMode::Live,
             &FixedClock,
         )
         .unwrap();
 
-        let changed_plan =
-            ExecutionLedger::resume(directory.path(), &"c".repeat(64), &"b".repeat(64), nodes())
-                .unwrap_err()
-                .to_string();
+        let changed_plan = ExecutionLedger::resume(
+            directory.path(),
+            &"c".repeat(64),
+            &"b".repeat(64),
+            nodes(),
+            ExecutionMode::Live,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(changed_plan.contains("substitutions require a new reviewed plan"));
 
-        let changed_inventory =
-            ExecutionLedger::resume(directory.path(), &"a".repeat(64), &"c".repeat(64), nodes())
-                .unwrap_err()
-                .to_string();
+        let changed_inventory = ExecutionLedger::resume(
+            directory.path(),
+            &"a".repeat(64),
+            &"c".repeat(64),
+            nodes(),
+            ExecutionMode::Live,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(changed_inventory.contains("belongs to inventory"));
     }
 
@@ -349,6 +380,7 @@ mod tests {
             &"a".repeat(64),
             &"b".repeat(64),
             nodes(),
+            ExecutionMode::Live,
             &FixedClock,
         )
         .unwrap();
@@ -358,10 +390,36 @@ mod tests {
             &"a".repeat(64),
             &"b".repeat(64),
             nodes(),
+            ExecutionMode::Live,
             &FixedClock,
         )
         .unwrap_err()
         .to_string();
         assert!(error.contains("resume the reviewed plan"), "{error}");
+    }
+
+    #[test]
+    fn simulation_resume_state_cannot_skip_live_execution() {
+        let directory = tempfile::tempdir().unwrap();
+        ExecutionLedger::create(
+            directory.path(),
+            &"a".repeat(64),
+            &"b".repeat(64),
+            nodes(),
+            ExecutionMode::Simulation,
+            &FixedClock,
+        )
+        .unwrap();
+
+        let error = ExecutionLedger::resume(
+            directory.path(),
+            &"a".repeat(64),
+            &"b".repeat(64),
+            nodes(),
+            ExecutionMode::Live,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("never share resume state"), "{error}");
     }
 }

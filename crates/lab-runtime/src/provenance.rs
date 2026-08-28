@@ -25,8 +25,17 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::execution::LoadedExecutionPlan;
 use crate::ledger::LEDGER_FILE;
+use crate::mode::ExecutionMode;
 
 pub const INVENTORY_RESULT_FILE: &str = "inventory-after.ttl";
+pub const SIMULATION_INVENTORY_RESULT_FILE: &str = "inventory-simulation.ttl";
+
+pub const fn inventory_result_file(mode: ExecutionMode) -> &'static str {
+    match mode {
+        ExecutionMode::Simulation => SIMULATION_INVENTORY_RESULT_FILE,
+        ExecutionMode::Live => INVENTORY_RESULT_FILE,
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InventoryResult {
@@ -36,13 +45,17 @@ pub struct InventoryResult {
     pub output_materials: Vec<String>,
 }
 
-/// Writes `inventory-after.ttl` beside the reviewed plan after successful completion.
+/// Writes a new inventory result beside the reviewed plan after successful completion.
 pub fn write_inventory_result(
     loaded: &LoadedExecutionPlan,
+    mode: ExecutionMode,
     started_at_unix_seconds: u64,
     ended_at_unix_seconds: u64,
 ) -> Result<InventoryResult> {
-    let output_path = loaded.directory.join(INVENTORY_RESULT_FILE);
+    if mode == ExecutionMode::Simulation && !loaded.plan.outputs.is_empty() {
+        bail!("simulation cannot generate physical output MaterialLots");
+    }
+    let output_path = loaded.directory.join(inventory_result_file(mode));
     if output_path == loaded.inventory.source_path() {
         bail!("refusing to overwrite the reviewed inventory source");
     }
@@ -59,8 +72,10 @@ pub fn write_inventory_result(
         bail!("run completion time precedes its start time");
     }
     let run_namespace = Namespace::new(format!(
-        "https://lab-lang.org/runs/{}/{}",
-        loaded.plan_sha256, started_at_unix_seconds
+        "https://lab-lang.org/runs/{}/{}/{}",
+        mode.as_str(),
+        loaded.plan_sha256,
+        started_at_unix_seconds
     ))?;
     let run_resource = iri_resource(format!("{}/run", run_namespace.as_str()))?;
 
@@ -178,10 +193,18 @@ pub fn write_inventory_result(
         .had_plan(plan.identity.clone())
         .build()?;
     let activity = Activity::builder(run_namespace.as_str(), "run")?
-        .name("Lab facility run")
+        .name(match mode {
+            ExecutionMode::Simulation => "Lab facility simulation",
+            ExecutionMode::Live => "Lab facility run",
+        })
         .description(format!(
-            "Execution of reviewed plan {} against facility {}",
-            loaded.plan_sha256, loaded.plan.inventory.facility
+            "{} of reviewed plan {} against facility {}",
+            match mode {
+                ExecutionMode::Simulation => "Simulation",
+                ExecutionMode::Live => "Execution",
+            },
+            loaded.plan_sha256,
+            loaded.plan.inventory.facility
         ))
         .started_at_time(started_at)
         .ended_at_time(ended_at)
@@ -195,8 +218,11 @@ pub fn write_inventory_result(
     extend(&mut triples, &activity)?;
 
     let evidence = ExperimentalData::builder(run_namespace.as_str(), "evidence")?
-        .name("Lab run evidence")
-        .description("Frozen reviewed inputs and the durable execution ledger")
+        .name(match mode {
+            ExecutionMode::Simulation => "Lab simulation evidence",
+            ExecutionMode::Live => "Lab run evidence",
+        })
+        .description("Frozen reviewed inputs and the mode-bound durable execution ledger")
         .attachments(
             attachments
                 .iter()
@@ -420,6 +446,7 @@ mod tests {
     use crate::clock::Clock;
     use crate::execution::{load_execution_directory, tests::write_execution_package};
     use crate::ledger::{ExecutionLedger, LedgerEvent};
+    use crate::mode::ExecutionMode;
 
     struct FixedClock;
 
@@ -444,6 +471,7 @@ mod tests {
             &loaded.plan_sha256,
             loaded.inventory.source_sha256(),
             nodes,
+            ExecutionMode::Live,
             &FixedClock,
         )
         .unwrap();
@@ -456,7 +484,9 @@ mod tests {
                 .unwrap();
         }
 
-        let result = write_inventory_result(&loaded, 1_725_000_000, 1_725_000_000).unwrap();
+        let result =
+            write_inventory_result(&loaded, ExecutionMode::Live, 1_725_000_000, 1_725_000_000)
+                .unwrap();
 
         assert_eq!(
             fs::read(loaded.inventory.source_path()).unwrap(),
@@ -534,9 +564,10 @@ mod tests {
                 .any(|activity| activity.to_string() == result.activity)
         );
 
-        let overwrite = write_inventory_result(&loaded, 1_725_000_000, 1_725_000_000)
-            .unwrap_err()
-            .to_string();
+        let overwrite =
+            write_inventory_result(&loaded, ExecutionMode::Live, 1_725_000_000, 1_725_000_000)
+                .unwrap_err()
+                .to_string();
         assert!(overwrite.contains("preserving prior run provenance"));
     }
 }
