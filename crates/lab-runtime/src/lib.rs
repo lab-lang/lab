@@ -8,9 +8,9 @@
 //! - **dry run** validates every document and narrates the walk without
 //!   touching hardware.
 //!
-//! The walk is parameterized over four ports: a [`clock::Clock`], an
+//! Facility execution is parameterized over a [`clock::Clock`], an
 //! [`operator::Operator`] for confirmations, an [`events::EventSink`] for
-//! narration, and a [`stations::Connector`] that opens station sessions.
+//! narration, and exact Asset-bound document executors.
 
 pub mod clock;
 pub mod device_executors;
@@ -20,10 +20,5 @@ pub mod ledger;
 pub mod operator;
 pub mod provenance;
 pub mod star;
-pub mod stations;
-pub mod workcell;
-
-#[cfg(test)]
-pub(crate) mod testing;
 
 pub use hamilton_star;

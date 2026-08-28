@@ -24,12 +24,6 @@ pub const THERMOCYCLE_RUN_FORMAT: &str = "lab.thermocycle-run.v0";
 /// The format string every `lab.plate-read.v0` document declares.
 pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 
-/// The format string every `lab.workcell-run.v0` document declares.
-pub const WORKCELL_RUN_FORMAT: &str = "lab.workcell-run.v0";
-
-/// The file name a wave directory's coordination plan is stored under.
-pub const WORKCELL_PLAN_FILE: &str = "plan.workcell.json";
-
 /// The reviewed, facility-wide execution plan format.
 pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v1";
 
@@ -105,14 +99,6 @@ pub fn load_thermocycle(path: &Path) -> Result<ThermocycleRunDocument, RunDocume
 pub fn load_plate_read(path: &Path) -> Result<PlateReadDocument, RunDocumentError> {
     let document: PlateReadDocument = load_document(path)?;
     check_format(path, PLATE_READ_FORMAT, &document.format)?;
-    Ok(document)
-}
-
-/// Load and format-check the coordination plan in a wave directory.
-pub fn load_workcell_plan(directory: &Path) -> Result<WorkcellRunDocument, RunDocumentError> {
-    let path = directory.join(WORKCELL_PLAN_FILE);
-    let document: WorkcellRunDocument = load_document(&path)?;
-    check_format(&path, WORKCELL_RUN_FORMAT, &document.format)?;
     Ok(document)
 }
 
@@ -516,61 +502,6 @@ pub enum PlateReadMode {
     Luminescence { integration_seconds: f64 },
 }
 
-/// One `lab.workcell-run.v0` document: the coordination plan for one wave
-/// of a multi-station build. Nodes execute in dependency order; every
-/// physical plate movement is an explicit handoff node the operator
-/// confirms.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorkcellRunDocument {
-    /// Always [`WORKCELL_RUN_FORMAT`]; readers reject any other value.
-    pub format: String,
-    pub stations: Vec<WorkcellStation>,
-    pub nodes: Vec<WorkcellNode>,
-}
-
-/// One station as the coordination plan sees it: a name, the kind that
-/// selects its executor, and where its program documents live relative to
-/// the wave directory.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkcellStation {
-    pub name: String,
-    /// The station kind string, e.g. `hamilton.star` or `inheco.odtc`.
-    pub kind: String,
-    pub program_dir: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorkcellNode {
-    /// Stable, human-readable identity, e.g. `assembly_run` or
-    /// `assembly_thermocycle.to-odtc-1`.
-    pub id: String,
-    /// Node ids that must complete first.
-    #[serde(default)]
-    pub after: Vec<String>,
-    #[serde(flatten)]
-    pub action: WorkcellAction,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "kebab-case")]
-pub enum WorkcellAction {
-    /// Execute one station program document.
-    StationProgram {
-        station: String,
-        /// The document path relative to the wave directory.
-        document: String,
-    },
-    /// A human moves labware between stations and confirms.
-    Handoff {
-        from: String,
-        to: String,
-        labware: String,
-        instructions: String,
-    },
-    /// A human performs a step that is not a movement, and confirms.
-    Manual { title: String, instructions: String },
-}
-
 /// One replayable Hamilton STAR step: the id-less firmware frame and the
 /// operator's view of it. `module` and `code` repeat the frame's first four
 /// characters so a reviewer can scan the document without decoding frames.
@@ -795,17 +726,5 @@ mod tests {
             matches!(error, RunDocumentError::WrongFormat { expected, .. } if expected == STAR_RUN_FORMAT),
             "the error names the expected format: {error}"
         );
-    }
-
-    #[test]
-    fn the_workcell_plan_loader_reads_from_its_well_known_file_name() {
-        let directory = tempfile::tempdir().expect("the test directory is creatable");
-        std::fs::write(
-            directory.path().join(WORKCELL_PLAN_FILE),
-            r#"{ "format": "lab.workcell-run.v0", "stations": [], "nodes": [] }"#,
-        )
-        .expect("the fixture writes");
-        let plan = load_workcell_plan(directory.path()).expect("the plan loads");
-        assert!(plan.nodes.is_empty(), "the empty plan round-trips");
     }
 }

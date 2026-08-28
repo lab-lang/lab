@@ -29,7 +29,7 @@ pub(crate) fn run_execution_command(
     dry_run: bool,
     yes: bool,
     resume: bool,
-    asset_addresses: Vec<String>,
+    asset_endpoints: Vec<String>,
     output: &Output,
 ) -> Result<()> {
     let loaded = load_execution_directory(&directory)?;
@@ -48,7 +48,7 @@ pub(crate) fn run_execution_command(
         );
     }
 
-    let addresses = parse_asset_addresses(&asset_addresses)?;
+    let addresses = parse_asset_endpoints(&asset_endpoints)?;
     let mut registry = build_hardware_registry(&loaded, &addresses)?;
     let mut operator = StdinOperator;
     let mut events = HumanSink;
@@ -108,17 +108,17 @@ pub(crate) fn run_execution_command(
     }
 }
 
-fn parse_asset_addresses(entries: &[String]) -> Result<BTreeMap<String, SocketAddr>> {
+fn parse_asset_endpoints(entries: &[String]) -> Result<BTreeMap<String, SocketAddr>> {
     let mut addresses = BTreeMap::new();
     for entry in entries {
         let Some((asset, address)) = entry.split_once('=') else {
-            bail!("--station takes ASSET_IRI=ADDRESS for a facility execution plan");
+            bail!("--asset-endpoint takes ASSET_IRI=ADDRESS for a facility execution plan");
         };
         let address = address.parse().with_context(|| {
             format!("'{address}' is not an <ip:port> address for Asset '{asset}'")
         })?;
         if addresses.insert(asset.to_owned(), address).is_some() {
-            bail!("Asset '{asset}' has more than one --station address");
+            bail!("Asset '{asset}' has more than one --asset-endpoint address");
         }
     }
     Ok(addresses)
@@ -203,7 +203,7 @@ fn build_hardware_registry(
             ("inheco.odtc", THERMOCYCLE_RUN_FORMAT) => {
                 let address = addresses.get(&asset).with_context(|| {
                     format!(
-                        "Inheco ODTC Asset '{asset}' has no runtime address; pass --station '{asset}=<ip:port>'"
+                        "Inheco ODTC Asset '{asset}' has no runtime address; pass --asset-endpoint '{asset}=<ip:port>'"
                     )
                 })?;
                 used_addresses.insert(asset.clone());
@@ -224,7 +224,7 @@ fn build_hardware_registry(
         .find(|asset| !used_addresses.contains(*asset))
     {
         bail!(
-            "--station supplies an address for Asset '{unused}', which the reviewed plan does not use as a networked executor"
+            "--asset-endpoint supplies an address for Asset '{unused}', which the reviewed plan does not use as a networked executor"
         );
     }
     Ok(registry)
@@ -243,10 +243,10 @@ impl EventSink for HumanSink {
                     format!(", resuming past {completed} completed")
                 }
             ),
-            RunEvent::Connecting { station, detail } => {
-                println!("connecting to Asset {station} ({detail})")
+            RunEvent::Connecting { asset, detail } => {
+                println!("connecting to Asset {asset} ({detail})")
             }
-            RunEvent::Connected { station } => println!("connected; Asset {station} is ready"),
+            RunEvent::Connected { asset } => println!("connected; Asset {asset} is ready"),
             RunEvent::NodeSkipped { id } => println!("skipping {id} (completed in the ledger)"),
             RunEvent::NodeStarted { .. } | RunEvent::NodeCompleted { .. } => {}
             RunEvent::DocumentStarted {
@@ -256,15 +256,15 @@ impl EventSink for HumanSink {
                 title,
             } => println!("\n{title}\n  Asset: {asset}\n  Adapter: {driver}\n  Document: {format}"),
             RunEvent::ProgramStarted {
-                station,
+                asset,
                 title,
                 extent,
             } => match extent {
                 ProgramExtent::Frames { frames } => {
-                    println!("\n{station}: {title} ({frames} frames)")
+                    println!("\n{asset}: {title} ({frames} frames)")
                 }
                 ProgramExtent::Plateaus { plateaus, .. } => {
-                    println!("\n{station}: {title} ({plateaus} plateaus)")
+                    println!("\n{asset}: {title} ({plateaus} plateaus)")
                 }
             },
             RunEvent::Frame {
@@ -273,14 +273,14 @@ impl EventSink for HumanSink {
             RunEvent::ThermalRunning { .. } => {
                 println!("running; resume uses the exact reviewed plan if interrupted")
             }
-            RunEvent::ThermalWarning { station, warning } => {
-                println!("{station} warning: {warning}")
+            RunEvent::ThermalWarning { asset, warning } => {
+                println!("{asset} warning: {warning}")
             }
             RunEvent::ThermalHold { celsius, .. } => {
                 println!("holding the block at {celsius} C until retrieval")
             }
-            RunEvent::DoorOpened { station } => println!("{station} door is open"),
-            RunEvent::DoorClosed { station } => println!("{station} door is closed"),
+            RunEvent::DoorOpened { asset } => println!("{asset} door is open"),
+            RunEvent::DoorClosed { asset } => println!("{asset} door is closed"),
             RunEvent::AttentionRequired { prompt, .. } => println!("\nby hand: {prompt}"),
             RunEvent::AttentionReleased { .. } | RunEvent::LabwareMoved { .. } => {}
         }

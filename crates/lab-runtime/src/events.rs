@@ -1,7 +1,7 @@
 //! The event port: everything a live or dry run has to say goes through one
 //! sink. The CLI's sink turns these facts into operator-facing narration.
 
-/// One observable moment in a workcell run.
+/// One observable moment in a reviewed facility run.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RunEvent {
     /// The walk is about to start `pending` nodes, skipping `completed`.
@@ -10,11 +10,11 @@ pub enum RunEvent {
         completed: usize,
     },
     Connecting {
-        station: String,
+        asset: String,
         detail: String,
     },
     Connected {
-        station: String,
+        asset: String,
     },
     NodeStarted {
         id: String,
@@ -32,36 +32,36 @@ pub enum RunEvent {
         format: String,
         title: String,
     },
-    /// A station program began: a STAR frame sequence or a thermal profile.
+    /// An Asset program began: a STAR frame sequence or a thermal profile.
     ProgramStarted {
-        station: String,
+        asset: String,
         title: String,
         extent: ProgramExtent,
     },
     /// One STAR frame is about to execute.
     Frame {
-        station: String,
+        asset: String,
         index: usize,
         description: String,
     },
-    /// The thermal profile is running to completion on its station.
+    /// The thermal profile is running to completion on its bound Asset.
     ThermalRunning {
-        station: String,
+        asset: String,
     },
     ThermalWarning {
-        station: String,
+        asset: String,
         warning: String,
     },
     /// The block holds a temperature until retrieval.
     ThermalHold {
-        station: String,
+        asset: String,
         celsius: f64,
     },
     DoorOpened {
-        station: String,
+        asset: String,
     },
     DoorClosed {
-        station: String,
+        asset: String,
     },
     /// The operator is needed, starting now.
     AttentionRequired {
@@ -80,7 +80,7 @@ pub enum RunEvent {
     },
 }
 
-/// How large a station program is, in the unit the station thinks in.
+/// How large a device program is, in the unit the device thinks in.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProgramExtent {
     Frames {

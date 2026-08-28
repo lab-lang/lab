@@ -40,12 +40,12 @@ impl HamiltonStarExecutor {
     fn session(&mut self, events: &mut dyn EventSink) -> Result<&hamilton_star::Star> {
         if self.session.is_none() {
             events.emit(RunEvent::Connecting {
-                station: self.asset.clone(),
+                asset: self.asset.clone(),
                 detail: "the first Hamilton STAR on USB".to_owned(),
             });
             self.session = Some(crate::star::open_usb_star(self.autoload_park_track)?);
             events.emit(RunEvent::Connected {
-                station: self.asset.clone(),
+                asset: self.asset.clone(),
             });
         }
         Ok(self
@@ -66,7 +66,7 @@ impl DocumentExecutor for HamiltonStarExecutor {
             bail!("the Hamilton STAR executor received a non-STAR document");
         };
         events.emit(RunEvent::ProgramStarted {
-            station: self.asset.clone(),
+            asset: self.asset.clone(),
             title: document.title.clone(),
             extent: ProgramExtent::Frames {
                 frames: commands.len(),
@@ -76,7 +76,7 @@ impl DocumentExecutor for HamiltonStarExecutor {
         let session = self.session(events)?;
         for (index, (step, command)) in document.steps.iter().zip(commands).enumerate() {
             events.emit(RunEvent::Frame {
-                station: asset.clone(),
+                asset: asset.clone(),
                 index: index + 1,
                 description: step.description.clone(),
             });
@@ -115,7 +115,7 @@ impl OdtcExecutor {
     fn session(&mut self, events: &mut dyn EventSink) -> Result<&mut lab_instruments::OdtcStation> {
         if self.session.is_none() {
             events.emit(RunEvent::Connecting {
-                station: self.asset.clone(),
+                asset: self.asset.clone(),
                 detail: self.address.to_string(),
             });
             self.session = Some(
@@ -127,7 +127,7 @@ impl OdtcExecutor {
                 })?,
             );
             events.emit(RunEvent::Connected {
-                station: self.asset.clone(),
+                asset: self.asset.clone(),
             });
         }
         Ok(self
@@ -148,7 +148,7 @@ impl DocumentExecutor for OdtcExecutor {
             bail!("the Inheco ODTC executor received a non-thermocycle document");
         };
         events.emit(RunEvent::ProgramStarted {
-            station: self.asset.clone(),
+            asset: self.asset.clone(),
             title: document.title.clone(),
             extent: ProgramExtent::Plateaus {
                 plateaus: document.profile.total_steps(),
@@ -161,14 +161,14 @@ impl DocumentExecutor for OdtcExecutor {
             .run_profile(&document.profile)
             .with_context(|| format!("could not start '{}' on {asset}", document.id))?;
         events.emit(RunEvent::ThermalRunning {
-            station: asset.clone(),
+            asset: asset.clone(),
         });
         session
             .await_completion(handle)
             .with_context(|| format!("'{}' did not complete on {asset}", document.id))?;
         for warning in session.take_warnings() {
             events.emit(RunEvent::ThermalWarning {
-                station: asset.clone(),
+                asset: asset.clone(),
                 warning,
             });
         }
@@ -176,10 +176,7 @@ impl DocumentExecutor for OdtcExecutor {
             session
                 .hold_block(celsius, None)
                 .with_context(|| format!("could not hold {celsius} C on {asset}"))?;
-            events.emit(RunEvent::ThermalHold {
-                station: asset,
-                celsius,
-            });
+            events.emit(RunEvent::ThermalHold { asset, celsius });
         }
         Ok(())
     }

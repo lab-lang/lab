@@ -5,7 +5,6 @@ mod run;
 mod targets;
 mod typeset;
 mod update;
-mod workcell_run;
 
 use std::path::PathBuf;
 
@@ -81,7 +80,7 @@ enum Command {
         #[command(subcommand)]
         command: AdaptersCommand,
     },
-    /// Execute a reviewed facility plan or a legacy emitted run package, or review it with --dry-run.
+    /// Execute a reviewed facility plan or a legacy STAR package, or review it with --dry-run.
     Run {
         /// A directory containing plan.execution.json, or a legacy target run directory.
         path: PathBuf,
@@ -97,9 +96,8 @@ enum Command {
         #[arg(long)]
         resume: bool,
         /// Where a networked Asset answers, as ASSET_IRI=ADDRESS (repeatable).
-        /// Legacy workcell waves continue to accept NAME=ADDRESS.
-        #[arg(long = "station", value_name = "NAME=ADDRESS")]
-        station: Vec<String>,
+        #[arg(long, value_name = "ASSET_IRI=ADDRESS")]
+        asset_endpoint: Vec<String>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -117,7 +115,7 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum TargetsCommand {
-    /// Describe every backend and station kind, or one backend in detail.
+    /// Describe every legacy single-device backend, or one backend in detail.
     Describe {
         /// Concrete `[target] backend` value to describe.
         #[arg(long)]
@@ -223,15 +221,20 @@ fn run() -> Result<()> {
             dry_run,
             yes,
             resume,
-            station,
+            asset_endpoint,
         } => {
             if execution_run::is_execution_directory(&path) {
-                execution_run::run_execution_command(path, dry_run, yes, resume, station, &output)
-            } else if workcell_run::is_workcell_directory(&path) {
-                workcell_run::run_workcell_command(path, dry_run, yes, resume, station, &output)
-            } else if resume || !station.is_empty() {
+                execution_run::run_execution_command(
+                    path,
+                    dry_run,
+                    yes,
+                    resume,
+                    asset_endpoint,
+                    &output,
+                )
+            } else if resume || !asset_endpoint.is_empty() {
                 anyhow::bail!(
-                    "--resume and --station apply to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
+                    "--resume and --asset-endpoint apply to reviewed facility plans; this directory holds a legacy Hamilton STAR package"
                 )
             } else {
                 run::run(path, dry_run, yes, &output)
@@ -276,6 +279,29 @@ mod tests {
             Command::Plan { path, out_dir }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("review"))
+        ));
+    }
+
+    #[test]
+    fn parses_exact_asset_endpoints_for_facility_runs() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "run",
+            "review",
+            "--resume",
+            "--asset-endpoint",
+            "https://example.org/facility/odtc=192.0.2.1:8080",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Run {
+                path,
+                resume: true,
+                asset_endpoint,
+                ..
+            } if path.as_path() == std::path::Path::new("review")
+                && asset_endpoint == ["https://example.org/facility/odtc=192.0.2.1:8080"]
         ));
     }
 
