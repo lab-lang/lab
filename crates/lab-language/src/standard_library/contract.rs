@@ -29,10 +29,12 @@ pub(crate) enum PhrasePart {
     },
     Integer {
         name: &'static str,
+        property_kind: &'static str,
         signed: bool,
     },
     Quantity {
         name: &'static str,
+        property_kind: &'static str,
         signed: bool,
         units: &'static [&'static str],
     },
@@ -117,7 +119,7 @@ impl ActionContractSpec {
         let mut argument_names = BTreeSet::new();
         let mut operands = BTreeSet::new();
         for part in self.phrase.iter().flat_map(PhrasePart::parts) {
-            let (name, units) = match part {
+            let (name, property_kind, units) = match part {
                 PhrasePart::Word(word) => {
                     if word.is_empty() {
                         return Err("action phrase words cannot be empty".to_owned());
@@ -133,10 +135,19 @@ impl ActionContractSpec {
                         ));
                     }
                     operands.insert(*name);
-                    (*name, None)
+                    (*name, None, None)
                 }
-                PhrasePart::Integer { name, .. } => (*name, None),
-                PhrasePart::Quantity { name, units, .. } => (*name, Some(*units)),
+                PhrasePart::Integer {
+                    name,
+                    property_kind,
+                    ..
+                } => (*name, Some(*property_kind), None),
+                PhrasePart::Quantity {
+                    name,
+                    property_kind,
+                    units,
+                    ..
+                } => (*name, Some(*property_kind), Some(*units)),
                 PhrasePart::Optional(_) => {
                     return Err("an optional clause cannot nest another".to_owned());
                 }
@@ -144,6 +155,11 @@ impl ActionContractSpec {
             if !argument_names.insert(name) {
                 return Err(format!(
                     "action argument '{name}' is declared more than once"
+                ));
+            }
+            if property_kind.is_some_and(|kind| !is_absolute_iri(kind)) {
+                return Err(format!(
+                    "action parameter '{name}' property kind must be an absolute IRI"
                 ));
             }
             if units.is_some_and(<[_]>::is_empty) {
@@ -228,6 +244,27 @@ mod tests {
         let error = action.validate().expect_err("bare names are not portable");
 
         assert!(error.contains("not an absolute IRI"), "{error}");
+    }
+
+    #[test]
+    fn a_parameter_kind_must_be_an_absolute_iri() {
+        let action = contract(vec![
+            PhrasePart::Word("act"),
+            PhrasePart::Integer {
+                name: "count",
+                property_kind: "count",
+                signed: false,
+            },
+        ]);
+
+        let error = action
+            .validate()
+            .expect_err("argument names are not RDF property identities");
+
+        assert!(
+            error.contains("property kind must be an absolute IRI"),
+            "{error}"
+        );
     }
 
     fn optional_operand(r#type: ContractType) -> PhrasePart {

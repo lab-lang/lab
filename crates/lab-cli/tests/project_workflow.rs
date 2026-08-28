@@ -65,7 +65,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     .unwrap();
     assert_eq!(
         requirements["schema_version"],
-        "lab.capability-requirements.v1"
+        "lab.capability-requirements.v2"
     );
     assert_eq!(requirements["requirements"].as_array().unwrap().len(), 1);
     assert_eq!(
@@ -91,7 +91,11 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     .unwrap();
     assert_eq!(
         instances["schema_version"],
-        "lab.capability-requirement-instances.v1"
+        "lab.capability-requirement-instances.v2"
+    );
+    assert_eq!(
+        instances["requirements_schema_version"],
+        "lab.capability-requirements.v2"
     );
     assert_eq!(instances["entry"]["module"], "test_project.programs.main");
     assert_eq!(instances["entry"]["workflow"], "main");

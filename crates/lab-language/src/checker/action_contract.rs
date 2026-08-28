@@ -58,6 +58,7 @@ impl Checker {
                         arguments.push(CheckedActionArgument {
                             name: (*name).to_owned(),
                             mode: *mode,
+                            parameter_kind: None,
                             value: TypedExpression {
                                 r#type: to_checked_type(&ty),
                                 value: CheckedExpression::List {
@@ -163,11 +164,16 @@ impl Checker {
                 arguments.push(CheckedActionArgument {
                     name: (*name).to_owned(),
                     mode: *mode,
+                    parameter_kind: None,
                     value: action_reference(self.definition_for_action_word(word), word, &actual),
                 });
                 *cursor += 1;
             }
-            PhrasePart::Integer { name, signed } => {
+            PhrasePart::Integer {
+                name,
+                property_kind,
+                signed,
+            } => {
                 let word = words.get(*cursor).ok_or_else(|| {
                     SemanticError::new(
                         effect.span,
@@ -181,12 +187,14 @@ impl Checker {
                 arguments.push(CheckedActionArgument {
                     name: (*name).to_owned(),
                     mode: OwnershipMode::Copy,
+                    parameter_kind: Some((*property_kind).to_owned()),
                     value,
                 });
                 *cursor += 1;
             }
             PhrasePart::Quantity {
                 name,
+                property_kind,
                 signed,
                 units,
             } => {
@@ -221,6 +229,7 @@ impl Checker {
                 arguments.push(CheckedActionArgument {
                     name: (*name).to_owned(),
                     mode: OwnershipMode::Copy,
+                    parameter_kind: Some((*property_kind).to_owned()),
                     value: TypedExpression {
                         r#type: CheckedType::Quantity {
                             unit: (*unit).to_owned(),

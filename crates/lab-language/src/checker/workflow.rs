@@ -520,6 +520,7 @@ impl Checker {
                 } else {
                     OwnershipMode::Copy
                 },
+                parameter_kind: None,
                 value: action_contract::action_reference(
                     self.definition_for_action_word(word),
                     word,

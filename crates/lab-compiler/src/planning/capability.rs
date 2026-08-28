@@ -1,15 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lab_language::{
-    CheckedActionArgument, CheckedDeclaration, CheckedField, CheckedModule, CheckedStatement,
-    CheckedType, OwnershipMode, ResolvedAction, TypedExpression, is_absolute_iri,
+    CheckedActionArgument, CheckedDeclaration, CheckedExpression, CheckedField, CheckedModule,
+    CheckedStatement, CheckedType, OwnershipMode, ResolvedAction, TypedExpression, is_absolute_iri,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const CAPABILITY_REQUIREMENTS_SCHEMA_VERSION: &str = "lab.capability-requirements.v1";
+pub const CAPABILITY_REQUIREMENTS_SCHEMA_VERSION: &str = "lab.capability-requirements.v2";
 pub const CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION: &str =
-    "lab.capability-requirement-instances.v1";
+    "lab.capability-requirement-instances.v2";
 
 /// Requirement templates derived from checked workflow definitions.
 ///
@@ -100,6 +100,7 @@ impl CapabilityRequirements {
         }
         Ok(CapabilityRequirementInstances {
             schema_version: CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION.to_owned(),
+            requirements_schema_version: self.schema_version.clone(),
             entry,
             instances,
         })
@@ -110,6 +111,7 @@ impl CapabilityRequirements {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityRequirementInstances {
     pub schema_version: String,
+    pub requirements_schema_version: String,
     pub entry: WorkflowIdentity,
     pub instances: Vec<CapabilityRequirementInstance>,
 }
@@ -245,8 +247,11 @@ impl RequirementControlMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityParameterConstraint {
     pub argument: String,
+    pub property_kind: String,
     pub relation: ParameterRelation,
     pub value: TypedExpression,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -289,6 +294,22 @@ pub enum CapabilityRequirementError {
     InvalidCapabilityKind {
         operation: String,
         capability_kind: String,
+    },
+    #[error(
+        "action operation `{operation}` parameter `{argument}` has non-absolute property kind `{property_kind}`"
+    )]
+    InvalidParameterKind {
+        operation: String,
+        argument: String,
+        property_kind: String,
+    },
+    #[error(
+        "action operation `{operation}` parameter `{argument}` uses unit `{unit}` without a canonical RDF unit IRI"
+    )]
+    UnknownParameterUnit {
+        operation: String,
+        argument: String,
+        unit: String,
     },
     #[error("capability requirement ID `{id}` occurs more than once")]
     DuplicateId { id: String },
@@ -408,8 +429,11 @@ fn requirement(
             capability_kind: capability_kind.clone(),
         });
     }
-    let (material_inputs, value_inputs, parameter_constraints) =
-        partition_arguments(&action.arguments);
+    let PartitionedArguments {
+        materials: material_inputs,
+        values: value_inputs,
+        parameters: parameter_constraints,
+    } = partition_arguments(action)?;
     let mut material_outputs = Vec::new();
     let mut value_outputs = Vec::new();
     for (binding, result) in bindings.iter().zip(&action.results) {
@@ -447,28 +471,39 @@ fn requirement(
     }))
 }
 
+struct PartitionedArguments {
+    materials: Vec<CapabilityMaterialInput>,
+    values: Vec<CapabilityValueInput>,
+    parameters: Vec<CapabilityParameterConstraint>,
+}
+
 fn partition_arguments(
-    arguments: &[CheckedActionArgument],
-) -> (
-    Vec<CapabilityMaterialInput>,
-    Vec<CapabilityValueInput>,
-    Vec<CapabilityParameterConstraint>,
-) {
+    action: &ResolvedAction,
+) -> Result<PartitionedArguments, CapabilityRequirementError> {
     let mut materials = Vec::new();
     let mut values = Vec::new();
     let mut parameters = Vec::new();
-    for argument in arguments {
+    for argument in &action.arguments {
         if contains_material(&argument.value.r#type) {
             materials.push(CapabilityMaterialInput {
                 argument: argument.name.clone(),
                 ownership: argument.mode,
                 value: argument.value.clone(),
             });
-        } else if is_parameter_type(&argument.value.r#type) {
+        } else if let Some(property_kind) = &argument.parameter_kind {
+            if !is_absolute_iri(property_kind) {
+                return Err(CapabilityRequirementError::InvalidParameterKind {
+                    operation: action.operation.clone(),
+                    argument: argument.name.clone(),
+                    property_kind: property_kind.clone(),
+                });
+            }
             parameters.push(CapabilityParameterConstraint {
                 argument: argument.name.clone(),
+                property_kind: property_kind.clone(),
                 relation: ParameterRelation::Exact,
                 value: argument.value.clone(),
+                unit: canonical_parameter_unit(action, argument)?,
             });
         } else {
             values.push(CapabilityValueInput {
@@ -478,7 +513,11 @@ fn partition_arguments(
             });
         }
     }
-    (materials, values, parameters)
+    Ok(PartitionedArguments {
+        materials,
+        values,
+        parameters,
+    })
 }
 
 fn contains_material(r#type: &CheckedType) -> bool {
@@ -496,17 +535,27 @@ fn contains_material(r#type: &CheckedType) -> bool {
     }
 }
 
-fn is_parameter_type(r#type: &CheckedType) -> bool {
-    match r#type {
-        CheckedType::Quantity { .. }
-        | CheckedType::Integer
-        | CheckedType::Decimal
-        | CheckedType::String
-        | CheckedType::Bool => true,
-        CheckedType::Union { alternatives } => alternatives.iter().all(is_parameter_type),
-        CheckedType::List { element } => is_parameter_type(element),
-        CheckedType::Named { .. } | CheckedType::Any { .. } | CheckedType::None => false,
-    }
+fn canonical_parameter_unit(
+    action: &ResolvedAction,
+    argument: &CheckedActionArgument,
+) -> Result<Option<String>, CapabilityRequirementError> {
+    let CheckedExpression::Quantity { unit, .. } = &argument.value.value else {
+        return Ok(None);
+    };
+    let iri = match unit.as_str() {
+        "C" => "http://qudt.org/vocab/unit/DEG_C",
+        "h" => "http://qudt.org/vocab/unit/HR",
+        "min" => "http://qudt.org/vocab/unit/MIN",
+        "uL" => "http://qudt.org/vocab/unit/MicroL",
+        _ => {
+            return Err(CapabilityRequirementError::UnknownParameterUnit {
+                operation: action.operation.clone(),
+                argument: argument.name.clone(),
+                unit: unit.clone(),
+            });
+        }
+    };
+    Ok(Some(iri.to_owned()))
 }
 
 fn requirement_id(module: &str, workflow: &str, path: &[StatementPathSegment]) -> String {
@@ -802,6 +851,14 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         assert_eq!(requirement.parameter_constraints.len(), 1);
         assert_eq!(requirement.parameter_constraints[0].argument, "temperature");
         assert_eq!(
+            requirement.parameter_constraints[0].property_kind,
+            "https://draggon.org/ns/capability#Temperature"
+        );
+        assert_eq!(
+            requirement.parameter_constraints[0].unit.as_deref(),
+            Some("http://qudt.org/vocab/unit/DEG_C")
+        );
+        assert_eq!(
             requirement.parameter_constraints[0].value.r#type,
             CheckedType::Quantity {
                 unit: "C".to_owned()
@@ -946,6 +1003,29 @@ workflow main(plasmid: Material<Plasmid>) -> Material<Plasmid>:
             CapabilityRequirementError::InvalidCapabilityKind {
                 operation: "std.lab.plasmid.store".to_owned(),
                 capability_kind: "cold_storage".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_a_non_absolute_parameter_kind_even_in_previously_checked_ir() {
+        let mut module = compile_module(SOURCE).unwrap();
+        let CheckedDeclaration::Workflow { body, .. } = &mut module.declarations[0] else {
+            panic!("the fixture begins with a workflow")
+        };
+        let CheckedStatement::Effect { action, .. } = &mut body[0] else {
+            panic!("the workflow begins with an effect")
+        };
+        action.arguments[1].parameter_kind = Some("temperature".to_owned());
+
+        let error = CapabilityRequirements::extract(&[&module]).unwrap_err();
+
+        assert_eq!(
+            error,
+            CapabilityRequirementError::InvalidParameterKind {
+                operation: "std.lab.plasmid.store".to_owned(),
+                argument: "temperature".to_owned(),
+                property_kind: "temperature".to_owned(),
             }
         );
     }

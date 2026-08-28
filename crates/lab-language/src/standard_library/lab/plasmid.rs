@@ -1,11 +1,11 @@
 //! `std.lab.plasmid` durable action contracts.
 
 use crate::checked::OwnershipMode;
-use crate::standard_library::capability;
 use crate::standard_library::catalog::StandardModule;
 use crate::standard_library::contract::{
     ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec,
 };
+use crate::standard_library::{capability, parameter};
 use crate::type_system::Ty;
 
 pub(in crate::standard_library::lab) fn module() -> StandardModule {
@@ -108,6 +108,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("for"),
                 PhrasePart::Quantity {
                     name: "duration",
+                    property_kind: parameter::DURATION,
                     signed: false,
                     units: &["min", "h"],
                 },
@@ -141,6 +142,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("pick"),
                 PhrasePart::Integer {
                     name: "count",
+                    property_kind: parameter::COUNT,
                     signed: false,
                 },
                 PhrasePart::Word("isolated"),
@@ -177,12 +179,14 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("at"),
                 PhrasePart::Quantity {
                     name: "temperature",
+                    property_kind: parameter::TEMPERATURE,
                     signed: true,
                     units: &["C"],
                 },
                 PhrasePart::Word("for"),
                 PhrasePart::Quantity {
                     name: "duration",
+                    property_kind: parameter::DURATION,
                     signed: false,
                     units: &["h"],
                 },
@@ -237,6 +241,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("at"),
                 PhrasePart::Quantity {
                     name: "temperature",
+                    property_kind: parameter::TEMPERATURE,
                     signed: true,
                     units: &["C"],
                 },

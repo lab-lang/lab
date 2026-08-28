@@ -1225,7 +1225,7 @@ its omissions report intact. It is a projection of the output, not a peer of it.
 
 ## Open questions and risks
 
-**Portable SBOL identities are strings by design.** `CheckedModule` is serde-serialized under `lab.portable-module.v7`, so pySBOL3 and sbol-rs objects do not ride inside portable compiler IR. `sbol_identity` carries the exact absolute Component IRI as a string, while typed SBOL objects remain behind the authoring and inventory boundaries.
+**Portable SBOL identities are strings by design.** `CheckedModule` is serde-serialized under `lab.portable-module.v8`, so pySBOL3 and sbol-rs objects do not ride inside portable compiler IR. `sbol_identity` carries the exact absolute Component IRI as a string, while typed SBOL objects remain behind the authoring and inventory boundaries.
 
 **No OM unit constants in sbol-rs.** Lab has `Quantity<uL>`, `Quantity<C>`, and
 `Quantity<min>`, and emitting them as OM `Measure` values needs unit IRIs that
@@ -1275,7 +1275,7 @@ and the RDF I/O stack are not obviously fine. This is why the validation pass
 runs from `lab-project` rather than from `compile_parsed_module`, and it needs
 measuring rather than assuming.
 
-**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, and to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability. The dependency manifest independently moved to `lab.dependency-build.v1` when it began recording inventory source provenance and exact Component-to-MaterialLot bindings.
+**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. The dependency manifest independently moved to `lab.dependency-build.v1` when it began recording inventory source provenance and exact Component-to-MaterialLot bindings.
 
 The checker's tables are the bulk of the mechanical work: fifteen
 `HashMap<String, _>` and `BTreeSet<String>` fields on `SemanticContext`, plus

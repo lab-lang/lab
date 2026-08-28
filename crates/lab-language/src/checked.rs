@@ -19,12 +19,13 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// produced type plays, and artifact instances preserve exact SBOL identities
 /// independently of laboratory provenance. Action capabilities are absolute
 /// SBOLInventory capability-kind IRIs rather than compiler-local names, and
-/// durable workflow calls preserve the resolved identity of their callee.
+/// durable workflow calls preserve the resolved identity of their callee, and
+/// operational parameters preserve absolute SBOLInventory property-kind IRIs.
 ///
 /// Grounding, design identities, and capability identities are semantic
 /// contracts, so each incompatible change raises the version rather than
 /// riding along as an optional field.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v7";
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v8";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -409,6 +410,8 @@ pub struct ResolvedAction {
 pub struct CheckedActionArgument {
     pub name: String,
     pub mode: OwnershipMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_kind: Option<String>,
     pub value: TypedExpression,
 }
 
