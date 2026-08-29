@@ -14,6 +14,7 @@ mod invocation;
 mod markdown;
 pub mod opentrons;
 mod package;
+mod procedure;
 mod profile;
 mod resources;
 mod trace;

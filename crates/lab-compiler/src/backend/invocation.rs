@@ -77,13 +77,13 @@ pub(crate) fn exact_invocation_tasks<'a>(
 ///
 /// IDs remain the authoritative schema. Parameter access uses their stable local suffixes because
 /// task IDs are namespaced by the chosen Method during LAIR projection.
-pub(crate) struct ProcedureTaskView<'a> {
-    adapter: &'a str,
-    task: &'a AllocatedProcedureTask,
+pub(crate) struct ProcedureTaskView<'adapter, 'task> {
+    adapter: &'adapter str,
+    task: &'task AllocatedProcedureTask,
 }
 
-impl<'a> ProcedureTaskView<'a> {
-    pub(crate) fn new(adapter: &'a str, task: &'a AllocatedProcedureTask) -> Self {
+impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
+    pub(crate) fn new(adapter: &'adapter str, task: &'task AllocatedProcedureTask) -> Self {
         Self { adapter, task }
     }
 
@@ -132,7 +132,7 @@ impl<'a> ProcedureTaskView<'a> {
         Ok(())
     }
 
-    pub(crate) fn materials(&self, role: &str) -> Vec<&'a SelectedMaterialBinding> {
+    pub(crate) fn materials(&self, role: &str) -> Vec<&'task SelectedMaterialBinding> {
         self.task
             .materials
             .iter()
@@ -140,7 +140,10 @@ impl<'a> ProcedureTaskView<'a> {
             .collect()
     }
 
-    pub(crate) fn one_material(&self, role: &str) -> Result<&'a SelectedMaterialBinding, String> {
+    pub(crate) fn one_material(
+        &self,
+        role: &str,
+    ) -> Result<&'task SelectedMaterialBinding, String> {
         let materials = self.materials(role);
         if materials.len() != 1 {
             return Err(format!(
@@ -258,7 +261,7 @@ impl<'a> ProcedureTaskView<'a> {
         )
     }
 
-    fn parameter(&self, name: &str) -> Result<&'a PlanningProcedureParameter, String> {
+    fn parameter(&self, name: &str) -> Result<&'task PlanningProcedureParameter, String> {
         let suffix = format!("::parameter::{name}");
         let matches = self
             .task

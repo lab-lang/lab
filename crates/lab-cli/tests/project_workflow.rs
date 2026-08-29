@@ -1288,12 +1288,12 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
 
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     let protocols = result["result"]["protocols"].as_array().unwrap();
-    assert_eq!(protocols.len(), 3);
+    assert_eq!(protocols.len(), 8);
     assert!(
         protocols
             .iter()
-            .all(|path| path.as_str().unwrap().ends_with("_protocol.json")),
-        "the allocated Flex adapter emits JSON protocols: {protocols:?}"
+            .all(|path| path.as_str().unwrap().ends_with("automation_protocol.json")),
+        "the allocated Flex adapter emits one JSON protocol per exact requirement: {protocols:?}"
     );
 
     let lowering: Value =
@@ -1305,21 +1305,37 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         "https://example.org/golden-gate/opentrons_flex"
     );
     assert_eq!(route["driver"], "opentrons.flex");
+    assert_eq!(route["scope"], "invocation");
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root
-            .join("wave-001/assembly_protocol.json")
+            .join("tasks/001-setup-golden-gate-reaction/automation_protocol.json")
             .is_file()
     );
     assert!(
         target_root
-            .join("wave-002/transformation_protocol.json")
+            .join("tasks/002-thermal-cycle-golden-gate-reaction/automation_protocol.json")
             .is_file()
     );
-    assert!(!target_root.join("wave-001/assembly_protocol.py").exists());
+    assert!(
+        target_root
+            .join("tasks/008-serial-dilution/automation_protocol.json")
+            .is_file()
+    );
+    assert!(
+        walk_files(&target_root).iter().all(|path| {
+            let name = path.file_name().unwrap().to_string_lossy();
+            !name.contains("transformation_protocol") && !name.contains("plating_protocol")
+        }),
+        "an exact Flex dilution must not absorb transformation or plating"
+    );
 
     let manifest: Value = serde_json::from_str(
-        &std::fs::read_to_string(target_root.join("wave-002/automation_manifest.json")).unwrap(),
+        &std::fs::read_to_string(
+            target_root.join("tasks/001-setup-golden-gate-reaction/invocation_manifest.json"),
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(manifest["adapter"], "opentrons.flex");
@@ -1330,11 +1346,40 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
 
     let protocol: Value = serde_json::from_str(
-        &std::fs::read_to_string(target_root.join("wave-001/assembly_protocol.json")).unwrap(),
+        &std::fs::read_to_string(
+            target_root.join("tasks/001-setup-golden-gate-reaction/automation_protocol.json"),
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(protocol["schemaVersion"], 8);
     assert_eq!(protocol["robot"]["model"], "OT-3 Standard");
+    assert!(!protocol["commands"].as_array().unwrap().is_empty());
+
+    let execution = read_json(out_dir.join("plan.execution.json"));
+    assert!(execution["lowerings"].as_array().is_none_or(Vec::is_empty));
+    let flex_documents = execution["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|node| node["document"]["format"] == "opentrons.protocol-designer-json")
+        .map(|node| &node["document"])
+        .collect::<Vec<_>>();
+    assert_eq!(flex_documents.len(), 8);
+    assert!(flex_documents.iter().all(|document| {
+        document["format"] == "opentrons.protocol-designer-json"
+            && out_dir.join(document["path"].as_str().unwrap()).is_file()
+    }));
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", out_dir.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "the exact Flex documents must pass generic runtime preflight: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
 
     std::fs::remove_dir_all(project).unwrap();
 }

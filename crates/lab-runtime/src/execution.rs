@@ -16,9 +16,9 @@ use lab_inventory::{FacilityScalarValue, InventorySnapshot};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
     ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding,
-    OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT, PlateReadDocument,
-    ReviewedLoweringArtifactRole, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument,
-    StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
+    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT,
+    PlateReadDocument, ReviewedLoweringArtifactRole, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
+    SimulationRunDocument, StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
 };
 use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
@@ -1244,6 +1244,53 @@ fn load_reviewed_document(
             Ok(LoadedReviewedDocument::ExternalFile {
                 format: format.to_owned(),
                 title: format!("Opentrons OT-2 {capability} protocol"),
+                contents: bytes.to_vec(),
+            })
+        }
+        ("opentrons.flex", OPENTRONS_PROTOCOL_DESIGNER_FORMAT) => {
+            let protocol: serde_json::Value = parse_json_document(bytes, path)?;
+            if protocol
+                .get("schemaVersion")
+                .and_then(serde_json::Value::as_u64)
+                != Some(8)
+            {
+                bail!(
+                    "{} is not an Opentrons Protocol Designer schema 8 document",
+                    path.display()
+                );
+            }
+            if protocol
+                .pointer("/robot/model")
+                .and_then(serde_json::Value::as_str)
+                != Some("OT-3 Standard")
+            {
+                bail!(
+                    "{} does not target the Opentrons Flex robot model",
+                    path.display()
+                );
+            }
+            let commands = protocol
+                .get("commands")
+                .and_then(serde_json::Value::as_array)
+                .with_context(|| {
+                    format!(
+                        "{} has no Protocol Designer command sequence",
+                        path.display()
+                    )
+                })?;
+            if commands.is_empty() {
+                bail!(
+                    "{} has an empty Protocol Designer command sequence",
+                    path.display()
+                );
+            }
+            let capability = expected_capability_kind
+                .rsplit(['#', '/'])
+                .find(|segment| !segment.is_empty())
+                .unwrap_or(expected_capability_kind);
+            Ok(LoadedReviewedDocument::ExternalFile {
+                format: format.to_owned(),
+                title: format!("Opentrons Flex {capability} protocol"),
                 contents: bytes.to_vec(),
             })
         }

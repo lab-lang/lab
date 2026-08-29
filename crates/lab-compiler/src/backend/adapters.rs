@@ -23,14 +23,12 @@ use crate::planning::{AdapterInvocation, AdapterInvocationPlan, BuildInventory};
 use crate::{AllocatedLairProgram, ArtifactBundle, ProtocolLairProgram};
 use lab_method::LocalId;
 use lab_runfmt::{
-    OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
-    SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
+    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
+    STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
 };
 
 pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v2";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
-
-const OPENTRONS_PROTOCOL_DESIGNER: &str = "opentrons.protocol-designer-json";
 
 const KNOWN_ADAPTERS: [&str; 6] = [
     "opentrons.ot2",
@@ -144,10 +142,10 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 ["on-deck-modules", "protocol-designer-json"],
                 [ControlMode::ReviewedFile],
                 [],
-                [OPENTRONS_PROTOCOL_DESIGNER],
+                [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::WholeProgram),
+                    lowering: Some(AdapterLoweringScope::Invocation),
                     simulation: false,
                     runtime: false,
                 },
@@ -460,6 +458,18 @@ pub fn lower_adapter_invocation_with_adapter(
                     message,
                 })
         }
+        "opentrons.flex" => {
+            let parsed = FlexAdapterProfile::parse(&profile.name, &profile.canonical_toml)
+                .map_err(|error| AdapterLoweringError::InvalidProfile {
+                    driver: driver.to_owned(),
+                    message: error.to_string(),
+                })?;
+            crate::backend::opentrons::flex::lower_invocation(&parsed, invocation_plan, invocation)
+                .map_err(|message| AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                })
+        }
         "lab.simulator" => lower_simulator_invocation(invocation_plan, invocation),
         _ => Err(AdapterLoweringError::UnsupportedInvocation {
             driver: driver.to_owned(),
@@ -762,6 +772,21 @@ mod tests {
             Some(AdapterLoweringScope::Invocation)
         );
         assert!(!ot2.services.runtime);
+
+        let flex = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "opentrons.flex")
+            .unwrap();
+        assert_eq!(
+            flex.services.lowering,
+            Some(AdapterLoweringScope::Invocation)
+        );
+        assert!(
+            flex.emitted_run_formats
+                .contains(OPENTRONS_PROTOCOL_DESIGNER_FORMAT)
+        );
+        assert!(!flex.services.runtime);
 
         let simulator = catalog
             .adapters
