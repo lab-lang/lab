@@ -8,6 +8,8 @@ from lab import methods as m
 PLASMID_PRODUCT = "https://www.lab-compiler.org/ns/material-state#PlasmidProduct"
 SEQUENCE_SYNTHESIS = "https://example.org/capability#SequenceSynthesis"
 SYNTHESIZE = "https://example.org/procedure#SynthesizePlasmid"
+ARTIFACT = "https://example.org/procedure#Artifact"
+DEPENDENCIES = "https://example.org/procedure#Dependencies"
 
 SOURCE = """\
 use std.bio.build
@@ -29,12 +31,28 @@ def sequence_synthesis() -> m.Method:
         id="https://example.org/method#sequence-synthesis",
         refines="std.bio.build.realize",
         inputs=(m.MethodInput("design", m.Port.design()),),
+        parameters=(
+            m.MethodParameter.scalar("artifact", m.ScalarType.TEXT),
+            m.MethodParameter.list("dependencies", m.ScalarType.TEXT),
+        ),
         tasks=(
             m.Task(
                 id="synthesize",
                 operation=SYNTHESIZE,
                 inputs=(m.ValueReference.method_input("design"),),
                 outputs=(m.TaskOutput("product", m.Port.material(PLASMID_PRODUCT)),),
+                parameters=(
+                    m.ProcedureParameter(
+                        "artifact",
+                        ARTIFACT,
+                        m.ProcedureValueExpression.intent_parameter("artifact"),
+                    ),
+                    m.ProcedureParameter(
+                        "dependencies",
+                        DEPENDENCIES,
+                        m.ProcedureValueExpression.intent_parameter("dependencies"),
+                    ),
+                ),
                 requirements=(
                     m.Requirement(
                         id="synthesis",
@@ -44,11 +62,7 @@ def sequence_synthesis() -> m.Method:
                 ),
             ),
         ),
-        outputs=(
-            m.MethodOutput(
-                "product", m.ValueReference.task_output("synthesize", "product")
-            ),
-        ),
+        outputs=(m.MethodOutput("product", m.ValueReference.task_output("synthesize", "product")),),
     )
 
 
@@ -64,12 +78,18 @@ class MethodTests(unittest.TestCase):
 
         self.assertIn("https://example.org/method#sequence-synthesis", refined.lair)
         self.assertIn(SEQUENCE_SYNTHESIS, refined.lair)
-        self.assertEqual(refined.planning_problem["schema_version"], "lab.planning-problem.v1")
+        self.assertEqual(refined.planning_problem["schema_version"], "lab.planning-problem.v2")
         choices = refined.planning_problem["choices"]
         self.assertEqual(len(choices), 1)
         self.assertEqual(
             choices[0]["candidates"][0]["method"],
             "https://example.org/method#sequence-synthesis",
+        )
+        parameters = choices[0]["candidates"][0]["tasks"][0]["parameters"]
+        self.assertEqual(parameters[0]["value"]["value"]["value"]["value"], "reporter")
+        self.assertEqual(
+            parameters[1]["value"],
+            {"kind": "list", "element_type": "text", "values": []},
         )
 
     def test_catalog_validation_is_authoritative_in_rust(self) -> None:

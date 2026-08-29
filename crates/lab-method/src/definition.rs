@@ -28,15 +28,27 @@ pub struct MethodInput {
     pub port_type: PortType,
 }
 
-/// A scalar Intent parameter required by this Method candidate.
+/// An Intent parameter required by this Method candidate.
 ///
 /// Candidates refining the same Intent operation may require different parameters. The operation's
 /// typed value inputs and outputs form the common interface; a candidate is applicable only when
-/// every parameter it declares is present with the declared scalar type.
+/// every parameter it declares is present with the declared semantic value type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MethodParameter {
     pub name: LocalId,
-    pub scalar_type: ScalarType,
+    pub value_type: ParameterType,
+}
+
+/// The closed structural shape expected from one Intent parameter.
+///
+/// Scalar kinds use the same exact lexical model as capability properties. Lists deliberately
+/// contain one scalar kind so Methods can carry ordered recipe data without accepting arbitrary
+/// JSON values into the compiler ABI.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ParameterType {
+    Scalar { scalar_type: ScalarType },
+    List { element_type: ScalarType },
 }
 
 /// The closed scalar shape expected from an Intent parameter.
@@ -102,6 +114,61 @@ pub enum ScalarValueExpression {
     },
 }
 
+/// One exact semantic value carried from Intent into a selected Procedure task.
+///
+/// Capability constraints remain scalar. Procedure parameters are broader because an adapter also
+/// needs ordered recipe data such as component or dependency lists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcedureValue {
+    Scalar {
+        value: PropertyValue,
+    },
+    List {
+        element_type: ScalarType,
+        values: Vec<PropertyValue>,
+    },
+}
+
+impl ProcedureValue {
+    pub fn value_type(&self) -> ParameterType {
+        match self {
+            Self::Scalar { value } => ParameterType::Scalar {
+                scalar_type: ScalarType::of(&value.value),
+            },
+            Self::List { element_type, .. } => ParameterType::List {
+                element_type: *element_type,
+            },
+        }
+    }
+
+    pub fn validate(&self) -> bool {
+        match self {
+            Self::Scalar { .. } => true,
+            Self::List {
+                element_type,
+                values,
+            } => values
+                .iter()
+                .all(|value| ScalarType::of(&value.value) == *element_type),
+        }
+    }
+}
+
+/// A literal Procedure value or a reference to a value supplied by the refined Intent operation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcedureValueExpression {
+    Literal {
+        value: ProcedureValue,
+    },
+    IntentParameter {
+        parameter: LocalId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<UnitIri>,
+    },
+}
+
 /// One typed offering-property constraint template in a portable method definition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CapabilityConstraintDefinition {
@@ -115,7 +182,7 @@ pub struct CapabilityConstraintDefinition {
 pub struct ProcedureParameterDefinition {
     pub id: LocalId,
     pub property_kind: PropertyKind,
-    pub value: ScalarValueExpression,
+    pub value: ProcedureValueExpression,
 }
 
 /// One semantic capability requirement owned by its enclosing Procedure task.

@@ -9,8 +9,8 @@
 
 use std::collections::BTreeSet;
 
-use lab_capability::{AbsoluteIri, OperationId, PropertyKind, PropertyValue};
-use lab_method::{LocalId, PortType};
+use lab_capability::{AbsoluteIri, OperationId, PropertyKind};
+use lab_method::{LocalId, PortType, ProcedureValue};
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;
@@ -25,7 +25,6 @@ use pliron::{verify_err, verify_err_noloc};
 
 use crate::lair::dialect::attributes::string_vec;
 use crate::lair::dialect::design::DesignType;
-use crate::lair::dialect::scalar::{decode_property_value, encode_property_value};
 
 /// One physical state in a method candidate.
 #[pliron_type(
@@ -242,9 +241,7 @@ pub(crate) fn semantic_port_type(context: &Context, handle: TypeHandle) -> Optio
         procedure_parameter_id: StringAttr,
         procedure_parameter_node: StringAttr,
         procedure_parameter_kind: StringAttr,
-        procedure_parameter_value_kind: StringAttr,
-        procedure_parameter_value: StringAttr,
-        procedure_parameter_unit: StringAttr
+        procedure_parameter_value: StringAttr
     ),
     interfaces = [NOpdsInterface<0>, NResultsInterface<0>]
 )]
@@ -256,7 +253,7 @@ impl ParameterOp {
         parameter_id: impl Into<String>,
         procedure_node: impl Into<String>,
         property_kind: &PropertyKind,
-        value: &PropertyValue,
+        value: &ProcedureValue,
     ) -> Self {
         let raw = Operation::new(
             context,
@@ -267,19 +264,17 @@ impl ParameterOp {
             0,
         );
         let result = Self { op: raw };
-        let (value_kind, lexical) = encode_property_value(value);
         result.set_attr_procedure_parameter_id(context, StringAttr::new(parameter_id.into()));
         result.set_attr_procedure_parameter_node(context, StringAttr::new(procedure_node.into()));
         result
             .set_attr_procedure_parameter_kind(context, StringAttr::new(property_kind.to_string()));
-        result.set_attr_procedure_parameter_value_kind(
+        result.set_attr_procedure_parameter_value(
             context,
-            StringAttr::new(value_kind.to_owned()),
+            StringAttr::new(
+                serde_json::to_string(value)
+                    .expect("ProcedureValue contains only infallibly serializable values"),
+            ),
         );
-        result.set_attr_procedure_parameter_value(context, StringAttr::new(lexical));
-        if let Some(unit) = &value.unit {
-            result.set_attr_procedure_parameter_unit(context, StringAttr::new(unit.to_string()));
-        }
         result
     }
 
@@ -300,7 +295,7 @@ impl ParameterOp {
     pub(crate) fn semantic_parameter(
         &self,
         context: &Context,
-    ) -> (LocalId, PropertyKind, PropertyValue) {
+    ) -> (LocalId, PropertyKind, ProcedureValue) {
         let id = LocalId::new(self.parameter_id(context))
             .expect("verified procedure.parameter carries a stable ID");
         let property = PropertyKind::new(
@@ -309,19 +304,11 @@ impl ParameterOp {
                 .as_str(),
         )
         .expect("verified procedure.parameter property kind is an absolute IRI");
-        let value_kind = self
-            .get_attr_procedure_parameter_value_kind(context)
-            .expect("verified procedure.parameter carries a value kind");
         let value = self
             .get_attr_procedure_parameter_value(context)
             .expect("verified procedure.parameter carries a value");
-        let unit = self.get_attr_procedure_parameter_unit(context);
-        let value = decode_property_value(
-            value_kind.as_str(),
-            value.as_str(),
-            unit.as_ref().map(|unit| unit.as_str()),
-        )
-        .expect("verified procedure.parameter carries a semantic value");
+        let value = serde_json::from_str(value.as_str())
+            .expect("verified procedure.parameter carries a semantic value");
         (id, property, value)
     }
 }
@@ -354,22 +341,20 @@ impl Verify for ParameterOp {
                 "procedure.parameter property_kind must be an absolute IRI"
             );
         }
-        let Some(value_kind) = self.get_attr_procedure_parameter_value_kind(context) else {
-            return verify_err!(
-                self.loc(context),
-                "procedure.parameter is missing value_kind"
-            );
-        };
         let Some(value) = self.get_attr_procedure_parameter_value(context) else {
             return verify_err!(self.loc(context), "procedure.parameter is missing value");
         };
-        let unit = self.get_attr_procedure_parameter_unit(context);
-        if let Err(error) = decode_property_value(
-            value_kind.as_str(),
-            value.as_str(),
-            unit.as_ref().map(|unit| unit.as_str()),
-        ) {
-            return verify_err!(self.loc(context), "invalid procedure.parameter: {error}");
+        let parsed = match serde_json::from_str::<ProcedureValue>(value.as_str()) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                return verify_err!(self.loc(context), "invalid procedure.parameter: {error}");
+            }
+        };
+        if !parsed.validate() {
+            return verify_err!(
+                self.loc(context),
+                "invalid procedure.parameter: list values do not match their element type"
+            );
         }
         Ok(())
     }

@@ -672,6 +672,7 @@ mod tests {
         CapabilityKind, ConstraintRelation, ControlMode, ExactInteger, MethodId, OperationId,
         PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
     };
+    use lab_method::ProcedureValue;
     use pliron::builtin::attributes::StringAttr;
     use pliron::builtin::ops::ModuleOp;
     use pliron::identifier::Identifier;
@@ -822,7 +823,11 @@ mod tests {
                 format!("{node}::parameter::cycles"),
                 &node,
                 &PropertyKind::new("https://sbol.io/ns/capability#CycleCount").unwrap(),
-                &PropertyValue::unitless(ScalarValue::Integer(ExactInteger::parse("30").unwrap())),
+                &ProcedureValue::Scalar {
+                    value: PropertyValue::unitless(ScalarValue::Integer(
+                        ExactInteger::parse("30").unwrap(),
+                    )),
+                },
             );
             choice.append_candidate_operation(&mut context, candidate, parameter.get_operation());
             let required = RequirementOp::new(

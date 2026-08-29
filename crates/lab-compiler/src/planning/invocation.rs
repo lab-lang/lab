@@ -15,7 +15,7 @@ use super::{
     PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, SelectedCapabilityParameter,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v1";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v2";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -6,10 +6,11 @@ use lab_capability::{
     ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue, ScalarValue, UnitIri,
 };
 use lab_method::{
-    IntentOperationId, LocalId, MethodDefinition, MethodRegistry, PortType, ScalarType,
-    ScalarValueExpression, ValueReference,
+    IntentOperationId, LocalId, MethodDefinition, MethodRegistry, PortType, ProcedureValue,
+    ProcedureValueExpression, ScalarType, ScalarValueExpression, ValueReference,
 };
-use pliron::builtin::attributes::StringAttr;
+use pliron::attribute::AttrObj;
+use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::context::{Context, Ptr};
 use pliron::input_err;
 use pliron::irbuild::dialect_conversion::{
@@ -177,7 +178,7 @@ impl DialectConversion for MethodRefinement<'_> {
 
 struct IntentInstance {
     operation: IntentOperationId,
-    parameters: BTreeMap<LocalId, PropertyValue>,
+    parameters: BTreeMap<LocalId, ProcedureValue>,
 }
 
 fn intent_operation(context: &Context, operation: Ptr<Operation>) -> Option<IntentOperationId> {
@@ -204,7 +205,27 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
         .expect("dialect conversion only queues supported Workflow operations");
     let mut parameters = BTreeMap::new();
     if let Some(realize) = Operation::get_op::<RealizeOp>(operation, context) {
+        insert_text(
+            &mut parameters,
+            "artifact",
+            required_string(realize.get_attr_realize_artifact(context)),
+        );
+        insert_text_list(
+            &mut parameters,
+            "dependencies",
+            required_strings(realize.get_attr_realize_dependencies(context)),
+        );
         if let Some(restriction_enzyme) = realize.get_attr_realize_restriction_enzyme(context) {
+            insert_text(
+                &mut parameters,
+                "backbone",
+                required_string(realize.get_attr_realize_backbone(context)),
+            );
+            insert_text_list(
+                &mut parameters,
+                "components",
+                required_strings(realize.get_attr_realize_components(context)),
+            );
             insert_text(
                 &mut parameters,
                 "restriction_enzyme",
@@ -231,6 +252,26 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
             required_string(provision.get_attr_provision_item(context)),
         );
     } else if let Some(transform) = Operation::get_op::<TransformOp>(operation, context) {
+        insert_text(
+            &mut parameters,
+            "artifact",
+            required_string(transform.get_attr_transform_artifact(context)),
+        );
+        insert_text(
+            &mut parameters,
+            "chassis",
+            required_string(transform.get_attr_transform_chassis(context)),
+        );
+        insert_text_list(
+            &mut parameters,
+            "plasmids",
+            required_strings(transform.get_attr_transform_plasmids(context)),
+        );
+        insert_text_list(
+            &mut parameters,
+            "dependencies",
+            required_strings(transform.get_attr_transform_dependencies(context)),
+        );
         insert_integer(
             &mut parameters,
             "replicates",
@@ -255,7 +296,9 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
         };
         parameters.insert(
             local("duration"),
-            PropertyValue::new(ScalarValue::Real(scalar), Some(unit)).unwrap(),
+            ProcedureValue::Scalar {
+                value: PropertyValue::new(ScalarValue::Real(scalar), Some(unit)).unwrap(),
+            },
         );
     } else if let Some(dilute) = Operation::get_op::<DiluteOp>(operation, context) {
         insert_integer(
@@ -288,7 +331,7 @@ fn append_candidate(
     choice_id: &str,
     method: &MethodDefinition,
     operands: &[Value],
-    parameters: &BTreeMap<LocalId, PropertyValue>,
+    parameters: &BTreeMap<LocalId, ProcedureValue>,
 ) -> Result<()> {
     let mut values = method
         .inputs
@@ -340,7 +383,7 @@ fn append_candidate(
 
         for parameter in &task.parameters {
             let parameter_id = format!("{node_id}::parameter::{}", parameter.id);
-            let value = resolve_value(
+            let value = resolve_procedure_value(
                 operation_location(choice, context),
                 &parameter.value,
                 parameters,
@@ -375,7 +418,7 @@ fn append_candidate(
                 requirement_op.get_operation(),
             );
             for constraint in &requirement.constraints {
-                let required = resolve_value(
+                let required = resolve_scalar_value(
                     operation_location(choice, context),
                     &constraint.required,
                     parameters,
@@ -404,15 +447,15 @@ fn append_candidate(
     Ok(())
 }
 
-fn resolve_value(
+fn resolve_scalar_value(
     location: pliron::location::Location,
     expression: &ScalarValueExpression,
-    parameters: &BTreeMap<LocalId, PropertyValue>,
+    parameters: &BTreeMap<LocalId, ProcedureValue>,
 ) -> Result<PropertyValue> {
     match expression {
         ScalarValueExpression::Literal { value } => Ok(value.clone()),
         ScalarValueExpression::IntentParameter { parameter, unit } => {
-            let Some(source) = parameters.get(parameter) else {
+            let Some(ProcedureValue::Scalar { value: source }) = parameters.get(parameter) else {
                 return input_err!(location, "Intent parameter '{parameter}' is unavailable");
             };
             let resolved_unit = match (&source.unit, unit) {
@@ -427,6 +470,43 @@ fn resolve_value(
             };
             PropertyValue::new(source.value.clone(), resolved_unit)
                 .map_err(|error| pliron::input_error!(location, error))
+        }
+    }
+}
+
+fn resolve_procedure_value(
+    location: pliron::location::Location,
+    expression: &ProcedureValueExpression,
+    parameters: &BTreeMap<LocalId, ProcedureValue>,
+) -> Result<ProcedureValue> {
+    match expression {
+        ProcedureValueExpression::Literal { value } => Ok(value.clone()),
+        ProcedureValueExpression::IntentParameter { parameter, unit } => {
+            let Some(source) = parameters.get(parameter) else {
+                return input_err!(location, "Intent parameter '{parameter}' is unavailable");
+            };
+            match source {
+                ProcedureValue::Scalar { value } => {
+                    let resolved_unit = match (&value.unit, unit) {
+                        (Some(source), Some(required)) if source != required => {
+                            return input_err!(
+                                location,
+                                "Intent parameter '{parameter}' uses unit '{source}', but the method requires '{required}'"
+                            );
+                        }
+                        (Some(source), _) => Some(source.clone()),
+                        (None, required) => required.clone(),
+                    };
+                    let value = PropertyValue::new(value.value.clone(), resolved_unit)
+                        .map_err(|error| pliron::input_error!(location, error))?;
+                    Ok(ProcedureValue::Scalar { value })
+                }
+                ProcedureValue::List { .. } if unit.is_some() => input_err!(
+                    location,
+                    "Intent list parameter '{parameter}' cannot be assigned a unit"
+                ),
+                ProcedureValue::List { .. } => Ok(source.clone()),
+            }
         }
     }
 }
@@ -459,12 +539,12 @@ fn verify_inputs(
 
 fn method_is_applicable(
     method: &MethodDefinition,
-    actual: &BTreeMap<LocalId, PropertyValue>,
+    actual: &BTreeMap<LocalId, ProcedureValue>,
 ) -> bool {
     method.parameters.iter().all(|parameter| {
         actual
             .get(&parameter.name)
-            .is_some_and(|value| ScalarType::of(&value.value) == parameter.scalar_type)
+            .is_some_and(|value| value.value_type() == parameter.value_type)
     })
 }
 
@@ -570,24 +650,45 @@ fn procedure_material_type(context: &mut Context, state: &str) -> TypeHandle {
     ProcedureMaterialType::get(context, StringAttr::new(state.to_owned())).into()
 }
 
-fn insert_text(parameters: &mut BTreeMap<LocalId, PropertyValue>, name: &str, value: String) {
+fn insert_text(parameters: &mut BTreeMap<LocalId, ProcedureValue>, name: &str, value: String) {
     parameters.insert(
         local(name),
-        PropertyValue::unitless(ScalarValue::Text(value)),
+        ProcedureValue::Scalar {
+            value: PropertyValue::unitless(ScalarValue::Text(value)),
+        },
     );
 }
 
-fn insert_integer(parameters: &mut BTreeMap<LocalId, PropertyValue>, name: &str, value: u32) {
+fn insert_text_list(
+    parameters: &mut BTreeMap<LocalId, ProcedureValue>,
+    name: &str,
+    values: Vec<String>,
+) {
     parameters.insert(
         local(name),
-        PropertyValue::unitless(ScalarValue::Integer(
-            ExactInteger::parse(value.to_string()).unwrap(),
-        )),
+        ProcedureValue::List {
+            element_type: ScalarType::Text,
+            values: values
+                .into_iter()
+                .map(|value| PropertyValue::unitless(ScalarValue::Text(value)))
+                .collect(),
+        },
+    );
+}
+
+fn insert_integer(parameters: &mut BTreeMap<LocalId, ProcedureValue>, name: &str, value: u32) {
+    parameters.insert(
+        local(name),
+        ProcedureValue::Scalar {
+            value: PropertyValue::unitless(ScalarValue::Integer(
+                ExactInteger::parse(value.to_string()).unwrap(),
+            )),
+        },
     );
 }
 
 fn insert_chemistry(
-    parameters: &mut BTreeMap<LocalId, PropertyValue>,
+    parameters: &mut BTreeMap<LocalId, ProcedureValue>,
     chemistry: &pliron::builtin::attributes::DictAttr,
     keys: &[&str],
 ) {
@@ -601,6 +702,21 @@ fn required_string(value: Option<std::cell::Ref<'_, StringAttr>>) -> String {
         .expect("verified Workflow operation carries its required string attribute")
         .as_str()
         .to_owned()
+}
+
+fn required_strings(value: Option<std::cell::Ref<'_, VecAttr>>) -> Vec<String> {
+    value
+        .expect("verified Workflow operation carries its required vector attribute")
+        .0
+        .iter()
+        .map(|value: &AttrObj| {
+            value
+                .downcast_ref::<StringAttr>()
+                .expect("verified Workflow vector contains strings")
+                .as_str()
+                .to_owned()
+        })
+        .collect()
 }
 
 fn qualified_id(choice: &str, method: &lab_capability::MethodId, local: &LocalId) -> String {

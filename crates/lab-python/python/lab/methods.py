@@ -59,6 +59,40 @@ class ScalarType(StrEnum):
     IRI = "iri"
 
 
+@dataclass(frozen=True, slots=True)
+class ParameterType:
+    """The structural type of an Intent parameter consumed by a Method."""
+
+    kind: str
+    scalar_type: ScalarType | None = None
+    element_type: ScalarType | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "scalar":
+            if self.scalar_type is None or self.element_type is not None:
+                raise ValueError("a scalar parameter type requires exactly one scalar type")
+        elif self.kind == "list":
+            if self.element_type is None or self.scalar_type is not None:
+                raise ValueError("a list parameter type requires exactly one element type")
+        else:
+            raise ValueError(f"unknown parameter-type kind {self.kind!r}")
+
+    @classmethod
+    def scalar(cls, scalar_type: ScalarType) -> Self:
+        return cls(kind="scalar", scalar_type=scalar_type)
+
+    @classmethod
+    def list(cls, element_type: ScalarType) -> Self:
+        return cls(kind="list", element_type=element_type)
+
+    def to_dict(self) -> dict[str, object]:
+        if self.kind == "scalar":
+            assert self.scalar_type is not None
+            return {"kind": self.kind, "scalar_type": self.scalar_type.value}
+        assert self.element_type is not None
+        return {"kind": self.kind, "element_type": self.element_type.value}
+
+
 class Qualification(StrEnum):
     """The ordered SBOLInventory qualification ladder."""
 
@@ -148,13 +182,21 @@ class MethodInput:
 @dataclass(frozen=True, slots=True)
 class MethodParameter:
     name: str
-    scalar_type: ScalarType
+    value_type: ParameterType
 
     def __post_init__(self) -> None:
         _local(self.name, "Method parameter name")
 
     def to_dict(self) -> dict[str, object]:
-        return {"name": self.name, "scalar_type": self.scalar_type.value}
+        return {"name": self.name, "value_type": self.value_type.to_dict()}
+
+    @classmethod
+    def scalar(cls, name: str, scalar_type: ScalarType) -> Self:
+        return cls(name=name, value_type=ParameterType.scalar(scalar_type))
+
+    @classmethod
+    def list(cls, name: str, element_type: ScalarType) -> Self:
+        return cls(name=name, value_type=ParameterType.list(element_type))
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,6 +362,87 @@ class ValueExpression:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcedureValue:
+    """An exact scalar or homogeneous ordered list carried into a Procedure task."""
+
+    kind: str
+    value: PropertyValue | None = None
+    element_type: ScalarType | None = None
+    values: tuple[PropertyValue, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.kind == "scalar":
+            if self.value is None or self.element_type is not None or self.values:
+                raise ValueError("a scalar Procedure value requires exactly one property value")
+        elif self.kind == "list":
+            if self.value is not None or self.element_type is None:
+                raise ValueError("a list Procedure value requires an element type")
+            if any(item.value.type is not self.element_type for item in self.values):
+                raise ValueError("Procedure list values must match the declared element type")
+        else:
+            raise ValueError(f"unknown Procedure-value kind {self.kind!r}")
+
+    @classmethod
+    def scalar(cls, value: PropertyValue) -> Self:
+        return cls(kind="scalar", value=value)
+
+    @classmethod
+    def list(cls, element_type: ScalarType, values: tuple[PropertyValue, ...] = ()) -> Self:
+        return cls(kind="list", element_type=element_type, values=values)
+
+    def to_dict(self) -> dict[str, object]:
+        if self.kind == "scalar":
+            assert self.value is not None
+            return {"kind": self.kind, "value": self.value.to_dict()}
+        assert self.element_type is not None
+        return {
+            "kind": self.kind,
+            "element_type": self.element_type.value,
+            "values": [value.to_dict() for value in self.values],
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProcedureValueExpression:
+    """A literal Procedure value or an exact reference to an Intent parameter."""
+
+    kind: str
+    literal: ProcedureValue | None = None
+    parameter: str | None = None
+    unit: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "literal":
+            if self.literal is None or self.parameter is not None or self.unit is not None:
+                raise ValueError("a literal expression requires exactly one Procedure value")
+        elif self.kind == "intent_parameter":
+            if self.parameter is None or self.literal is not None:
+                raise ValueError("an Intent-parameter expression requires exactly one parameter")
+            _local(self.parameter, "Intent parameter reference")
+            if self.unit is not None:
+                _iri(self.unit, "Intent parameter unit")
+        else:
+            raise ValueError(f"unknown Procedure-value expression kind {self.kind!r}")
+
+    @classmethod
+    def constant(cls, value: ProcedureValue) -> Self:
+        return cls(kind="literal", literal=value)
+
+    @classmethod
+    def intent_parameter(cls, parameter: str, unit: str | None = None) -> Self:
+        return cls(kind="intent_parameter", parameter=parameter, unit=unit)
+
+    def to_dict(self) -> dict[str, object]:
+        if self.kind == "literal":
+            assert self.literal is not None
+            return {"kind": self.kind, "value": self.literal.to_dict()}
+        result: dict[str, object] = {"kind": self.kind, "parameter": self.parameter}
+        if self.unit is not None:
+            result["unit"] = self.unit
+        return result
+
+
+@dataclass(frozen=True, slots=True)
 class CapabilityConstraint:
     property_kind: str
     relation: ConstraintRelation
@@ -340,7 +463,7 @@ class CapabilityConstraint:
 class ProcedureParameter:
     id: str
     property_kind: str
-    value: ValueExpression
+    value: ProcedureValueExpression
 
     def __post_init__(self) -> None:
         _local(self.id, "Procedure parameter ID")
@@ -485,8 +608,11 @@ __all__ = [
     "MethodInput",
     "MethodOutput",
     "MethodParameter",
+    "ParameterType",
     "Port",
     "ProcedureParameter",
+    "ProcedureValue",
+    "ProcedureValueExpression",
     "PropertyValue",
     "Qualification",
     "RefinedProgram",

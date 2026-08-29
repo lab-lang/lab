@@ -553,7 +553,7 @@ mod tests {
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
-    use lab_method::IntentOperationId;
+    use lab_method::{IntentOperationId, ProcedureValue, ScalarType};
 
     use crate::backend::default_adapter_profile;
     use crate::lair::session::CompilerSession;
@@ -889,6 +889,34 @@ workflow main() -> Material<Plasmid>:
             })
             .expect("automated Golden Gate remains selectable");
         assert_eq!(automated.tasks.len(), 2);
+        let setup_parameters = &automated.tasks[0].parameters;
+        let artifact = setup_parameters
+            .iter()
+            .find(|parameter| parameter.id.as_str().ends_with("::parameter::artifact"))
+            .expect("selected Procedure carries its artifact identity");
+        assert!(matches!(
+            &artifact.value,
+            ProcedureValue::Scalar { value }
+                if matches!(&value.value, ScalarValue::Text(value) if value == "p_gfp")
+        ));
+        let components = setup_parameters
+            .iter()
+            .find(|parameter| parameter.id.as_str().ends_with("::parameter::components"))
+            .expect("selected Procedure carries its ordered components");
+        assert!(matches!(
+            &components.value,
+            ProcedureValue::List { element_type: ScalarType::Text, values }
+                if values.len() == 4
+                    && matches!(&values[0].value, ScalarValue::Text(value) if value == "J23101")
+        ));
+        let dependencies = setup_parameters
+            .iter()
+            .find(|parameter| parameter.id.as_str().ends_with("::parameter::dependencies"))
+            .expect("selected Procedure carries its dependency list");
+        assert!(matches!(
+            &dependencies.value,
+            ProcedureValue::List { element_type: ScalarType::Text, values } if values.is_empty()
+        ));
         assert!(matches!(
             automated.tasks[1].inputs[0].source,
             PlanningValueSource::TaskOutput { ref task, ref output }

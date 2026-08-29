@@ -9,9 +9,9 @@ use lab_capability::{
 };
 use lab_method::{
     CapabilityConstraintDefinition, CapabilityRequirementDefinition, IntentOperationId, LocalId,
-    MethodDefinition, MethodInput, MethodOutput, MethodParameter, MethodRegistry, PortType,
-    ProcedureParameterDefinition, ProcedureTaskDefinition, ScalarType, ScalarValueExpression,
-    TaskOutput, ValueReference,
+    MethodDefinition, MethodInput, MethodOutput, MethodParameter, MethodRegistry, ParameterType,
+    PortType, ProcedureParameterDefinition, ProcedureTaskDefinition, ProcedureValueExpression,
+    ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
 };
 
 const METHOD_NS: &str = "https://www.lab-compiler.org/ns/method#";
@@ -47,17 +47,21 @@ pub fn standard_method_definitions() -> Vec<MethodDefinition> {
 }
 
 fn artifact_realization_service() -> MethodDefinition {
+    let parameters = vec![
+        parameter("artifact", ScalarType::Text),
+        list_parameter("dependencies", ScalarType::Text),
+    ];
     MethodDefinition {
         id: method("manual-artifact-realization"),
         refines: intent("std.bio.build.realize"),
         inputs: vec![input("design", PortType::Design)],
-        parameters: vec![],
+        parameters: parameters.clone(),
         tasks: vec![task(
             "realize",
             "RealizeArtifact",
             vec![input_ref("design")],
             vec![output("product", material("PlasmidProduct"))],
-            vec![],
+            select_parameters(&parameters, &["artifact", "dependencies"]),
             vec![requirement(
                 "artifact-realization",
                 "ArtifactRealization",
@@ -72,6 +76,10 @@ fn artifact_realization_service() -> MethodDefinition {
 fn automated_golden_gate() -> MethodDefinition {
     let parameters = realization_parameters();
     let setup_parameters = [
+        "artifact",
+        "backbone",
+        "components",
+        "dependencies",
         "restriction_enzyme",
         "assembly_replicates",
         "reaction_volume_ul",
@@ -223,7 +231,10 @@ fn recovery_method(
             vec![ProcedureParameterDefinition {
                 id: local("duration"),
                 property_kind: property("Duration"),
-                value: value.clone(),
+                value: ProcedureValueExpression::IntentParameter {
+                    parameter: local("duration"),
+                    unit: None,
+                },
             }],
             vec![requirement(
                 "incubation",
@@ -299,48 +310,62 @@ fn antibiotic_selection() -> MethodDefinition {
 }
 
 fn realization_parameters() -> Vec<MethodParameter> {
-    std::iter::once(parameter("restriction_enzyme", ScalarType::Text))
-        .chain(std::iter::once(parameter(
-            "assembly_replicates",
-            ScalarType::Integer,
-        )))
-        .chain(
-            [
-                "reaction_volume_ul",
-                "part_volume_ul",
-                "enzyme_volume_ul",
-                "ligase_volume_ul",
-                "buffer_volume_ul",
-                "cycles",
-                "digest_temperature_c",
-                "digest_minutes",
-                "ligate_temperature_c",
-                "ligate_minutes",
-            ]
-            .map(|name| parameter(name, ScalarType::Integer)),
-        )
-        .collect()
+    [
+        parameter("artifact", ScalarType::Text),
+        parameter("backbone", ScalarType::Text),
+        list_parameter("components", ScalarType::Text),
+        list_parameter("dependencies", ScalarType::Text),
+        parameter("restriction_enzyme", ScalarType::Text),
+    ]
+    .into_iter()
+    .chain(std::iter::once(parameter(
+        "assembly_replicates",
+        ScalarType::Integer,
+    )))
+    .chain(
+        [
+            "reaction_volume_ul",
+            "part_volume_ul",
+            "enzyme_volume_ul",
+            "ligase_volume_ul",
+            "buffer_volume_ul",
+            "cycles",
+            "digest_temperature_c",
+            "digest_minutes",
+            "ligate_temperature_c",
+            "ligate_minutes",
+        ]
+        .map(|name| parameter(name, ScalarType::Integer)),
+    )
+    .collect()
 }
 
 fn transformation_parameters() -> Vec<MethodParameter> {
-    std::iter::once(parameter("replicates", ScalarType::Integer))
-        .chain(
-            [
-                "cell_volume_ul",
-                "dna_volume_ul",
-                "recovery_volume_ul",
-                "cold_minutes",
-                "heat_shock_temperature_c",
-                "heat_shock_minutes",
-                "recovery_temperature_c",
-                "recovery_minutes",
-                "medium_volume_ul",
-                "culture_volume_ul",
-                "colony_volume_ul",
-            ]
-            .map(|name| parameter(name, ScalarType::Integer)),
-        )
-        .collect()
+    [
+        parameter("artifact", ScalarType::Text),
+        parameter("chassis", ScalarType::Text),
+        list_parameter("plasmids", ScalarType::Text),
+        list_parameter("dependencies", ScalarType::Text),
+        parameter("replicates", ScalarType::Integer),
+    ]
+    .into_iter()
+    .chain(
+        [
+            "cell_volume_ul",
+            "dna_volume_ul",
+            "recovery_volume_ul",
+            "cold_minutes",
+            "heat_shock_temperature_c",
+            "heat_shock_minutes",
+            "recovery_temperature_c",
+            "recovery_minutes",
+            "medium_volume_ul",
+            "culture_volume_ul",
+            "colony_volume_ul",
+        ]
+        .map(|name| parameter(name, ScalarType::Integer)),
+    )
+    .collect()
 }
 
 fn select_parameters(
@@ -381,7 +406,7 @@ fn procedure_parameter(
     ProcedureParameterDefinition {
         id: id.clone(),
         property_kind: property(&upper_camel(id.as_str())),
-        value: ScalarValueExpression::IntentParameter {
+        value: ProcedureValueExpression::IntentParameter {
             parameter: source.name.clone(),
             unit,
         },
@@ -431,7 +456,14 @@ fn input(name: &str, port_type: PortType) -> MethodInput {
 fn parameter(name: &str, scalar_type: ScalarType) -> MethodParameter {
     MethodParameter {
         name: local(name),
-        scalar_type,
+        value_type: ParameterType::Scalar { scalar_type },
+    }
+}
+
+fn list_parameter(name: &str, element_type: ScalarType) -> MethodParameter {
+    MethodParameter {
+        name: local(name),
+        value_type: ParameterType::List { element_type },
     }
 }
 

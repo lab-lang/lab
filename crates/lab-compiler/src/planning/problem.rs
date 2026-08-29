@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint, PropertyKind,
-    PropertyValue, QualificationLevel,
+    QualificationLevel,
 };
-use lab_method::{IntentOperationId, LocalId, PortType};
+use lab_method::{IntentOperationId, LocalId, PortType, ProcedureValue};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v1";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v2";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///
@@ -79,7 +79,7 @@ pub struct PlanningTaskOutput {
 pub struct PlanningProcedureParameter {
     pub id: LocalId,
     pub property_kind: PropertyKind,
-    pub value: PropertyValue,
+    pub value: ProcedureValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

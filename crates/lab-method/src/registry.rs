@@ -4,8 +4,8 @@ use lab_capability::{ConstraintRelation, ControlMode, MethodId};
 use thiserror::Error;
 
 use crate::{
-    IntentOperationId, LocalId, MethodDefinition, MethodSignature, ScalarType,
-    ScalarValueExpression, TaskOutput, ValueReference,
+    IntentOperationId, LocalId, MethodDefinition, MethodSignature, ParameterType,
+    ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
 };
 
 /// A malformed portable method definition.
@@ -33,6 +33,17 @@ pub enum MethodDefinitionError {
     UnavailableIntentParameter { owner: LocalId, parameter: LocalId },
     #[error("method value `{owner}` applies a unit to non-numeric Intent parameter `{parameter}`")]
     UnitOnNonNumericIntentParameter { owner: LocalId, parameter: LocalId },
+    #[error(
+        "Capability requirement `{requirement}` references non-scalar Intent parameter `{parameter}`"
+    )]
+    NonScalarConstraintParameter {
+        requirement: LocalId,
+        parameter: LocalId,
+    },
+    #[error(
+        "Procedure task `{task}` parameter `{parameter}` contains values that do not match its declared list element type"
+    )]
+    InvalidProcedureValue { task: LocalId, parameter: LocalId },
     #[error(
         "Capability requirement `{requirement}` uses an ordered relation with non-numeric scalar type `{scalar_type:?}`"
     )]
@@ -104,7 +115,7 @@ impl MethodDefinition {
         let mut parameter_types = BTreeMap::new();
         for parameter in &self.parameters {
             if parameter_types
-                .insert(parameter.name.clone(), parameter.scalar_type)
+                .insert(parameter.name.clone(), parameter.value_type.clone())
                 .is_some()
             {
                 return Err(MethodDefinitionError::DuplicateParameter {
@@ -183,12 +194,20 @@ impl MethodDefinition {
                         parameter: parameter.id.clone(),
                     });
                 }
-                if let ScalarValueExpression::IntentParameter {
-                    parameter: source,
-                    unit,
-                } = &parameter.value
-                {
-                    parameter_scalar_type(&parameter_types, &parameter.id, source, unit.is_some())?;
+                match &parameter.value {
+                    ProcedureValueExpression::Literal { value } if !value.validate() => {
+                        return Err(MethodDefinitionError::InvalidProcedureValue {
+                            task: task.id.clone(),
+                            parameter: parameter.id.clone(),
+                        });
+                    }
+                    ProcedureValueExpression::IntentParameter {
+                        parameter: source,
+                        unit,
+                    } => {
+                        parameter_type(&parameter_types, &parameter.id, source, unit.is_some())?;
+                    }
+                    ProcedureValueExpression::Literal { .. } => {}
                 }
             }
             let mut outputs = BTreeSet::new();
@@ -236,24 +255,45 @@ impl MethodDefinition {
 }
 
 fn parameter_scalar_type(
-    parameter_types: &BTreeMap<LocalId, ScalarType>,
+    parameter_types: &BTreeMap<LocalId, ParameterType>,
     owner: &LocalId,
     parameter: &LocalId,
     has_unit: bool,
 ) -> Result<ScalarType, MethodDefinitionError> {
-    let Some(scalar_type) = parameter_types.get(parameter).copied() else {
+    let parameter_type = parameter_type(parameter_types, owner, parameter, has_unit)?;
+    let ParameterType::Scalar { scalar_type } = parameter_type else {
+        return Err(MethodDefinitionError::NonScalarConstraintParameter {
+            requirement: owner.clone(),
+            parameter: parameter.clone(),
+        });
+    };
+    Ok(scalar_type)
+}
+
+fn parameter_type(
+    parameter_types: &BTreeMap<LocalId, ParameterType>,
+    owner: &LocalId,
+    parameter: &LocalId,
+    has_unit: bool,
+) -> Result<ParameterType, MethodDefinitionError> {
+    let Some(parameter_type) = parameter_types.get(parameter).cloned() else {
         return Err(MethodDefinitionError::UnavailableIntentParameter {
             owner: owner.clone(),
             parameter: parameter.clone(),
         });
     };
-    if has_unit && !scalar_type.is_numeric() {
+    if has_unit
+        && !matches!(
+            parameter_type,
+            ParameterType::Scalar { scalar_type } if scalar_type.is_numeric()
+        )
+    {
         return Err(MethodDefinitionError::UnitOnNonNumericIntentParameter {
             owner: owner.clone(),
             parameter: parameter.clone(),
         });
     }
-    Ok(scalar_type)
+    Ok(parameter_type)
 }
 
 impl MethodRegistry {
@@ -320,13 +360,15 @@ mod tests {
     use std::collections::BTreeSet;
 
     use lab_capability::{
-        AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
+        AbsoluteIri, CapabilityKind, ControlMode, ExactInteger, MethodId, OperationId,
+        PropertyKind, PropertyValue, QualificationLevel, ScalarValue,
     };
 
     use crate::{
         CapabilityConstraintDefinition, CapabilityRequirementDefinition, MethodDefinition,
-        MethodInput, MethodOutput, MethodParameter, PortType, ProcedureTaskDefinition, ScalarType,
-        ScalarValueExpression, TaskOutput, ValueReference,
+        MethodInput, MethodOutput, MethodParameter, ParameterType, PortType,
+        ProcedureParameterDefinition, ProcedureTaskDefinition, ProcedureValue,
+        ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
     };
 
     use super::*;
@@ -351,7 +393,9 @@ mod tests {
             }],
             parameters: vec![MethodParameter {
                 name: id("duration"),
-                scalar_type: ScalarType::Real,
+                value_type: ParameterType::Scalar {
+                    scalar_type: ScalarType::Real,
+                },
             }],
             tasks: vec![ProcedureTaskDefinition {
                 id: id("incubate"),
@@ -452,7 +496,9 @@ mod tests {
                 parameter: id("duration"),
                 unit: None,
             };
-        definition.parameters[0].scalar_type = ScalarType::Text;
+        definition.parameters[0].value_type = ParameterType::Scalar {
+            scalar_type: ScalarType::Text,
+        };
         definition.tasks[0].requirements[0].constraints[0].relation = ConstraintRelation::AtLeast;
         assert!(matches!(
             definition.validate(),
@@ -505,7 +551,9 @@ mod tests {
         );
         second.parameters.push(MethodParameter {
             name: id("shaking_speed"),
-            scalar_type: ScalarType::Integer,
+            value_type: ParameterType::Scalar {
+                scalar_type: ScalarType::Integer,
+            },
         });
 
         let registry = MethodRegistry::new([first, second]).unwrap();
@@ -515,6 +563,49 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    #[test]
+    fn list_parameters_are_validated_at_constraint_and_literal_boundaries() {
+        let mut definition = definition(
+            "https://example.org/method/static-incubation",
+            "https://example.org/state/incubated",
+        );
+        definition.parameters.push(MethodParameter {
+            name: id("samples"),
+            value_type: ParameterType::List {
+                element_type: ScalarType::Text,
+            },
+        });
+        definition.tasks[0].requirements[0].constraints[0].required =
+            ScalarValueExpression::IntentParameter {
+                parameter: id("samples"),
+                unit: None,
+            };
+        assert!(matches!(
+            definition.validate(),
+            Err(MethodDefinitionError::NonScalarConstraintParameter { .. })
+        ));
+
+        definition.tasks[0].requirements[0].constraints.clear();
+        definition.tasks[0]
+            .parameters
+            .push(ProcedureParameterDefinition {
+                id: id("samples"),
+                property_kind: PropertyKind::new("https://example.org/property/samples").unwrap(),
+                value: ProcedureValueExpression::Literal {
+                    value: ProcedureValue::List {
+                        element_type: ScalarType::Text,
+                        values: vec![PropertyValue::unitless(ScalarValue::Integer(
+                            ExactInteger::parse("1").unwrap(),
+                        ))],
+                    },
+                },
+            });
+        assert!(matches!(
+            definition.validate(),
+            Err(MethodDefinitionError::InvalidProcedureValue { .. })
+        ));
     }
 
     #[test]
