@@ -335,6 +335,16 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
             "serial_dilutions",
             u32_value(&dilute.get_attr_dilute_serial_dilutions(context).unwrap()),
         );
+        insert_integer(
+            &mut parameters,
+            "medium_volume_ul",
+            u32_value(&dilute.get_attr_dilute_medium_volume_ul(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "culture_volume_ul",
+            u32_value(&dilute.get_attr_dilute_culture_volume_ul(context).unwrap()),
+        );
     } else if let Some(plate) = Operation::get_op::<PlateOp>(operation, context) {
         insert_text(
             &mut parameters,

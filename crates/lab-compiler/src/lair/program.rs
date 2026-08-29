@@ -478,6 +478,8 @@ fn append_workflow(
                     context,
                     workflow_value(&values, input, &name)?,
                     intent.serial_dilutions,
+                    intent.chemistry.medium_volume_ul,
+                    intent.chemistry.culture_volume_ul,
                 );
                 values.insert(culture.clone(), operation.get_result_diluted(context));
                 root.append_operation(context, operation.get_operation(), 0);

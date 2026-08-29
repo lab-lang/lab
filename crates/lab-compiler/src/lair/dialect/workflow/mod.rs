@@ -386,7 +386,11 @@ impl Verify for RecoverOp {
 #[pliron_op(
     name = "workflow.dilute",
     format,
-    attributes = (dilute_serial_dilutions: IntegerAttr),
+    attributes = (
+        dilute_serial_dilutions: IntegerAttr,
+        dilute_medium_volume_ul: IntegerAttr,
+        dilute_culture_volume_ul: IntegerAttr
+    ),
     operands = (culture: MaterialType),
     results = (diluted: MaterialType)
 )]
@@ -394,7 +398,13 @@ impl Verify for RecoverOp {
 pub struct DiluteOp;
 
 impl DiluteOp {
-    pub fn new(ctx: &mut Context, culture: Value, serial_dilutions: u8) -> Self {
+    pub fn new(
+        ctx: &mut Context,
+        culture: Value,
+        serial_dilutions: u8,
+        medium_volume_ul: u16,
+        culture_volume_ul: u16,
+    ) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
@@ -406,6 +416,8 @@ impl DiluteOp {
             ),
         };
         result.set_attr_dilute_serial_dilutions(ctx, u32_attr(ctx, serial_dilutions.into()));
+        result.set_attr_dilute_medium_volume_ul(ctx, u32_attr(ctx, medium_volume_ul.into()));
+        result.set_attr_dilute_culture_volume_ul(ctx, u32_attr(ctx, culture_volume_ul.into()));
         result
     }
 }
@@ -415,6 +427,18 @@ impl Verify for DiluteOp {
         require_count(
             self.get_attr_dilute_serial_dilutions(ctx).as_deref(),
             "dilute_serial_dilutions",
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_count(
+            self.get_attr_dilute_medium_volume_ul(ctx).as_deref(),
+            "dilute_medium_volume_ul",
+            self.loc(ctx),
+            ctx,
+        )?;
+        require_count(
+            self.get_attr_dilute_culture_volume_ul(ctx).as_deref(),
+            "dilute_culture_volume_ul",
             self.loc(ctx),
             ctx,
         )?;

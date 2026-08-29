@@ -4,15 +4,15 @@ use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use lab_capability::{
-    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId, OperationId,
-    PropertyKind, QualificationLevel, UnitIri,
+    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, ExactInteger, MethodId,
+    OperationId, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
 };
 use lab_method::{
     CapabilityConstraintDefinition, CapabilityRequirementDefinition, IntentOperationId, LocalId,
     MaterialInputDefinition, MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput,
     MethodParameter, MethodRegistry, ParameterType, PortType, ProcedureParameterDefinition,
-    ProcedureTaskDefinition, ProcedureValueExpression, ScalarType, ScalarValueExpression,
-    TaskOutput, ValueReference,
+    ProcedureTaskDefinition, ProcedureValue, ProcedureValueExpression, ScalarType,
+    ScalarValueExpression, TaskOutput, ValueReference,
 };
 
 const METHOD_NS: &str = "https://www.lab-compiler.org/ns/method#";
@@ -91,12 +91,29 @@ fn automated_golden_gate() -> MethodDefinition {
         "buffer_volume_ul",
     ];
     let cycling_parameters = [
+        "assembly_replicates",
+        "reaction_volume_ul",
         "cycles",
         "digest_temperature_c",
         "digest_minutes",
         "ligate_temperature_c",
         "ligate_minutes",
     ];
+    let setup_task_parameters = with_integer_literals(
+        select_parameters(&parameters, &setup_parameters),
+        [("mix_cycles", 3), ("mix_volume_ul", 15)],
+    );
+    let cycling_task_parameters = with_integer_literals(
+        select_parameters(&parameters, &cycling_parameters),
+        [
+            ("lid_temperature_c", 105),
+            ("final_digest_temperature_c", 50),
+            ("final_digest_minutes", 5),
+            ("heat_inactivation_temperature_c", 80),
+            ("heat_inactivation_minutes", 10),
+            ("hold_temperature_c", 4),
+        ],
+    );
     MethodDefinition {
         id: method("automated-golden-gate"),
         refines: intent("std.bio.build.realize"),
@@ -108,7 +125,7 @@ fn automated_golden_gate() -> MethodDefinition {
                 "SetupGoldenGateReaction",
                 vec![input_ref("design")],
                 vec![output("reaction", material("AssemblyReaction"))],
-                select_parameters(&parameters, &setup_parameters),
+                setup_task_parameters,
                 vec![
                     material_parameter("backbone", "backbone"),
                     material_parameter("components", "components"),
@@ -130,7 +147,7 @@ fn automated_golden_gate() -> MethodDefinition {
                 "ThermalCycleGoldenGateReaction",
                 vec![task_ref("setup-reaction", "reaction")],
                 vec![output("product", material("PlasmidProduct"))],
-                select_parameters(&parameters, &cycling_parameters),
+                cycling_task_parameters,
                 vec![],
                 vec![requirement(
                     "thermal-cycling",
@@ -267,7 +284,11 @@ fn recovery_method(
 }
 
 fn serial_dilution() -> MethodDefinition {
-    let parameters = vec![parameter("serial_dilutions", ScalarType::Integer)];
+    let parameters = vec![
+        parameter("serial_dilutions", ScalarType::Integer),
+        parameter("medium_volume_ul", ScalarType::Integer),
+        parameter("culture_volume_ul", ScalarType::Integer),
+    ];
     MethodDefinition {
         id: method("serial-dilution"),
         refines: intent("std.lab.plasmid.dilute"),
@@ -278,8 +299,14 @@ fn serial_dilution() -> MethodDefinition {
             "SeriallyDiluteCulture",
             vec![input_ref("culture")],
             vec![output("diluted", material("DilutedCulture"))],
-            select_parameters(&parameters, &["serial_dilutions"]),
-            vec![],
+            with_integer_literals(
+                select_parameters(
+                    &parameters,
+                    &["serial_dilutions", "medium_volume_ul", "culture_volume_ul"],
+                ),
+                [("mix_cycles", 5), ("mix_volume_ul", 19)],
+            ),
+            vec![material_literal("medium", "recovery_medium")],
             vec![requirement(
                 "liquid-handling",
                 "LiquidHandling",
@@ -426,6 +453,33 @@ fn procedure_parameter(
         value: ProcedureValueExpression::IntentParameter {
             parameter: source.name.clone(),
             unit,
+        },
+    }
+}
+
+fn with_integer_literals<const N: usize>(
+    mut parameters: Vec<ProcedureParameterDefinition>,
+    values: [(&str, u32); N],
+) -> Vec<ProcedureParameterDefinition> {
+    parameters.extend(
+        values
+            .into_iter()
+            .map(|(name, value)| literal_integer_parameter(name, value)),
+    );
+    parameters
+}
+
+fn literal_integer_parameter(name: &str, value: u32) -> ProcedureParameterDefinition {
+    let value = PropertyValue::new(
+        ScalarValue::Integer(ExactInteger::parse(value.to_string()).unwrap()),
+        parameter_unit(name),
+    )
+    .expect("built-in integer Procedure literals use valid units");
+    ProcedureParameterDefinition {
+        id: local(name),
+        property_kind: property(&upper_camel(name)),
+        value: ProcedureValueExpression::Literal {
+            value: ProcedureValue::Scalar { value },
         },
     }
 }
