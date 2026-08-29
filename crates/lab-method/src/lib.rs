@@ -4,10 +4,12 @@
 //! Definitions contain no facility, Asset, CapabilityOffering, MaterialLot, adapter, or schedule
 //! identity. The compiler validates them before constructing LAIR candidate regions.
 
+mod catalog;
 mod definition;
 mod id;
 mod registry;
 
+pub use catalog::{METHOD_CATALOG_SCHEMA_VERSION, MethodCatalogDocument, MethodCatalogError};
 pub use definition::{
     CapabilityConstraintDefinition, CapabilityRequirementDefinition, MaterialInputDefinition,
     MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput, MethodParameter,

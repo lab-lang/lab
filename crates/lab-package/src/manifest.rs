@@ -57,6 +57,8 @@ pub struct PackageManifest {
     #[serde(default)]
     pub build: BuildMetadata,
     #[serde(default)]
+    pub methods: MethodCatalogMetadata,
+    #[serde(default)]
     pub planning: PlanningMetadata,
     #[serde(default)]
     pub inventory: InventoryMetadata,
@@ -81,10 +83,22 @@ pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
 }
 
+/// Portable Method documents contributed by this package.
+///
+/// Each JSON document uses the versioned `lab-method` catalog contract. Dependencies contribute
+/// their documents before their consumers, and the project composes the complete set with Lab's
+/// standard Methods before refinement.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MethodCatalogMetadata {
+    #[serde(default)]
+    pub documents: Vec<PathBuf>,
+}
+
 /// Explicit policy for resolving method and facility choices.
 ///
-/// Methods remain compiler-owned semantic definitions. A package may only pin a stable source
-/// operation or one concrete choice to an exact method IRI; it cannot redefine the method here.
+/// Method definitions live in versioned catalog documents. Planning configuration only selects
+/// among the resulting alternatives by stable source operation, choice, and Method identity.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanningMetadata {
@@ -229,6 +243,7 @@ impl PackageManifest {
                 self.package.edition.clone(),
             ));
         }
+        self.methods.validate()?;
         self.planning.validate()?;
         self.inventory.validate()?;
         self.execution.validate(&self.inventory)?;
@@ -274,6 +289,37 @@ impl PackageManifest {
                         })?;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MethodCatalogMetadata {
+    fn validate(&self) -> Result<(), PackageError> {
+        let mut documents = BTreeSet::new();
+        for document in &self.documents {
+            if !valid_relative_path(document) {
+                return Err(PackageError::InvalidMethods(format!(
+                    "document '{}' must be a package-relative path without '..'",
+                    document.display()
+                )));
+            }
+            if document
+                .extension()
+                .and_then(|extension| extension.to_str())
+                != Some("json")
+            {
+                return Err(PackageError::InvalidMethods(format!(
+                    "document '{}' must use the versioned JSON Method catalog format",
+                    document.display()
+                )));
+            }
+            if !documents.insert(document) {
+                return Err(PackageError::InvalidMethods(format!(
+                    "document '{}' is declared more than once",
+                    document.display()
+                )));
             }
         }
         Ok(())
@@ -636,6 +682,53 @@ method = "https://www.lab-compiler.org/ns/method#controlled-recovery"
             Some("choice-17")
         );
         manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn reads_portable_method_catalog_documents_separately_from_planning_policy() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "golden-gate"
+version = "0.1.0"
+
+[methods]
+documents = ["methods/liquid-handling.json", "methods/incubation.json"]
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://example.org/method/automated-golden-gate"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.methods.documents,
+            [
+                PathBuf::from("methods/liquid-handling.json"),
+                PathBuf::from("methods/incubation.json")
+            ]
+        );
+        assert_eq!(manifest.planning.methods.len(), 1);
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_escaping_duplicate_or_non_json_method_documents() {
+        for documents in [
+            "[\"../methods.json\"]",
+            "[\"methods/catalog.toml\"]",
+            "[\"methods/catalog.json\", \"methods/catalog.json\"]",
+        ] {
+            let manifest = PackageManifest::parse(&format!(
+                "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[methods]\ndocuments = {documents}\n"
+            ))
+            .unwrap();
+
+            assert!(matches!(
+                manifest.validate(),
+                Err(PackageError::InvalidMethods(_))
+            ));
+        }
     }
 
     #[test]

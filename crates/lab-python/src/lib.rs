@@ -105,6 +105,20 @@ fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyR
     serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
+fn parse_method_definitions(definitions_json: &str) -> PyResult<Vec<MethodDefinition>> {
+    serde_json::from_str::<Vec<MethodDefinition>>(definitions_json)
+        .map_err(|error| PyValueError::new_err(format!("invalid Method definitions: {error}")))
+}
+
+fn validate_method_catalog(
+    mut definitions: Vec<MethodDefinition>,
+) -> PyResult<Vec<MethodDefinition>> {
+    definitions.sort_by(|left, right| left.id.cmp(&right.id));
+    MethodRegistry::new(definitions.clone())
+        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))?;
+    Ok(definitions)
+}
+
 fn method_definitions(
     definitions_json: &str,
     include_standard: bool,
@@ -114,17 +128,30 @@ fn method_definitions(
     } else {
         Vec::new()
     };
-    let custom = serde_json::from_str::<Vec<MethodDefinition>>(definitions_json)
-        .map_err(|error| PyValueError::new_err(format!("invalid Method definitions: {error}")))?;
-    definitions.extend(custom);
-    definitions.sort_by(|left, right| left.id.cmp(&right.id));
-    MethodRegistry::new(definitions.clone())
-        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))?;
-    Ok(definitions)
+    definitions.extend(parse_method_definitions(definitions_json)?);
+    validate_method_catalog(definitions)
 }
 
 fn method_registry(definitions_json: &str, include_standard: bool) -> PyResult<MethodRegistry> {
     MethodRegistry::new(method_definitions(definitions_json, include_standard)?)
+        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))
+}
+
+fn project_method_registry(
+    project: &LabProject,
+    definitions_json: &str,
+    include_standard: bool,
+) -> PyResult<MethodRegistry> {
+    let mut definitions = if include_standard {
+        standard_method_definitions()
+    } else {
+        Vec::new()
+    };
+    definitions.extend(project.package_method_definitions().map_err(|error| {
+        PyValueError::new_err(format!("failed to load package Method catalogs: {error}"))
+    })?);
+    definitions.extend(parse_method_definitions(definitions_json)?);
+    MethodRegistry::new(validate_method_catalog(definitions)?)
         .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))
 }
 
@@ -242,12 +269,12 @@ fn plan_lab_project(
     definitions_json: &str,
     include_standard: bool,
 ) -> PyResult<String> {
-    let registry = method_registry(definitions_json, include_standard)?;
     let project = LabProject::discover(path)
         .map_err(|error| PyValueError::new_err(format!("failed to load Lab project: {error}")))?;
     let compiled = project.compile().map_err(|error| {
         PyValueError::new_err(format!("failed to compile Lab project: {error}"))
     })?;
+    let registry = project_method_registry(&project, definitions_json, include_standard)?;
     let planned = project
         .plan_facility(&compiled, &registry)
         .map_err(|error| PyValueError::new_err(format!("failed to plan Lab project: {error}")))?;
@@ -262,11 +289,11 @@ fn plan_lab_modules(
     definitions_json: &str,
     include_standard: bool,
 ) -> PyResult<String> {
-    let registry = method_registry(definitions_json, include_standard)?;
     let checked = compile_named_modules(&modules)?;
     let module_refs = checked.iter().collect::<Vec<_>>();
     let project = LabProject::discover(package_path)
         .map_err(|error| PyValueError::new_err(format!("failed to load Lab project: {error}")))?;
+    let registry = project_method_registry(&project, definitions_json, include_standard)?;
     let planned = plan_modules_for_package(project.default_package(), &module_refs, &registry)
         .map_err(|error| PyValueError::new_err(format!("failed to plan Lab program: {error}")))?;
     serialize_facility_plan(&planned)

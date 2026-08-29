@@ -1827,6 +1827,7 @@ dependencies = [
  "sbol3",
  "semver",
  "serde",
+ "serde_json",
  "thiserror",
  "toml 0.8.23",
 ]

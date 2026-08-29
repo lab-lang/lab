@@ -405,6 +405,11 @@ impl MethodRegistry {
         self.by_operation.keys()
     }
 
+    /// Iterate all definitions in deterministic operation and Method-IRI order.
+    pub fn definitions(&self) -> impl Iterator<Item = &MethodDefinition> {
+        self.by_operation.values().flatten()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.by_operation.is_empty()
     }

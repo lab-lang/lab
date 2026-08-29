@@ -1,5 +1,6 @@
 """Python consumes the same exact facility-planning service as the Lab CLI."""
 
+import shutil
 from pathlib import Path
 
 import lab
@@ -10,6 +11,66 @@ from lab import planning
 REPOSITORY = Path(__file__).resolve().parents[3]
 GOLDEN_GATE = REPOSITORY / "examples" / "golden-gate"
 OT2 = "https://example.org/golden-gate/opentrons_ot2"
+CAPABILITY = "https://sbol.io/ns/capability#"
+PROCEDURE = "https://www.lab-compiler.org/ns/procedure#"
+MATERIAL_STATE = "https://www.lab-compiler.org/ns/material-state#"
+CUSTOM_RECOVERY = "https://example.org/method/custom-recovery"
+
+
+def custom_recovery() -> method_types.Method:
+    return method_types.Method(
+        id=CUSTOM_RECOVERY,
+        refines="std.lab.plasmid.recover",
+        inputs=(
+            method_types.MethodInput(
+                "culture", method_types.Port.material(f"{MATERIAL_STATE}TransformedCulture")
+            ),
+        ),
+        parameters=(method_types.MethodParameter.scalar("duration", method_types.ScalarType.REAL),),
+        tasks=(
+            method_types.Task(
+                id="recover",
+                operation=f"{PROCEDURE}RecoverCulture",
+                inputs=(method_types.ValueReference.method_input("culture"),),
+                outputs=(
+                    method_types.TaskOutput(
+                        "recovered", method_types.Port.material(f"{MATERIAL_STATE}RecoveredCulture")
+                    ),
+                ),
+                parameters=(
+                    method_types.ProcedureParameter(
+                        "duration",
+                        f"{CAPABILITY}Duration",
+                        method_types.ProcedureValueExpression.intent_parameter("duration"),
+                    ),
+                ),
+                materials=(
+                    method_types.MaterialInput(
+                        "medium", method_types.MaterialSource.constant("recovery_medium")
+                    ),
+                ),
+                requirements=(
+                    method_types.Requirement(
+                        id="incubation",
+                        capability_kind=f"{CAPABILITY}Incubation",
+                        accepted_control_modes=(method_types.ControlMode.MANUAL,),
+                        constraints=(
+                            method_types.CapabilityConstraint(
+                                property_kind=f"{CAPABILITY}Duration",
+                                relation=method_types.ConstraintRelation.EXACT,
+                                required=method_types.ValueExpression.intent_parameter("duration"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        outputs=(
+            method_types.MethodOutput(
+                "recovered", method_types.ValueReference.task_output("recover", "recovered")
+            ),
+        ),
+    )
 
 
 def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
@@ -86,3 +147,20 @@ def test_a_python_program_uses_the_packages_inventory_and_adapter_context() -> N
         for requirement in task.requirements
         if requirement.adapter is not None
     )
+
+
+def test_file_backed_planning_composes_package_authored_method_documents(tmp_path: Path) -> None:
+    project = tmp_path / "golden-gate"
+    shutil.copytree(GOLDEN_GATE, project)
+    with (project / "lab.toml").open("a", encoding="utf-8") as manifest:
+        manifest.write(
+            f'\n[methods]\ndocuments = ["methods/custom.json"]\n\n'
+            f'[[planning.methods]]\nsource-operation = "std.lab.plasmid.recover"\n'
+            f'method = "{CUSTOM_RECOVERY}"\n'
+        )
+    (project / "methods").mkdir()
+    method_types.MethodCatalog((custom_recovery(),)).write(project / "methods/custom.json")
+
+    planned = lab.plan_project(project)
+
+    assert any(selection.method == CUSTOM_RECOVERY for selection in planned.solution.selections)

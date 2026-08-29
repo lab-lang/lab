@@ -151,12 +151,12 @@ impl LabProject {
         plan_modules_with_inventory(package, &modules, methods, inventory)
     }
 
-    /// Plans with the versioned Method set built into this compiler.
-    pub fn plan_facility_with_standard_methods(
+    /// Plans with the standard and package-contributed Methods captured during compilation.
+    pub fn plan_facility_with_package_methods(
         &self,
         compiled: &CompiledProject,
     ) -> Result<FacilityPlanningResult, FacilityProjectError> {
-        self.plan_facility(compiled, lab_compiler::standard_method_registry())
+        self.plan_facility(compiled, &compiled.methods)
     }
 }
 

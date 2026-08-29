@@ -1,6 +1,9 @@
 """Portable Method authoring uses the same Rust contract and refinement as Lab source."""
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import lab
 from lab import methods as m
@@ -120,6 +123,19 @@ class MethodTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "has no Capability requirements"):
             m.MethodCatalog((invalid,), include_standard=False).validate()
+
+    def test_catalog_writes_the_versioned_package_document(self) -> None:
+        catalog = m.MethodCatalog((sequence_synthesis(),), include_standard=False)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "methods.json"
+
+            written = catalog.write(path)
+            document = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(written, path)
+        self.assertEqual(document["schema_version"], m.METHOD_CATALOG_SCHEMA_VERSION)
+        self.assertEqual(document["methods"][0]["id"], sequence_synthesis().id)
+        self.assertNotIn("include_standard", document)
 
     def test_exact_scalars_and_units_match_the_shared_json_contract(self) -> None:
         value = m.PropertyValue(

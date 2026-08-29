@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Self, cast
 
 from ._native import refine_lab_modules as _refine_lab_modules
@@ -28,6 +29,7 @@ _INTEGER = re.compile(r"^[+-]?[0-9]+$")
 _REAL = re.compile(r"^[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))$")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*$")
 _FORBIDDEN_IRI = frozenset('<>"{}|\\^`')
+METHOD_CATALOG_SCHEMA_VERSION = "lab.method-catalog.v1"
 
 
 def _local(value: str, field: str) -> str:
@@ -606,7 +608,30 @@ class MethodCatalog:
     include_standard: bool = True
 
     def to_json(self) -> str:
+        """Serialize only custom definitions for the native in-memory API."""
+
         return json.dumps([method.to_dict() for method in self.methods], separators=(",", ":"))
+
+    def to_document(self) -> dict[str, object]:
+        """Return the versioned package document; standard Methods are composed by Lab."""
+
+        return {
+            "schema_version": METHOD_CATALOG_SCHEMA_VERSION,
+            "methods": [method.to_dict() for method in self.methods],
+        }
+
+    def to_document_json(self, *, indent: int | None = 2) -> str:
+        """Serialize the versioned package document accepted by ``[methods].documents``."""
+
+        return json.dumps(self.to_document(), indent=indent)
+
+    def write(self, path: str | Path) -> Path:
+        """Validate and write a portable package Method document."""
+
+        self.validate()
+        destination = Path(path)
+        destination.write_text(f"{self.to_document_json()}\n", encoding="utf-8")
+        return destination
 
     def validate(self) -> list[dict[str, Any]]:
         """Validate the complete composed catalog with the Rust contract."""
@@ -649,6 +674,7 @@ def refine(
 
 
 __all__ = [
+    "METHOD_CATALOG_SCHEMA_VERSION",
     "CapabilityConstraint",
     "ConstraintRelation",
     "ControlMode",

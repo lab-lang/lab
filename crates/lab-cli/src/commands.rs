@@ -207,6 +207,7 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
     } else if package.entry_source().is_some() {
         Some(write_unallocated_compiler_frontier(
             &program_modules,
+            &compiled.methods,
             &output_root,
         )?)
     } else {
@@ -341,7 +342,7 @@ fn write_facility_plan(
     output_root: &Path,
 ) -> Result<PlanCompleted> {
     let package = project.default_package();
-    let facility = project.plan_facility_with_standard_methods(compiled)?;
+    let facility = project.plan_facility_with_package_methods(compiled)?;
     let inventory = &facility.inventory;
     let adapter_bindings = facility.adapter_bindings.as_ref();
     let allocated = &facility.allocated;
@@ -533,6 +534,7 @@ fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
 
 fn write_unallocated_compiler_frontier(
     modules: &[&lab_compiler::CheckedModule],
+    methods: &lab_method::MethodRegistry,
     output_root: &Path,
 ) -> Result<BuildCompilerIndex> {
     let compiler = output_root.join("compiler");
@@ -550,7 +552,7 @@ fn write_unallocated_compiler_frontier(
     }
     let refined = PortableLairProgram::lower_program(modules)
         .context("failed to lower the checked program into Design and Intent LAIR")?
-        .refine_standard_methods()
+        .refine_methods(methods)
         .context("failed to refine workflow intent into Method alternatives")?;
     let problem = refined
         .planning_problem()
