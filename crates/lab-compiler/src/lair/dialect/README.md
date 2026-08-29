@@ -1,12 +1,12 @@
 # LAIR
 
-LAIR—the Lab Automation Intermediate Representation—is the Lab ecosystem's multi-layer compiler IR. It is implemented as a family of Pliron dialects that preserve biological and physical meaning while programs are progressively lowered from artifact intent toward laboratory execution.
+LAIR—the Lab Automation Intermediate Representation—is the Lab ecosystem's multi-layer compiler IR. It is implemented as a family of Pliron dialects that preserve biological and physical meaning while programs are progressively lowered from scientific intent toward laboratory execution. [Decision 0045](../../../../../docs/language/decisions/0045-lair-method-refinement-and-facility-allocation.md) records how method alternatives, capability requirements, facility allocation, and public adapter boundaries extend this architecture.
 
 LAIR is currently maintained inside `lab-compiler`. Its active consumer is the `lab-opt` textual IR tool, which parses, verifies, transforms, and reprints LAIR modules. It can be extracted into a crate later when an independent consumer requires a stable LAIR API.
 
 Pliron is an implementation detail of this layer. Pliron contexts, modules, values, and pointers do not cross the public session boundary; callers exchange textual LAIR, stage and pipeline descriptions, and compiler-owned errors. Raw Pliron entities remain inside the dialect, analysis, pipeline, stage, and session modules.
 
-## Initial dialects
+## Current vertical slice
 
 The first vertical slice contains:
 
@@ -16,7 +16,21 @@ The first vertical slice contains:
 - Protocol material-state types such as `CircularDna`, `ColonyPool`, `CloneCulture`, and `PurifiedPlasmid`;
 - Protocol evidence types for sequence identity, concentration, and volume.
 
-The dialects are layers within LAIR; no individual dialect is itself “the LAIR dialect.” Design and Workflow form the portable source-lowering boundary. A dialect conversion selects Protocol operations and eliminates Workflow operations while remaining independent of any facility. Planning then binds requirements to capability offerings and assets before an adapter lowers the bound protocol to device operations.
+The dialects are layers within LAIR; no individual dialect is itself “the LAIR dialect.” Design and Workflow form the implemented portable source-lowering boundary. The current dialect conversion selects one plasmid-build Protocol and eliminates Workflow operations before facility planning. This is a vertical slice, not the accepted final method-selection boundary.
+
+## Accepted stage architecture
+
+The executable LAIR pipeline evolves toward three verifier-valid boundaries:
+
+```text
+design-intent
+    -> refined-alternatives
+    -> allocated-procedure
+```
+
+Design and generalized Intent operations preserve reachable source semantics and typed material flow. Method candidate regions contain Procedure tasks and first-class Capability requirements but no facility binding. A read-only analysis extracts a purpose-built global constraint problem; the solver selects unpinned methods together with exact offerings, Assets, adapters, MaterialLots, movements, and scheduling. An allocation pass applies that complete solution to the same LAIR identities, erases unselected candidates, and produces Allocated Procedure LAIR.
+
+Pliron remains internal to `lab-compiler`. Immutable procedure, adapter-invocation, execution-plan, and run-document records are projections from verified stages rather than aliases for Pliron objects. External adapters consume versioned invocation records; a built-in adapter may use its own device dialect internally, but Pliron is not part of the adapter ABI.
 
 ## Physical-resource rule
 

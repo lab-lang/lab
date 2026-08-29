@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes [0031: Workcell targets](0031-workcell-targets.md).
+Accepted. Supersedes [0031: Workcell targets](0031-workcell-targets.md) and is extended by [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md).
 
 ## Context
 
@@ -27,7 +27,7 @@ The persistent catalog and run ledger are SBOLInventory graphs. Workflow require
 
 A package selects one RDF document through `[inventory].document` and may select one Facility by absolute IRI. If the selector is omitted, the document must contain exactly one Facility. Lab validates both SBOL 3 and SBOLInventory before exposing an immutable inventory snapshot, and a reviewed plan records the exact Facility IRI and source-file SHA-256.
 
-Workflow operations refine into capability requirements identified by stable absolute capability-kind IRIs, minimum qualification, accepted control modes, typed parameter constraints, and material inputs and outputs. The facility planner binds each reachable requirement to an exact `CapabilityOffering` IRI and its owning `Asset` IRI. Candidate ordering is not allocation, so unresolved equal candidates remain an explained ambiguity.
+Workflow operations refine through one or more facility-independent method candidates. Each candidate contains Procedure tasks and capability requirements identified by stable absolute capability-kind IRIs, minimum qualification, accepted control modes, typed parameter constraints, and material inputs and outputs. The facility planner selects an unpinned method and binds each active requirement to an exact `CapabilityOffering` IRI and its owning `Asset` IRI in one graph-wide solution. Candidate ordering is not allocation, so unresolved equal methods or offerings remain an explained ambiguity.
 
 Operational configuration is an overlay keyed by exact Asset IRI. An adapter descriptor states the capability kinds, control modes, document formats, and planning, lowering, simulation, or runtime services its implementation supports. Manufacturer and model never select a driver. The `lab.adapter-profile.v2` schema contains no target, backend, or Asset selector: the manifest's exact Asset-to-driver binding selects the implementation, while the profile supplies only its checked non-secret configuration. Endpoints and credentials remain local runtime configuration rather than facility facts.
 
