@@ -8,11 +8,12 @@ use pliron::context::Context;
 use pliron::linked_list::ContainsLinkedList;
 use pliron::op::Op;
 use pliron::operation::Operation;
+use pliron::value::{DefiningEntity, Value};
 
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::meta::StageOp;
 use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-use crate::lair::dialect::procedure::TaskOp;
+use crate::lair::dialect::procedure::{ParameterOp, TaskOp};
 
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,6 +144,7 @@ fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<()
     let mut choice_ids = BTreeSet::new();
     let mut procedure_nodes = BTreeSet::new();
     let mut requirement_ids = BTreeSet::new();
+    let mut parameter_ids = BTreeSet::new();
     for choice in choices {
         let choice_id = choice.choice_id(context);
         if !choice_ids.insert(choice_id.clone()) {
@@ -156,6 +158,7 @@ fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<()
                 candidate,
                 &mut procedure_nodes,
                 &mut requirement_ids,
+                &mut parameter_ids,
             )?;
         }
     }
@@ -168,6 +171,7 @@ fn verify_candidate(
     candidate: usize,
     global_procedure_nodes: &mut BTreeSet<String>,
     global_requirement_ids: &mut BTreeSet<String>,
+    global_parameter_ids: &mut BTreeSet<String>,
 ) -> Result<(), String> {
     let choice_id = choice.choice_id(context);
     let block = choice
@@ -182,6 +186,8 @@ fn verify_candidate(
     let mut tasks = BTreeSet::new();
     let mut requirements = BTreeMap::new();
     let mut constraints = Vec::new();
+    let mut parameters = Vec::new();
+    let mut task_operations = Vec::new();
 
     for operation in block.deref(context).iter(context) {
         if let Some(task) = Operation::get_op::<TaskOp>(operation, context) {
@@ -194,6 +200,7 @@ fn verify_candidate(
             if !global_procedure_nodes.insert(node.clone()) {
                 return Err(format!("duplicate Procedure node identity '{node}'"));
             }
+            task_operations.push(operation);
             continue;
         }
         if let Some(requirement) = Operation::get_op::<RequirementOp>(operation, context) {
@@ -211,6 +218,14 @@ fn verify_candidate(
         }
         if let Some(constraint) = Operation::get_op::<ConstraintOp>(operation, context) {
             constraints.push(constraint.requirement_id(context));
+            continue;
+        }
+        if let Some(parameter) = Operation::get_op::<ParameterOp>(operation, context) {
+            let id = parameter.parameter_id(context);
+            if !global_parameter_ids.insert(id.clone()) {
+                return Err(format!("duplicate Procedure parameter identity '{id}'"));
+            }
+            parameters.push((id, parameter.procedure_node(context)));
             continue;
         }
         if Operation::get_op::<YieldOp>(operation, context).is_some() {
@@ -255,6 +270,81 @@ fn verify_candidate(
                 "Capability constraint references Requirement '{requirement}' outside its candidate"
             ));
         }
+    }
+    for (parameter, node) in parameters {
+        if !tasks.contains(&node) {
+            return Err(format!(
+                "Procedure parameter '{parameter}' references Procedure node '{node}' outside its candidate"
+            ));
+        }
+    }
+    verify_candidate_dataflow(context, choice, candidate, &task_operations, tail)?;
+    Ok(())
+}
+
+fn verify_candidate_dataflow(
+    context: &Context,
+    choice: &ChoiceOp,
+    candidate: usize,
+    tasks: &[pliron::context::Ptr<Operation>],
+    yield_operation: pliron::context::Ptr<Operation>,
+) -> Result<(), String> {
+    let choice_id = choice.choice_id(context);
+    let external = choice
+        .get_operation()
+        .deref(context)
+        .operands()
+        .collect::<Vec<_>>();
+    for (task_index, task) in tasks.iter().enumerate() {
+        for operand in task.deref(context).operands() {
+            verify_candidate_value(
+                context,
+                operand,
+                &external,
+                tasks,
+                Some(task_index),
+            )
+            .map_err(|error| {
+                format!(
+                    "method choice '{choice_id}' candidate {candidate} has invalid Procedure dataflow: {error}"
+                )
+            })?;
+        }
+    }
+    for yielded in yield_operation.deref(context).operands() {
+        verify_candidate_value(context, yielded, &external, tasks, None).map_err(|error| {
+            format!(
+                "method choice '{choice_id}' candidate {candidate} has invalid yield dataflow: {error}"
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn verify_candidate_value(
+    _context: &Context,
+    value: Value,
+    external: &[Value],
+    tasks: &[pliron::context::Ptr<Operation>],
+    consumer_index: Option<usize>,
+) -> Result<(), String> {
+    if external.contains(&value) {
+        return Ok(());
+    }
+    let DefiningEntity::Op(defining_operation) = value.defining_entity() else {
+        return Err("a block value is not declared as a method.choice operand".to_owned());
+    };
+    let Some(definition_index) = tasks
+        .iter()
+        .position(|operation| *operation == defining_operation)
+    else {
+        return Err(
+            "a value is defined outside this candidate and is not a method.choice operand"
+                .to_owned(),
+        );
+    };
+    if consumer_index.is_some_and(|consumer_index| definition_index >= consumer_index) {
+        return Err("a Procedure task uses a value before its task defines it".to_owned());
     }
     Ok(())
 }
@@ -353,7 +443,7 @@ mod tests {
     use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
     use crate::lair::dialect::design::DesignDnaSequenceOp;
     use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-    use crate::lair::dialect::procedure::{MaterialType, TaskOp};
+    use crate::lair::dialect::procedure::{MaterialType, ParameterOp, TaskOp};
     use crate::lair::session::CompilerSession;
 
     use super::*;
@@ -402,6 +492,49 @@ mod tests {
         );
     }
 
+    #[test]
+    fn refined_alternatives_reject_values_crossing_candidate_regions() {
+        let (context, module) = refined_program(false);
+        let module_block = module
+            .get_region(&context)
+            .deref(&context)
+            .get_head()
+            .unwrap();
+        let choice = module_block
+            .deref(&context)
+            .iter(&context)
+            .find_map(|operation| Operation::get_op::<ChoiceOp>(operation, &context))
+            .unwrap();
+        let first_block = choice
+            .candidate_region(&context, 0)
+            .deref(&context)
+            .get_head()
+            .unwrap();
+        let first_result = first_block
+            .deref(&context)
+            .iter(&context)
+            .find_map(|operation| Operation::get_op::<TaskOp>(operation, &context))
+            .unwrap()
+            .get_operation()
+            .deref(&context)
+            .get_result(0);
+        let second_yield = choice
+            .candidate_region(&context, 1)
+            .deref(&context)
+            .get_head()
+            .unwrap()
+            .deref(&context)
+            .get_tail()
+            .unwrap();
+        Operation::replace_operand(second_yield, &context, 0, first_result);
+
+        let error = detect_stage(&context, module).unwrap_err();
+        assert!(
+            error.contains("value is defined outside this candidate"),
+            "{error}"
+        );
+    }
+
     fn refined_program(uncovered_task: bool) -> (Context, ModuleOp) {
         let mut context = Context::new();
         let module = ModuleOp::new(&mut context, Identifier::try_from("refined_demo").unwrap());
@@ -435,6 +568,14 @@ mod tests {
             let task = TaskOp::new(&mut context, &node, &operation, vec![], vec![material_type]);
             let result = task.get_operation().deref(&context).get_result(0);
             choice.append_candidate_operation(&mut context, candidate, task.get_operation());
+            let parameter = ParameterOp::new(
+                &mut context,
+                format!("{node}::parameter::cycles"),
+                &node,
+                &PropertyKind::new("https://sbol.io/ns/capability#CycleCount").unwrap(),
+                &PropertyValue::unitless(ScalarValue::Integer(ExactInteger::parse("30").unwrap())),
+            );
+            choice.append_candidate_operation(&mut context, candidate, parameter.get_operation());
             let required = RequirementOp::new(
                 &mut context,
                 &requirement,

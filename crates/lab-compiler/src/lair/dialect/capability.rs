@@ -7,8 +7,8 @@ use std::cell::Ref;
 use std::collections::BTreeSet;
 
 use lab_capability::{
-    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, ExactDecimal, ExactInteger,
-    PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
+    CapabilityKind, ConstraintRelation, ControlMode, PropertyConstraint, PropertyKind,
+    QualificationLevel,
 };
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
@@ -22,6 +22,7 @@ use pliron::verify_err;
 
 use crate::lair::dialect::attributes::string_vec;
 use crate::lair::dialect::procedure::is_stable_local_id;
+use crate::lair::dialect::scalar::{decode_property_value, encode_property_value};
 
 /// A semantic requirement attached to one exact Procedure node in the same candidate.
 #[pliron_op(
@@ -195,7 +196,7 @@ impl ConstraintOp {
             0,
         );
         let result = Self { op: raw };
-        let (value_kind, value) = encode_scalar(&constraint.required.value);
+        let (value_kind, value) = encode_property_value(&constraint.required);
         result.set_attr_constraint_requirement_id(context, StringAttr::new(requirement_id.into()));
         result.set_attr_property_kind(
             context,
@@ -237,29 +238,13 @@ impl ConstraintOp {
             other => return Err(format!("unknown constraint relation `{other}`")),
         };
         let lexical = required_attr(self.get_attr_value(context), "value")?;
-        let value = match required_attr(self.get_attr_value_kind(context), "value_kind")?.as_str() {
-            "text" => ScalarValue::Text(lexical.clone()),
-            "integer" => ScalarValue::Integer(
-                ExactInteger::parse(&lexical).map_err(|error| error.to_string())?,
-            ),
-            "real" => {
-                ScalarValue::Real(ExactDecimal::parse(&lexical).map_err(|error| error.to_string())?)
-            }
-            "boolean" => ScalarValue::Boolean(match lexical.as_str() {
-                "true" => true,
-                "false" => false,
-                _ => return Err("boolean value must be `true` or `false`".to_owned()),
-            }),
-            "iri" => {
-                ScalarValue::Iri(AbsoluteIri::new(&lexical).map_err(|error| error.to_string())?)
-            }
-            other => return Err(format!("unknown scalar value kind `{other}`")),
-        };
-        let unit = self
-            .get_attr_unit(context)
-            .map(|unit| UnitIri::new(unit.as_str()).map_err(|error| error.to_string()))
-            .transpose()?;
-        let required = PropertyValue::new(value, unit).map_err(|error| error.to_string())?;
+        let value_kind = required_attr(self.get_attr_value_kind(context), "value_kind")?;
+        let unit = self.get_attr_unit(context);
+        let required = decode_property_value(
+            &value_kind,
+            &lexical,
+            unit.as_ref().map(|unit| unit.as_str()),
+        )?;
         Ok(PropertyConstraint {
             property_kind,
             relation,
@@ -284,14 +269,4 @@ fn required_attr(
     value
         .map(|value| value.as_str().to_owned())
         .ok_or_else(|| format!("missing {name}"))
-}
-
-fn encode_scalar(value: &ScalarValue) -> (&'static str, String) {
-    match value {
-        ScalarValue::Text(value) => ("text", value.clone()),
-        ScalarValue::Integer(value) => ("integer", value.to_string()),
-        ScalarValue::Real(value) => ("real", value.to_string()),
-        ScalarValue::Boolean(value) => ("boolean", value.to_string()),
-        ScalarValue::Iri(value) => ("iri", value.to_string()),
-    }
 }

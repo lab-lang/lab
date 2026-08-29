@@ -7,17 +7,21 @@
 // Construction APIs are consumed by the forthcoming method-refinement pass.
 #![allow(dead_code)]
 
-use lab_capability::{AbsoluteIri, OperationId};
+use lab_capability::{AbsoluteIri, OperationId, PropertyKind, PropertyValue};
 use pliron::builtin::attributes::StringAttr;
+use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;
 use pliron::context::Context;
 use pliron::derive::{pliron_op, pliron_type};
 use pliron::op::Op;
 use pliron::operation::Operation;
 use pliron::result::Result;
-use pliron::r#type::TypeHandle;
+use pliron::r#type::{TypeHandle, Typed};
 use pliron::value::Value;
 use pliron::{verify_err, verify_err_noloc};
+
+use crate::lair::dialect::design::DesignType;
+use crate::lair::dialect::scalar::{decode_property_value, encode_property_value};
 
 /// One physical state in a method candidate.
 #[pliron_type(
@@ -112,6 +116,143 @@ impl Verify for TaskOp {
                 self.loc(context),
                 "procedure.task operation must be an absolute IRI"
             );
+        }
+        let operation = self.get_operation().deref(context);
+        for operand in operation.operands() {
+            if !is_procedure_port_type(context, operand.get_type(context)) {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.task operands must be Design, Procedure material, or Procedure data values"
+                );
+            }
+        }
+        for result in operation.results() {
+            if !is_procedure_port_type(context, result.get_type(context)) {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.task results must be Design, Procedure material, or Procedure data values"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_procedure_port_type(context: &Context, handle: TypeHandle) -> bool {
+    let ty = handle.deref(context);
+    ty.downcast_ref::<DesignType>().is_some()
+        || ty.downcast_ref::<MaterialType>().is_some()
+        || ty.downcast_ref::<DataType>().is_some()
+}
+
+/// One exact semantic parameter attached to a Procedure task by stable identity.
+#[pliron_op(
+    name = "procedure.parameter",
+    format,
+    attributes = (
+        procedure_parameter_id: StringAttr,
+        procedure_parameter_node: StringAttr,
+        procedure_parameter_kind: StringAttr,
+        procedure_parameter_value_kind: StringAttr,
+        procedure_parameter_value: StringAttr,
+        procedure_parameter_unit: StringAttr
+    ),
+    interfaces = [NOpdsInterface<0>, NResultsInterface<0>]
+)]
+pub(crate) struct ParameterOp;
+
+impl ParameterOp {
+    pub(crate) fn new(
+        context: &mut Context,
+        parameter_id: impl Into<String>,
+        procedure_node: impl Into<String>,
+        property_kind: &PropertyKind,
+        value: &PropertyValue,
+    ) -> Self {
+        let raw = Operation::new(
+            context,
+            Self::get_concrete_op_info(),
+            vec![],
+            vec![],
+            vec![],
+            0,
+        );
+        let result = Self { op: raw };
+        let (value_kind, lexical) = encode_property_value(value);
+        result.set_attr_procedure_parameter_id(context, StringAttr::new(parameter_id.into()));
+        result.set_attr_procedure_parameter_node(context, StringAttr::new(procedure_node.into()));
+        result
+            .set_attr_procedure_parameter_kind(context, StringAttr::new(property_kind.to_string()));
+        result.set_attr_procedure_parameter_value_kind(
+            context,
+            StringAttr::new(value_kind.to_owned()),
+        );
+        result.set_attr_procedure_parameter_value(context, StringAttr::new(lexical));
+        if let Some(unit) = &value.unit {
+            result.set_attr_procedure_parameter_unit(context, StringAttr::new(unit.to_string()));
+        }
+        result
+    }
+
+    pub(crate) fn parameter_id(&self, context: &Context) -> String {
+        self.get_attr_procedure_parameter_id(context)
+            .expect("verified procedure.parameter carries parameter_id")
+            .as_str()
+            .to_owned()
+    }
+
+    pub(crate) fn procedure_node(&self, context: &Context) -> String {
+        self.get_attr_procedure_parameter_node(context)
+            .expect("verified procedure.parameter carries procedure_node")
+            .as_str()
+            .to_owned()
+    }
+}
+
+impl Verify for ParameterOp {
+    fn verify(&self, context: &Context) -> Result<()> {
+        for (name, value) in [
+            (
+                "parameter_id",
+                self.get_attr_procedure_parameter_id(context),
+            ),
+            (
+                "procedure_node",
+                self.get_attr_procedure_parameter_node(context),
+            ),
+        ] {
+            if value.is_none_or(|value| !is_stable_local_id(value.as_str())) {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.parameter {name} must be non-empty and contain no whitespace"
+                );
+            }
+        }
+        if self
+            .get_attr_procedure_parameter_kind(context)
+            .is_none_or(|value| PropertyKind::new(value.as_str()).is_err())
+        {
+            return verify_err!(
+                self.loc(context),
+                "procedure.parameter property_kind must be an absolute IRI"
+            );
+        }
+        let Some(value_kind) = self.get_attr_procedure_parameter_value_kind(context) else {
+            return verify_err!(
+                self.loc(context),
+                "procedure.parameter is missing value_kind"
+            );
+        };
+        let Some(value) = self.get_attr_procedure_parameter_value(context) else {
+            return verify_err!(self.loc(context), "procedure.parameter is missing value");
+        };
+        let unit = self.get_attr_procedure_parameter_unit(context);
+        if let Err(error) = decode_property_value(
+            value_kind.as_str(),
+            value.as_str(),
+            unit.as_ref().map(|unit| unit.as_str()),
+        ) {
+            return verify_err!(self.loc(context), "invalid procedure.parameter: {error}");
         }
         Ok(())
     }

@@ -4,8 +4,8 @@ use lab_capability::{ConstraintRelation, ControlMode, MethodId};
 use thiserror::Error;
 
 use crate::{
-    ConstraintValue, IntentOperationId, LocalId, MethodDefinition, MethodSignature, ScalarType,
-    TaskOutput, ValueReference,
+    IntentOperationId, LocalId, MethodDefinition, MethodSignature, ScalarType,
+    ScalarValueExpression, TaskOutput, ValueReference,
 };
 
 /// A malformed portable method definition.
@@ -19,6 +19,8 @@ pub enum MethodDefinitionError {
     DuplicateTask { id: LocalId },
     #[error("Procedure task `{task}` output `{output}` occurs more than once")]
     DuplicateTaskOutput { task: LocalId, output: LocalId },
+    #[error("Procedure task `{task}` parameter `{parameter}` occurs more than once")]
+    DuplicateProcedureParameter { task: LocalId, parameter: LocalId },
     #[error("Capability requirement `{id}` occurs more than once")]
     DuplicateRequirement { id: LocalId },
     #[error("Procedure task `{task}` has no Capability requirements")]
@@ -27,20 +29,10 @@ pub enum MethodDefinitionError {
     MissingControlMode { requirement: LocalId },
     #[error("Capability requirement `{requirement}` accepts descriptive UnspecifiedControl")]
     UnspecifiedControlMode { requirement: LocalId },
-    #[error(
-        "Capability requirement `{requirement}` references unavailable Intent parameter `{parameter}`"
-    )]
-    UnavailableConstraintParameter {
-        requirement: LocalId,
-        parameter: LocalId,
-    },
-    #[error(
-        "Capability requirement `{requirement}` applies a unit to non-numeric Intent parameter `{parameter}`"
-    )]
-    UnitOnNonNumericParameter {
-        requirement: LocalId,
-        parameter: LocalId,
-    },
+    #[error("method value `{owner}` references unavailable Intent parameter `{parameter}`")]
+    UnavailableIntentParameter { owner: LocalId, parameter: LocalId },
+    #[error("method value `{owner}` applies a unit to non-numeric Intent parameter `{parameter}`")]
+    UnitOnNonNumericIntentParameter { owner: LocalId, parameter: LocalId },
     #[error(
         "Capability requirement `{requirement}` uses an ordered relation with non-numeric scalar type `{scalar_type:?}`"
     )]
@@ -163,23 +155,14 @@ impl MethodDefinition {
                 }
                 for constraint in &requirement.constraints {
                     let scalar_type = match &constraint.required {
-                        ConstraintValue::Literal { value } => ScalarType::of(&value.value),
-                        ConstraintValue::IntentParameter { parameter, unit } => {
-                            let Some(scalar_type) = parameter_types.get(parameter).copied() else {
-                                return Err(
-                                    MethodDefinitionError::UnavailableConstraintParameter {
-                                        requirement: requirement.id.clone(),
-                                        parameter: parameter.clone(),
-                                    },
-                                );
-                            };
-                            if unit.is_some() && !scalar_type.is_numeric() {
-                                return Err(MethodDefinitionError::UnitOnNonNumericParameter {
-                                    requirement: requirement.id.clone(),
-                                    parameter: parameter.clone(),
-                                });
-                            }
-                            scalar_type
+                        ScalarValueExpression::Literal { value } => ScalarType::of(&value.value),
+                        ScalarValueExpression::IntentParameter { parameter, unit } => {
+                            parameter_scalar_type(
+                                &parameter_types,
+                                &requirement.id,
+                                parameter,
+                                unit.is_some(),
+                            )?
                         }
                     };
                     if !matches!(constraint.relation, ConstraintRelation::Exact)
@@ -190,6 +173,22 @@ impl MethodDefinition {
                             scalar_type,
                         });
                     }
+                }
+            }
+            let mut parameter_ids = BTreeSet::new();
+            for parameter in &task.parameters {
+                if !parameter_ids.insert(parameter.id.clone()) {
+                    return Err(MethodDefinitionError::DuplicateProcedureParameter {
+                        task: task.id.clone(),
+                        parameter: parameter.id.clone(),
+                    });
+                }
+                if let ScalarValueExpression::IntentParameter {
+                    parameter: source,
+                    unit,
+                } = &parameter.value
+                {
+                    parameter_scalar_type(&parameter_types, &parameter.id, source, unit.is_some())?;
                 }
             }
             let mut outputs = BTreeSet::new();
@@ -235,6 +234,27 @@ impl MethodDefinition {
             outputs,
         })
     }
+}
+
+fn parameter_scalar_type(
+    parameter_types: &BTreeMap<LocalId, ScalarType>,
+    owner: &LocalId,
+    parameter: &LocalId,
+    has_unit: bool,
+) -> Result<ScalarType, MethodDefinitionError> {
+    let Some(scalar_type) = parameter_types.get(parameter).copied() else {
+        return Err(MethodDefinitionError::UnavailableIntentParameter {
+            owner: owner.clone(),
+            parameter: parameter.clone(),
+        });
+    };
+    if has_unit && !scalar_type.is_numeric() {
+        return Err(MethodDefinitionError::UnitOnNonNumericIntentParameter {
+            owner: owner.clone(),
+            parameter: parameter.clone(),
+        });
+    }
+    Ok(scalar_type)
 }
 
 impl MethodRegistry {
@@ -305,9 +325,9 @@ mod tests {
     };
 
     use crate::{
-        CapabilityConstraintDefinition, CapabilityRequirementDefinition, ConstraintValue,
-        MethodDefinition, MethodInput, MethodOutput, MethodParameter, PortType,
-        ProcedureTaskDefinition, ScalarType, TaskOutput, ValueReference,
+        CapabilityConstraintDefinition, CapabilityRequirementDefinition, MethodDefinition,
+        MethodInput, MethodOutput, MethodParameter, PortType, ProcedureTaskDefinition, ScalarType,
+        ScalarValueExpression, TaskOutput, ValueReference,
     };
 
     use super::*;
@@ -344,6 +364,7 @@ mod tests {
                     name: id("product"),
                     port_type: material(output_state),
                 }],
+                parameters: vec![],
                 requirements: vec![CapabilityRequirementDefinition {
                     id: id("environment"),
                     capability_kind: CapabilityKind::new(
@@ -358,7 +379,7 @@ mod tests {
                         )
                         .unwrap(),
                         relation: ConstraintRelation::Exact,
-                        required: ConstraintValue::IntentParameter {
+                        required: ScalarValueExpression::IntentParameter {
                             parameter: id("duration"),
                             unit: Some(
                                 lab_capability::UnitIri::new("http://qudt.org/vocab/unit/HR")
@@ -418,17 +439,17 @@ mod tests {
             "https://example.org/state/incubated",
         );
         definition.tasks[0].requirements[0].constraints[0].required =
-            ConstraintValue::IntentParameter {
+            ScalarValueExpression::IntentParameter {
                 parameter: id("missing"),
                 unit: None,
             };
         assert!(matches!(
             definition.validate(),
-            Err(MethodDefinitionError::UnavailableConstraintParameter { .. })
+            Err(MethodDefinitionError::UnavailableIntentParameter { .. })
         ));
 
         definition.tasks[0].requirements[0].constraints[0].required =
-            ConstraintValue::IntentParameter {
+            ScalarValueExpression::IntentParameter {
                 parameter: id("duration"),
                 unit: None,
             };

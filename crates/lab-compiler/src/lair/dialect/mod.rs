@@ -138,4 +138,5 @@ pub(crate) mod meta;
 pub(crate) mod method;
 pub(crate) mod procedure;
 pub(crate) mod protocol;
+pub(crate) mod scalar;
 pub(crate) mod workflow;

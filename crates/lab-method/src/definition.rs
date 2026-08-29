@@ -87,7 +87,7 @@ pub struct MethodOutput {
 /// A literal value or a reference to a scalar supplied by the refined Intent operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ConstraintValue {
+pub enum ScalarValueExpression {
     Literal {
         value: PropertyValue,
     },
@@ -103,7 +103,15 @@ pub enum ConstraintValue {
 pub struct CapabilityConstraintDefinition {
     pub property_kind: PropertyKind,
     pub relation: ConstraintRelation,
-    pub required: ConstraintValue,
+    pub required: ScalarValueExpression,
+}
+
+/// One exact semantic parameter carried by a Procedure task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ProcedureParameterDefinition {
+    pub id: LocalId,
+    pub property_kind: PropertyKind,
+    pub value: ScalarValueExpression,
 }
 
 /// One semantic capability requirement owned by its enclosing Procedure task.
@@ -126,6 +134,8 @@ pub struct ProcedureTaskDefinition {
     pub inputs: Vec<ValueReference>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<TaskOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ProcedureParameterDefinition>,
     pub requirements: Vec<CapabilityRequirementDefinition>,
 }
 
