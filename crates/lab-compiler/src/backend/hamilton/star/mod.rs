@@ -11,6 +11,7 @@
 mod backend;
 pub mod catalog;
 mod emit;
+mod invocation;
 mod package;
 pub mod plan;
 pub mod profile;
@@ -27,3 +28,5 @@ pub use crate::backend::hamilton::star::plan::{
     ManualStep, StarBuildError, StarEmissionError, StarExecutionPlan, StarPlanningError, plan_build,
 };
 pub use crate::backend::hamilton::star::profile::{StarAdapterProfile, StarProfileError};
+
+pub(in crate::backend) use invocation::lower_invocation;

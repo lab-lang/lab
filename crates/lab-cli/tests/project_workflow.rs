@@ -988,10 +988,10 @@ asset = "https://example.org/golden-gate/opentrons_ot2"
 driver = "opentrons.ot2"
 profile = "adapters/opentrons-ot2.toml""#;
     assert!(manifest.contains(configured_ot2));
-    let simulator_bindings = r#"[[execution.adapters]]
-asset = "https://example.org/golden-gate/opentrons_ot2"
-driver = "lab.simulator"
-profile = "adapters/simulator.toml"
+    let star_and_simulator_bindings = r#"[[execution.adapters]]
+asset = "https://example.org/golden-gate/hamilton_star"
+driver = "hamilton.star"
+profile = "adapters/hamilton-star.toml"
 
 [[execution.adapters]]
 asset = "https://example.org/golden-gate/thermal_simulator"
@@ -999,17 +999,25 @@ driver = "lab.simulator"
 profile = "adapters/simulator.toml""#;
     std::fs::write(
         &manifest_path,
-        manifest.replace(configured_ot2, simulator_bindings),
+        manifest.replace(configured_ot2, star_and_simulator_bindings),
     )
     .unwrap();
+    std::fs::write(project.join("adapters/hamilton-star.toml"), "").unwrap();
     std::fs::write(project.join("adapters/simulator.toml"), "").unwrap();
 
     let inventory_path = project.join("inventory/facility.ttl");
-    let inventory = std::fs::read_to_string(&inventory_path).unwrap();
+    let inventory = std::fs::read_to_string(&inventory_path)
+        .unwrap()
+        .replace("opentrons_ot2", "hamilton_star")
+        .replace(
+            "Opentrons OT-2 with Thermocycler Module",
+            "Hamilton STAR liquid handler",
+        )
+        .replace("OT-2 with Thermocycler Module Gen2", "STAR");
     let combined_offerings =
-        "    fac:capability ex:opentrons_ot2_liquid_handling, ex:opentrons_ot2_thermal_cycling .";
+        "    fac:capability ex:hamilton_star_liquid_handling, ex:hamilton_star_thermal_cycling .";
     assert!(inventory.contains(combined_offerings));
-    let split_assets = r#"    fac:capability ex:opentrons_ot2_liquid_handling .
+    let split_assets = r#"    fac:capability ex:hamilton_star_liquid_handling .
 
 ex:thermal_simulator
     a sbol:TopLevel, fac:Asset ;
@@ -1020,7 +1028,7 @@ ex:thermal_simulator
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:automation_bench ;
     fac:isActive true ;
-    fac:capability ex:opentrons_ot2_thermal_cycling ."#;
+    fac:capability ex:hamilton_star_thermal_cycling ."#;
     std::fs::write(
         &inventory_path,
         inventory.replace(combined_offerings, split_assets),
@@ -1045,10 +1053,14 @@ ex:thermal_simulator
     assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
     let routes = lowering["routes"].as_array().unwrap();
     assert_eq!(routes.len(), 2);
-    assert!(
-        routes
-            .iter()
-            .all(|route| { route["driver"] == "lab.simulator" && route["scope"] == "invocation" })
+    assert!(routes.iter().all(|route| route["scope"] == "invocation"));
+    let drivers = routes
+        .iter()
+        .map(|route| route["driver"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        drivers,
+        std::collections::BTreeSet::from(["hamilton.star", "lab.simulator"])
     );
     let assets = routes
         .iter()
@@ -1057,7 +1069,7 @@ ex:thermal_simulator
     assert_eq!(
         assets,
         std::collections::BTreeSet::from([
-            "https://example.org/golden-gate/opentrons_ot2",
+            "https://example.org/golden-gate/hamilton_star",
             "https://example.org/golden-gate/thermal_simulator",
         ])
     );
@@ -1065,20 +1077,18 @@ ex:thermal_simulator
         .iter()
         .map(|route| route["requirements"].as_array().unwrap().len())
         .sum::<usize>();
-    assert!(routes.iter().all(|route| {
-        route["artifacts"].as_array().unwrap().len()
-            == route["requirements"].as_array().unwrap().len()
+    let automation_artifacts = routes
+        .iter()
+        .flat_map(|route| route["artifacts"].as_array().unwrap())
+        .filter(|artifact| artifact["role"] == "automation_protocol")
+        .collect::<Vec<_>>();
+    assert_eq!(automation_artifacts.len(), lowered_requirements);
+    assert!(automation_artifacts.iter().all(|artifact| {
+        matches!(
+            artifact["format"].as_str(),
+            Some("lab.star-run.v0" | "lab.simulation-run.v1")
+        ) && artifact["sha256"].as_str().unwrap().len() == 64
     }));
-    assert!(
-        routes
-            .iter()
-            .flat_map(|route| route["artifacts"].as_array().unwrap())
-            .all(|artifact| {
-                artifact["role"] == "automation_protocol"
-                    && artifact["format"] == "lab.simulation-run.v1"
-                    && artifact["sha256"].as_str().unwrap().len() == 64
-            })
-    );
 
     let plan = read_json(out_dir.join("plan.execution.json"));
     assert!(plan["lowerings"].as_array().is_none_or(Vec::is_empty));
@@ -1089,16 +1099,61 @@ ex:thermal_simulator
         .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
     assert_eq!(reviewed_documents.len(), lowered_requirements);
+    let mut star_documents = 0;
+    let mut simulation_documents = 0;
     for document in reviewed_documents {
-        assert_eq!(document["format"], "lab.simulation-run.v1");
         let path = document["path"].as_str().unwrap();
-        assert!(
-            path.starts_with("assets/opentrons_ot2/")
-                || path.starts_with("assets/thermal_simulator/"),
-            "unexpected invocation document path: {path}"
-        );
+        match document["format"].as_str().unwrap() {
+            "lab.star-run.v0" => {
+                star_documents += 1;
+                assert!(path.starts_with("assets/hamilton_star/"));
+                let run = read_json(out_dir.join(path));
+                assert_eq!(run["format"], "lab.star-run.v0");
+                assert!(!run["steps"].as_array().unwrap().is_empty());
+            }
+            "lab.simulation-run.v1" => {
+                simulation_documents += 1;
+                assert!(path.starts_with("assets/thermal_simulator/"));
+            }
+            format => panic!("unexpected invocation document format: {format}"),
+        }
         assert!(out_dir.join(path).is_file());
     }
+    assert!(star_documents > 0);
+    assert!(simulation_documents > 0);
+
+    let star_route = routes
+        .iter()
+        .find(|route| route["driver"] == "hamilton.star")
+        .unwrap();
+    let star_output = out_dir.join(star_route["output"].as_str().unwrap());
+    for manifest in star_route["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|artifact| {
+            artifact["path"]
+                .as_str()
+                .unwrap()
+                .ends_with("invocation_manifest.json")
+        })
+    {
+        let contents =
+            std::fs::read_to_string(star_output.join(manifest["path"].as_str().unwrap())).unwrap();
+        assert!(!contents.contains("transformation"));
+        assert!(!contents.contains("agar_plate"));
+    }
+
+    let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", out_dir.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "multi-Asset reviewed plan failed preflight: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert!(String::from_utf8_lossy(&dry_run.stdout).contains("through hamilton.star"));
 
     let result: Value = serde_json::from_slice(&built.stdout).unwrap();
     assert_eq!(

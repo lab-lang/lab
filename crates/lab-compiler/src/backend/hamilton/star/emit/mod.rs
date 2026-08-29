@@ -13,7 +13,7 @@ use crate::backend::document::Doc;
 use crate::backend::hamilton::star::emit::manual::{
     bench_blocks, render_manual_protocol, run_blocks,
 };
-use crate::backend::hamilton::star::emit::runs::render_run;
+pub(in crate::backend::hamilton::star) use crate::backend::hamilton::star::emit::runs::render_run;
 use crate::backend::hamilton::star::plan::{
     StarBuildError, StarEmissionError, StarExecutionPlan, plan_build,
 };

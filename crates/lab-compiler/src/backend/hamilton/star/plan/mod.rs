@@ -5,6 +5,7 @@ mod choreograph;
 mod constraints;
 mod error;
 mod execution;
+mod invocation;
 mod liquids;
 
 use crate::ProtocolLairProgram;
@@ -18,6 +19,9 @@ pub use crate::backend::hamilton::star::plan::execution::{
     StarExecutionPlan, StarOperation, StarPlatingPlan, StarRunPlan, StarStrainChemistry,
     StarStrainPlan, StarTransformationPlan, StarWell, ThermalRequirement, TipClass,
     TipPickupPosition,
+};
+pub(in crate::backend::hamilton::star) use crate::backend::hamilton::star::plan::invocation::{
+    SetupAddition, plan_dilution_invocation, plan_setup_invocation,
 };
 use crate::planning::BuildGraph;
 

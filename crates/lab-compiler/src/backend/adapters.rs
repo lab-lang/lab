@@ -162,7 +162,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [STAR_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::WholeProgram),
+                    lowering: Some(AdapterLoweringScope::Invocation),
                     simulation: true,
                     runtime: true,
                 },
@@ -470,6 +470,18 @@ pub fn lower_adapter_invocation_with_adapter(
                     message,
                 })
         }
+        "hamilton.star" => {
+            let parsed = StarAdapterProfile::parse(&profile.name, &profile.canonical_toml)
+                .map_err(|error| AdapterLoweringError::InvalidProfile {
+                    driver: driver.to_owned(),
+                    message: error.to_string(),
+                })?;
+            crate::backend::hamilton::star::lower_invocation(&parsed, invocation_plan, invocation)
+                .map_err(|message| AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                })
+        }
         "lab.simulator" => lower_simulator_invocation(invocation_plan, invocation),
         _ => Err(AdapterLoweringError::UnsupportedInvocation {
             driver: driver.to_owned(),
@@ -758,7 +770,7 @@ mod tests {
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
         assert_eq!(
             star.services.lowering,
-            Some(AdapterLoweringScope::WholeProgram)
+            Some(AdapterLoweringScope::Invocation)
         );
         assert!(star.services.runtime);
 
