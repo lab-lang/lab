@@ -34,6 +34,7 @@ pub use capability::{
 };
 pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,
+    build_execution_plan_from_invocations,
 };
 pub use inventory::BuildInventoryError;
 pub(crate) use invocation::hex_sha256;

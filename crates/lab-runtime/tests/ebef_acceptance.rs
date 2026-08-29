@@ -255,6 +255,7 @@ fn materialize_reviewed_simulation() -> tempfile::TempDir {
             source_sha256: sha256_hex(inventory.as_bytes()),
             facility: FACILITY.to_owned(),
         },
+        planning: None,
         requirements: vec![
             requirement(
                 "assay/liquid-handling",

@@ -7,14 +7,14 @@ use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionLoweringBundle, ExecutionMaterialBinding, ExecutionParameterBinding,
     ExecutionParameterValue, ExecutionPlanAction, ExecutionPlanDocument, ExecutionPlanNode,
-    ExecutionRequirementBinding, ReviewedRunDocument,
+    ExecutionPlanningReference, ExecutionRequirementBinding, ReviewedRunDocument,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    AllocationScalarValue, FACILITY_ALLOCATION_SCHEMA_VERSION, FacilityAllocation,
-    ParameterRelation,
+    AdapterInvocationPlan, AllocationScalarValue, FACILITY_ALLOCATION_SCHEMA_VERSION,
+    FacilityAllocation, ParameterRelation,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,6 +31,8 @@ pub struct ExecutionPlanOptions {
     pub reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lowerings: Vec<ExecutionLoweringBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning: Option<ExecutionPlanningReference>,
 }
 
 impl Default for ExecutionPlanOptions {
@@ -42,6 +44,7 @@ impl Default for ExecutionPlanOptions {
             movements: Vec::new(),
             reviewed_documents: BTreeMap::new(),
             lowerings: Vec::new(),
+            planning: None,
         }
     }
 }
@@ -195,6 +198,159 @@ pub fn build_execution_plan(
             source_sha256: allocation.inventory_sha256.clone(),
             facility: allocation.facility.clone(),
         },
+        planning: options.planning,
+        requirements,
+        materials: options.materials,
+        outputs: options.outputs,
+        lowerings: options.lowerings,
+        nodes,
+    };
+    plan.validate()
+        .map_err(ExecutionPlanBuildError::InvalidPlan)?;
+    Ok(plan)
+}
+
+/// Build a reviewed plan from the exact selected Method graph and adapter invocations.
+pub fn build_execution_plan_from_invocations(
+    invocations: &AdapterInvocationPlan,
+    mut options: ExecutionPlanOptions,
+) -> Result<ExecutionPlanDocument, ExecutionPlanBuildError> {
+    invocations
+        .validate()
+        .map_err(|error| ExecutionPlanBuildError::InvalidInvocations(error.to_string()))?;
+    let planning = options
+        .planning
+        .take()
+        .ok_or(ExecutionPlanBuildError::MissingPlanningReference)?;
+    if planning.problem_sha256 != invocations.problem_sha256
+        || planning.allocated_lair_sha256 != invocations.allocated_lair_sha256
+    {
+        return Err(ExecutionPlanBuildError::PlanningReferenceMismatch);
+    }
+    let expected_methods = invocations
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                method.choice.as_str(),
+                method.source_operation.as_str(),
+                method.method.as_str(),
+                method
+                    .tasks
+                    .iter()
+                    .map(|task| task.id.as_str())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let planned_methods = planning
+        .methods
+        .iter()
+        .map(|method| {
+            (
+                method.choice.as_str(),
+                method.source_operation.as_str(),
+                method.method.as_str(),
+                method.tasks.iter().map(String::as_str).collect::<Vec<_>>(),
+            )
+        })
+        .collect::<Vec<_>>();
+    if planned_methods != expected_methods {
+        return Err(ExecutionPlanBuildError::PlanningReferenceMismatch);
+    }
+
+    let mut requirements = Vec::new();
+    let mut nodes = Vec::new();
+    let mut previous = None;
+    for method in &invocations.methods {
+        for task in &method.tasks {
+            for binding in &task.requirements {
+                let requirement = binding.id.to_string();
+                let document = options.reviewed_documents.remove(&requirement);
+                if let Some(document) = &document {
+                    let Some(adapter) = binding.adapter.as_ref() else {
+                        return Err(ExecutionPlanBuildError::DocumentWithoutAdapter {
+                            requirement,
+                        });
+                    };
+                    if !adapter.emitted_run_formats.contains(&document.format) {
+                        return Err(ExecutionPlanBuildError::UnsupportedDocumentFormat {
+                            requirement,
+                            driver: adapter.driver.clone(),
+                            format: document.format.clone(),
+                            supported: render_set(&adapter.emitted_run_formats),
+                        });
+                    }
+                }
+                requirements.push(ExecutionRequirementBinding {
+                    requirement_instance: requirement.clone(),
+                    requirement_template: format!("{}::{}", method.method, binding.id),
+                    capability_kind: binding.capability_kind.to_string(),
+                    offering: binding.offering.clone(),
+                    asset: binding.asset.clone(),
+                    minimum_qualification: binding.minimum_qualification.iri().to_owned(),
+                    observed_qualification: binding.observed_qualification.clone(),
+                    control_mode: binding.control_mode.clone(),
+                    parameters: binding
+                        .parameters
+                        .iter()
+                        .map(|parameter| ExecutionParameterBinding {
+                            argument: parameter.property_kind.to_string(),
+                            property_kind: parameter.property_kind.to_string(),
+                            relation: parameter.relation.to_string(),
+                            required: semantic_value(&parameter.required.value),
+                            required_unit: parameter
+                                .required
+                                .unit
+                                .as_ref()
+                                .map(ToString::to_string),
+                            offering_parameter: parameter.offering_parameter.clone(),
+                            observed: semantic_value(&parameter.observed.value),
+                            observed_unit: parameter
+                                .observed
+                                .unit
+                                .as_ref()
+                                .map(ToString::to_string),
+                        })
+                        .collect(),
+                    adapter: binding
+                        .adapter
+                        .as_ref()
+                        .map(|adapter| ExecutionAdapterBinding {
+                            driver: adapter.driver.clone(),
+                            profile_path: adapter.profile_path.to_string_lossy().into_owned(),
+                            profile_sha256: adapter.profile_sha256.clone(),
+                        }),
+                });
+                let id = format!("execute-{:04}", nodes.len() + 1);
+                nodes.push(ExecutionPlanNode {
+                    id: id.clone(),
+                    after: previous.into_iter().collect(),
+                    action: ExecutionPlanAction::Execute {
+                        requirement,
+                        document,
+                    },
+                });
+                previous = Some(id);
+            }
+        }
+    }
+    if let Some(requirement) = options.reviewed_documents.keys().next() {
+        return Err(ExecutionPlanBuildError::UnknownDocumentRequirement {
+            requirement: requirement.clone(),
+        });
+    }
+    if !options.movements.is_empty() {
+        return Err(ExecutionPlanBuildError::LegacyMovementWithInvocationPlan);
+    }
+    let plan = ExecutionPlanDocument {
+        format: EXECUTION_PLAN_FORMAT.to_owned(),
+        inventory: ExecutionInventoryReference {
+            document: options.inventory_document,
+            source_sha256: invocations.inventory_sha256.clone(),
+            facility: invocations.facility.clone(),
+        },
+        planning: Some(planning),
         requirements,
         materials: options.materials,
         outputs: options.outputs,
@@ -212,6 +368,12 @@ pub enum ExecutionPlanBuildError {
         "facility allocation declares schema `{found}`, expected `{FACILITY_ALLOCATION_SCHEMA_VERSION}`"
     )]
     WrongAllocationSchema { found: String },
+    #[error("adapter invocation plan is invalid: {0}")]
+    InvalidInvocations(String),
+    #[error("compiler-derived execution planning requires frozen compiler artifacts")]
+    MissingPlanningReference,
+    #[error("frozen compiler artifacts do not match the adapter invocation plan")]
+    PlanningReferenceMismatch,
     #[error("requirement `{requirement}` has a reviewed run document but no allocated adapter")]
     DocumentWithoutAdapter { requirement: String },
     #[error(
@@ -234,8 +396,24 @@ pub enum ExecutionPlanBuildError {
     },
     #[error("requirement parameter uses a dynamic value that cannot enter a reviewed plan")]
     DynamicParameter,
+    #[error("material movement projection has not yet migrated to the allocated Procedure graph")]
+    LegacyMovementWithInvocationPlan,
     #[error("constructed execution plan is invalid: {0}")]
     InvalidPlan(String),
+}
+
+fn semantic_value(value: &lab_capability::ScalarValue) -> ExecutionParameterValue {
+    match value {
+        lab_capability::ScalarValue::Text(value) => ExecutionParameterValue::Text(value.clone()),
+        lab_capability::ScalarValue::Integer(value) => {
+            ExecutionParameterValue::Integer(value.to_string())
+        }
+        lab_capability::ScalarValue::Real(value) => {
+            ExecutionParameterValue::Real(value.to_string())
+        }
+        lab_capability::ScalarValue::Boolean(value) => ExecutionParameterValue::Boolean(*value),
+        lab_capability::ScalarValue::Iri(value) => ExecutionParameterValue::Iri(value.to_string()),
+    }
 }
 
 fn requirement_value(
@@ -363,6 +541,7 @@ mod tests {
                 }],
                 reviewed_documents: BTreeMap::new(),
                 lowerings: Vec::new(),
+                planning: None,
             },
         )
         .unwrap();

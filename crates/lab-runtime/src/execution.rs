@@ -641,6 +641,17 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
         );
     }
 
+    if let Some(planning) = &plan.planning {
+        for (label, artifact) in planning.artifacts() {
+            read_frozen_input(
+                &directory,
+                &artifact.path,
+                &artifact.sha256,
+                &format!("compiler {label}"),
+            )?;
+        }
+    }
+
     validate_catalog_bindings(&plan, &inventory)?;
     for requirement in &plan.requirements {
         if let Some(adapter) = &requirement.adapter {
@@ -1218,9 +1229,9 @@ pub(crate) mod tests {
 
     use lab_runfmt::{
         ExecutionAdapterBinding, ExecutionInventoryReference, ExecutionMaterialBinding,
-        ExecutionMaterialOutput, ExecutionPlanAction, ExecutionPlanNode,
-        ExecutionRequirementBinding, ReviewedRunDocument, RunStep, STAR_RUN_FORMAT,
-        StarRunDocument,
+        ExecutionMaterialOutput, ExecutionMethodSelection, ExecutionPlanAction, ExecutionPlanNode,
+        ExecutionPlanningArtifact, ExecutionPlanningReference, ExecutionRequirementBinding,
+        ReviewedRunDocument, RunStep, STAR_RUN_FORMAT, StarRunDocument,
     };
 
     use super::*;
@@ -1324,6 +1335,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                 source_sha256: sha256_hex(INVENTORY.as_bytes()),
                 facility: "https://example.org/facility/facility".to_owned(),
             },
+            planning: None,
             requirements: vec![ExecutionRequirementBinding {
                 requirement_instance: "workflow/main/liquid".to_owned(),
                 requirement_template: "workflow::main::liquid".to_owned(),
@@ -1439,6 +1451,56 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             .unwrap_err()
             .to_string();
         assert!(error.contains("reviewed run document"), "{error}");
+        assert!(error.contains("reviewed plan requires"), "{error}");
+    }
+
+    #[test]
+    fn preflight_freezes_every_compiler_intermediate() {
+        let directory = write_execution_package();
+        let compiler = directory.path().join("compiler");
+        fs::create_dir_all(&compiler).unwrap();
+        let artifacts = [
+            ("planning-problem.json", b"problem\n".as_slice()),
+            ("facility-solution.json", b"solution\n".as_slice()),
+            ("allocated.lair", b"allocated\n".as_slice()),
+            ("adapter-invocations.json", b"invocations\n".as_slice()),
+        ];
+        for (name, contents) in artifacts {
+            fs::write(compiler.join(name), contents).unwrap();
+        }
+        let plan_path = directory.path().join(EXECUTION_PLAN_FILE);
+        let mut plan: ExecutionPlanDocument =
+            serde_json::from_slice(&fs::read(&plan_path).unwrap()).unwrap();
+        let artifact = |name: &str| ExecutionPlanningArtifact {
+            path: format!("compiler/{name}"),
+            sha256: sha256_hex(&fs::read(compiler.join(name)).unwrap()),
+        };
+        let problem = artifact("planning-problem.json");
+        let allocated = artifact("allocated.lair");
+        plan.planning = Some(ExecutionPlanningReference {
+            problem_sha256: problem.sha256.clone(),
+            allocated_lair_sha256: allocated.sha256.clone(),
+            planning_problem: problem,
+            facility_solution: artifact("facility-solution.json"),
+            allocated_lair: allocated,
+            adapter_invocations: artifact("adapter-invocations.json"),
+            methods: vec![ExecutionMethodSelection {
+                choice: "main::body[0]".to_owned(),
+                source_operation: "std.bio.build.realize".to_owned(),
+                method: "https://example.org/method#automated".to_owned(),
+                tasks: vec!["main::body[0]::setup".to_owned()],
+            }],
+        });
+        let mut bytes = serde_json::to_vec_pretty(&plan).unwrap();
+        bytes.push(b'\n');
+        fs::write(&plan_path, bytes).unwrap();
+        load_execution_directory(directory.path()).unwrap();
+
+        fs::write(compiler.join("allocated.lair"), "changed\n").unwrap();
+        let error = load_execution_directory(directory.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("compiler allocated LAIR"), "{error}");
         assert!(error.contains("reviewed plan requires"), "{error}");
     }
 

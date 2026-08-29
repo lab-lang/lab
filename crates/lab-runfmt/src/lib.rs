@@ -28,7 +28,7 @@ pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v1";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v2";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -112,7 +112,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v1` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v2` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
@@ -131,6 +131,9 @@ pub struct ExecutionPlanDocument {
     /// Always [`EXECUTION_PLAN_FORMAT`].
     pub format: String,
     pub inventory: ExecutionInventoryReference,
+    /// Exact compiler decisions and intermediate artifacts, when this plan was compiler-derived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning: Option<ExecutionPlanningReference>,
     pub requirements: Vec<ExecutionRequirementBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<ExecutionMaterialBinding>,
@@ -153,6 +156,9 @@ impl ExecutionPlanDocument {
         }
         require_sha256("inventory source", &self.inventory.source_sha256)?;
         require_relative_path("inventory source", &self.inventory.document)?;
+        if let Some(planning) = &self.planning {
+            planning.validate()?;
+        }
 
         let mut requirements = BTreeMap::new();
         for requirement in &self.requirements {
@@ -413,6 +419,83 @@ impl ExecutionPlanDocument {
         }
         validate_acyclic(&nodes)
     }
+}
+
+/// Exact compiler provenance frozen into a reviewed execution plan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPlanningReference {
+    pub problem_sha256: String,
+    pub allocated_lair_sha256: String,
+    pub planning_problem: ExecutionPlanningArtifact,
+    pub facility_solution: ExecutionPlanningArtifact,
+    pub allocated_lair: ExecutionPlanningArtifact,
+    pub adapter_invocations: ExecutionPlanningArtifact,
+    pub methods: Vec<ExecutionMethodSelection>,
+}
+
+impl ExecutionPlanningReference {
+    pub fn artifacts(&self) -> [(&'static str, &ExecutionPlanningArtifact); 4] {
+        [
+            ("planning problem", &self.planning_problem),
+            ("facility solution", &self.facility_solution),
+            ("allocated LAIR", &self.allocated_lair),
+            ("adapter invocations", &self.adapter_invocations),
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        require_sha256("planning problem", &self.problem_sha256)?;
+        require_sha256("allocated LAIR", &self.allocated_lair_sha256)?;
+        for (label, artifact) in self.artifacts() {
+            require_relative_path(label, &artifact.path)?;
+            require_sha256(label, &artifact.sha256)?;
+        }
+        if self.planning_problem.sha256 != self.problem_sha256 {
+            return Err(
+                "planning problem artifact digest must equal the selected problem digest"
+                    .to_owned(),
+            );
+        }
+        if self.allocated_lair.sha256 != self.allocated_lair_sha256 {
+            return Err(
+                "allocated LAIR artifact digest must equal the selected LAIR digest".to_owned(),
+            );
+        }
+        if self.methods.is_empty() {
+            return Err("compiler-derived planning contains no selected Methods".to_owned());
+        }
+        let mut choices = BTreeSet::new();
+        for method in &self.methods {
+            if method.choice.is_empty()
+                || method.source_operation.is_empty()
+                || method.method.is_empty()
+                || method.tasks.is_empty()
+                || !choices.insert(method.choice.as_str())
+            {
+                return Err(format!(
+                    "selected Method choice '{}' is empty, repeated, or incomplete",
+                    method.choice
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One immutable compiler artifact staged next to the reviewed plan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPlanningArtifact {
+    pub path: String,
+    pub sha256: String,
+}
+
+/// One Method decision from the global facility solution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionMethodSelection {
+    pub choice: String,
+    pub source_operation: String,
+    pub method: String,
+    pub tasks: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -732,6 +815,7 @@ mod tests {
                 source_sha256: "a".repeat(64),
                 facility: "https://example.org/facility".to_owned(),
             },
+            planning: None,
             requirements: vec![ExecutionRequirementBinding {
                 requirement_instance: "example::main/body[0]".to_owned(),
                 requirement_template: "example::main::body[0]".to_owned(),
@@ -762,6 +846,35 @@ mod tests {
         }
     }
 
+    fn planning_reference() -> ExecutionPlanningReference {
+        ExecutionPlanningReference {
+            problem_sha256: "c".repeat(64),
+            allocated_lair_sha256: "d".repeat(64),
+            planning_problem: ExecutionPlanningArtifact {
+                path: "compiler/planning-problem.json".to_owned(),
+                sha256: "c".repeat(64),
+            },
+            facility_solution: ExecutionPlanningArtifact {
+                path: "compiler/facility-solution.json".to_owned(),
+                sha256: "e".repeat(64),
+            },
+            allocated_lair: ExecutionPlanningArtifact {
+                path: "compiler/allocated.lair".to_owned(),
+                sha256: "d".repeat(64),
+            },
+            adapter_invocations: ExecutionPlanningArtifact {
+                path: "compiler/adapter-invocations.json".to_owned(),
+                sha256: "f".repeat(64),
+            },
+            methods: vec![ExecutionMethodSelection {
+                choice: "main::body[0]".to_owned(),
+                source_operation: "std.bio.build.realize".to_owned(),
+                method: "https://example.org/method#automated".to_owned(),
+                tasks: vec!["main::body[0]::setup".to_owned()],
+            }],
+        }
+    }
+
     #[test]
     fn an_execution_plan_round_trips_and_validates() {
         let plan = execution_plan();
@@ -776,6 +889,22 @@ mod tests {
         let path = directory.path().join(EXECUTION_PLAN_FILE);
         std::fs::write(&path, text).unwrap();
         assert_eq!(load_execution_plan(&path).unwrap(), plan);
+    }
+
+    #[test]
+    fn compiler_derived_plans_freeze_method_and_intermediate_artifact_identity() {
+        let mut plan = execution_plan();
+        plan.planning = Some(planning_reference());
+        plan.validate().unwrap();
+
+        let mut changed = plan;
+        changed.planning.as_mut().unwrap().allocated_lair.sha256 = "0".repeat(64);
+        assert!(
+            changed
+                .validate()
+                .unwrap_err()
+                .contains("allocated LAIR artifact digest")
+        );
     }
 
     #[test]
