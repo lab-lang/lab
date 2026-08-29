@@ -9,6 +9,7 @@ mod lowering;
 mod model;
 mod problem;
 mod resolution;
+mod solver;
 
 pub use adapters::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
@@ -51,3 +52,12 @@ pub use problem::{
     PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
 pub use resolution::{DependencyGraphError, resolve_dependency_graph};
+pub use solver::{
+    AdapterRequirement, AlternativeMethod, AlternativeRequirementBinding,
+    FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningError, FacilityPlanningPolicy,
+    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MethodPin,
+    MethodPinSelector, PlanningAlternative, PlanningCandidateRejectionReason,
+    PlanningRejectedOffering, RejectedMethodCandidate, RejectedPlanningRequirement,
+    SelectedAdapter, SelectedCapabilityParameter, SelectedMethod, SelectedProcedureTask,
+    SelectedRequirementBinding,
+};

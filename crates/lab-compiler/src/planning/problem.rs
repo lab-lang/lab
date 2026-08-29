@@ -9,6 +9,7 @@ use lab_capability::{
 use lab_method::{IntentOperationId, LocalId, PortType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v1";
@@ -106,6 +107,13 @@ pub enum PlanningValueSource {
 }
 
 impl PlanningProblem {
+    /// Digest the canonical serde representation used to bind a solution to this exact problem.
+    pub fn sha256(&self) -> String {
+        let bytes = serde_json::to_vec(self)
+            .expect("PlanningProblem contains only infallibly serializable semantic values");
+        hex_sha256(&bytes)
+    }
+
     /// Validate a deserialized problem before a solver or facility query consumes it.
     pub fn validate(&self) -> Result<(), PlanningProblemValidationError> {
         if self.schema_version != PLANNING_PROBLEM_SCHEMA_VERSION {
@@ -152,6 +160,13 @@ impl PlanningProblem {
         }
         Ok(())
     }
+}
+
+fn hex_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn validate_ports(
@@ -374,5 +389,6 @@ mod tests {
             decoded.validate().unwrap_err(),
             PlanningProblemValidationError::EmptyProblem
         );
+        assert_eq!(decoded.sha256().len(), 64);
     }
 }
