@@ -5,6 +5,7 @@ mod allocation;
 mod capability;
 mod execution;
 mod inventory;
+mod invocation;
 mod lowering;
 mod model;
 mod problem;
@@ -35,6 +36,12 @@ pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,
 };
 pub use inventory::BuildInventoryError;
+pub(crate) use invocation::hex_sha256;
+pub use invocation::{
+    ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
+    AdapterInvocationPlan, AdapterInvocationValidationError, AllocatedMethod,
+    AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+};
 pub use lowering::{
     FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
     FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringProjectionError,

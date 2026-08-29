@@ -298,6 +298,7 @@ impl RefinedLairProgram {
         Ok(AllocatedLairProgram {
             context: self.context,
             module: self.module,
+            problem,
             solution,
         })
     }
@@ -307,6 +308,7 @@ impl RefinedLairProgram {
 pub struct AllocatedLairProgram {
     context: Context,
     module: ModuleOp,
+    problem: crate::planning::PlanningProblem,
     solution: crate::planning::FacilityPlanningSolution,
 }
 
@@ -317,6 +319,24 @@ impl AllocatedLairProgram {
 
     pub fn solution(&self) -> &crate::planning::FacilityPlanningSolution {
         &self.solution
+    }
+
+    pub fn planning_problem(&self) -> &crate::planning::PlanningProblem {
+        &self.problem
+    }
+
+    /// Project the exact backend-facing ABI from this verifier-valid allocated program.
+    pub fn adapter_invocations(
+        &self,
+    ) -> Result<crate::planning::AdapterInvocationPlan, crate::planning::AdapterInvocationError>
+    {
+        let ir = self.ir();
+        let allocated_lair_sha256 = crate::planning::hex_sha256(ir.as_bytes());
+        crate::planning::AdapterInvocationPlan::project(
+            &self.problem,
+            &self.solution,
+            allocated_lair_sha256,
+        )
     }
 }
 
@@ -531,11 +551,13 @@ mod tests {
     };
     use lab_method::IntentOperationId;
 
+    use crate::backend::default_adapter_profile;
     use crate::lair::session::CompilerSession;
     use crate::lair::stage::IrStage;
     use crate::planning::{
-        AdapterRequirement, FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin,
-        MethodPinSelector, PlanningProblem, PlanningValueSource,
+        AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationPlan, AdapterRequirement,
+        FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin, MethodPinSelector,
+        PlanningProblem, PlanningValueSource,
     };
 
     use super::PortableLairProgram;
@@ -890,7 +912,18 @@ workflow build_second() -> Material<Plasmid>:
             }],
             adapter_requirement: AdapterRequirement::Optional,
         };
-        let solution = FacilityPlanningSolution::solve(&problem, &inventory, None, policy).unwrap();
+        let adapters = AdapterBindingSnapshot::resolve(
+            &inventory,
+            vec![AdapterBindingRequest {
+                asset: "https://example.org/golden-gate/opentrons_ot2".to_owned(),
+                driver: "opentrons.ot2".to_owned(),
+                profile_path: std::path::PathBuf::from("adapters/opentrons-ot2.toml"),
+                profile: default_adapter_profile("opentrons.ot2", "opentrons-ot2").unwrap(),
+            }],
+        )
+        .unwrap();
+        let solution =
+            FacilityPlanningSolution::solve(&problem, &inventory, Some(&adapters), policy).unwrap();
         let allocated = refined.allocate(solution).expect("solution applies");
         let ir = allocated.ir();
 
@@ -905,6 +938,42 @@ workflow build_second() -> Material<Plasmid>:
         assert!(ir.contains("#manual-recovery"), "{ir}");
         assert!(!ir.contains("method.choice"), "{ir}");
         assert!(!ir.contains("method.yield"), "{ir}");
+
+        let invocations = allocated.adapter_invocations().unwrap();
+        assert_eq!(invocations.invocations.len(), 1);
+        assert_eq!(
+            invocations.invocations[0].asset,
+            "https://example.org/golden-gate/opentrons_ot2"
+        );
+        assert_eq!(invocations.invocations[0].adapter.driver, "opentrons.ot2");
+        assert!(
+            invocations.invocations[0]
+                .requirements
+                .iter()
+                .any(|requirement| requirement.as_str().ends_with("::liquid-handling"))
+        );
+        assert!(
+            invocations
+                .methods
+                .iter()
+                .any(|method| { method.method.as_str().ends_with("#automated-golden-gate") })
+        );
+        assert!(invocations.methods.iter().any(|method| {
+            method.method.as_str().ends_with("#manual-recovery")
+                && method.tasks[0].requirements[0].adapter.is_none()
+        }));
+        let json = serde_json::to_string_pretty(&invocations).unwrap();
+        let decoded: AdapterInvocationPlan = serde_json::from_str(&json).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded, invocations);
+        let mut tampered = decoded;
+        tampered.invocations[0]
+            .tasks
+            .push(lab_method::LocalId::new("task-that-was-never-allocated").unwrap());
+        assert!(matches!(
+            tampered.validate(),
+            Err(crate::planning::AdapterInvocationValidationError::UnknownTask { .. })
+        ));
 
         let mut session = CompilerSession::default();
         session.parse_ir(&ir).unwrap();
