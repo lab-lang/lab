@@ -17,7 +17,7 @@ struct Cli {
     #[arg(default_value = "-")]
     input: String,
 
-    /// Module-anchored pipeline, for example builtin.module(protocol-check-material-linearity).
+    /// Module-anchored pipeline, for example builtin.module(check-material-linearity).
     #[arg(long, default_value = "builtin.module()")]
     pass_pipeline: PassPipeline,
 

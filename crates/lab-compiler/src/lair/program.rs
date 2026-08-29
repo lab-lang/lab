@@ -35,18 +35,6 @@ pub enum PortableLairError {
 }
 
 #[derive(Debug, Error)]
-pub enum ProtocolLairError {
-    #[error("Procedure-to-Protocol adapter projection failed: {0}")]
-    Conversion(String),
-    #[error("generated Protocol LAIR failed verification: {0}")]
-    Verification(String),
-    #[error("generated Protocol LAIR failed material-linearity analysis: {0}")]
-    MaterialLinearity(String),
-    #[error("generated LAIR does not satisfy the method-selected Protocol contract: {0}")]
-    Stage(String),
-}
-
-#[derive(Debug, Error)]
 pub enum RefinedLairError {
     #[error("Intent-to-Method refinement failed: {0}")]
     Conversion(String),
@@ -86,8 +74,8 @@ impl PortableLairProgram {
     }
 
     /// Lower checked, backend-neutral frontend IR into verified Design and
-    /// Workflow LAIR. Protocol selection consumes this type; neither selection
-    /// nor a robot backend can accept checked modules directly.
+    /// Workflow LAIR. Method refinement consumes this type; facility planning
+    /// and adapters cannot accept checked modules directly.
     ///
     /// The modules form one program. An artifact declared in one module may be
     /// realized by a workflow in another, so a package can separate designs,
@@ -207,43 +195,6 @@ impl PortableLairProgram {
     pub fn refine_standard_methods(self) -> Result<RefinedLairProgram, RefinedLairError> {
         self.refine_methods(crate::lair::methods::standard_method_registry())
     }
-
-    /// Consume method-neutral Workflow LAIR and select the supported concrete
-    /// plasmid-build Protocol. No backend planning occurs at this boundary.
-    pub fn select_protocol(mut self) -> Result<ProtocolLairProgram, ProtocolLairError> {
-        crate::lair::protocol_selection::select_plasmid_build_protocol(
-            &mut self.context,
-            self.module.get_operation(),
-        )
-        .map_err(|error| ProtocolLairError::Conversion(error.disp(&self.context).to_string()))?;
-        set_stage(
-            &mut self.context,
-            self.module,
-            IrStage::MethodSelectedProtocol,
-        )
-        .map_err(ProtocolLairError::Stage)?;
-        verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
-            ProtocolLairError::Verification(error.disp(&self.context).to_string())
-        })?;
-        crate::lair::analysis::MaterialLinearityAnalysis::compute(
-            self.module.get_operation(),
-            &self.context,
-            &mut AnalysisManager::default(),
-        )
-        .map_err(|error| {
-            ProtocolLairError::MaterialLinearity(error.disp(&self.context).to_string())
-        })?;
-        let stage = detect_stage(&self.context, self.module).map_err(ProtocolLairError::Stage)?;
-        if stage != IrStage::MethodSelectedProtocol {
-            return Err(ProtocolLairError::Stage(format!(
-                "expected method-selected-protocol, found {stage}"
-            )));
-        }
-        Ok(ProtocolLairProgram {
-            context: self.context,
-            module: self.module,
-        })
-    }
 }
 
 /// Owned, verifier-valid Method alternatives with no facility allocation or selected candidate.
@@ -339,27 +290,6 @@ impl AllocatedLairProgram {
             allocated_lair_sha256,
             material_inventory,
         )
-    }
-}
-
-/// Owned, verifier-valid Protocol LAIR. Robot planners consume this boundary
-/// directly; it cannot be constructed from unchecked source or device IR.
-pub struct ProtocolLairProgram {
-    context: Context,
-    module: ModuleOp,
-}
-
-impl ProtocolLairProgram {
-    pub fn ir(&self) -> String {
-        self.module.get_operation().disp(&self.context).to_string()
-    }
-
-    pub(crate) fn context(&self) -> &Context {
-        &self.context
-    }
-
-    pub(crate) fn module(&self) -> ModuleOp {
-        self.module
     }
 }
 

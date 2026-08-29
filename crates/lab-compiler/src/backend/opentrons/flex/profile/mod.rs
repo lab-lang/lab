@@ -18,7 +18,7 @@ pub use crate::backend::opentrons::flex::profile::error::FlexProfileError;
 // Only the field types other `flex` submodules reach into directly
 // are re-exported; the rest of the schema stays behind `FlexAdapterProfile`.
 use crate::backend::opentrons::flex::profile::schema::{FlexDeck, Instruments};
-pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Plates, Stages, TipRacks};
+pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Stages, TipRacks};
 
 /// Slots the installed thermocycler occupies.
 const THERMOCYCLER_SLOTS: [FlexSlot; 2] = [FlexSlot::A1, FlexSlot::B1];

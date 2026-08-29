@@ -31,8 +31,6 @@ pub const BOTTOM_STANDOFF_MM: f64 = 0.5;
 pub const LLD_CLEARANCE_MM: f64 = 5.0;
 /// Jet dispense clearance above the post-dispense surface, mm.
 pub const DISPENSE_CLEARANCE_MM: f64 = 2.0;
-/// Fixed agar spotting height above the well bottom, mm.
-pub const AGAR_SPOT_HEIGHT_MM: f64 = 6.0;
 /// Dead volume the operator loads beyond consumption: sample tubes, µL.
 pub const TUBE_DEAD_VOLUME_UL: f64 = 50.0;
 /// Dead volume for troughs, µL.
@@ -200,12 +198,6 @@ impl LiquidState {
         &self.drawn
     }
 
-    /// Forgets a resource's held volumes: the operator cleared or replaced
-    /// the labware between runs (the reaction plate after assembly).
-    pub fn clear_resource(&mut self, resource: &str) {
-        self.volumes.retain(|(held, _), _| held != resource);
-    }
-
     /// The heights for aspirating `volume_ul` from a well, computed at the
     /// current surface, then the ledger debit.
     pub fn aspirate(&mut self, deck: &DeckIndex, well: &StarWell, volume_ul: f64) -> LiquidHeights {
@@ -324,11 +316,12 @@ mod tests {
         let deck = deck();
         let mut liquids = LiquidState::new();
         let well = StarWell::new("agar_plate/1", "A1");
-        let heights = liquids.dispense(&deck, &well, 4.0, Some(AGAR_SPOT_HEIGHT_MM));
+        let fixed_height_mm = 6.0;
+        let heights = liquids.dispense(&deck, &well, 4.0, Some(fixed_height_mm));
         let position = deck.position(&well);
         assert_eq!(
             heights.position_z,
-            wire_mm(position.z + AGAR_SPOT_HEIGHT_MM),
+            wire_mm(position.z + fixed_height_mm),
             "spotting height is the documented 6 mm above the well bottom"
         );
     }

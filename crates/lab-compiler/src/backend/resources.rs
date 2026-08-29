@@ -8,7 +8,6 @@ use crate::backend::AdapterConstraintError;
 
 use crate::backend::error::PlanningError;
 use crate::backend::profile::Plates;
-use crate::backend::trace::{AssemblyTrace, StrainTrace};
 
 /// A well on one of the plates a stage may hold several of. `plate` indexes
 /// the stage's declared slot list, so adding a slot to adapter configuration raises
@@ -17,41 +16,6 @@ use crate::backend::trace::{AssemblyTrace, StrainTrace};
 pub struct Well {
     pub plate: usize,
     pub well: String,
-}
-
-pub(in crate::backend) fn assembly_source_keys(
-    traces: &[AssemblyTrace],
-    context: &pliron::context::Context,
-) -> BTreeSet<String> {
-    let mut keys = BTreeSet::from([
-        "reagent:nuclease_free_water".into(),
-        "reagent:T4_DNA_ligase".into(),
-        "reagent:T4_DNA_ligase_buffer".into(),
-    ]);
-    for trace in traces {
-        keys.insert(format!("dna:{}", trace.backbone(context)));
-        keys.extend(
-            trace
-                .components(context)
-                .iter()
-                .map(|component| format!("dna:{component}")),
-        );
-        keys.insert(format!("enzyme:{}", trace.restriction_enzyme(context)));
-    }
-    keys
-}
-
-pub(in crate::backend) fn transformation_source_keys(
-    traces: &[StrainTrace],
-    context: &pliron::context::Context,
-) -> BTreeSet<String> {
-    let mut keys = BTreeSet::from(["reagent:recovery_medium".into()]);
-    keys.extend(
-        traces
-            .iter()
-            .map(|trace| format!("cells:{}", trace.host(context))),
-    );
-    keys
 }
 
 pub(in crate::backend) fn assign_source_wells(
@@ -154,18 +118,6 @@ pub(in crate::backend) fn plate_wells(capacity: usize) -> Vec<String> {
             (0..rows).map(move |row| format!("{}{column}", char::from(b'A' + row as u8)))
         })
         .collect()
-}
-
-pub(in crate::backend) fn require_known_geometry(
-    resource: &'static str,
-    capacity: usize,
-) -> Result<(), PlanningError> {
-    if plate_wells(capacity).is_empty() {
-        return Err(PlanningError::InvalidProtocol(format!(
-            "adapter configuration gives {resource} {capacity} wells, which is not a labware format this implementation can address"
-        )));
-    }
-    Ok(())
 }
 
 fn source_rack_wells(capacity: usize) -> Vec<String> {

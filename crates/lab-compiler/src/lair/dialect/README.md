@@ -38,4 +38,4 @@ Pliron remains internal to `lab-compiler`. Immutable procedure, adapter-invocati
 
 Protocol values representing physical material are affine: they may have at most one consumer. Branching physical matter requires an explicit operation such as `protocol.sample`, which returns a retained sample and a separate assay aliquot. Design and evidence values are information rather than matter and may be reused.
 
-Pliron operation verifiers check only operation-local material states. The separate `MaterialLinearityAnalysis` follows SSA use lists across the complete module, and `protocol-check-material-linearity` makes that analysis a required pipeline gate. This separation keeps non-local reasoning out of operation verifiers.
+Pliron operation verifiers check only operation-local material states. The separate `MaterialLinearityAnalysis` follows SSA use lists across the complete allocated Procedure module, and `check-material-linearity` makes that analysis a required pipeline gate. This separation keeps non-local reasoning out of operation verifiers.

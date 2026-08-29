@@ -10,7 +10,6 @@ use pliron::value::Value;
 use pliron::verify_err;
 
 use crate::lair::dialect::procedure::MaterialType as ProcedureMaterialType;
-use crate::lair::dialect::protocol::MaterialType as ProtocolMaterialType;
 
 /// A whole-IR analysis of the affine physical-resource rule.
 ///
@@ -20,7 +19,7 @@ pub(crate) struct MaterialLinearityAnalysis;
 
 impl Analysis for MaterialLinearityAnalysis {
     fn name(&self) -> &str {
-        "protocol-material-linearity"
+        "material-linearity"
     }
 
     fn compute(
@@ -58,12 +57,8 @@ fn collect_material_results(ctx: &Context, values: &mut Vec<Value>, node: IRNode
         let handle = result.get_type(ctx);
         if handle
             .deref(ctx)
-            .downcast_ref::<ProtocolMaterialType>()
+            .downcast_ref::<ProcedureMaterialType>()
             .is_some()
-            || handle
-                .deref(ctx)
-                .downcast_ref::<ProcedureMaterialType>()
-                .is_some()
         {
             values.push(result);
         }
@@ -81,8 +76,12 @@ mod tests {
     use pliron::linked_list::ContainsLinkedList;
     use pliron::op::Op;
 
+    use lab_capability::OperationId;
+    use lab_method::LocalId;
+    use pliron::builtin::attributes::StringAttr;
+
     use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp};
-    use crate::lair::dialect::protocol::{AssembleOp, AssemblyMethodAttr, SynthesizeOp};
+    use crate::lair::dialect::procedure::{MaterialType, TaskOp};
 
     use crate::lair::analysis::*;
 
@@ -99,35 +98,32 @@ mod tests {
         let design = DesignPlasmidOp::new(ctx, "p_test", sequence_value, 1, true, None, None);
         let design_value = design.get_result_design(ctx);
         inserter.append_op(ctx, &design);
-        let synthesize = SynthesizeOp::new(ctx, design_value);
-        let fragment = synthesize.get_result_material(ctx);
-        inserter.append_op(ctx, &synthesize);
-        let first_assembly = AssembleOp::new(
+        let material_type = MaterialType::get(
             ctx,
-            fragment,
-            AssemblyMethodAttr::Gibson,
-            "p_test",
-            "backbone",
-            vec!["part".into()],
-            vec![],
-            "enzyme",
-            1,
-            crate::lair::dialect::attributes::quantity_dict(&[], ctx),
-        );
-        inserter.append_op(ctx, &first_assembly);
-        let second_assembly = AssembleOp::new(
+            StringAttr::new("https://example.org/material/sample".to_owned()),
+        )
+        .into();
+        let produce = TaskOp::new(
             ctx,
-            fragment,
-            AssemblyMethodAttr::Gibson,
-            "p_test_2",
-            "backbone",
-            vec!["part".into()],
-            vec![],
-            "enzyme",
-            1,
-            crate::lair::dialect::attributes::quantity_dict(&[], ctx),
+            "produce",
+            &OperationId::new("https://example.org/procedure/produce").unwrap(),
+            vec![design_value],
+            vec![material_type],
+            &[LocalId::new("sample").unwrap()],
         );
-        inserter.append_op(ctx, &second_assembly);
+        let sample = produce.get_operation().deref(ctx).get_result(0);
+        inserter.append_op(ctx, &produce);
+        for node in ["consume-first", "consume-second"] {
+            let consume = TaskOp::new(
+                ctx,
+                node,
+                &OperationId::new("https://example.org/procedure/consume").unwrap(),
+                vec![sample],
+                vec![],
+                &[],
+            );
+            inserter.append_op(ctx, &consume);
+        }
 
         assert!(
             MaterialLinearityAnalysis::compute(

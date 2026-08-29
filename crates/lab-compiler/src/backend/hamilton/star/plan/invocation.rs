@@ -51,7 +51,6 @@ pub(in crate::backend::hamilton::star) fn plan_setup_invocation(
 
     let choreograph = |liquids: &mut LiquidState| {
         let mut builder = RunBuilder::new(
-            profile,
             &deck,
             liquids,
             Some(TipFeeder::new(
@@ -153,7 +152,6 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
 
     let choreograph = |liquids: &mut LiquidState| {
         let mut builder = RunBuilder::new(
-            profile,
             &deck,
             liquids,
             Some(TipFeeder::new(

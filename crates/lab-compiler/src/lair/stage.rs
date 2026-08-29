@@ -29,8 +29,6 @@ pub enum IrStage {
     RefinedAlternatives,
     /// One selected Procedure graph with exact facility and adapter decisions.
     AllocatedProcedure,
-    /// Method-selected Protocol IR plus the retained Design value it currently consumes.
-    MethodSelectedProtocol,
 }
 
 impl Display for IrStage {
@@ -40,7 +38,6 @@ impl Display for IrStage {
             Self::DesignIntent => "design-intent",
             Self::RefinedAlternatives => "refined-alternatives",
             Self::AllocatedProcedure => "allocated-procedure",
-            Self::MethodSelectedProtocol => "method-selected-protocol",
         })
     }
 }
@@ -54,9 +51,8 @@ impl FromStr for IrStage {
             "design-intent" | "design-workflow" => Ok(Self::DesignIntent),
             "refined-alternatives" => Ok(Self::RefinedAlternatives),
             "allocated-procedure" => Ok(Self::AllocatedProcedure),
-            "method-selected-protocol" => Ok(Self::MethodSelectedProtocol),
             other => Err(format!(
-                "unknown IR stage '{other}'; expected design, design-intent, refined-alternatives, allocated-procedure, or method-selected-protocol"
+                "unknown IR stage '{other}'; expected design, design-intent, refined-alternatives, or allocated-procedure"
             )),
         }
     }
@@ -98,20 +94,12 @@ pub(crate) fn detect_stage(context: &Context, module: ModuleOp) -> Result<IrStag
         verify_allocated_procedure(context, module)?;
         return Ok(declared);
     }
-    let (design_operations, workflow_operations, protocol_operations) =
-        operation_counts(context, module)?;
-    let structural = match (design_operations, workflow_operations, protocol_operations) {
-        (1.., 0, 0) => IrStage::Design,
-        (1.., 1.., 0) => IrStage::DesignIntent,
-        (1.., 0, 1..) => IrStage::MethodSelectedProtocol,
-        (0, _, _) => {
+    let (design_operations, workflow_operations) = operation_counts(context, module)?;
+    let structural = match (design_operations, workflow_operations) {
+        (1.., 0) => IrStage::Design,
+        (1.., 1..) => IrStage::DesignIntent,
+        (0, _) => {
             return Err("a Lab Compiler module must contain at least one design operation".into());
-        }
-        (_, 1.., 1..) => {
-            return Err(
-                "Workflow operations must be fully eliminated before the method-selected Protocol boundary"
-                    .into(),
-            );
         }
     };
     if declared != structural {
@@ -709,7 +697,7 @@ fn stage_markers(context: &Context, module: ModuleOp) -> Result<Vec<StageOp>, St
     Ok(markers)
 }
 
-fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize, usize), String> {
+fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize), String> {
     let block = module
         .get_region(context)
         .deref(context)
@@ -717,7 +705,6 @@ fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize
         .ok_or_else(|| "builtin.module has no entry block".to_owned())?;
     let mut design_operations = 0;
     let mut workflow_operations = 0;
-    let mut protocol_operations = 0;
 
     for operation in block.deref(context).iter(context) {
         let op_id = Operation::get_opid(operation, context);
@@ -725,7 +712,6 @@ fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize
             "lair" if Operation::get_op::<StageOp>(operation, context).is_some() => {}
             "design" => design_operations += 1,
             "workflow" => workflow_operations += 1,
-            "protocol" => protocol_operations += 1,
             dialect => {
                 return Err(format!(
                     "operation '{op_id}' belongs to dialect '{dialect}', which is not legal at a Lab Compiler stage boundary"
@@ -733,7 +719,7 @@ fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize
             }
         }
     }
-    Ok((design_operations, workflow_operations, protocol_operations))
+    Ok((design_operations, workflow_operations))
 }
 
 #[cfg(test)]

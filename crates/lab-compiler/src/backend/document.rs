@@ -132,19 +132,6 @@ impl Doc {
         });
     }
 
-    pub fn labeled_heading(
-        &mut self,
-        level: u8,
-        label: impl Into<String>,
-        text: impl IntoIterator<Item = Inline>,
-    ) {
-        self.blocks.push(Block::Heading {
-            level,
-            label: Some(label.into()),
-            text: text.into_iter().collect(),
-        });
-    }
-
     pub fn para(&mut self, content: impl IntoIterator<Item = Inline>) {
         self.blocks
             .push(Block::Paragraph(content.into_iter().collect()));
@@ -179,68 +166,5 @@ impl Doc {
             columns: columns.into_iter().collect(),
             rows,
         });
-    }
-
-    /// Splice another document's content under the current position, shifting
-    /// every heading down by `offset` levels so the fragment nests instead of
-    /// competing with this document's own structure.
-    pub fn extend_nested(&mut self, blocks: impl IntoIterator<Item = Block>, offset: u8) {
-        self.blocks
-            .extend(blocks.into_iter().map(|block| match block {
-                Block::Heading { level, label, text } => Block::Heading {
-                    level: level + offset,
-                    label,
-                    text,
-                },
-                other => other,
-            }));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extend_nested_shifts_headings_and_only_headings() {
-        let mut doc = Doc::new(DocMeta::new("Outer", "", "", ""));
-        doc.labeled_heading(1, "Run 001", [code("thing")]);
-        doc.extend_nested(
-            [
-                Block::Heading {
-                    level: 1,
-                    label: Some("Stage 1".into()),
-                    text: vec![text("Build summary")],
-                },
-                Block::Paragraph(vec![text("body")]),
-                Block::Heading {
-                    level: 2,
-                    label: None,
-                    text: vec![text("Detail")],
-                },
-            ],
-            1,
-        );
-        assert_eq!(
-            doc.blocks,
-            vec![
-                Block::Heading {
-                    level: 1,
-                    label: Some("Run 001".into()),
-                    text: vec![code("thing")]
-                },
-                Block::Heading {
-                    level: 2,
-                    label: Some("Stage 1".into()),
-                    text: vec![text("Build summary")]
-                },
-                Block::Paragraph(vec![text("body")]),
-                Block::Heading {
-                    level: 3,
-                    label: None,
-                    text: vec![text("Detail")]
-                },
-            ]
-        );
     }
 }

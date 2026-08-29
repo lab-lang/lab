@@ -10,7 +10,6 @@ use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLower
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
 use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::ot2::BACKEND;
-use crate::backend::opentrons::ot2::emit::python_string_expression;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, serial_dilution, setup_golden_gate,
@@ -420,12 +419,38 @@ fn render_python_protocol(plan: &Ot2TaskPlan) -> Result<String, String> {
         &format!("{api_level},  # LAB:API_LEVEL"),
     )?;
     let plan_json = serde_json::to_string(plan).map_err(|error| error.to_string())?;
-    let plan_literal = python_string_expression(&plan_json).map_err(|error| error.to_string())?;
+    let plan_literal = python_string_expression(&plan_json)?;
     replace_once(
         &output,
         PLAN_SENTINEL,
         &format!("{plan_literal}  # LAB:INVOCATION_PLAN"),
     )
+}
+
+fn python_string_expression(value: &str) -> Result<String, String> {
+    const MAX_LITERAL_WIDTH: usize = 88;
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    for character in value.chars() {
+        let mut candidate = current.clone();
+        candidate.push(character);
+        let encoded = serde_json::to_string(&candidate).map_err(|error| error.to_string())?;
+        if encoded.len() > MAX_LITERAL_WIDTH && !current.is_empty() {
+            chunks.push(current);
+            current = character.to_string();
+        } else {
+            current = candidate;
+        }
+    }
+    chunks.push(current);
+
+    let literals = chunks
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(format!("(\n    {}\n)", literals.join("\n    ")))
 }
 
 fn replace_once(source: &str, needle: &str, replacement: &str) -> Result<String, String> {

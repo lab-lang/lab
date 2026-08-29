@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 pub use error::Ot2ProfileError;
 // Only the field types other `ot2` submodules reach into directly
 // are re-exported; the rest of the schema stays behind `Ot2AdapterProfile`.
+pub use schema::Stages;
 use schema::{Instruments, ProtocolOptions, SharedDeck};
-pub use schema::{Plates, Stages};
 
 /// Deck slots an OT-2 can address. Slot 12 is the fixed trash.
 const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];

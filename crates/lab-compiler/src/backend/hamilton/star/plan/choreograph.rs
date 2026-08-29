@@ -1,13 +1,9 @@
-//! Lowering logical transfers into channel operations: tip feeding, the
-//! 8-channel column batching rule, and multi-dispense chunking.
+//! Lowering invocation-local logical transfers into channel operations.
 //!
 //! Batching rules, stated once:
 //! - a tube or trough source admits one channel at a time, so shared-liquid
 //!   distribution runs single-channel with multi-dispense: one aspirate
 //!   carries as many targets as fit the tip's working volume;
-//! - plate-to-plate transfers batch onto up to eight channels when both
-//!   sides run down one column in consecutive rows, which keeps every
-//!   channel pair 9 mm apart — the machine's own well pitch;
 //! - a transfer that mixes afterwards keeps its tip to itself: mixing with
 //!   a shared multi-dispense tip would carry liquid between targets;
 //! - the final dispense of a tip's load jets in blow-out mode (`dm1`); the
@@ -18,21 +14,13 @@ use hamilton_star::catalog::{CorrectionCurve, TipType};
 
 use crate::backend::AdapterConstraintError;
 use crate::backend::hamilton::star::BACKEND;
-use crate::backend::hamilton::star::catalog::{LabwareDefinition, parse_well};
+use crate::backend::hamilton::star::catalog::LabwareDefinition;
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::{
     ChannelLiquid, StarOperation, StarWell, TipClass, TipPickupPosition,
 };
 use crate::backend::hamilton::star::plan::liquids::{DeckIndex, LiquidState, wire_mm, wire_ul};
-use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::resources::plate_wells;
-
-/// Mix applied after assembly reagent additions: 3 × 15 µL.
-pub const ASSEMBLY_MIX: (u32, f64) = (3, 15.0);
-/// Mix applied after a DNA addition to a transformation: 3 × 15 µL.
-pub const DNA_MIX: (u32, f64) = (3, 15.0);
-/// Mix applied after a serial-dilution transfer: 5 × 19 µL.
-pub const DILUTION_MIX: (u32, f64) = (5, 19.0);
 
 /// One logical transfer the choreographer lowers.
 #[derive(Clone, Debug, PartialEq)]
@@ -43,9 +31,6 @@ pub struct Transfer {
     pub volume_ul: f64,
     /// Mix cycles and volume applied at the target with the same tip.
     pub mix_after: Option<(u32, f64)>,
-    /// A fixed dispense height above the target's bottom (agar spotting)
-    /// instead of the tracked surface.
-    pub fixed_dispense_height_mm: Option<f64>,
 }
 
 impl Transfer {
@@ -55,17 +40,11 @@ impl Transfer {
             target,
             volume_ul,
             mix_after: None,
-            fixed_dispense_height_mm: None,
         }
     }
 
     pub fn with_mix(mut self, mix: (u32, f64)) -> Transfer {
         self.mix_after = Some(mix);
-        self
-    }
-
-    pub fn at_fixed_height(mut self, height_mm: f64) -> Transfer {
-        self.fixed_dispense_height_mm = Some(height_mm);
         self
     }
 }
@@ -163,7 +142,6 @@ impl TipFeeder {
 
 /// Builds one run's operation list.
 pub struct RunBuilder<'a> {
-    profile: &'a StarAdapterProfile,
     deck: &'a DeckIndex,
     liquids: &'a mut LiquidState,
     small: Option<TipFeeder>,
@@ -200,14 +178,12 @@ impl Curves {
 
 impl<'a> RunBuilder<'a> {
     pub fn new(
-        profile: &'a StarAdapterProfile,
         deck: &'a DeckIndex,
         liquids: &'a mut LiquidState,
         small: Option<TipFeeder>,
         large: Option<TipFeeder>,
     ) -> RunBuilder<'a> {
         RunBuilder {
-            profile,
             deck,
             liquids,
             small,
@@ -391,12 +367,9 @@ impl<'a> RunBuilder<'a> {
                 channels: vec![aspirate],
             });
             for (index, transfer) in chunk.iter().enumerate() {
-                let heights = self.liquids.dispense(
-                    self.deck,
-                    &transfer.target,
-                    transfer.volume_ul,
-                    transfer.fixed_dispense_height_mm,
-                );
+                let heights =
+                    self.liquids
+                        .dispense(self.deck, &transfer.target, transfer.volume_ul, None);
                 let liquid = self.channel_liquid(
                     channel,
                     &transfer.target,
@@ -415,79 +388,6 @@ impl<'a> RunBuilder<'a> {
             }
             self.discard(vec![channel]);
         }
-        Ok(())
-    }
-
-    /// Plate-to-plate transfers: consecutive column runs batch onto up to
-    /// eight channels, everything else falls back to per-transfer
-    /// distribution.
-    pub fn plate_transfers(
-        &mut self,
-        class: TipClass,
-        transfers: &[Transfer],
-    ) -> Result<(), StarPlanningError> {
-        let mut index = 0;
-        while index < transfers.len() {
-            let batch = column_batch_length(&transfers[index..], self.profile.machine.channels);
-            if batch >= 2 {
-                self.batched_transfer(class, &transfers[index..index + batch])?;
-            } else {
-                self.distribute(class, &transfers[index..=index])?;
-            }
-            index += batch.max(1);
-        }
-        Ok(())
-    }
-
-    /// One multi-channel pickup → aspirate → dispense → discard for
-    /// column-aligned transfers.
-    fn batched_transfer(
-        &mut self,
-        class: TipClass,
-        transfers: &[Transfer],
-    ) -> Result<(), StarPlanningError> {
-        let channels = self.pick_up(class, transfers.len())?;
-        let mut aspirates = Vec::with_capacity(transfers.len());
-        let mut dispenses = Vec::with_capacity(transfers.len());
-        for (position, transfer) in transfers.iter().enumerate() {
-            let channel = channels[position];
-            let corrected = wire_ul(self.curves.corrected(class, transfer.volume_ul));
-            let heights =
-                self.liquids
-                    .aspirate(self.deck, &transfer.source, f64::from(corrected) / 10.0);
-            aspirates.push(self.channel_liquid(
-                channel,
-                &transfer.source,
-                transfer.volume_ul,
-                corrected,
-                heights,
-                None,
-            ));
-            let heights = self.liquids.dispense(
-                self.deck,
-                &transfer.target,
-                transfer.volume_ul,
-                transfer.fixed_dispense_height_mm,
-            );
-            dispenses.push(self.channel_liquid(
-                channel,
-                &transfer.target,
-                transfer.volume_ul,
-                corrected,
-                heights,
-                transfer.mix_after,
-            ));
-        }
-        self.operations.push(StarOperation::Aspirate {
-            tip: class,
-            channels: aspirates,
-        });
-        self.operations.push(StarOperation::Dispense {
-            tip: class,
-            mode: 1,
-            channels: dispenses,
-        });
-        self.discard(channels);
         Ok(())
     }
 
@@ -513,44 +413,6 @@ impl<'a> RunBuilder<'a> {
     }
 }
 
-/// The longest prefix (capped at the channel count) whose sources and
-/// targets each run down a single column in consecutive rows on one
-/// resource, with uniform mix and height options. Both sides then advance
-/// 9 mm per channel — exactly the machine's channel pitch.
-fn column_batch_length(transfers: &[Transfer], channels: usize) -> usize {
-    let mut length = 1;
-    while length < transfers.len().min(channels) {
-        let previous = &transfers[length - 1];
-        let next = &transfers[length];
-        if consecutive_in_column(&previous.source, &next.source)
-            && consecutive_in_column(&previous.target, &next.target)
-            && previous.mix_after == next.mix_after
-            && previous.fixed_dispense_height_mm == next.fixed_dispense_height_mm
-        {
-            length += 1;
-        } else {
-            break;
-        }
-    }
-    length
-}
-
-/// Whether `next` sits directly below `previous`: same resource, same
-/// column, the next row down. Row/column bounds are generous — the resource
-/// capacity was validated when its wells were allocated.
-fn consecutive_in_column(previous: &StarWell, next: &StarWell) -> bool {
-    if previous.resource != next.resource {
-        return false;
-    }
-    let Some((previous_row, previous_column)) = parse_well(&previous.well, 26, 99) else {
-        return false;
-    };
-    let Some((next_row, next_column)) = parse_well(&next.well, 26, 99) else {
-        return false;
-    };
-    previous_column == next_column && next_row == previous_row + 1
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -559,64 +421,6 @@ mod tests {
 
     fn feeder(deck: &DeckIndex) -> TipFeeder {
         TipFeeder::new("assembly_small_tips", deck, 1, 96)
-    }
-
-    #[test]
-    fn a_full_column_of_aligned_transfers_batches_to_one_eight_channel_op() {
-        let profile = StarAdapterProfile::default();
-        let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
-        let mut liquids = LiquidState::new();
-        let transfers: Vec<Transfer> = (0..8)
-            .map(|row| {
-                let well = format!("{}1", char::from(b'A' + row));
-                Transfer::new(
-                    StarWell::new("reaction_plate", well.clone()),
-                    StarWell::new("dilution_plate/1", well),
-                    2.0,
-                )
-            })
-            .collect();
-        let mut builder = RunBuilder::new(&profile, &deck, &mut liquids, Some(feeder(&deck)), None);
-        builder
-            .plate_transfers(TipClass::Small, &transfers)
-            .expect("aligned transfers lower");
-        let (operations, _) = builder.finish();
-        let aspirates = operations
-            .iter()
-            .filter(|op| matches!(op, StarOperation::Aspirate { .. }))
-            .count();
-        assert_eq!(aspirates, 1, "eight aligned transfers share one aspirate");
-        let Some(StarOperation::Aspirate { channels, .. }) = operations
-            .iter()
-            .find(|op| matches!(op, StarOperation::Aspirate { .. }))
-        else {
-            unreachable!("an aspirate was counted above");
-        };
-        assert_eq!(channels.len(), 8, "every channel carries its own well");
-    }
-
-    #[test]
-    fn a_lone_transfer_runs_single_channel() {
-        let profile = StarAdapterProfile::default();
-        let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
-        let mut liquids = LiquidState::new();
-        let transfers = [Transfer::new(
-            StarWell::new("reaction_plate", "A1"),
-            StarWell::new("dilution_plate/1", "C7"),
-            2.0,
-        )];
-        let mut builder = RunBuilder::new(&profile, &deck, &mut liquids, Some(feeder(&deck)), None);
-        builder
-            .plate_transfers(TipClass::Small, &transfers)
-            .expect("a lone transfer lowers");
-        let (operations, _) = builder.finish();
-        let Some(StarOperation::Aspirate { channels, .. }) = operations
-            .iter()
-            .find(|op| matches!(op, StarOperation::Aspirate { .. }))
-        else {
-            panic!("the transfer aspirates");
-        };
-        assert_eq!(channels.len(), 1, "an unaligned transfer keeps one channel");
     }
 
     #[test]
@@ -636,7 +440,7 @@ mod tests {
                 )
             })
             .collect();
-        let mut builder = RunBuilder::new(&profile, &deck, &mut liquids, Some(feeder(&deck)), None);
+        let mut builder = RunBuilder::new(&deck, &mut liquids, Some(feeder(&deck)), None);
         builder
             .distribute(TipClass::Small, &transfers)
             .expect("the distribution lowers");

@@ -204,7 +204,7 @@ fn plan_task(
     (
         &'static str,
         StarTaskExecution,
-        crate::backend::hamilton::star::StarExecutionPlan,
+        crate::backend::hamilton::star::plan::StarExecutionPlan,
     ),
     String,
 > {
@@ -226,7 +226,7 @@ fn plan_setup(
     (
         &'static str,
         StarTaskExecution,
-        crate::backend::hamilton::star::StarExecutionPlan,
+        crate::backend::hamilton::star::plan::StarExecutionPlan,
     ),
     String,
 > {
@@ -308,7 +308,7 @@ fn plan_dilution(
     (
         &'static str,
         StarTaskExecution,
-        crate::backend::hamilton::star::StarExecutionPlan,
+        crate::backend::hamilton::star::plan::StarExecutionPlan,
     ),
     String,
 > {

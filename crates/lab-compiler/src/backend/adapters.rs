@@ -16,11 +16,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use crate::ArtifactBundle;
 use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
-use crate::planning::{AdapterInvocation, AdapterInvocationPlan, BuildInventory};
-use crate::{ArtifactBundle, ProtocolLairProgram};
+use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
 use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
@@ -300,67 +300,6 @@ pub fn validate_adapter_profile(
     }
 }
 
-/// Lowers one complete checked Protocol build through an explicitly selected legacy adapter API.
-///
-/// Selection has already happened through facility allocation. This function cannot infer a
-/// driver from an Asset's manufacturer or model and cannot select a different adapter. The
-/// profile is private operational configuration for the exact Asset binding, not a second facility model.
-pub fn lower_dependency_build_with_adapter(
-    driver: &str,
-    name: &str,
-    contents: &str,
-    protocol: &ProtocolLairProgram,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, AdapterLoweringError> {
-    match driver {
-        "opentrons.ot2" => {
-            let profile = Ot2AdapterProfile::parse(name, contents).map_err(|error| {
-                AdapterLoweringError::InvalidProfile {
-                    driver: driver.to_owned(),
-                    message: error.to_string(),
-                }
-            })?;
-            lab_compiler_ot2(protocol, &profile, inventory).map_err(|message| {
-                AdapterLoweringError::Lowering {
-                    driver: driver.to_owned(),
-                    message,
-                }
-            })
-        }
-        "opentrons.flex" => {
-            let profile = FlexAdapterProfile::parse(name, contents).map_err(|error| {
-                AdapterLoweringError::InvalidProfile {
-                    driver: driver.to_owned(),
-                    message: error.to_string(),
-                }
-            })?;
-            lab_compiler_flex(protocol, &profile, inventory).map_err(|message| {
-                AdapterLoweringError::Lowering {
-                    driver: driver.to_owned(),
-                    message,
-                }
-            })
-        }
-        "hamilton.star" => {
-            let profile = StarAdapterProfile::parse(name, contents).map_err(|error| {
-                AdapterLoweringError::InvalidProfile {
-                    driver: driver.to_owned(),
-                    message: error.to_string(),
-                }
-            })?;
-            lab_compiler_star(protocol, &profile, inventory).map_err(|message| {
-                AdapterLoweringError::Lowering {
-                    driver: driver.to_owned(),
-                    message,
-                }
-            })
-        }
-        _ => Err(AdapterLoweringError::Unsupported {
-            driver: driver.to_owned(),
-        }),
-    }
-}
-
 /// One reviewed run document emitted for an exact allocated requirement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdapterInvocationDocument {
@@ -528,40 +467,8 @@ fn short_digest(value: &str) -> String {
     sha256(value.as_bytes())[..8].to_owned()
 }
 
-fn lab_compiler_ot2(
-    protocol: &ProtocolLairProgram,
-    profile: &Ot2AdapterProfile,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, String> {
-    crate::backend::opentrons::ot2::compile_dependency_build(protocol, profile, inventory)
-        .map(|bundle| bundle.artifacts().clone())
-        .map_err(|error| error.to_string())
-}
-
-fn lab_compiler_flex(
-    protocol: &ProtocolLairProgram,
-    profile: &FlexAdapterProfile,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, String> {
-    crate::backend::opentrons::flex::compile_dependency_build(protocol, profile, inventory)
-        .map(|bundle| bundle.artifacts().clone())
-        .map_err(|error| error.to_string())
-}
-
-fn lab_compiler_star(
-    protocol: &ProtocolLairProgram,
-    profile: &StarAdapterProfile,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, String> {
-    crate::backend::hamilton::star::compile_dependency_build(protocol, profile, inventory)
-        .map(|bundle| bundle.artifacts().clone())
-        .map_err(|error| error.to_string())
-}
-
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AdapterLoweringError {
-    #[error("adapter '{driver}' does not provide legacy dependency-build lowering")]
-    Unsupported { driver: String },
     #[error("adapter '{driver}' does not provide requirement-scoped lowering")]
     UnsupportedInvocation { driver: String },
     #[error("invalid invocation for adapter '{driver}': {message}")]
