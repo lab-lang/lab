@@ -72,6 +72,8 @@ inventory/
   facility.ttl
 adapters/
   opentrons-ot2.toml
+methods/
+  site-methods.json
 src/
   designs/
     parts.lab
@@ -98,6 +100,7 @@ tests/
 - `programs` wires designs, policies, parameters, and workflows into runnable entry points.
 - `inventory` holds portable SBOLInventory facility catalogs and material ledgers.
 - `adapters` holds non-secret operational configuration bound to exact facility Assets by `lab.toml`.
+- `methods` holds portable, facility-independent Method definitions contributed by the package.
 - `.lab/` is generated output and runtime state, never hand-authored source.
 
 These directory names are conventions rather than language keywords. `lab.toml` names the inventory and adapter-profile paths explicitly; the module system does not give a directory magical semantics merely because it is called `workflows`.
@@ -139,6 +142,9 @@ edition = "2026"
 [build]
 entry = "src/programs/main.lab"
 
+[methods]
+documents = ["methods/site-methods.json"]
+
 [inventory]
 document = "inventory/facility.ttl"
 # Required only when the document contains more than one facility:
@@ -153,6 +159,8 @@ profile = "adapters/star-1.toml"
 parts = "1.2"
 local-policies = { path = "../policies" }
 ```
+
+`[methods] documents` names versioned `lab.method-catalog.v1` JSON files inside the package. Lab composes those definitions with catalogs contributed by reachable path dependencies and the standard Method set, then validates the complete registry before compiling. Method documents describe facility-independent Procedure and Capability alternatives; exact selection remains in `[[planning.methods]]`, facility facts remain in SBOLInventory, and adapter implementation remains under `[[execution.adapters]]`.
 
 `[inventory] document` names a package-relative SBOLInventory document in Turtle, RDF/XML, JSON-LD, or N-Triples. Lab validates the complete SBOL 3 and SBOLInventory Profile 0.2 graph before planning. If `facility` is omitted, the document must contain exactly one facility; otherwise the absolute Facility IRI selects one exactly.
 

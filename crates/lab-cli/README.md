@@ -33,6 +33,15 @@ default-member = "packages/device"
 
 A workspace root owns membership and nothing else; each member stays an ordinary package. `default-member` names the package a single-package command acts on, and is required once a workspace has more than one member.
 
+Packages extend persistent Method coverage through versioned documents rather than compiler targets or Rust plugins:
+
+```toml
+[methods]
+documents = ["methods/site-methods.json"]
+```
+
+`lab check` loads the default package's reachable path dependencies in dependency-first order, verifies every `lab.method-catalog.v1` document, and validates the contributed definitions together with the standard Method registry. `lab build` and `lab plan` use that same registry; `[[planning.methods]]` can pin an exact alternative but does not define one.
+
 ## Facility-derived lowering
 
 The portable frontend of `lab build` never contains an instrument selector: `[build]` names only the experiment entry, and the CLI has no `--target` mode. When the package names a facility document, the build derives device choice by matching the experiment's capability requirements against that validated facility. With no facility document, the same command stops after portable compilation.

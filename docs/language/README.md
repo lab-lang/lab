@@ -89,4 +89,5 @@ The latest accepted design records are:
 - [`0043`](decisions/0043-sequences-are-first-class-design-values.md): DNA and protein sequences are independent typed values referenced by designs; and
 - [`0044`](decisions/0044-facility-graphs-replace-workcell-targets.md): SBOLInventory facilities replace compiler-specific workcell targets with exact capability, Asset, material, plan, and run bindings;
 - [`0045`](decisions/0045-lair-method-refinement-and-facility-allocation.md): LAIR preserves Method alternatives and first-class Procedure and Capability graphs until one global facility solution is applied; and
-- [`0046`](decisions/0046-allocated-procedure-is-the-device-boundary.md): verifier-valid Allocated Procedure is the only production input to immutable adapter invocations and device lowering.
+- [`0046`](decisions/0046-allocated-procedure-is-the-device-boundary.md): verifier-valid Allocated Procedure is the only production input to immutable adapter invocations and device lowering; and
+- [`0047`](decisions/0047-packages-contribute-versioned-method-catalogs.md): packages contribute versioned portable Method documents that Rust and Python compose through one authoritative registry.

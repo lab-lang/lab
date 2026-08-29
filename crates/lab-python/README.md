@@ -71,7 +71,14 @@ sequence_synthesis = m.Method(
             id="synthesize",
             operation="https://example.org/procedure#SynthesizePlasmid",
             inputs=(m.ValueReference.method_input("design"),),
-            outputs=(m.TaskOutput("product", m.Port.material("https://www.lab-compiler.org/ns/material-state#PlasmidProduct")),),
+            outputs=(
+                m.TaskOutput(
+                    "product",
+                    m.Port.material(
+                        "https://www.lab-compiler.org/ns/material-state#PlasmidProduct"
+                    ),
+                ),
+            ),
             parameters=(
                 m.ProcedureParameter(
                     "artifact",
@@ -103,9 +110,23 @@ print(refined.planning_problem)
 
 The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v4` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
 
+The same typed authoring surface writes a persistent package catalog:
+
+```python
+catalog = m.MethodCatalog((sequence_synthesis,))
+catalog.write("methods/synthesis.json")
+```
+
+```toml
+[methods]
+documents = ["methods/synthesis.json"]
+```
+
+`write` validates through Rust and emits the versioned `lab.method-catalog.v1` envelope. `include_standard` controls validation and in-memory refinement; it is not serialized because a package document contributes only its own portable definitions. Lab loads documents from the runnable package and its reachable path dependencies, composes them with the standard registry, and fails `lab check` on an unknown version, duplicate Method identity, incompatible Intent signature, or invalid Procedure graph.
+
 ## Facility planning
 
-Python calls the same project service as `lab plan`; it does not implement a separate allocator. A package's `lab.toml` selects its SBOLInventory document and local adapter bindings, then `plan_project` compiles the package through Method refinement, exact MaterialLot and capability-offering allocation, allocated Procedure LAIR, and adapter invocation projection.
+Python calls the same project service as `lab plan`; it does not implement a separate allocator. A package's `lab.toml` contributes persistent Method catalogs, selects its SBOLInventory document, and declares local adapter bindings. `plan_project` composes those catalogs with any `methods=` supplied in memory, then compiles the package through Method refinement, exact MaterialLot and capability-offering allocation, allocated Procedure LAIR, and adapter invocation projection.
 
 ```python
 import lab
