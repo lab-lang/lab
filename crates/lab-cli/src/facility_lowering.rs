@@ -9,7 +9,7 @@ use lab_compiler::backend::{adapter_catalog, lower_allocated_dependency_build_wi
 use lab_compiler::planning::{
     AdapterInvocationPlan, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
-    FacilityLoweringManifest, FacilityLoweringRoute,
+    FacilityLoweringManifest, FacilityLoweringRoute, MaterialLotBuildInventory,
 };
 use lab_compiler::{AllocatedLairProgram, ArtifactBundle, CheckedModule};
 use lab_inventory::InventorySnapshot;
@@ -29,7 +29,6 @@ pub(crate) struct FacilityLoweringOutput {
 /// Asset has an explicit local adapter binding whose implementation provides lowering.
 pub(crate) fn lower_adapter_invocations(
     package: &LabPackage,
-    modules: &[&CheckedModule],
     inventory: &InventorySnapshot,
     allocated: &AllocatedLairProgram,
     invocation_plan: &AdapterInvocationPlan,
@@ -139,7 +138,8 @@ pub(crate) fn lower_adapter_invocations(
                 "the selected realization Method is not supported by the current dependency-build adapter bridge"
             );
         }
-        let build_inventory = semantic_build_inventory(modules, inventory)?;
+        let build_inventory =
+            BuildInventory::MaterialLots(invocation_plan.material_inventory.clone());
 
         for (
             (asset, driver, source_profile_path, profile_sha256),
@@ -213,10 +213,10 @@ pub(crate) fn lower_adapter_invocations(
     })
 }
 
-fn semantic_build_inventory(
+pub(crate) fn semantic_material_inventory(
     modules: &[&CheckedModule],
     snapshot: &InventorySnapshot,
-) -> Result<BuildInventory> {
+) -> Result<MaterialLotBuildInventory> {
     let material_lots = snapshot
         .active_material_lots()
         .context("failed to index active SBOLInventory MaterialLots")?;
@@ -229,13 +229,17 @@ fn semantic_build_inventory(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    BuildInventory::from_material_lots(
+    let inventory = BuildInventory::from_material_lots(
         modules,
         snapshot.source_sha256(),
         snapshot.facility().as_str(),
         &lots_by_component,
     )
-    .context("failed to bind checked designs to SBOLInventory MaterialLots")
+    .context("failed to bind checked designs to SBOLInventory MaterialLots")?;
+    let BuildInventory::MaterialLots(inventory) = inventory else {
+        unreachable!("SBOLInventory material binding always creates semantic inventory")
+    };
+    Ok(inventory)
 }
 
 fn facility_lowering_directories<'a>(

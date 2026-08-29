@@ -620,6 +620,27 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .unwrap()
             .starts_with("assets/opentrons_ot2/")
     );
+    let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v3");
+    assert_eq!(
+        invocations["material_inventory"]["facility"],
+        "https://example.org/golden-gate/facility"
+    );
+    assert_eq!(
+        invocations["material_inventory"]["source_sha256"],
+        invocations["inventory_sha256"]
+    );
+    assert_eq!(
+        invocations["material_inventory"]["materials"]["J23101"]["component"],
+        "https://synbiohub.org/public/igem/J23101"
+    );
+    assert_eq!(
+        invocations["material_inventory"]["materials"]["J23101"]["material_lots"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
 
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([

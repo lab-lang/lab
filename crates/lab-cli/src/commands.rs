@@ -382,8 +382,10 @@ fn write_facility_plan(
         .allocate(solution.clone())
         .context("failed to apply the facility solution to refined LAIR")?;
     let allocated_ir = allocated.ir();
+    let material_inventory =
+        crate::facility_lowering::semantic_material_inventory(&modules, &inventory)?;
     let invocations = allocated
-        .adapter_invocations()
+        .adapter_invocations(material_inventory)
         .context("failed to project allocated LAIR into adapter invocations")?;
     fs::create_dir_all(output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
@@ -421,7 +423,6 @@ fn write_facility_plan(
 
     let lowered = crate::facility_lowering::lower_adapter_invocations(
         package,
-        &modules,
         &inventory,
         &allocated,
         &invocations,

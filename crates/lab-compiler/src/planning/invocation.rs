@@ -10,12 +10,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use super::model::MaterialLotCandidates;
 use super::{
-    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem,
-    PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, SelectedCapabilityParameter,
+    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MaterialLotBuildInventory,
+    PlanningProblem, PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput,
+    SelectedCapabilityParameter,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v2";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v3";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -25,6 +27,7 @@ pub struct AdapterInvocationPlan {
     pub allocated_lair_sha256: String,
     pub inventory_sha256: String,
     pub facility: String,
+    pub material_inventory: MaterialLotBuildInventory,
     pub methods: Vec<AllocatedMethod>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invocations: Vec<AdapterInvocation>,
@@ -99,6 +102,7 @@ impl AdapterInvocationPlan {
         problem: &PlanningProblem,
         solution: &FacilityPlanningSolution,
         allocated_lair_sha256: String,
+        material_inventory: MaterialLotBuildInventory,
     ) -> Result<Self, AdapterInvocationError> {
         solution.validate_against(problem)?;
         let selections = solution
@@ -202,6 +206,7 @@ impl AdapterInvocationPlan {
             allocated_lair_sha256,
             inventory_sha256: solution.inventory_sha256.clone(),
             facility: solution.facility.clone(),
+            material_inventory,
             methods,
             invocations,
         };
@@ -228,6 +233,7 @@ impl AdapterInvocationPlan {
         if AbsoluteIri::new(&self.facility).is_err() {
             return Err(AdapterInvocationValidationError::InvalidFacility);
         }
+        validate_material_inventory(self)?;
         if self.methods.is_empty() {
             return Err(AdapterInvocationValidationError::EmptyMethods);
         }
@@ -370,6 +376,49 @@ impl AdapterInvocationPlan {
     }
 }
 
+fn validate_material_inventory(
+    plan: &AdapterInvocationPlan,
+) -> Result<(), AdapterInvocationValidationError> {
+    if plan.material_inventory.source_sha256 != plan.inventory_sha256
+        || plan.material_inventory.facility != plan.facility
+    {
+        return Err(AdapterInvocationValidationError::MaterialInventoryMismatch);
+    }
+    for (kind, entries) in [
+        ("material", &plan.material_inventory.materials),
+        ("artifact", &plan.material_inventory.artifacts),
+    ] {
+        for (symbol, candidates) in entries {
+            if symbol.is_empty() {
+                return Err(AdapterInvocationValidationError::InvalidMaterialInventory {
+                    kind,
+                    symbol: symbol.clone(),
+                });
+            }
+            let MaterialLotCandidates::Identified {
+                component,
+                material_lots,
+            } = candidates
+            else {
+                continue;
+            };
+            let strictly_sorted = material_lots.windows(2).all(|lots| lots[0] < lots[1]);
+            if AbsoluteIri::new(component).is_err()
+                || material_lots
+                    .iter()
+                    .any(|material_lot| AbsoluteIri::new(material_lot).is_err())
+                || !strictly_sorted
+            {
+                return Err(AdapterInvocationValidationError::InvalidMaterialInventory {
+                    kind,
+                    symbol: symbol.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Default)]
 struct InvocationMembers {
     tasks: BTreeSet<LocalId>,
@@ -431,6 +480,10 @@ pub enum AdapterInvocationValidationError {
     InvalidDigest { label: &'static str },
     #[error("adapter invocations name a facility that is not an absolute IRI")]
     InvalidFacility,
+    #[error("adapter invocation material inventory does not match its inventory hash and facility")]
+    MaterialInventoryMismatch,
+    #[error("adapter invocation material inventory contains invalid {kind} `{symbol}`")]
+    InvalidMaterialInventory { kind: &'static str, symbol: String },
     #[error("adapter invocations contain no selected Methods")]
     EmptyMethods,
     #[error("adapter invocations repeat Method choice `{choice}`")]

@@ -328,6 +328,7 @@ impl AllocatedLairProgram {
     /// Project the exact backend-facing ABI from this verifier-valid allocated program.
     pub fn adapter_invocations(
         &self,
+        material_inventory: crate::planning::MaterialLotBuildInventory,
     ) -> Result<crate::planning::AdapterInvocationPlan, crate::planning::AdapterInvocationError>
     {
         let ir = self.ir();
@@ -336,6 +337,7 @@ impl AllocatedLairProgram {
             &self.problem,
             &self.solution,
             allocated_lair_sha256,
+            material_inventory,
         )
     }
 
@@ -589,8 +591,8 @@ mod tests {
     use crate::lair::stage::IrStage;
     use crate::planning::{
         AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationPlan, AdapterRequirement,
-        FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin, MethodPinSelector,
-        PlanningProblem, PlanningValueSource,
+        BuildInventory, FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin,
+        MethodPinSelector, PlanningProblem, PlanningValueSource,
     };
 
     use super::PortableLairProgram;
@@ -1055,7 +1057,26 @@ workflow main() -> Material<Plasmid>:
         assert!(!protocol_ir.contains("procedure."), "{protocol_ir}");
         assert!(!protocol_ir.contains("allocation."), "{protocol_ir}");
 
-        let invocations = allocated.adapter_invocations().unwrap();
+        let active_lots = inventory.active_material_lots().unwrap();
+        let lots_by_component = active_lots
+            .components()
+            .map(|(component, lots)| {
+                (
+                    component.as_str().to_owned(),
+                    lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
+                )
+            })
+            .collect();
+        let BuildInventory::MaterialLots(material_inventory) = BuildInventory::from_material_lots(
+            &[&checked],
+            inventory.source_sha256(),
+            inventory.facility().as_str(),
+            &lots_by_component,
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        let invocations = allocated.adapter_invocations(material_inventory).unwrap();
         assert_eq!(invocations.invocations.len(), 1);
         assert_eq!(
             invocations.invocations[0].asset,
@@ -1082,6 +1103,13 @@ workflow main() -> Material<Plasmid>:
         let decoded: AdapterInvocationPlan = serde_json::from_str(&json).unwrap();
         decoded.validate().unwrap();
         assert_eq!(decoded, invocations);
+        let mut mismatched_inventory = decoded.clone();
+        mismatched_inventory.material_inventory.source_sha256 = "0".repeat(64);
+        assert!(matches!(
+            mismatched_inventory.validate(),
+            Err(crate::planning::AdapterInvocationValidationError::MaterialInventoryMismatch)
+        ));
+
         let mut tampered = decoded;
         tampered.invocations[0]
             .tasks
