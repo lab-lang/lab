@@ -101,7 +101,29 @@ refined = lab.refine(program, methods=(sequence_synthesis,), include_standard=Fa
 print(refined.planning_problem)
 ```
 
-The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v2` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v4` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+
+## Facility planning
+
+Python calls the same project service as `lab plan`; it does not implement a separate allocator. A package's `lab.toml` selects its SBOLInventory document and local adapter bindings, then `plan_project` compiles the package through Method refinement, exact MaterialLot and capability-offering allocation, allocated Procedure LAIR, and adapter invocation projection.
+
+```python
+import lab
+
+planned = lab.plan_project("examples/golden-gate")
+print(planned.inventory.facility)
+for invocation in planned.invocations:
+    print(invocation.asset, invocation.adapter.driver, invocation.tasks)
+```
+
+An in-memory `Program`, including one emitted by the Python object model, can use an existing package as its facility and policy context:
+
+```python
+program = lab.check(designs.module, workflows.module)
+planned = lab.plan(program, project="path/to/facility-package")
+```
+
+The returned `FacilityPlan` provides typed Method, Procedure task, MaterialLot, capability offering, Asset, adapter, and invocation selections. It also retains the complete planning problem, adapter-binding snapshot, and adapter-invocation document for forward-compatible inspection.
 
 ## Writing a program
 

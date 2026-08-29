@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use facility::{
-    FacilityPlanningResult, FacilityProjectError, load_package_inventory,
+    FacilityPlanningResult, FacilityProjectError, load_package_inventory, plan_modules_for_package,
     resolve_package_adapter_bindings,
 };
 

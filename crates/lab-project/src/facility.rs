@@ -148,42 +148,7 @@ impl LabProject {
             .filter(|module| program_packages.contains(&module.package))
             .map(|module| &module.module)
             .collect::<Vec<_>>();
-
-        let portable = PortableLairProgram::lower_program(&modules)
-            .map_err(FacilityProjectError::PortableLair)?;
-        let refined = portable
-            .refine_methods(methods)
-            .map_err(FacilityProjectError::RefinedLair)?;
-        let refined_lair = refined.ir();
-        let problem = refined
-            .planning_problem()
-            .map_err(FacilityProjectError::PlanningProblem)?;
-        let adapter_bindings = resolve_package_adapter_bindings(package, &inventory)?;
-        let material_inventory = semantic_material_inventory(&modules, &inventory)?;
-        let solution = FacilityPlanningSolution::solve(
-            &problem,
-            &inventory,
-            &material_inventory,
-            adapter_bindings.as_ref(),
-            facility_planning_policy(package)?,
-        )
-        .map_err(FacilityProjectError::FacilityPlanning)?;
-        let allocated = refined
-            .allocate(solution)
-            .map_err(FacilityProjectError::Allocation)?;
-        let adapter_invocations = allocated
-            .adapter_invocations(material_inventory)
-            .map_err(FacilityProjectError::AdapterInvocations)?;
-
-        Ok(FacilityPlanningResult {
-            package: package.manifest.package.name.clone(),
-            version: package.manifest.package.version.clone(),
-            inventory,
-            adapter_bindings,
-            refined_lair,
-            allocated,
-            adapter_invocations,
-        })
+        plan_modules_with_inventory(package, &modules, methods, inventory)
     }
 
     /// Plans with the versioned Method set built into this compiler.
@@ -193,6 +158,66 @@ impl LabProject {
     ) -> Result<FacilityPlanningResult, FacilityProjectError> {
         self.plan_facility(compiled, lab_compiler::standard_method_registry())
     }
+}
+
+/// Plans an explicitly supplied, already checked program against one package's facility context.
+///
+/// This is the embedding boundary used by non-file frontends such as Python. The caller owns
+/// frontend checking and module order; the package contributes only inventory selection, planning
+/// policy, and local adapter configuration.
+pub fn plan_modules_for_package(
+    package: &LabPackage,
+    modules: &[&lab_language::CheckedModule],
+    methods: &MethodRegistry,
+) -> Result<FacilityPlanningResult, FacilityProjectError> {
+    let inventory =
+        load_package_inventory(package)?.ok_or_else(|| FacilityProjectError::MissingInventory {
+            package: package.manifest.package.name.clone(),
+        })?;
+    plan_modules_with_inventory(package, modules, methods, inventory)
+}
+
+fn plan_modules_with_inventory(
+    package: &LabPackage,
+    modules: &[&lab_language::CheckedModule],
+    methods: &MethodRegistry,
+    inventory: InventorySnapshot,
+) -> Result<FacilityPlanningResult, FacilityProjectError> {
+    let portable =
+        PortableLairProgram::lower_program(modules).map_err(FacilityProjectError::PortableLair)?;
+    let refined = portable
+        .refine_methods(methods)
+        .map_err(FacilityProjectError::RefinedLair)?;
+    let refined_lair = refined.ir();
+    let problem = refined
+        .planning_problem()
+        .map_err(FacilityProjectError::PlanningProblem)?;
+    let adapter_bindings = resolve_package_adapter_bindings(package, &inventory)?;
+    let material_inventory = semantic_material_inventory(modules, &inventory)?;
+    let solution = FacilityPlanningSolution::solve(
+        &problem,
+        &inventory,
+        &material_inventory,
+        adapter_bindings.as_ref(),
+        facility_planning_policy(package)?,
+    )
+    .map_err(FacilityProjectError::FacilityPlanning)?;
+    let allocated = refined
+        .allocate(solution)
+        .map_err(FacilityProjectError::Allocation)?;
+    let adapter_invocations = allocated
+        .adapter_invocations(material_inventory)
+        .map_err(FacilityProjectError::AdapterInvocations)?;
+
+    Ok(FacilityPlanningResult {
+        package: package.manifest.package.name.clone(),
+        version: package.manifest.package.version.clone(),
+        inventory,
+        adapter_bindings,
+        refined_lair,
+        allocated,
+        adapter_invocations,
+    })
 }
 
 /// Loads and validates the package's selected SBOLInventory document, if configured.

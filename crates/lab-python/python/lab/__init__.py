@@ -19,6 +19,7 @@ import json
 from typing import Any, cast
 
 from . import methods as methods
+from . import planning as planning
 from . import sbol as sbol
 from ._artifacts import artifact
 from ._circuits import (
@@ -79,6 +80,7 @@ from ._workflows import Context, Workflow, WorkflowCall, WorkflowError, workflow
 # thing, and either spelling emits the same `use` line.
 from .bio.build import realize
 from .methods import RefinedProgram, refine
+from .planning import FacilityPlan, plan, plan_project
 from .plasmid import (
     assemble,
     capture,
@@ -139,6 +141,7 @@ __all__ = [
     "Evidence",
     "Evidential",
     "Expression",
+    "FacilityPlan",
     "Fields",
     "Fragment",
     "Function",
@@ -208,6 +211,9 @@ __all__ = [
     "not_",
     "or_",
     "pick",
+    "plan",
+    "plan_project",
+    "planning",
     "plate",
     "provision",
     "purify",

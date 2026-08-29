@@ -1,11 +1,14 @@
 //! Python extension module for Lab.
 
+use std::path::Path;
+
 use lab_compiler::{
     CheckedModule, Diagnostic, ModuleId, PortableLairProgram, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
     standard_method_definitions,
 };
 use lab_method::{MethodDefinition, MethodRegistry};
+use lab_project::{FacilityPlanningResult, LabProject, plan_modules_for_package};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::Serialize;
@@ -104,6 +107,11 @@ fn method_definitions(
     Ok(definitions)
 }
 
+fn method_registry(definitions_json: &str, include_standard: bool) -> PyResult<MethodRegistry> {
+    MethodRegistry::new(method_definitions(definitions_json, include_standard)?)
+        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))
+}
+
 /// Validate Python-authored portable Method definitions against the Rust contract.
 #[pyfunction]
 fn validate_method_definitions(definitions_json: &str, include_standard: bool) -> PyResult<String> {
@@ -152,9 +160,7 @@ fn refine_lab_modules(
     definitions_json: &str,
     include_standard: bool,
 ) -> PyResult<String> {
-    let definitions = method_definitions(definitions_json, include_standard)?;
-    let registry = MethodRegistry::new(definitions)
-        .expect("method_definitions returned only a validated complete catalog");
+    let registry = method_registry(definitions_json, include_standard)?;
     let checked = compile_named_modules(&modules)?;
     let module_refs = checked.iter().collect::<Vec<_>>();
     let refined = PortableLairProgram::lower_program(&module_refs)
@@ -172,6 +178,84 @@ fn refine_lab_modules(
     .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
+#[derive(Serialize)]
+struct PythonInventorySelection<'a> {
+    document: &'a Path,
+    sha256: &'a str,
+    facility: &'a str,
+}
+
+#[derive(Serialize)]
+struct PythonFacilityPlan<'a> {
+    schema_version: &'static str,
+    package: &'a str,
+    version: &'a str,
+    inventory: PythonInventorySelection<'a>,
+    adapter_bindings: Option<&'a lab_compiler::planning::AdapterBindingSnapshot>,
+    refined_lair: &'a str,
+    planning_problem: &'a lab_compiler::planning::PlanningProblem,
+    facility_solution: &'a lab_compiler::planning::FacilityPlanningSolution,
+    allocated_lair: String,
+    adapter_invocations: &'a lab_compiler::planning::AdapterInvocationPlan,
+}
+
+fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String> {
+    serde_json::to_string(&PythonFacilityPlan {
+        schema_version: "lab.python-facility-plan.v1",
+        package: &planned.package,
+        version: &planned.version,
+        inventory: PythonInventorySelection {
+            document: planned.inventory.source_path(),
+            sha256: planned.inventory.source_sha256(),
+            facility: planned.inventory.facility().as_str(),
+        },
+        adapter_bindings: planned.adapter_bindings.as_ref(),
+        refined_lair: &planned.refined_lair,
+        planning_problem: planned.problem(),
+        facility_solution: planned.solution(),
+        allocated_lair: planned.allocated.ir(),
+        adapter_invocations: &planned.adapter_invocations,
+    })
+    .map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
+/// Compile and facility-plan the default package in a Lab project.
+#[pyfunction]
+fn plan_lab_project(
+    path: &str,
+    definitions_json: &str,
+    include_standard: bool,
+) -> PyResult<String> {
+    let registry = method_registry(definitions_json, include_standard)?;
+    let project = LabProject::discover(path)
+        .map_err(|error| PyValueError::new_err(format!("failed to load Lab project: {error}")))?;
+    let compiled = project.compile().map_err(|error| {
+        PyValueError::new_err(format!("failed to compile Lab project: {error}"))
+    })?;
+    let planned = project
+        .plan_facility(&compiled, &registry)
+        .map_err(|error| PyValueError::new_err(format!("failed to plan Lab project: {error}")))?;
+    serialize_facility_plan(&planned)
+}
+
+/// Facility-plan checked Python-emitted modules using a Lab package as operational context.
+#[pyfunction]
+fn plan_lab_modules(
+    modules: Vec<(String, String)>,
+    package_path: &str,
+    definitions_json: &str,
+    include_standard: bool,
+) -> PyResult<String> {
+    let registry = method_registry(definitions_json, include_standard)?;
+    let checked = compile_named_modules(&modules)?;
+    let module_refs = checked.iter().collect::<Vec<_>>();
+    let project = LabProject::discover(package_path)
+        .map_err(|error| PyValueError::new_err(format!("failed to load Lab project: {error}")))?;
+    let planned = plan_modules_for_package(project.default_package(), &module_refs, &registry)
+        .map_err(|error| PyValueError::new_err(format!("failed to plan Lab program: {error}")))?;
+    serialize_facility_plan(&planned)
+}
+
 #[pymodule]
 pub fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(compile_lab_module, module)?)?;
@@ -179,5 +263,7 @@ pub fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(lab_standard_library, module)?)?;
     module.add_function(wrap_pyfunction!(validate_method_definitions, module)?)?;
     module.add_function(wrap_pyfunction!(refine_lab_modules, module)?)?;
+    module.add_function(wrap_pyfunction!(plan_lab_project, module)?)?;
+    module.add_function(wrap_pyfunction!(plan_lab_modules, module)?)?;
     Ok(())
 }

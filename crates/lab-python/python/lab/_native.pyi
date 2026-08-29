@@ -5,3 +5,10 @@ def validate_method_definitions(definitions_json: str, include_standard: bool) -
 def refine_lab_modules(
     modules: list[tuple[str, str]], definitions_json: str, include_standard: bool
 ) -> str: ...
+def plan_lab_project(path: str, definitions_json: str, include_standard: bool) -> str: ...
+def plan_lab_modules(
+    modules: list[tuple[str, str]],
+    package_path: str,
+    definitions_json: str,
+    include_standard: bool,
+) -> str: ...
