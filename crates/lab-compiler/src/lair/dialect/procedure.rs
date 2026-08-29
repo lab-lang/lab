@@ -7,8 +7,11 @@
 // Construction APIs are consumed by the forthcoming method-refinement pass.
 #![allow(dead_code)]
 
+use std::collections::BTreeSet;
+
 use lab_capability::{AbsoluteIri, OperationId, PropertyKind, PropertyValue};
-use pliron::builtin::attributes::StringAttr;
+use lab_method::LocalId;
+use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;
 use pliron::context::Context;
@@ -20,6 +23,7 @@ use pliron::r#type::{TypeHandle, Typed};
 use pliron::value::Value;
 use pliron::{verify_err, verify_err_noloc};
 
+use crate::lair::dialect::attributes::string_vec;
 use crate::lair::dialect::design::DesignType;
 use crate::lair::dialect::scalar::{decode_property_value, encode_property_value};
 
@@ -63,7 +67,11 @@ impl Verify for DataType {
 #[pliron_op(
     name = "procedure.task",
     format,
-    attributes = (node_id: StringAttr, operation: StringAttr)
+    attributes = (
+        node_id: StringAttr,
+        operation: StringAttr,
+        task_output_names: VecAttr
+    )
 )]
 pub(crate) struct TaskOp;
 
@@ -74,6 +82,7 @@ impl TaskOp {
         operation: &OperationId,
         operands: Vec<Value>,
         result_types: Vec<TypeHandle>,
+        output_names: &[LocalId],
     ) -> Self {
         let raw = Operation::new(
             context,
@@ -86,6 +95,10 @@ impl TaskOp {
         let result = Self { op: raw };
         result.set_attr_node_id(context, StringAttr::new(node_id.into()));
         result.set_attr_operation(context, StringAttr::new(operation.to_string()));
+        result.set_attr_task_output_names(
+            context,
+            string_vec(output_names.iter().map(ToString::to_string).collect()),
+        );
         result
     }
 
@@ -118,6 +131,36 @@ impl Verify for TaskOp {
             );
         }
         let operation = self.get_operation().deref(context);
+        let Some(output_names) = self.get_attr_task_output_names(context) else {
+            return verify_err!(self.loc(context), "procedure.task is missing output names");
+        };
+        if output_names.0.len() != operation.get_num_results() {
+            return verify_err!(
+                self.loc(context),
+                "procedure.task output names must match its result arity"
+            );
+        }
+        let mut seen = BTreeSet::new();
+        for name in &output_names.0 {
+            let Some(name) = name.downcast_ref::<StringAttr>() else {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.task output names must contain only strings"
+                );
+            };
+            if !is_stable_local_id(name.as_str()) {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.task output names must be non-empty and contain no whitespace"
+                );
+            }
+            if !seen.insert(name.as_str()) {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.task output names must be unique"
+                );
+            }
+        }
         for operand in operation.operands() {
             if !is_procedure_port_type(context, operand.get_type(context)) {
                 return verify_err!(

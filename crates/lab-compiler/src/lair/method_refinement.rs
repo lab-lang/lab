@@ -28,7 +28,7 @@ use crate::lair::dialect::attributes::{quantity_entry, u32_value};
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 use crate::lair::dialect::design::DesignType;
-use crate::lair::dialect::method::{ChoiceOp, YieldOp};
+use crate::lair::dialect::method::{ChoiceOp, ChoicePorts, YieldOp};
 use crate::lair::dialect::procedure::{
     DataType as ProcedureDataType, MaterialType as ProcedureMaterialType, ParameterOp, TaskOp,
 };
@@ -122,14 +122,26 @@ impl DialectConversion for MethodRefinement<'_> {
             .outputs
             .iter()
             .map(|output| port_type(context, &output.port_type))
-            .collect();
+            .collect::<Vec<_>>();
         let choice = ChoiceOp::new(
             context,
             &choice_id,
             instance.operation.as_str(),
-            operands.clone(),
-            result_types,
             &method_ids,
+            ChoicePorts {
+                inputs: signature
+                    .inputs
+                    .iter()
+                    .zip(operands.iter().copied())
+                    .map(|(input, value)| (input.name.clone(), value))
+                    .collect(),
+                outputs: signature
+                    .outputs
+                    .iter()
+                    .zip(result_types)
+                    .map(|(output, ty)| (output.name.clone(), ty))
+                    .collect(),
+            },
         );
 
         for (candidate_index, candidate) in candidates.iter().enumerate() {
@@ -300,6 +312,11 @@ fn append_candidate(
             &task.operation,
             task_operands,
             task_results,
+            &task
+                .outputs
+                .iter()
+                .map(|output| output.name.clone())
+                .collect::<Vec<_>>(),
         );
         for (index, output) in task.outputs.iter().enumerate() {
             values.insert(

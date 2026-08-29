@@ -6,6 +6,7 @@
 use std::collections::BTreeSet;
 
 use lab_capability::MethodId;
+use lab_method::LocalId;
 use pliron::basic_block::BasicBlock;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{
@@ -30,20 +31,32 @@ use crate::lair::dialect::procedure::is_stable_local_id;
 #[pliron_op(
     name = "method.choice",
     format,
-    attributes = (choice_id: StringAttr, source_operation: StringAttr, candidates: VecAttr),
+    attributes = (
+        choice_id: StringAttr,
+        source_operation: StringAttr,
+        candidates: VecAttr,
+        choice_input_names: VecAttr,
+        choice_output_names: VecAttr
+    ),
     interfaces = [SingleBlockRegionInterface]
 )]
 pub(crate) struct ChoiceOp;
+
+pub(crate) struct ChoicePorts {
+    pub inputs: Vec<(LocalId, Value)>,
+    pub outputs: Vec<(LocalId, TypeHandle)>,
+}
 
 impl ChoiceOp {
     pub(crate) fn new(
         context: &mut Context,
         choice_id: impl Into<String>,
         source_operation: impl Into<String>,
-        operands: Vec<Value>,
-        result_types: Vec<TypeHandle>,
         candidates: &[MethodId],
+        ports: ChoicePorts,
     ) -> Self {
+        let (input_names, operands): (Vec<_>, Vec<_>) = ports.inputs.into_iter().unzip();
+        let (output_names, result_types): (Vec<_>, Vec<_>) = ports.outputs.into_iter().unzip();
         let raw = Operation::new(
             context,
             Self::get_concrete_op_info(),
@@ -58,6 +71,14 @@ impl ChoiceOp {
         result.set_attr_candidates(
             context,
             string_vec(candidates.iter().map(ToString::to_string).collect()),
+        );
+        result.set_attr_choice_input_names(
+            context,
+            string_vec(input_names.iter().map(ToString::to_string).collect()),
+        );
+        result.set_attr_choice_output_names(
+            context,
+            string_vec(output_names.iter().map(ToString::to_string).collect()),
         );
         for index in 0..candidates.len() {
             let block = BasicBlock::new(context, None, vec![]);
@@ -119,6 +140,8 @@ impl Verify for ChoiceOp {
                 "method.choice candidate identities and regions must have the same length"
             );
         }
+        self.verify_port_names(context, true)?;
+        self.verify_port_names(context, false)?;
         let mut seen = BTreeSet::new();
         for candidate in &candidates.0 {
             let Some(candidate) = candidate.downcast_ref::<StringAttr>() else {
@@ -148,6 +171,53 @@ impl Verify for ChoiceOp {
 }
 
 impl ChoiceOp {
+    fn verify_port_names(&self, context: &Context, inputs: bool) -> Result<()> {
+        let (kind, names, expected) = if inputs {
+            (
+                "input",
+                self.get_attr_choice_input_names(context),
+                self.get_operation().deref(context).get_num_operands(),
+            )
+        } else {
+            (
+                "output",
+                self.get_attr_choice_output_names(context),
+                self.get_operation().deref(context).get_num_results(),
+            )
+        };
+        let Some(names) = names else {
+            return verify_err!(self.loc(context), "method.choice is missing {kind} names");
+        };
+        if names.0.len() != expected {
+            return verify_err!(
+                self.loc(context),
+                "method.choice {kind} names must match its {kind} arity"
+            );
+        }
+        let mut seen = BTreeSet::new();
+        for name in &names.0 {
+            let Some(name) = name.downcast_ref::<StringAttr>() else {
+                return verify_err!(
+                    self.loc(context),
+                    "method.choice {kind} names must contain only strings"
+                );
+            };
+            if !is_stable_local_id(name.as_str()) {
+                return verify_err!(
+                    self.loc(context),
+                    "method.choice {kind} names must be non-empty and contain no whitespace"
+                );
+            }
+            if !seen.insert(name.as_str()) {
+                return verify_err!(
+                    self.loc(context),
+                    "method.choice {kind} names must be unique"
+                );
+            }
+        }
+        Ok(())
+    }
+
     fn verify_yield(&self, context: &Context, candidate: usize) -> Result<()> {
         let Some(block) = self
             .candidate_region(context, candidate)

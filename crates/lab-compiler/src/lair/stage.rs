@@ -442,7 +442,7 @@ mod tests {
 
     use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
     use crate::lair::dialect::design::DesignDnaSequenceOp;
-    use crate::lair::dialect::method::{ChoiceOp, YieldOp};
+    use crate::lair::dialect::method::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::lair::dialect::procedure::{MaterialType, ParameterOp, TaskOp};
     use crate::lair::session::CompilerSession;
 
@@ -468,7 +468,9 @@ mod tests {
         );
         let ir = module.get_operation().disp(&context).to_string();
         assert!(ir.contains("method.choice"), "{ir}");
+        assert!(ir.contains("choice_output_names"), "{ir}");
         assert!(ir.contains("procedure.task"), "{ir}");
+        assert!(ir.contains("task_output_names"), "{ir}");
         assert!(ir.contains("capability.requirement"), "{ir}");
         assert!(ir.contains("capability.constraint"), "{ir}");
         assert!(ir.contains("9007199254740993"), "{ir}");
@@ -555,9 +557,11 @@ mod tests {
             &mut context,
             "incubation",
             "std.lab.incubate",
-            vec![],
-            vec![material_type],
             &candidates,
+            ChoicePorts {
+                inputs: vec![],
+                outputs: vec![(lab_method::LocalId::new("sample").unwrap(), material_type)],
+            },
         );
         let operation = OperationId::new("https://example.org/procedure/incubate").unwrap();
         let capability = CapabilityKind::new("https://sbol.io/ns/capability#Incubation").unwrap();
@@ -565,7 +569,14 @@ mod tests {
         for candidate in 0..candidates.len() {
             let node = format!("incubation::candidate-{candidate}::incubate");
             let requirement = format!("incubation::candidate-{candidate}::temperature-control");
-            let task = TaskOp::new(&mut context, &node, &operation, vec![], vec![material_type]);
+            let task = TaskOp::new(
+                &mut context,
+                &node,
+                &operation,
+                vec![],
+                vec![material_type],
+                &[lab_method::LocalId::new("sample").unwrap()],
+            );
             let result = task.get_operation().deref(&context).get_result(0);
             choice.append_candidate_operation(&mut context, candidate, task.get_operation());
             let parameter = ParameterOp::new(
@@ -610,6 +621,7 @@ mod tests {
                     &operation,
                     vec![],
                     vec![],
+                    &[],
                 );
                 choice.append_candidate_operation(
                     &mut context,
