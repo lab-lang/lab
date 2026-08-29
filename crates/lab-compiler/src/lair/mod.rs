@@ -1,5 +1,6 @@
 //! Pliron-backed Lab intermediate representations and their transformations.
 
+pub(crate) mod allocation;
 pub(crate) mod analysis;
 pub(crate) mod dialect;
 pub mod methods;

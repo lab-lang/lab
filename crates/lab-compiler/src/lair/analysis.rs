@@ -9,7 +9,8 @@ use pliron::r#type::Typed;
 use pliron::value::Value;
 use pliron::verify_err;
 
-use crate::lair::dialect::protocol::MaterialType;
+use crate::lair::dialect::procedure::MaterialType as ProcedureMaterialType;
+use crate::lair::dialect::protocol::MaterialType as ProtocolMaterialType;
 
 /// A whole-IR analysis of the affine physical-resource rule.
 ///
@@ -55,7 +56,15 @@ fn collect_material_results(ctx: &Context, values: &mut Vec<Value>, node: IRNode
     };
     for result in operation.deref(ctx).results() {
         let handle = result.get_type(ctx);
-        if handle.deref(ctx).downcast_ref::<MaterialType>().is_some() {
+        if handle
+            .deref(ctx)
+            .downcast_ref::<ProtocolMaterialType>()
+            .is_some()
+            || handle
+                .deref(ctx)
+                .downcast_ref::<ProcedureMaterialType>()
+                .is_some()
+        {
             values.push(result);
         }
     }

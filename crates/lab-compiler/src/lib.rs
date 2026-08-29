@@ -19,8 +19,9 @@ pub use lab_language::{
 pub use lair::methods::standard_method_registry;
 pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
 pub use lair::program::{
-    PlanningProblemExtractionError, PortableLairError, PortableLairProgram, ProtocolLairError,
-    ProtocolLairProgram, RefinedLairError, RefinedLairProgram,
+    AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
+    PortableLairProgram, ProtocolLairError, ProtocolLairProgram, RefinedLairError,
+    RefinedLairProgram,
 };
 pub use lair::session::{CompilerSession, SessionError, SessionOptions};
 pub use lair::stage::{IrStage, StageContract};

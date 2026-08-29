@@ -10,6 +10,7 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use pliron::value::{DefiningEntity, Value};
 
+use crate::lair::dialect::allocation::{BindingOp, ContextOp as AllocationContextOp, MethodOp};
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::meta::StageOp;
 use crate::lair::dialect::method::{ChoiceOp, YieldOp};
@@ -24,6 +25,8 @@ pub enum IrStage {
     DesignIntent,
     /// Facility-independent Method candidates containing Procedure and Capability operations.
     RefinedAlternatives,
+    /// One selected Procedure graph with exact facility and adapter decisions.
+    AllocatedProcedure,
     /// Method-selected Protocol IR plus the retained Design value it currently consumes.
     MethodSelectedProtocol,
 }
@@ -34,6 +37,7 @@ impl Display for IrStage {
             Self::Design => "design",
             Self::DesignIntent => "design-intent",
             Self::RefinedAlternatives => "refined-alternatives",
+            Self::AllocatedProcedure => "allocated-procedure",
             Self::MethodSelectedProtocol => "method-selected-protocol",
         })
     }
@@ -47,9 +51,10 @@ impl FromStr for IrStage {
             "design" => Ok(Self::Design),
             "design-intent" | "design-workflow" => Ok(Self::DesignIntent),
             "refined-alternatives" => Ok(Self::RefinedAlternatives),
+            "allocated-procedure" => Ok(Self::AllocatedProcedure),
             "method-selected-protocol" => Ok(Self::MethodSelectedProtocol),
             other => Err(format!(
-                "unknown IR stage '{other}'; expected design, design-intent, refined-alternatives, or method-selected-protocol"
+                "unknown IR stage '{other}'; expected design, design-intent, refined-alternatives, allocated-procedure, or method-selected-protocol"
             )),
         }
     }
@@ -87,6 +92,10 @@ pub(crate) fn detect_stage(context: &Context, module: ModuleOp) -> Result<IrStag
         verify_refined_alternatives(context, module)?;
         return Ok(declared);
     }
+    if declared == IrStage::AllocatedProcedure {
+        verify_allocated_procedure(context, module)?;
+        return Ok(declared);
+    }
     let (design_operations, workflow_operations, protocol_operations) =
         operation_counts(context, module)?;
     let structural = match (design_operations, workflow_operations, protocol_operations) {
@@ -109,6 +118,235 @@ pub(crate) fn detect_stage(context: &Context, module: ModuleOp) -> Result<IrStag
         ));
     }
     Ok(declared)
+}
+
+fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(), String> {
+    let block = module
+        .get_region(context)
+        .deref(context)
+        .get_head()
+        .ok_or_else(|| "builtin.module has no entry block".to_owned())?;
+    let mut allocation_contexts = 0;
+    let mut methods = Vec::new();
+    let mut task_operations = Vec::new();
+    let mut tasks = BTreeSet::new();
+    let mut requirements = BTreeMap::new();
+    let mut parameters = Vec::new();
+    let mut constraints = Vec::new();
+    let mut bindings = BTreeMap::new();
+    let mut design_operations = 0;
+
+    for operation in block.deref(context).iter(context) {
+        let id = Operation::get_opid(operation, context);
+        if Operation::get_op::<StageOp>(operation, context).is_some() {
+            continue;
+        }
+        if id.dialect.as_ref() == "design" {
+            design_operations += 1;
+            continue;
+        }
+        if Operation::get_op::<AllocationContextOp>(operation, context).is_some() {
+            allocation_contexts += 1;
+            continue;
+        }
+        if let Some(method) = Operation::get_op::<MethodOp>(operation, context) {
+            methods.push(method);
+            continue;
+        }
+        if let Some(task) = Operation::get_op::<TaskOp>(operation, context) {
+            let node = task.node_id(context);
+            if !tasks.insert(node.clone()) {
+                return Err(format!("duplicate Procedure node identity '{node}'"));
+            }
+            task_operations.push(operation);
+            continue;
+        }
+        if let Some(requirement) = Operation::get_op::<RequirementOp>(operation, context) {
+            let requirement_id = requirement.requirement_id(context);
+            if requirements
+                .insert(requirement_id.clone(), requirement)
+                .is_some()
+            {
+                return Err(format!("duplicate Requirement identity '{requirement_id}'"));
+            }
+            continue;
+        }
+        if let Some(parameter) = Operation::get_op::<ParameterOp>(operation, context) {
+            parameters.push((
+                parameter.parameter_id(context),
+                parameter.procedure_node(context),
+            ));
+            continue;
+        }
+        if let Some(constraint) = Operation::get_op::<ConstraintOp>(operation, context) {
+            constraints.push(constraint.requirement_id(context));
+            continue;
+        }
+        if let Some(binding) = Operation::get_op::<BindingOp>(operation, context) {
+            let requirement = binding.requirement(context);
+            if bindings.insert(requirement.clone(), binding).is_some() {
+                return Err(format!(
+                    "Requirement '{requirement}' has more than one allocation.binding"
+                ));
+            }
+            continue;
+        }
+        return Err(format!(
+            "operation '{id}' is not legal at the allocated-procedure module boundary"
+        ));
+    }
+    if design_operations == 0 {
+        return Err("allocated-procedure requires at least one Design operation".to_owned());
+    }
+    if allocation_contexts != 1 {
+        return Err(format!(
+            "allocated-procedure requires exactly one allocation.context, found {allocation_contexts}"
+        ));
+    }
+    if methods.is_empty() || tasks.is_empty() {
+        return Err("allocated-procedure requires selected Methods and Procedure tasks".to_owned());
+    }
+
+    let mut choices = BTreeSet::new();
+    let mut selected_tasks = BTreeSet::new();
+    for method in methods {
+        let choice = method.choice(context);
+        if !choices.insert(choice.clone()) {
+            return Err(format!("duplicate selected Method choice '{choice}'"));
+        }
+        for task in method.procedure_nodes(context) {
+            if !selected_tasks.insert(task.clone()) {
+                return Err(format!(
+                    "Procedure node '{task}' belongs to more than one selected Method"
+                ));
+            }
+        }
+    }
+    let semantic_tasks = tasks
+        .iter()
+        .map(|task| lab_method::LocalId::new(task).expect("verified task IDs are stable"))
+        .collect::<BTreeSet<_>>();
+    if selected_tasks != semantic_tasks {
+        return Err(
+            "selected Methods must name every allocated Procedure node exactly once".to_owned(),
+        );
+    }
+    for (parameter, node) in parameters {
+        if !tasks.contains(&node) {
+            return Err(format!(
+                "Procedure parameter '{parameter}' references absent node '{node}'"
+            ));
+        }
+    }
+    for requirement in requirements.values() {
+        let node = requirement.procedure_node(context);
+        if !tasks.contains(&node) {
+            return Err(format!(
+                "Requirement '{}' references absent Procedure node '{node}'",
+                requirement.requirement_id(context)
+            ));
+        }
+    }
+    for task in &tasks {
+        if !requirements
+            .values()
+            .any(|requirement| requirement.procedure_node(context) == *task)
+        {
+            return Err(format!(
+                "allocated Procedure node '{task}' has no Capability requirement"
+            ));
+        }
+    }
+    for requirement in constraints {
+        if !requirements.contains_key(&requirement) {
+            return Err(format!(
+                "Capability constraint references absent Requirement '{requirement}'"
+            ));
+        }
+    }
+    if bindings.len() != requirements.len() {
+        return Err("every allocated Requirement must have exactly one binding".to_owned());
+    }
+    for (requirement_id, requirement) in &requirements {
+        let stable_id =
+            lab_method::LocalId::new(requirement_id).expect("verified Requirement IDs are stable");
+        let Some(binding) = bindings.get(&stable_id) else {
+            return Err(format!(
+                "allocated Requirement '{requirement_id}' has no binding"
+            ));
+        };
+        if binding.procedure_node(context).as_str() != requirement.procedure_node(context) {
+            return Err(format!(
+                "allocation for Requirement '{requirement_id}' names the wrong Procedure node"
+            ));
+        }
+        let observed_qualification = lab_capability::QualificationLevel::try_from(
+            binding
+                .get_attr_observed_qualification(context)
+                .expect("verified binding carries qualification")
+                .as_str(),
+        )
+        .expect("binding verifier accepts only closed qualifications");
+        if !requirement
+            .semantic_minimum_qualification(context)
+            .is_satisfied_by(observed_qualification)
+        {
+            return Err(format!(
+                "allocation for Requirement '{requirement_id}' has insufficient qualification"
+            ));
+        }
+        let observed_control_mode = lab_capability::ControlMode::try_from(
+            binding
+                .get_attr_observed_control_mode(context)
+                .expect("verified binding carries control mode")
+                .as_str(),
+        )
+        .expect("binding verifier accepts only closed control modes");
+        if !requirement
+            .semantic_control_modes(context)
+            .contains(&observed_control_mode)
+        {
+            return Err(format!(
+                "allocation for Requirement '{requirement_id}' uses an unaccepted control mode"
+            ));
+        }
+    }
+    verify_allocated_dataflow(context, &task_operations)
+}
+
+fn verify_allocated_dataflow(
+    context: &Context,
+    tasks: &[pliron::context::Ptr<Operation>],
+) -> Result<(), String> {
+    for (consumer_index, task) in tasks.iter().enumerate() {
+        let task_id = Operation::get_op::<TaskOp>(*task, context)
+            .expect("allocated task list contains Procedure tasks")
+            .node_id(context);
+        for operand in task.deref(context).operands() {
+            let DefiningEntity::Op(definition) = operand.defining_entity() else {
+                return Err(format!(
+                    "allocated Procedure node '{task_id}' cannot consume a block argument"
+                ));
+            };
+            let definition_id = Operation::get_opid(definition, context);
+            if definition_id.dialect.as_ref() == "design" {
+                continue;
+            }
+            let Some(definition_index) =
+                tasks.iter().position(|candidate| *candidate == definition)
+            else {
+                return Err(format!(
+                    "allocated Procedure node '{task_id}' consumes a value outside Design or Procedure LAIR"
+                ));
+            };
+            if definition_index >= consumer_index {
+                return Err(format!(
+                    "allocated Procedure node '{task_id}' uses a value before its task defines it"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<(), String> {

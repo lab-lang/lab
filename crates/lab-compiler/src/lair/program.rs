@@ -58,6 +58,20 @@ pub enum RefinedLairError {
 
 pub use crate::lair::planning_problem::PlanningProblemExtractionError;
 
+#[derive(Debug, Error)]
+pub enum AllocatedLairError {
+    #[error(transparent)]
+    Problem(#[from] PlanningProblemExtractionError),
+    #[error(transparent)]
+    Application(#[from] crate::lair::allocation::AllocationApplicationError),
+    #[error("generated allocated LAIR failed verification: {0}")]
+    Verification(String),
+    #[error("generated allocated LAIR failed material-linearity analysis: {0}")]
+    MaterialLinearity(String),
+    #[error("generated LAIR does not satisfy the allocated-procedure contract: {0}")]
+    Stage(String),
+}
+
 /// A Pliron context and its root module, owned together for the complete
 /// lifetime of all IR handles.
 pub struct PortableLairProgram {
@@ -248,6 +262,61 @@ impl RefinedLairProgram {
         &self,
     ) -> Result<crate::planning::PlanningProblem, PlanningProblemExtractionError> {
         crate::lair::planning_problem::extract_planning_problem(&self.context, self.module)
+    }
+
+    /// Apply one complete solution to this exact refined module and eliminate every alternative.
+    pub fn allocate(
+        mut self,
+        solution: crate::planning::FacilityPlanningSolution,
+    ) -> Result<AllocatedLairProgram, AllocatedLairError> {
+        let problem = self.planning_problem()?;
+        crate::lair::allocation::apply_facility_solution(
+            &mut self.context,
+            self.module,
+            &problem,
+            &solution,
+        )?;
+        set_stage(&mut self.context, self.module, IrStage::AllocatedProcedure)
+            .map_err(AllocatedLairError::Stage)?;
+        verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
+            AllocatedLairError::Verification(error.disp(&self.context).to_string())
+        })?;
+        crate::lair::analysis::MaterialLinearityAnalysis::compute(
+            self.module.get_operation(),
+            &self.context,
+            &mut AnalysisManager::default(),
+        )
+        .map_err(|error| {
+            AllocatedLairError::MaterialLinearity(error.disp(&self.context).to_string())
+        })?;
+        let stage = detect_stage(&self.context, self.module).map_err(AllocatedLairError::Stage)?;
+        if stage != IrStage::AllocatedProcedure {
+            return Err(AllocatedLairError::Stage(format!(
+                "expected allocated-procedure, found {stage}"
+            )));
+        }
+        Ok(AllocatedLairProgram {
+            context: self.context,
+            module: self.module,
+            solution,
+        })
+    }
+}
+
+/// Owned, verifier-valid Procedure LAIR with all method and facility decisions frozen.
+pub struct AllocatedLairProgram {
+    context: Context,
+    module: ModuleOp,
+    solution: crate::planning::FacilityPlanningSolution,
+}
+
+impl AllocatedLairProgram {
+    pub fn ir(&self) -> String {
+        self.module.get_operation().disp(&self.context).to_string()
+    }
+
+    pub fn solution(&self) -> &crate::planning::FacilityPlanningSolution {
+        &self.solution
     }
 }
 
@@ -456,13 +525,18 @@ fn workflow_value(
 #[cfg(test)]
 mod tests {
     use lab_capability::ScalarValue;
+    use lab_inventory::InventorySnapshot;
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
+    use lab_method::IntentOperationId;
 
     use crate::lair::session::CompilerSession;
     use crate::lair::stage::IrStage;
-    use crate::planning::{PlanningProblem, PlanningValueSource};
+    use crate::planning::{
+        AdapterRequirement, FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin,
+        MethodPinSelector, PlanningProblem, PlanningValueSource,
+    };
 
     use super::PortableLairProgram;
 
@@ -776,5 +850,64 @@ workflow build_second() -> Material<Plasmid>:
         let decoded: PlanningProblem = serde_json::from_str(&json).expect("problem deserializes");
         decoded.validate().expect("decoded problem revalidates");
         assert_eq!(decoded, problem);
+    }
+
+    #[test]
+    fn a_complete_solution_produces_verifier_valid_allocated_procedure_lair() {
+        let source = format!("{DESIGNS}{WORKFLOWS}")
+            .replace("use demo.designs\n", "")
+            .replace("use std.bio.designs\nuse std.bio.golden_gate\n", "")
+            .replacen(
+                "use std.bio.build",
+                "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.build",
+                1,
+            );
+        let checked = compile_module(&source).expect("program checks");
+        let refined = PortableLairProgram::lower(&checked)
+            .expect("portable LAIR lowers")
+            .refine_standard_methods()
+            .expect("standard methods refine");
+        let problem = refined.planning_problem().expect("problem projects");
+        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let inventory = InventorySnapshot::load(
+            workspace.join("examples/golden-gate"),
+            "inventory/facility.ttl",
+            None,
+        )
+        .expect("Golden Gate inventory validates");
+        let policy = FacilityPlanningPolicy {
+            method_pins: vec![MethodPin {
+                selector: MethodPinSelector::SourceOperation {
+                    source_operation: IntentOperationId::new("std.bio.build.realize").unwrap(),
+                },
+                method: lab_capability::MethodId::new(
+                    "https://www.lab-compiler.org/ns/method#automated-golden-gate",
+                )
+                .unwrap(),
+            }],
+            adapter_requirement: AdapterRequirement::Optional,
+        };
+        let solution = FacilityPlanningSolution::solve(&problem, &inventory, None, policy).unwrap();
+        let allocated = refined.allocate(solution).expect("solution applies");
+        let ir = allocated.ir();
+
+        assert!(ir.contains("allocated-procedure"), "{ir}");
+        assert!(ir.contains("allocation.context"), "{ir}");
+        assert!(ir.contains("allocation.method"), "{ir}");
+        assert!(ir.contains("allocation.binding"), "{ir}");
+        assert!(
+            ir.contains("https://example.org/golden-gate/opentrons_ot2"),
+            "{ir}"
+        );
+        assert!(ir.contains("#manual-recovery"), "{ir}");
+        assert!(!ir.contains("method.choice"), "{ir}");
+        assert!(!ir.contains("method.yield"), "{ir}");
+
+        let mut session = CompilerSession::default();
+        session.parse_ir(&ir).unwrap();
+        session.verify_stage(IrStage::AllocatedProcedure).unwrap();
     }
 }
