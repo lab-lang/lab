@@ -360,6 +360,98 @@ impl Verify for ParameterOp {
     }
 }
 
+/// One concrete external material symbol required by a Procedure task.
+///
+/// This is still facility-independent: the symbol is resolved through the checked declaration's
+/// SBOL identity only after the complete Method graph has been extracted for planning.
+#[pliron_op(
+    name = "procedure.material_input",
+    format,
+    attributes = (
+        material_input_id: StringAttr,
+        material_input_node: StringAttr,
+        material_input_symbol: StringAttr
+    ),
+    interfaces = [NOpdsInterface<0>, NResultsInterface<0>]
+)]
+pub(crate) struct MaterialInputOp;
+
+impl MaterialInputOp {
+    pub(crate) fn new(
+        context: &mut Context,
+        input_id: impl Into<String>,
+        procedure_node: impl Into<String>,
+        symbol: impl Into<String>,
+    ) -> Self {
+        let raw = Operation::new(
+            context,
+            Self::get_concrete_op_info(),
+            vec![],
+            vec![],
+            vec![],
+            0,
+        );
+        let result = Self { op: raw };
+        result.set_attr_material_input_id(context, StringAttr::new(input_id.into()));
+        result.set_attr_material_input_node(context, StringAttr::new(procedure_node.into()));
+        result.set_attr_material_input_symbol(context, StringAttr::new(symbol.into()));
+        result
+    }
+
+    pub(crate) fn input_id(&self, context: &Context) -> String {
+        self.get_attr_material_input_id(context)
+            .expect("verified procedure.material_input carries an input ID")
+            .as_str()
+            .to_owned()
+    }
+
+    pub(crate) fn procedure_node(&self, context: &Context) -> String {
+        self.get_attr_material_input_node(context)
+            .expect("verified procedure.material_input carries a Procedure node")
+            .as_str()
+            .to_owned()
+    }
+
+    pub(crate) fn symbol(&self, context: &Context) -> String {
+        self.get_attr_material_input_symbol(context)
+            .expect("verified procedure.material_input carries a symbol")
+            .as_str()
+            .to_owned()
+    }
+}
+
+impl Verify for MaterialInputOp {
+    fn verify(&self, context: &Context) -> Result<()> {
+        for (name, value) in [
+            (
+                "material_input_id",
+                self.get_attr_material_input_id(context),
+            ),
+            (
+                "material_input_node",
+                self.get_attr_material_input_node(context),
+            ),
+        ] {
+            if value.is_none_or(|value| !is_stable_local_id(value.as_str())) {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.material_input {name} must be a stable local ID"
+                );
+            }
+        }
+        if self
+            .get_attr_material_input_symbol(context)
+            .is_none_or(|value| value.as_str().is_empty())
+        {
+            return verify_err!(
+                self.loc(context),
+                "procedure.material_input symbol must be non-empty"
+            );
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn is_stable_local_id(value: &str) -> bool {
     !value.is_empty()
         && !value

@@ -9,10 +9,11 @@ mod id;
 mod registry;
 
 pub use definition::{
-    CapabilityConstraintDefinition, CapabilityRequirementDefinition, MethodDefinition, MethodInput,
-    MethodOutput, MethodParameter, MethodSignature, ParameterType, PortType,
-    ProcedureParameterDefinition, ProcedureTaskDefinition, ProcedureValue,
-    ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
+    CapabilityConstraintDefinition, CapabilityRequirementDefinition, MaterialInputDefinition,
+    MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput, MethodParameter,
+    MethodSignature, ParameterType, PortType, ProcedureParameterDefinition,
+    ProcedureTaskDefinition, ProcedureValue, ProcedureValueExpression, ScalarType,
+    ScalarValueExpression, TaskOutput, ValueReference,
 };
 pub use id::{IntentOperationId, LocalId, LocalIdError};
 pub use registry::{MethodDefinitionError, MethodRegistry, MethodRegistryError};

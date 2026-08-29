@@ -427,6 +427,7 @@ fn task(
         inputs,
         outputs,
         parameters,
+        materials: Vec::new(),
         requirements,
     }
 }

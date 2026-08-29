@@ -6,8 +6,9 @@ use lab_capability::{
     ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue, ScalarValue, UnitIri,
 };
 use lab_method::{
-    IntentOperationId, LocalId, MethodDefinition, MethodRegistry, PortType, ProcedureValue,
-    ProcedureValueExpression, ScalarType, ScalarValueExpression, ValueReference,
+    IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodRegistry,
+    PortType, ProcedureValue, ProcedureValueExpression, ScalarType, ScalarValueExpression,
+    ValueReference,
 };
 use pliron::attribute::AttrObj;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
@@ -31,7 +32,8 @@ use crate::lair::dialect::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_
 use crate::lair::dialect::design::DesignType;
 use crate::lair::dialect::method::{ChoiceOp, ChoicePorts, YieldOp};
 use crate::lair::dialect::procedure::{
-    DataType as ProcedureDataType, MaterialType as ProcedureMaterialType, ParameterOp, TaskOp,
+    DataType as ProcedureDataType, MaterialInputOp, MaterialType as ProcedureMaterialType,
+    ParameterOp, TaskOp,
 };
 use crate::lair::dialect::workflow::{
     DiluteOp, MaterialType as WorkflowMaterialType, PlateOp, ProvisionOp, RealizeOp, RecoverOp,
@@ -408,6 +410,33 @@ fn append_candidate(
         }
         choice.append_candidate_operation(context, candidate_index, task_op.get_operation());
 
+        for material in &task.materials {
+            let symbols = resolve_material_symbols(
+                operation_location(choice, context),
+                &material.source,
+                parameters,
+            )?;
+            let indexed = matches!(
+                &material.source,
+                MaterialSourceExpression::IntentParameter { parameter }
+                    if matches!(parameters.get(parameter), Some(ProcedureValue::List { .. }))
+            );
+            for (index, symbol) in symbols.into_iter().enumerate() {
+                let suffix = if indexed {
+                    format!("::{index:04}")
+                } else {
+                    String::new()
+                };
+                let input_id = format!("{node_id}::material::{}{suffix}", material.id);
+                let material_op = MaterialInputOp::new(context, input_id, &node_id, symbol);
+                choice.append_candidate_operation(
+                    context,
+                    candidate_index,
+                    material_op.get_operation(),
+                );
+            }
+        }
+
         for parameter in &task.parameters {
             let parameter_id = format!("{node_id}::parameter::{}", parameter.id);
             let value = resolve_procedure_value(
@@ -472,6 +501,40 @@ fn append_candidate(
     let yield_op = YieldOp::new(context, yielded);
     choice.append_candidate_operation(context, candidate_index, yield_op.get_operation());
     Ok(())
+}
+
+fn resolve_material_symbols(
+    location: pliron::location::Location,
+    expression: &MaterialSourceExpression,
+    parameters: &BTreeMap<LocalId, ProcedureValue>,
+) -> Result<Vec<String>> {
+    match expression {
+        MaterialSourceExpression::Literal { symbol } => Ok(vec![symbol.clone()]),
+        MaterialSourceExpression::IntentParameter { parameter } => {
+            let Some(value) = parameters.get(parameter) else {
+                return input_err!(location, "Intent parameter '{parameter}' is unavailable");
+            };
+            match value {
+                ProcedureValue::Scalar { value } => match &value.value {
+                    ScalarValue::Text(symbol) => Ok(vec![symbol.clone()]),
+                    _ => input_err!(
+                        location,
+                        "material input parameter '{parameter}' is not text-valued"
+                    ),
+                },
+                ProcedureValue::List { values, .. } => values
+                    .iter()
+                    .map(|value| match &value.value {
+                        ScalarValue::Text(symbol) => Ok(symbol.clone()),
+                        _ => input_err!(
+                            location.clone(),
+                            "material input parameter '{parameter}' contains a non-text value"
+                        ),
+                    })
+                    .collect(),
+            }
+        }
+    }
 }
 
 fn resolve_scalar_value(

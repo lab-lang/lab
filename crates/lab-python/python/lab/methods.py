@@ -478,6 +478,53 @@ class ProcedureParameter:
 
 
 @dataclass(frozen=True, slots=True)
+class MaterialSource:
+    """A literal inventory symbol or a symbol-valued Intent parameter."""
+
+    kind: str
+    symbol: str | None = None
+    parameter: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "literal":
+            if not self.symbol or self.parameter is not None:
+                raise ValueError("a literal material source requires one non-empty symbol")
+        elif self.kind == "intent_parameter":
+            if self.parameter is None or self.symbol is not None:
+                raise ValueError("an Intent material source requires exactly one parameter")
+            _local(self.parameter, "material Intent parameter")
+        else:
+            raise ValueError(f"unknown material-source kind {self.kind!r}")
+
+    @classmethod
+    def constant(cls, symbol: str) -> Self:
+        return cls(kind="literal", symbol=symbol)
+
+    @classmethod
+    def intent_parameter(cls, parameter: str) -> Self:
+        return cls(kind="intent_parameter", parameter=parameter)
+
+    def to_dict(self) -> dict[str, object]:
+        if self.kind == "literal":
+            return {"kind": self.kind, "symbol": self.symbol}
+        return {"kind": self.kind, "parameter": self.parameter}
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialInput:
+    """One external material source required by a Procedure task."""
+
+    id: str
+    source: MaterialSource
+
+    def __post_init__(self) -> None:
+        _local(self.id, "Procedure material input ID")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"id": self.id, "source": self.source.to_dict()}
+
+
+@dataclass(frozen=True, slots=True)
 class Requirement:
     id: str
     capability_kind: str
@@ -507,6 +554,7 @@ class Task:
     inputs: tuple[ValueReference, ...] = ()
     outputs: tuple[TaskOutput, ...] = ()
     parameters: tuple[ProcedureParameter, ...] = ()
+    materials: tuple[MaterialInput, ...] = ()
 
     def __post_init__(self) -> None:
         _local(self.id, "Procedure task ID")
@@ -519,6 +567,7 @@ class Task:
             "inputs": [reference.to_dict() for reference in self.inputs],
             "outputs": [output.to_dict() for output in self.outputs],
             "parameters": [parameter.to_dict() for parameter in self.parameters],
+            "materials": [material.to_dict() for material in self.materials],
             "requirements": [requirement.to_dict() for requirement in self.requirements],
         }
 
@@ -603,6 +652,8 @@ __all__ = [
     "CapabilityConstraint",
     "ConstraintRelation",
     "ControlMode",
+    "MaterialInput",
+    "MaterialSource",
     "Method",
     "MethodCatalog",
     "MethodInput",

@@ -36,10 +36,10 @@ pub use model::{
     DependencyNode, LegacyBuildInventory, MaterialLotBinding, MaterialLotBuildInventory,
 };
 pub use problem::{
-    PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMethodCandidate,
-    PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProblem,
-    PlanningProblemValidationError, PlanningProcedureParameter, PlanningProcedureTask,
-    PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+    PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
+    PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,
+    PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
+    PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
 pub use resolution::{DependencyGraphError, resolve_dependency_graph};
 pub use solver::{

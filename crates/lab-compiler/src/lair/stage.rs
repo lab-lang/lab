@@ -14,7 +14,7 @@ use crate::lair::dialect::allocation::{BindingOp, ContextOp as AllocationContext
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::meta::StageOp;
 use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-use crate::lair::dialect::procedure::{ParameterOp, TaskOp};
+use crate::lair::dialect::procedure::{MaterialInputOp, ParameterOp, TaskOp};
 
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -383,6 +383,7 @@ fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<()
     let mut procedure_nodes = BTreeSet::new();
     let mut requirement_ids = BTreeSet::new();
     let mut parameter_ids = BTreeSet::new();
+    let mut material_input_ids = BTreeSet::new();
     for choice in choices {
         let choice_id = choice.choice_id(context);
         if !choice_ids.insert(choice_id.clone()) {
@@ -397,6 +398,7 @@ fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<()
                 &mut procedure_nodes,
                 &mut requirement_ids,
                 &mut parameter_ids,
+                &mut material_input_ids,
             )?;
         }
     }
@@ -410,6 +412,7 @@ fn verify_candidate(
     global_procedure_nodes: &mut BTreeSet<String>,
     global_requirement_ids: &mut BTreeSet<String>,
     global_parameter_ids: &mut BTreeSet<String>,
+    global_material_input_ids: &mut BTreeSet<String>,
 ) -> Result<(), String> {
     let choice_id = choice.choice_id(context);
     let block = choice
@@ -425,6 +428,7 @@ fn verify_candidate(
     let mut requirements = BTreeMap::new();
     let mut constraints = Vec::new();
     let mut parameters = Vec::new();
+    let mut material_inputs = Vec::new();
     let mut task_operations = Vec::new();
 
     for operation in block.deref(context).iter(context) {
@@ -464,6 +468,16 @@ fn verify_candidate(
                 return Err(format!("duplicate Procedure parameter identity '{id}'"));
             }
             parameters.push((id, parameter.procedure_node(context)));
+            continue;
+        }
+        if let Some(material) = Operation::get_op::<MaterialInputOp>(operation, context) {
+            let id = material.input_id(context);
+            if !global_material_input_ids.insert(id.clone()) {
+                return Err(format!(
+                    "duplicate Procedure material input identity '{id}'"
+                ));
+            }
+            material_inputs.push((id, material.procedure_node(context)));
             continue;
         }
         if Operation::get_op::<YieldOp>(operation, context).is_some() {
@@ -513,6 +527,13 @@ fn verify_candidate(
         if !tasks.contains(&node) {
             return Err(format!(
                 "Procedure parameter '{parameter}' references Procedure node '{node}' outside its candidate"
+            ));
+        }
+    }
+    for (material, node) in material_inputs {
+        if !tasks.contains(&node) {
+            return Err(format!(
+                "Procedure material input '{material}' references Procedure node '{node}' outside its candidate"
             ));
         }
     }
@@ -682,7 +703,7 @@ mod tests {
     use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
     use crate::lair::dialect::design::DesignDnaSequenceOp;
     use crate::lair::dialect::method::{ChoiceOp, ChoicePorts, YieldOp};
-    use crate::lair::dialect::procedure::{MaterialType, ParameterOp, TaskOp};
+    use crate::lair::dialect::procedure::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
     use crate::lair::session::CompilerSession;
 
     use super::*;
@@ -709,6 +730,7 @@ mod tests {
         assert!(ir.contains("method.choice"), "{ir}");
         assert!(ir.contains("choice_output_names"), "{ir}");
         assert!(ir.contains("procedure.task"), "{ir}");
+        assert!(ir.contains("procedure.material_input"), "{ir}");
         assert!(ir.contains("task_output_names"), "{ir}");
         assert!(ir.contains("capability.requirement"), "{ir}");
         assert!(ir.contains("capability.constraint"), "{ir}");
@@ -820,6 +842,13 @@ mod tests {
             );
             let result = task.get_operation().deref(&context).get_result(0);
             choice.append_candidate_operation(&mut context, candidate, task.get_operation());
+            let material = MaterialInputOp::new(
+                &mut context,
+                format!("{node}::material::medium"),
+                &node,
+                "recovery_medium",
+            );
+            choice.append_candidate_operation(&mut context, candidate, material.get_operation());
             let parameter = ParameterOp::new(
                 &mut context,
                 format!("{node}::parameter::cycles"),

@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v3";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v4";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///
@@ -68,7 +68,27 @@ pub struct PlanningProcedureTask {
     pub outputs: Vec<PlanningTaskOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<PlanningProcedureParameter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<PlanningMaterialInput>,
     pub requirements: Vec<PlanningCapabilityRequirement>,
+}
+
+/// One stable physical material input before facility allocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PlanningMaterialInput {
+    pub id: LocalId,
+    pub symbol: String,
+    pub source: PlanningMaterialSource,
+}
+
+/// The physical origin of a Procedure material input before facility allocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PlanningMaterialSource {
+    /// Resolve the symbol through its checked SBOL Component identity and an active MaterialLot.
+    Inventory,
+    /// Consume the physical result of another Method choice in this same plan.
+    ChoiceOutput { choice: LocalId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -137,6 +157,7 @@ impl PlanningProblem {
         let mut task_ids = BTreeSet::new();
         let mut requirement_ids = BTreeSet::new();
         let mut parameter_ids = BTreeSet::new();
+        let mut material_input_ids = BTreeSet::new();
         let mut output_ports = BTreeMap::new();
         for choice in &self.choices {
             if !choices.insert(choice.id.clone()) {
@@ -201,6 +222,7 @@ impl PlanningProblem {
                     &mut task_ids,
                     &mut requirement_ids,
                     &mut parameter_ids,
+                    &mut material_input_ids,
                 )?;
             }
         }
@@ -242,6 +264,27 @@ impl PlanningProblem {
                     return Err(PlanningProblemValidationError::ValueTypeMismatch {
                         owner: choice.id.clone(),
                         value_source: source.clone(),
+                    });
+                }
+                dependencies
+                    .get_mut(&choice.id)
+                    .expect("every validated choice has a dependency set")
+                    .insert(producer.clone());
+            }
+            for material in choice
+                .candidates
+                .iter()
+                .flat_map(|candidate| &candidate.tasks)
+                .flat_map(|task| &task.materials)
+            {
+                let PlanningMaterialSource::ChoiceOutput { choice: producer } = &material.source
+                else {
+                    continue;
+                };
+                if !dependencies.contains_key(producer) {
+                    return Err(PlanningProblemValidationError::UnknownMaterialProducer {
+                        material: material.id.clone(),
+                        producer: producer.clone(),
                     });
                 }
                 dependencies
@@ -320,6 +363,7 @@ fn validate_candidate(
     global_tasks: &mut BTreeSet<LocalId>,
     global_requirements: &mut BTreeSet<LocalId>,
     global_parameters: &mut BTreeSet<LocalId>,
+    global_material_inputs: &mut BTreeSet<LocalId>,
 ) -> Result<(), PlanningProblemValidationError> {
     if candidate.tasks.is_empty() {
         return Err(PlanningProblemValidationError::EmptyProcedure {
@@ -379,6 +423,18 @@ fn validate_candidate(
             if !global_parameters.insert(parameter.id.clone()) {
                 return Err(PlanningProblemValidationError::DuplicateParameter {
                     parameter: parameter.id.clone(),
+                });
+            }
+        }
+        for material in &task.materials {
+            if !global_material_inputs.insert(material.id.clone()) {
+                return Err(PlanningProblemValidationError::DuplicateMaterialInput {
+                    material: material.id.clone(),
+                });
+            }
+            if material.symbol.is_empty() {
+                return Err(PlanningProblemValidationError::EmptyMaterialSymbol {
+                    material: material.id.clone(),
                 });
             }
         }
@@ -494,6 +550,15 @@ pub enum PlanningProblemValidationError {
     },
     #[error("Procedure parameter `{parameter}` occurs more than once")]
     DuplicateParameter { parameter: LocalId },
+    #[error("Procedure material input `{material}` occurs more than once")]
+    DuplicateMaterialInput { material: LocalId },
+    #[error("Procedure material input `{material}` has an empty inventory symbol")]
+    EmptyMaterialSymbol { material: LocalId },
+    #[error("Procedure material input `{material}` references unknown Method choice `{producer}`")]
+    UnknownMaterialProducer {
+        material: LocalId,
+        producer: LocalId,
+    },
     #[error("Procedure task `{task}` has no Capability requirement")]
     MissingRequirement { task: LocalId },
     #[error("Capability requirement `{requirement}` occurs more than once")]

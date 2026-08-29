@@ -15,13 +15,13 @@ use thiserror::Error;
 
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-use crate::lair::dialect::procedure::{ParameterOp, TaskOp, semantic_port_type};
+use crate::lair::dialect::procedure::{MaterialInputOp, ParameterOp, TaskOp, semantic_port_type};
 use crate::lair::stage::{IrStage, detect_stage};
 use crate::planning::{
-    PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMethodCandidate,
-    PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProblem,
-    PlanningProblemValidationError, PlanningProcedureParameter, PlanningProcedureTask,
-    PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+    PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
+    PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,
+    PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
+    PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -172,7 +172,14 @@ fn extract_choice(
         .into_iter()
         .enumerate()
         .map(|(candidate, method)| {
-            extract_candidate(context, choice, &choice_id, candidate, method)
+            extract_candidate(
+                context,
+                choice,
+                &choice_id,
+                candidate,
+                method,
+                artifact_choices,
+            )
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PlanningMethodChoice {
@@ -191,6 +198,7 @@ fn extract_candidate(
     choice_id: &LocalId,
     candidate_index: usize,
     method: lab_capability::MethodId,
+    artifact_choices: &BTreeMap<String, LocalId>,
 ) -> Result<PlanningMethodCandidate, PlanningProblemExtractionError> {
     let block = choice
         .candidate_region(context, candidate_index)
@@ -262,7 +270,31 @@ fn extract_candidate(
                 inputs,
                 outputs,
                 parameters: Vec::new(),
+                materials: Vec::new(),
                 requirements: Vec::new(),
+            });
+            continue;
+        }
+        if let Some(material) = Operation::get_op::<MaterialInputOp>(operation, context) {
+            let task = LocalId::new(material.procedure_node(context))
+                .expect("verified Procedure node references are stable IDs");
+            let Some(task_index) = task_indexes.get(&task).copied() else {
+                return Err(PlanningProblemExtractionError::MissingTask { task });
+            };
+            let symbol = material.symbol(context);
+            let source =
+                artifact_choices
+                    .get(&symbol)
+                    .map_or(PlanningMaterialSource::Inventory, |choice| {
+                        PlanningMaterialSource::ChoiceOutput {
+                            choice: choice.clone(),
+                        }
+                    });
+            tasks[task_index].materials.push(PlanningMaterialInput {
+                id: LocalId::new(material.input_id(context))
+                    .expect("verified material input identities are stable IDs"),
+                symbol,
+                source,
             });
             continue;
         }

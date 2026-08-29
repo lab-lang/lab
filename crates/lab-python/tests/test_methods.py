@@ -53,6 +53,7 @@ def sequence_synthesis() -> m.Method:
                         m.ProcedureValueExpression.intent_parameter("dependencies"),
                     ),
                 ),
+                materials=(m.MaterialInput("template", m.MaterialSource.constant("template_dna")),),
                 requirements=(
                     m.Requirement(
                         id="synthesis",
@@ -78,7 +79,7 @@ class MethodTests(unittest.TestCase):
 
         self.assertIn("https://example.org/method#sequence-synthesis", refined.lair)
         self.assertIn(SEQUENCE_SYNTHESIS, refined.lair)
-        self.assertEqual(refined.planning_problem["schema_version"], "lab.planning-problem.v2")
+        self.assertEqual(refined.planning_problem["schema_version"], "lab.planning-problem.v4")
         choices = refined.planning_problem["choices"]
         self.assertEqual(len(choices), 1)
         self.assertEqual(
@@ -90,6 +91,16 @@ class MethodTests(unittest.TestCase):
         self.assertEqual(
             parameters[1]["value"],
             {"kind": "list", "element_type": "text", "values": []},
+        )
+        self.assertEqual(
+            choices[0]["candidates"][0]["tasks"][0]["materials"],
+            [
+                {
+                    "id": "std-bio-build-realize-0::https://example.org/method#sequence-synthesis::synthesize::material::template",
+                    "symbol": "template_dna",
+                    "source": {"kind": "inventory"},
+                }
+            ],
         )
 
     def test_catalog_validation_is_authoritative_in_rust(self) -> None:

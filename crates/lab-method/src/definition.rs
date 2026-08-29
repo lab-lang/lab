@@ -185,6 +185,26 @@ pub struct ProcedureParameterDefinition {
     pub value: ProcedureValueExpression,
 }
 
+/// A literal inventory lookup symbol or a symbol-valued Intent parameter.
+///
+/// Symbols remain frontend values at this portable boundary. Facility planning resolves each
+/// concrete symbol through the checked declaration's exact SBOL Component identity and then binds
+/// that Component to a physical MaterialLot. A list-valued parameter expands to one stable
+/// material input per element during refinement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MaterialSourceExpression {
+    Literal { symbol: String },
+    IntentParameter { parameter: LocalId },
+}
+
+/// One external material source required by a Procedure task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MaterialInputDefinition {
+    pub id: LocalId,
+    pub source: MaterialSourceExpression,
+}
+
 /// One semantic capability requirement owned by its enclosing Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CapabilityRequirementDefinition {
@@ -207,6 +227,8 @@ pub struct ProcedureTaskDefinition {
     pub outputs: Vec<TaskOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ProcedureParameterDefinition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<MaterialInputDefinition>,
     pub requirements: Vec<CapabilityRequirementDefinition>,
 }
 

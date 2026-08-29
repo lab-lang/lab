@@ -4,8 +4,9 @@ use lab_capability::{ConstraintRelation, ControlMode, MethodId};
 use thiserror::Error;
 
 use crate::{
-    IntentOperationId, LocalId, MethodDefinition, MethodSignature, ParameterType,
-    ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
+    IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodSignature,
+    ParameterType, ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput,
+    ValueReference,
 };
 
 /// A malformed portable method definition.
@@ -21,6 +22,19 @@ pub enum MethodDefinitionError {
     DuplicateTaskOutput { task: LocalId, output: LocalId },
     #[error("Procedure task `{task}` parameter `{parameter}` occurs more than once")]
     DuplicateProcedureParameter { task: LocalId, parameter: LocalId },
+    #[error("Procedure task `{task}` material input `{material}` occurs more than once")]
+    DuplicateMaterialInput { task: LocalId, material: LocalId },
+    #[error("Procedure task `{task}` material input `{material}` has an empty literal symbol")]
+    EmptyMaterialSymbol { task: LocalId, material: LocalId },
+    #[error(
+        "Procedure task `{task}` material input `{material}` references Intent parameter `{parameter}` with non-text type `{parameter_type:?}`"
+    )]
+    InvalidMaterialParameter {
+        task: LocalId,
+        material: LocalId,
+        parameter: LocalId,
+        parameter_type: ParameterType,
+    },
     #[error("Capability requirement `{id}` occurs more than once")]
     DuplicateRequirement { id: LocalId },
     #[error("Procedure task `{task}` has no Capability requirements")]
@@ -210,6 +224,47 @@ impl MethodDefinition {
                     ProcedureValueExpression::Literal { .. } => {}
                 }
             }
+            let mut material_ids = BTreeSet::new();
+            for material in &task.materials {
+                if !material_ids.insert(material.id.clone()) {
+                    return Err(MethodDefinitionError::DuplicateMaterialInput {
+                        task: task.id.clone(),
+                        material: material.id.clone(),
+                    });
+                }
+                match &material.source {
+                    MaterialSourceExpression::Literal { symbol } if symbol.is_empty() => {
+                        return Err(MethodDefinitionError::EmptyMaterialSymbol {
+                            task: task.id.clone(),
+                            material: material.id.clone(),
+                        });
+                    }
+                    MaterialSourceExpression::Literal { .. } => {}
+                    MaterialSourceExpression::IntentParameter { parameter } => {
+                        let Some(parameter_type) = parameter_types.get(parameter) else {
+                            return Err(MethodDefinitionError::UnavailableIntentParameter {
+                                owner: material.id.clone(),
+                                parameter: parameter.clone(),
+                            });
+                        };
+                        if !matches!(
+                            parameter_type,
+                            ParameterType::Scalar {
+                                scalar_type: ScalarType::Text
+                            } | ParameterType::List {
+                                element_type: ScalarType::Text
+                            }
+                        ) {
+                            return Err(MethodDefinitionError::InvalidMaterialParameter {
+                                task: task.id.clone(),
+                                material: material.id.clone(),
+                                parameter: parameter.clone(),
+                                parameter_type: parameter_type.clone(),
+                            });
+                        }
+                    }
+                }
+            }
             let mut outputs = BTreeSet::new();
             for output in &task.outputs {
                 if !outputs.insert(output.name.clone()) {
@@ -365,10 +420,11 @@ mod tests {
     };
 
     use crate::{
-        CapabilityConstraintDefinition, CapabilityRequirementDefinition, MethodDefinition,
-        MethodInput, MethodOutput, MethodParameter, ParameterType, PortType,
-        ProcedureParameterDefinition, ProcedureTaskDefinition, ProcedureValue,
-        ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
+        CapabilityConstraintDefinition, CapabilityRequirementDefinition, MaterialInputDefinition,
+        MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput, MethodParameter,
+        ParameterType, PortType, ProcedureParameterDefinition, ProcedureTaskDefinition,
+        ProcedureValue, ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput,
+        ValueReference,
     };
 
     use super::*;
@@ -408,6 +464,7 @@ mod tests {
                     port_type: material(output_state),
                 }],
                 parameters: vec![],
+                materials: vec![],
                 requirements: vec![CapabilityRequirementDefinition {
                     id: id("environment"),
                     capability_kind: CapabilityKind::new(
@@ -473,6 +530,41 @@ mod tests {
             definition.validate(),
             Err(MethodDefinitionError::UnavailableTaskInput { .. })
         ));
+    }
+
+    #[test]
+    fn material_inputs_accept_only_non_empty_literals_or_text_parameters() {
+        let mut definition = definition(
+            "https://example.org/method/static-incubation",
+            "https://example.org/state/incubated",
+        );
+        definition.tasks[0].materials.push(MaterialInputDefinition {
+            id: id("medium"),
+            source: MaterialSourceExpression::IntentParameter {
+                parameter: id("duration"),
+            },
+        });
+        assert!(matches!(
+            definition.validate().unwrap_err(),
+            MethodDefinitionError::InvalidMaterialParameter { material, .. }
+                if material == id("medium")
+        ));
+
+        definition.tasks[0].materials[0].source = MaterialSourceExpression::Literal {
+            symbol: String::new(),
+        };
+        assert_eq!(
+            definition.validate().unwrap_err(),
+            MethodDefinitionError::EmptyMaterialSymbol {
+                task: id("incubate"),
+                material: id("medium"),
+            }
+        );
+
+        definition.tasks[0].materials[0].source = MaterialSourceExpression::Literal {
+            symbol: "recovery_medium".to_owned(),
+        };
+        definition.validate().unwrap();
     }
 
     #[test]
