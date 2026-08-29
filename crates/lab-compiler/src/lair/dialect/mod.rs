@@ -133,5 +133,6 @@ pub(crate) mod attributes {
 
 pub(crate) mod chemistry;
 pub(crate) mod design;
+pub(crate) mod meta;
 pub(crate) mod protocol;
 pub(crate) mod workflow;

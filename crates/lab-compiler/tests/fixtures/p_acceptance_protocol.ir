@@ -1,6 +1,7 @@
 builtin.module @p_acceptance 
 {
   ^block1v1():
+    lair.stage () [] [stage: builtin.string "method-selected-protocol"]: <() -> ()>;
     sequence_v15 = design.dna_sequence () [] [sequence_name: builtin.string "p_acceptance_sequence", elements: builtin.string "GCTAGCGGATCCATGACCATGATTACGCCAAGCTTGAATTCGAGCTCGGTACCCGGGGATCCTCTAGAGTCGACCTGCAGGCATGCAAGCTT"]: <() -> (design.dna_sequence )> !15;
     design_v0 = design.plasmid (sequence_v15) [] [copies: builtin.integer <1: ui32>, artifact_name: builtin.string "p_acceptance", exact_sequence_required: builtin.bool true, acceptance_minimum_volume_ul: builtin.integer <20: ui32>, topology: design.topology Circular, acceptance_minimum_concentration_ng_per_ul: builtin.integer <100: ui32>]: <(design.dna_sequence ) -> (design.artifact )> !0;
     competent_cells_v1 = protocol.provision () [] [item: builtin.string "DH5alpha"]: <() -> (protocol.material CompetentCells)> !1;

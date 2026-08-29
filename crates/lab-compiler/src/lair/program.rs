@@ -21,7 +21,7 @@ use crate::lair::dialect::workflow::{
 use crate::lair::source_lowering::{
     BuildArtifactIntent, SourceLoweringError, WorkflowActionIntent, lower_build_intent,
 };
-use crate::lair::stage::{IrStage, detect_stage};
+use crate::lair::stage::{IrStage, detect_stage, initialize_stage, set_stage};
 
 #[derive(Debug, Error)]
 pub enum PortableLairError {
@@ -73,6 +73,7 @@ impl PortableLairProgram {
             &mut context,
             Identifier::try_from("lab_build").expect("static module name is valid"),
         );
+        initialize_stage(&mut context, root, IrStage::DesignIntent);
         let mut sequences = BTreeMap::new();
         for artifact in &artifacts {
             let BuildArtifactIntent::Plasmid(intent) = artifact else {
@@ -132,9 +133,9 @@ impl PortableLairProgram {
         verify_operation(root.get_operation(), &context)
             .map_err(|error| PortableLairError::Verification(error.disp(&context).to_string()))?;
         let stage = detect_stage(&context, root).map_err(PortableLairError::Stage)?;
-        if stage != IrStage::DesignWorkflow {
+        if stage != IrStage::DesignIntent {
             return Err(PortableLairError::Stage(format!(
-                "expected design-workflow, found {stage}"
+                "expected design-intent, found {stage}"
             )));
         }
         Ok(Self {
@@ -155,6 +156,12 @@ impl PortableLairProgram {
             self.module.get_operation(),
         )
         .map_err(|error| ProtocolLairError::Conversion(error.disp(&self.context).to_string()))?;
+        set_stage(
+            &mut self.context,
+            self.module,
+            IrStage::MethodSelectedProtocol,
+        )
+        .map_err(ProtocolLairError::Stage)?;
         verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
             ProtocolLairError::Verification(error.disp(&self.context).to_string())
         })?;

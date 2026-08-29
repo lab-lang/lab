@@ -60,3 +60,29 @@ fn parsing_and_biological_verification_are_distinct_failures() {
         "design.dna_sequence elements must be non-empty, uppercase, and unambiguous DNA"
     ));
 }
+
+#[test]
+fn stage_identity_is_explicit_and_must_match_the_module_structure() {
+    let missing = protocol_ir().replace(
+        "    lair.stage () [] [stage: builtin.string \"method-selected-protocol\"]: <() -> ()>;\n",
+        "",
+    );
+    let mut session = CompilerSession::default();
+    session.parse_ir(&missing).unwrap();
+    let error = session.detect_stage().unwrap_err().to_string();
+    assert!(
+        error.contains("requires exactly one lair.stage marker, found 0"),
+        "{error}"
+    );
+
+    let mismatched = protocol_ir().replace("method-selected-protocol", "design-intent");
+    let mut session = CompilerSession::default();
+    session.parse_ir(&mismatched).unwrap();
+    let error = session.detect_stage().unwrap_err().to_string();
+    assert!(
+        error.contains(
+            "lair.stage declares design-intent, but the module structurally satisfies method-selected-protocol"
+        ),
+        "{error}"
+    );
+}
