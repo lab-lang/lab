@@ -1832,6 +1832,7 @@ name = "lab-python"
 version = "0.1.2"
 dependencies = [
  "lab-compiler",
+ "lab-method",
  "pyo3",
  "serde",
  "serde_json",

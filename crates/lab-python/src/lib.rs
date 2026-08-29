@@ -1,9 +1,11 @@
 //! Python extension module for Lab.
 
 use lab_compiler::{
-    CheckedModule, Diagnostic, ModuleId, SemanticEnvironment, SourceId,
+    CheckedModule, Diagnostic, ModuleId, PortableLairProgram, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
+    standard_method_definitions,
 };
+use lab_method::{MethodDefinition, MethodRegistry};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::Serialize;
@@ -84,10 +86,98 @@ fn lab_standard_library() -> PyResult<String> {
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
+fn method_definitions(
+    definitions_json: &str,
+    include_standard: bool,
+) -> PyResult<Vec<MethodDefinition>> {
+    let mut definitions = if include_standard {
+        standard_method_definitions()
+    } else {
+        Vec::new()
+    };
+    let custom = serde_json::from_str::<Vec<MethodDefinition>>(definitions_json)
+        .map_err(|error| PyValueError::new_err(format!("invalid Method definitions: {error}")))?;
+    definitions.extend(custom);
+    definitions.sort_by(|left, right| left.id.cmp(&right.id));
+    MethodRegistry::new(definitions.clone())
+        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))?;
+    Ok(definitions)
+}
+
+/// Validate Python-authored portable Method definitions against the Rust contract.
+#[pyfunction]
+fn validate_method_definitions(definitions_json: &str, include_standard: bool) -> PyResult<String> {
+    serde_json::to_string(&method_definitions(definitions_json, include_standard)?)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
+fn compile_named_modules(modules: &[(String, String)]) -> PyResult<Vec<CheckedModule>> {
+    let mut environment = SemanticEnvironment::default();
+    let mut checked = Vec::with_capacity(modules.len());
+    for (name, source) in modules {
+        let analysis = analyze_module_in_environment(
+            SourceId::new(name.clone()),
+            ModuleId::new(name.clone()),
+            source,
+            &environment,
+        );
+        let Some(module) = analysis.checked else {
+            let diagnostics = analysis
+                .diagnostics
+                .iter()
+                .map(|diagnostic| render_diagnostic(source, diagnostic))
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            return Err(PyValueError::new_err(format!(
+                "Lab module '{name}' did not check:\n\n{diagnostics}"
+            )));
+        };
+        environment.insert(name.clone(), module.interface.clone());
+        checked.push(module);
+    }
+    Ok(checked)
+}
+
+#[derive(Serialize)]
+struct RefinedProgram {
+    schema_version: &'static str,
+    refined_lair: String,
+    planning_problem: lab_compiler::planning::PlanningProblem,
+}
+
+/// Refine checked Python-emitted Lab modules through the shared Rust Method pipeline.
+#[pyfunction]
+fn refine_lab_modules(
+    modules: Vec<(String, String)>,
+    definitions_json: &str,
+    include_standard: bool,
+) -> PyResult<String> {
+    let definitions = method_definitions(definitions_json, include_standard)?;
+    let registry = MethodRegistry::new(definitions)
+        .expect("method_definitions returned only a validated complete catalog");
+    let checked = compile_named_modules(&modules)?;
+    let module_refs = checked.iter().collect::<Vec<_>>();
+    let refined = PortableLairProgram::lower_program(&module_refs)
+        .map_err(|error| PyValueError::new_err(format!("failed to lower Lab Intent: {error}")))?
+        .refine_methods(&registry)
+        .map_err(|error| PyValueError::new_err(format!("failed to refine Lab Intent: {error}")))?;
+    let planning_problem = refined
+        .planning_problem()
+        .map_err(|error| PyValueError::new_err(format!("failed to project planning: {error}")))?;
+    serde_json::to_string(&RefinedProgram {
+        schema_version: "lab.python-refinement.v1",
+        refined_lair: refined.ir(),
+        planning_problem,
+    })
+    .map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 #[pymodule]
 pub fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(compile_lab_module, module)?)?;
     module.add_function(wrap_pyfunction!(analyze_lab_modules, module)?)?;
     module.add_function(wrap_pyfunction!(lab_standard_library, module)?)?;
+    module.add_function(wrap_pyfunction!(validate_method_definitions, module)?)?;
+    module.add_function(wrap_pyfunction!(refine_lab_modules, module)?)?;
     Ok(())
 }

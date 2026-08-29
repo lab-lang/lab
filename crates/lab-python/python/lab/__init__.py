@@ -18,6 +18,7 @@ mapped back to the line of Python that produced the Lab it is about.
 import json
 from typing import Any, cast
 
+from . import methods as methods
 from . import sbol as sbol
 from ._artifacts import artifact
 from ._circuits import (
@@ -77,6 +78,7 @@ from ._workflows import Context, Workflow, WorkflowCall, WorkflowError, workflow
 # reaching them here and reaching them through their module are the same
 # thing, and either spelling emits the same `use` line.
 from .bio.build import realize
+from .methods import RefinedProgram, refine
 from .plasmid import (
     assemble,
     capture,
@@ -161,6 +163,7 @@ __all__ = [
     "Record",
     "RecordDeclaration",
     "RecordType",
+    "RefinedProgram",
     "Regulation",
     "Rejected",
     "RestrictionEnzyme",
@@ -200,6 +203,7 @@ __all__ = [
     "inconclusive_sequence",
     "induced",
     "layout",
+    "methods",
     "no_colonies",
     "not_",
     "or_",
@@ -211,6 +215,7 @@ __all__ = [
     "realize",
     "record",
     "recover",
+    "refine",
     "repressed",
     "sbol",
     "screen",

@@ -16,7 +16,7 @@ pub use lab_language::{
     compile_module_in_environment, manifest, parse_module, render_checked_module,
     render_diagnostic, standard_library_manifest,
 };
-pub use lair::methods::standard_method_registry;
+pub use lair::methods::{standard_method_definitions, standard_method_registry};
 pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
 pub use lair::program::{
     AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,

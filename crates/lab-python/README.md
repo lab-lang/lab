@@ -50,6 +50,43 @@ module = compile_lab_module(source)
 print(module["declarations"])
 ```
 
+## Portable Methods and capability refinement
+
+Python can also contribute portable Methods at the same semantic boundary as the Rust compiler. A Method refines one Intent operation into a Procedure graph with typed values, parameters, and capability requirements. It does not name a facility, asset, offering, material lot, adapter, or schedule; the facility planner makes those choices later.
+
+```python
+import lab
+from lab import methods as m
+
+sequence_synthesis = m.Method(
+    id="https://example.org/method#sequence-synthesis",
+    refines="std.bio.build.realize",
+    inputs=(m.MethodInput("design", m.Port.design()),),
+    tasks=(
+        m.Task(
+            id="synthesize",
+            operation="https://example.org/procedure#SynthesizePlasmid",
+            inputs=(m.ValueReference.method_input("design"),),
+            outputs=(m.TaskOutput("product", m.Port.material("https://www.lab-compiler.org/ns/material-state#PlasmidProduct")),),
+            requirements=(
+                m.Requirement(
+                    id="synthesis",
+                    capability_kind="https://example.org/capability#SequenceSynthesis",
+                    accepted_control_modes=(m.ControlMode.REVIEWED_FILE,),
+                ),
+            ),
+        ),
+    ),
+    outputs=(m.MethodOutput("product", m.ValueReference.task_output("synthesize", "product")),),
+)
+
+program = lab.check_sources({"example.main": source})
+refined = lab.refine(program, methods=(sequence_synthesis,), include_standard=False)
+print(refined.planning_problem)
+```
+
+The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v1` consumed by facility planning. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+
 ## Writing a program
 
 A Lab module is a Python module. The standard library is mirrored as Python packages, so a kind is a class you import, its properties are keyword arguments, and a claim is a function of the artifact it is about:

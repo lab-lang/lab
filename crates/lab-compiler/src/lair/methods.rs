@@ -24,12 +24,16 @@ const QUDT_UNIT_NS: &str = "http://qudt.org/vocab/unit/";
 pub fn standard_method_registry() -> &'static MethodRegistry {
     static REGISTRY: OnceLock<MethodRegistry> = OnceLock::new();
     REGISTRY.get_or_init(|| {
-        MethodRegistry::new(standard_methods())
+        MethodRegistry::new(standard_method_definitions())
             .expect("bundled method definitions are validated by compiler tests")
     })
 }
 
-fn standard_methods() -> Vec<MethodDefinition> {
+/// Return owned copies of the portable Method definitions bundled with this compiler build.
+///
+/// Frontends may extend this list before constructing their own validated registry. Facility and
+/// adapter facts remain outside these definitions.
+pub fn standard_method_definitions() -> Vec<MethodDefinition> {
     vec![
         artifact_realization_service(),
         automated_golden_gate(),
