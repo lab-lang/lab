@@ -28,7 +28,7 @@ pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v2";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v3";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -112,7 +112,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v2` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v3` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
@@ -348,6 +348,7 @@ impl ExecutionPlanDocument {
         }
 
         let mut nodes = BTreeMap::new();
+        let mut scheduled_requirements = BTreeSet::new();
         for node in &self.nodes {
             if node.id.is_empty() || nodes.insert(node.id.as_str(), node).is_some() {
                 return Err(format!("node ID '{}' is empty or repeated", node.id));
@@ -377,10 +378,22 @@ impl ExecutionPlanDocument {
                     requirement,
                     document,
                 } => {
-                    if !requirements.contains_key(requirement.as_str()) {
-                        return Err(format!(
+                    let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
+                        format!(
                             "execute node '{}' references unknown requirement '{}'",
                             node.id, requirement
+                        )
+                    })?;
+                    if binding.control_mode == lab_capability::ControlMode::Manual.iri() {
+                        return Err(format!(
+                            "execute node '{}' represents manual-control requirement '{}'; use a manual node",
+                            node.id, requirement
+                        ));
+                    }
+                    if !scheduled_requirements.insert(requirement.as_str()) {
+                        return Err(format!(
+                            "requirement '{}' is scheduled by more than one execution node",
+                            requirement
                         ));
                     }
                     if let Some(document) = document {
@@ -411,11 +424,58 @@ impl ExecutionPlanDocument {
                         ));
                     }
                 }
-                ExecutionPlanAction::Manual { title, .. } if title.is_empty() => {
-                    return Err(format!("manual node '{}' has an empty title", node.id));
+                ExecutionPlanAction::Manual {
+                    requirement,
+                    title,
+                    instructions,
+                } => {
+                    let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
+                        format!(
+                            "manual node '{}' references unknown requirement '{}'",
+                            node.id, requirement
+                        )
+                    })?;
+                    if binding.control_mode != lab_capability::ControlMode::Manual.iri() {
+                        return Err(format!(
+                            "manual node '{}' references requirement '{}' with non-manual control mode '{}'",
+                            node.id, requirement, binding.control_mode
+                        ));
+                    }
+                    if binding.adapter.is_some() {
+                        return Err(format!(
+                            "manual node '{}' references requirement '{}' with a runtime adapter",
+                            node.id, requirement
+                        ));
+                    }
+                    if lowered_requirements.contains(requirement.as_str()) {
+                        return Err(format!(
+                            "manual requirement '{}' also belongs to a whole-program adapter lowering",
+                            requirement
+                        ));
+                    }
+                    if !scheduled_requirements.insert(requirement.as_str()) {
+                        return Err(format!(
+                            "requirement '{}' is scheduled by more than one execution node",
+                            requirement
+                        ));
+                    }
+                    if title.trim().is_empty() {
+                        return Err(format!("manual node '{}' has an empty title", node.id));
+                    }
+                    if instructions.trim().is_empty() {
+                        return Err(format!("manual node '{}' has empty instructions", node.id));
+                    }
                 }
-                ExecutionPlanAction::Manual { .. } => {}
             }
+        }
+        if let Some(requirement) = requirements
+            .keys()
+            .find(|requirement| !scheduled_requirements.contains(**requirement))
+        {
+            return Err(format!(
+                "requirement '{}' is not scheduled by an execution node",
+                requirement
+            ));
         }
         validate_acyclic(&nodes)
     }
@@ -625,6 +685,7 @@ pub enum ExecutionPlanAction {
         instructions: String,
     },
     Manual {
+        requirement: String,
         title: String,
         instructions: String,
     },
@@ -913,15 +974,22 @@ mod tests {
         );
 
         let mut cyclic = execution_plan();
+        let mut manual = cyclic.requirements[0].clone();
+        manual.requirement_instance = "example::main/body[1]".to_owned();
+        manual.requirement_template = "example::main::body[1]".to_owned();
+        manual.control_mode = lab_capability::ControlMode::Manual.iri().to_owned();
+        manual.adapter = None;
+        cyclic.requirements.push(manual);
         cyclic.nodes.push(ExecutionPlanNode {
-            id: "execute-0002".to_owned(),
+            id: "manual-0002".to_owned(),
             after: vec!["execute-0001".to_owned()],
             action: ExecutionPlanAction::Manual {
+                requirement: "example::main/body[1]".to_owned(),
                 title: "inspect".to_owned(),
                 instructions: "confirm".to_owned(),
             },
         });
-        cyclic.nodes[0].after.push("execute-0002".to_owned());
+        cyclic.nodes[0].after.push("manual-0002".to_owned());
         assert!(cyclic.validate().unwrap_err().contains("dependency cycle"));
     }
 

@@ -56,30 +56,35 @@ impl LoadedExecutionPlan {
             );
         }
         for node in &self.nodes {
-            let LoadedExecutionAction::Execute {
-                requirement,
-                document,
-            } = &node.action
-            else {
-                continue;
-            };
-            let qualification = sbol_inventory::vocabulary::Qualification::try_from(
-                requirement.observed_qualification.as_str(),
-            );
-            if !qualification.is_ok_and(|value| value >= minimum) {
-                issues.push(format!(
-                    "node '{}' is bound only at qualification '{}', below '{}' for {}",
-                    node.id,
-                    requirement.observed_qualification,
-                    minimum.iri(),
-                    mode.as_str()
-                ));
-            }
-            if requirement.adapter.is_none() {
-                issues.push(format!("node '{}' has no frozen runtime adapter", node.id));
-            }
-            if document.is_none() {
-                issues.push(format!("node '{}' has no reviewed run document", node.id));
+            match &node.action {
+                LoadedExecutionAction::Execute {
+                    requirement,
+                    document,
+                } => {
+                    check_execution_qualification(
+                        &mut issues,
+                        &node.id,
+                        requirement,
+                        minimum,
+                        mode,
+                    );
+                    if requirement.adapter.is_none() {
+                        issues.push(format!("node '{}' has no frozen runtime adapter", node.id));
+                    }
+                    if document.is_none() {
+                        issues.push(format!("node '{}' has no reviewed run document", node.id));
+                    }
+                }
+                LoadedExecutionAction::Manual { requirement, .. } => {
+                    check_execution_qualification(
+                        &mut issues,
+                        &node.id,
+                        requirement,
+                        minimum,
+                        mode,
+                    );
+                }
+                LoadedExecutionAction::MoveMaterial { .. } => {}
             }
         }
         issues
@@ -87,6 +92,27 @@ impl LoadedExecutionPlan {
 
     pub fn is_ready(&self, mode: ExecutionMode) -> bool {
         self.readiness_issues(mode).is_empty()
+    }
+}
+
+fn check_execution_qualification(
+    issues: &mut Vec<String>,
+    node: &str,
+    requirement: &ExecutionRequirementBinding,
+    minimum: sbol_inventory::vocabulary::Qualification,
+    mode: ExecutionMode,
+) {
+    let qualification = sbol_inventory::vocabulary::Qualification::try_from(
+        requirement.observed_qualification.as_str(),
+    );
+    if !qualification.is_ok_and(|value| value >= minimum) {
+        issues.push(format!(
+            "node '{}' is bound only at qualification '{}', below '{}' for {}",
+            node,
+            requirement.observed_qualification,
+            minimum.iri(),
+            mode.as_str()
+        ));
     }
 }
 
@@ -110,6 +136,7 @@ pub enum LoadedExecutionAction {
         instructions: String,
     },
     Manual {
+        requirement: Box<ExecutionRequirementBinding>,
         title: String,
         instructions: String,
     },
@@ -338,14 +365,17 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
                 );
             }
             LoadedExecutionAction::Manual {
+                requirement,
                 title,
                 instructions,
             } => {
                 let _ = writeln!(
                     text,
-                    "\n[{}] {} - by hand: {}: {}",
+                    "\n[{}] {} - by hand on {} for {}: {}: {}",
                     index + 1,
                     node.id,
+                    requirement.asset,
+                    requirement.capability_kind,
                     title,
                     instructions
                 );
@@ -572,12 +602,16 @@ fn execute_execution_node(
             Ok(NodeExecution::Done)
         }
         LoadedExecutionAction::Manual {
+            requirement,
             title,
             instructions,
         } => {
             events.emit(RunEvent::AttentionRequired {
                 node: node.id.clone(),
-                prompt: format!("{title}: {instructions}"),
+                prompt: format!(
+                    "{title} on Asset '{}' using CapabilityOffering '{}': {instructions}",
+                    requirement.asset, requirement.offering
+                ),
             });
             let confirmed = operator.confirm(
                 ConfirmKind::Manual,
@@ -737,12 +771,19 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                 instructions: instructions.clone(),
             },
             ExecutionPlanAction::Manual {
+                requirement,
                 title,
                 instructions,
-            } => LoadedExecutionAction::Manual {
-                title: title.clone(),
-                instructions: instructions.clone(),
-            },
+            } => {
+                let binding = requirements
+                    .get(requirement.as_str())
+                    .expect("execution-plan validation resolved every requirement");
+                LoadedExecutionAction::Manual {
+                    requirement: Box::new((*binding).clone()),
+                    title: title.clone(),
+                    instructions: instructions.clone(),
+                }
+            }
         };
         nodes.push(LoadedExecutionNode {
             id: node.id.clone(),
@@ -1258,6 +1299,14 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
     a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid_handling" ;
     fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Executable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
+ex:manual_workstation a sbol:TopLevel, fac:Asset ; sbol:displayId "manual_workstation" ;
+    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    fac:assetKind fac:Workstation ; fac:locatedIn ex:room ; fac:isActive true ;
+    fac:capability <https://example.org/facility/manual_workstation/material_provisioning> .
+<https://example.org/facility/manual_workstation/material_provisioning>
+    a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "material_provisioning" ;
+    fac:capabilityKind cap:MaterialProvisioning ; fac:qualification fac:Executable ;
+    fac:controlMode fac:ManualControl ; fac:isActive true .
 ex:design a sbol:Component ; sbol:displayId "design" ;
     sbol:hasNamespace <https://example.org/facility> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
@@ -1336,22 +1385,39 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                 facility: "https://example.org/facility/facility".to_owned(),
             },
             planning: None,
-            requirements: vec![ExecutionRequirementBinding {
-                requirement_instance: "workflow/main/liquid".to_owned(),
-                requirement_template: "workflow::main::liquid".to_owned(),
-                capability_kind: "https://sbol.io/ns/capability#LiquidHandling".to_owned(),
-                offering: "https://example.org/facility/star/liquid_handling".to_owned(),
-                asset: "https://example.org/facility/star".to_owned(),
-                minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
-                observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
-                control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
-                parameters: Vec::new(),
-                adapter: Some(ExecutionAdapterBinding {
-                    driver: "hamilton.star".to_owned(),
-                    profile_path: "adapters/star.toml".to_owned(),
-                    profile_sha256: sha256_hex(b""),
-                }),
-            }],
+            requirements: vec![
+                ExecutionRequirementBinding {
+                    requirement_instance: "workflow/main/liquid".to_owned(),
+                    requirement_template: "workflow::main::liquid".to_owned(),
+                    capability_kind: "https://sbol.io/ns/capability#LiquidHandling".to_owned(),
+                    offering: "https://example.org/facility/star/liquid_handling".to_owned(),
+                    asset: "https://example.org/facility/star".to_owned(),
+                    minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
+                    parameters: Vec::new(),
+                    adapter: Some(ExecutionAdapterBinding {
+                        driver: "hamilton.star".to_owned(),
+                        profile_path: "adapters/star.toml".to_owned(),
+                        profile_sha256: sha256_hex(b""),
+                    }),
+                },
+                ExecutionRequirementBinding {
+                    requirement_instance: "workflow/main/deck-preparation".to_owned(),
+                    requirement_template: "workflow::main::deck-preparation".to_owned(),
+                    capability_kind: "https://sbol.io/ns/capability#MaterialProvisioning"
+                        .to_owned(),
+                    offering:
+                        "https://example.org/facility/manual_workstation/material_provisioning"
+                            .to_owned(),
+                    asset: "https://example.org/facility/manual_workstation".to_owned(),
+                    minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    control_mode: "https://sbol.io/ns/facility#ManualControl".to_owned(),
+                    parameters: Vec::new(),
+                    adapter: None,
+                },
+            ],
             materials: vec![ExecutionMaterialBinding {
                 id: "input".to_owned(),
                 component: "https://example.org/facility/design".to_owned(),
@@ -1387,6 +1453,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                     id: "prepare".to_owned(),
                     after: Vec::new(),
                     action: ExecutionPlanAction::Manual {
+                        requirement: "workflow/main/deck-preparation".to_owned(),
                         title: "Prepare the deck".to_owned(),
                         instructions: "Confirm the reviewed deck layout.".to_owned(),
                     },

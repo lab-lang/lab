@@ -232,7 +232,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v2");
+    assert_eq!(plan["format"], "lab.execution-plan.v3");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -247,10 +247,16 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
         std::fs::read(project.join("inventory/catalog.ttl")).unwrap()
     );
     assert_eq!(plan["requirements"].as_array().unwrap().len(), 1);
-    assert_eq!(plan["nodes"][0]["action"], "execute");
+    assert_eq!(plan["nodes"][0]["action"], "manual");
     assert_eq!(
         plan["nodes"][0]["requirement"],
         plan["requirements"][0]["requirement_instance"]
+    );
+    assert!(
+        plan["nodes"][0]["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("https://example.org/facility/operator/realization")
     );
 
     let plan_directory = project.join(".lab/plan");

@@ -2,6 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lab_capability::{ControlMode, ScalarValue};
+use lab_method::ProcedureValue;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionLoweringBundle, ExecutionMaterialBinding, ExecutionParameterBinding,
@@ -11,7 +13,7 @@ use lab_runfmt::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::AdapterInvocationPlan;
+use super::{AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPlanOptions {
@@ -99,6 +101,13 @@ pub fn build_execution_plan_from_invocations(
             for binding in &task.requirements {
                 let requirement = binding.id.to_string();
                 let document = options.reviewed_documents.remove(&requirement);
+                let is_manual = binding.control_mode == ControlMode::Manual.iri();
+                if is_manual && document.is_some() {
+                    return Err(ExecutionPlanBuildError::ManualRequirementDocument { requirement });
+                }
+                if is_manual && binding.adapter.is_some() {
+                    return Err(ExecutionPlanBuildError::ManualRequirementAdapter { requirement });
+                }
                 if let Some(document) = &document {
                     let Some(adapter) = binding.adapter.as_ref() else {
                         return Err(ExecutionPlanBuildError::DocumentWithoutAdapter {
@@ -114,7 +123,7 @@ pub fn build_execution_plan_from_invocations(
                         });
                     }
                 }
-                requirements.push(ExecutionRequirementBinding {
+                let execution_binding = ExecutionRequirementBinding {
                     requirement_instance: requirement.clone(),
                     requirement_template: format!("{}::{}", method.method, binding.id),
                     capability_kind: binding.capability_kind.to_string(),
@@ -153,15 +162,30 @@ pub fn build_execution_plan_from_invocations(
                             profile_path: adapter.profile_path.to_string_lossy().into_owned(),
                             profile_sha256: adapter.profile_sha256.clone(),
                         }),
-                });
-                let id = format!("execute-{:04}", nodes.len() + 1);
+                };
+                requirements.push(execution_binding);
+                let (id, action) = if is_manual {
+                    (
+                        format!("manual-{:04}", nodes.len() + 1),
+                        ExecutionPlanAction::Manual {
+                            requirement,
+                            title: format!("Perform {}", task.operation),
+                            instructions: manual_instructions(task, binding),
+                        },
+                    )
+                } else {
+                    (
+                        format!("execute-{:04}", nodes.len() + 1),
+                        ExecutionPlanAction::Execute {
+                            requirement,
+                            document,
+                        },
+                    )
+                };
                 nodes.push(ExecutionPlanNode {
                     id: id.clone(),
                     after: previous.into_iter().collect(),
-                    action: ExecutionPlanAction::Execute {
-                        requirement,
-                        document,
-                    },
+                    action,
                 });
                 previous = Some(id);
             }
@@ -201,6 +225,10 @@ pub enum ExecutionPlanBuildError {
     PlanningReferenceMismatch,
     #[error("requirement `{requirement}` has a reviewed run document but no allocated adapter")]
     DocumentWithoutAdapter { requirement: String },
+    #[error("manual-control requirement `{requirement}` cannot have a reviewed run document")]
+    ManualRequirementDocument { requirement: String },
+    #[error("manual-control requirement `{requirement}` cannot have a runtime adapter")]
+    ManualRequirementAdapter { requirement: String },
     #[error(
         "adapter `{driver}` for requirement `{requirement}` does not emit `{format}`; supported formats: {supported}"
     )]
@@ -227,6 +255,65 @@ fn semantic_value(value: &lab_capability::ScalarValue) -> ExecutionParameterValu
         }
         lab_capability::ScalarValue::Boolean(value) => ExecutionParameterValue::Boolean(*value),
         lab_capability::ScalarValue::Iri(value) => ExecutionParameterValue::Iri(value.to_string()),
+    }
+}
+
+fn manual_instructions(
+    task: &AllocatedProcedureTask,
+    binding: &AllocatedRequirementBinding,
+) -> String {
+    let mut instructions = format!(
+        "Use CapabilityOffering '{}' on Asset '{}' to perform Procedure operation '{}'. Follow the facility's reviewed local SOP for this operation and confirm completion.",
+        binding.offering, binding.asset, task.operation
+    );
+    if !task.parameters.is_empty() {
+        let parameters = task
+            .parameters
+            .iter()
+            .map(|parameter| {
+                format!(
+                    "{} ({}) = {}",
+                    parameter.id,
+                    parameter.property_kind,
+                    render_procedure_value(&parameter.value)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        instructions.push_str(" Procedure parameters: ");
+        instructions.push_str(&parameters);
+        instructions.push('.');
+    }
+    instructions
+}
+
+fn render_procedure_value(value: &ProcedureValue) -> String {
+    match value {
+        ProcedureValue::Scalar { value } => render_property_value(value),
+        ProcedureValue::List { values, .. } => format!(
+            "[{}]",
+            values
+                .iter()
+                .map(render_property_value)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+fn render_property_value(value: &lab_capability::PropertyValue) -> String {
+    let scalar = match &value.value {
+        ScalarValue::Text(value) => {
+            serde_json::to_string(value).expect("a scalar string is always representable as JSON")
+        }
+        ScalarValue::Integer(value) => value.to_string(),
+        ScalarValue::Real(value) => value.to_string(),
+        ScalarValue::Boolean(value) => value.to_string(),
+        ScalarValue::Iri(value) => format!("<{value}>"),
+    };
+    match &value.unit {
+        Some(unit) => format!("{scalar} <{unit}>"),
+        None => scalar,
     }
 }
 

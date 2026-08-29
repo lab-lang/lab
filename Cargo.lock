@@ -1842,6 +1842,7 @@ dependencies = [
 name = "lab-runfmt"
 version = "0.1.2"
 dependencies = [
+ "lab-capability",
  "lab-instruments",
  "serde",
  "serde_json",
