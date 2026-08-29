@@ -5,13 +5,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::{adapter_catalog, lower_dependency_build_with_adapter};
+use lab_compiler::backend::{adapter_catalog, lower_allocated_dependency_build_with_adapter};
 use lab_compiler::planning::{
     AdapterInvocationPlan, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
     FacilityLoweringManifest, FacilityLoweringRoute,
 };
-use lab_compiler::{ArtifactBundle, CheckedModule, PortableLairProgram};
+use lab_compiler::{AllocatedLairProgram, ArtifactBundle, CheckedModule};
 use lab_inventory::InventorySnapshot;
 use lab_package::LabPackage;
 use sha2::{Digest, Sha256};
@@ -31,6 +31,7 @@ pub(crate) fn lower_adapter_invocations(
     package: &LabPackage,
     modules: &[&CheckedModule],
     inventory: &InventorySnapshot,
+    allocated: &AllocatedLairProgram,
     invocation_plan: &AdapterInvocationPlan,
     output_root: &Path,
 ) -> Result<FacilityLoweringOutput> {
@@ -138,14 +139,6 @@ pub(crate) fn lower_adapter_invocations(
                 "the selected realization Method is not supported by the current dependency-build adapter bridge"
             );
         }
-        // The current OT-2, Flex, and STAR emitters still share the mature dependency-build
-        // planner. This compatibility projection is guarded by the exact selected Method above;
-        // adapter discovery and invocation identity come only from allocated Procedure LAIR.
-        let lair = PortableLairProgram::lower_program(modules)
-            .context("failed to construct the dependency-build adapter projection")?;
-        let protocol = lair
-            .select_protocol()
-            .context("failed to project selected Procedure semantics into the legacy backend IR")?;
         let build_inventory = semantic_build_inventory(modules, inventory)?;
 
         for (
@@ -169,11 +162,11 @@ pub(crate) fn lower_adapter_invocations(
                     asset
                 );
             }
-            let bundle = lower_dependency_build_with_adapter(
+            let bundle = lower_allocated_dependency_build_with_adapter(
                 &driver,
                 &profile.name,
                 &profile.canonical_toml,
-                &protocol,
+                allocated,
                 &build_inventory,
             )
             .with_context(|| {

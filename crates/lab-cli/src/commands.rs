@@ -423,6 +423,7 @@ fn write_facility_plan(
         package,
         &modules,
         &inventory,
+        &allocated,
         &invocations,
         output_root,
     )?;

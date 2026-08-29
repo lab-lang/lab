@@ -20,7 +20,7 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::BuildInventory;
-use crate::{ArtifactBundle, ProtocolLairProgram};
+use crate::{AllocatedLairProgram, ArtifactBundle, ProtocolLairProgram};
 use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 
 pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v1";
@@ -353,6 +353,27 @@ pub fn lower_dependency_build_with_adapter(
             driver: driver.to_owned(),
         }),
     }
+}
+
+/// Lowers one exact allocated Procedure program through its already selected adapter.
+///
+/// The compatibility Protocol IR is derived from selected Procedure tasks and their exact values.
+/// It does not revisit Workflow Intent or perform method selection.
+pub fn lower_allocated_dependency_build_with_adapter(
+    driver: &str,
+    name: &str,
+    contents: &str,
+    allocated: &AllocatedLairProgram,
+    inventory: &BuildInventory,
+) -> Result<ArtifactBundle, AdapterLoweringError> {
+    let protocol =
+        allocated
+            .dependency_build_protocol()
+            .map_err(|error| AdapterLoweringError::Lowering {
+                driver: driver.to_owned(),
+                message: error.to_string(),
+            })?;
+    lower_dependency_build_with_adapter(driver, name, contents, &protocol, inventory)
 }
 
 fn lab_compiler_ot2(
