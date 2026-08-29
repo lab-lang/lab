@@ -38,7 +38,7 @@ pSB1C3 = Backbone.buy(
     design=designs.backbone(identity=f"{IGEM}/pSB1C3/1"),
 )
 BsaI = RestrictionEnzyme.buy(
-    identity="NEB-R0535",
+    supplier_identity="NEB-R0535",
     digest_temperature=37 * C,
     digest_duration=2 * minutes,
 )

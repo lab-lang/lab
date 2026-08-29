@@ -168,11 +168,11 @@ class ArtifactKind:
     ) -> BuyDeclaration[_ArtifactKindT]:
         """Declare something a supplier lists.
 
-        It has an identity to resolve or order against and is never built, so it
-        takes no claims and no build order: `require` and `accept` belong to
-        building. A typed `design` contributes its registry identity, sequence,
-        and other biological facts without making the design factory itself
-        imply procurement.
+        It has a supplier identity to resolve or order against and is never
+        built, so it takes no claims and no build order: `require` and `accept`
+        belong to building. A typed `design` contributes its independent SBOL
+        Component identity, sequence, and other biological facts without making
+        the design factory itself imply procurement.
         """
 
         found, scope = declaring_module(depth=2, given=module)

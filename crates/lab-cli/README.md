@@ -19,7 +19,9 @@ lab check
 lab build
 ```
 
-`lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. `lab build` writes verified portable module IR plus a package index under `.lab/build/` and a deterministic `lab.lock` at the project root.
+`lab.toml` anchors package identity and the build entry. Source modules are discovered recursively under `src/` and receive stable names from their package and relative path. Same-package imports and recursive path dependencies are compiled through checked module interfaces. Every `lab build` writes verified portable module IR, `capability_requirements.json`, `capability_instances.json` for runnable packages, an optional `adapter_bindings.json`, and a package index under `.lab/build/`, plus a deterministic `lab.lock` at the project root. The requirement file describes every checked workflow template and contains no facility allocation. The instance file expands only templates reachable from the exact entry module's `main` workflow, preserves every resolved workflow call site, and rejects recursive expansion rather than inventing a finite run. When the runnable package selects an SBOLInventory document, the same build then allocates those instances, invokes adapters selected through exact Asset bindings, emits their protocol bundles and PDFs, and freezes everything in `.lab/build/plan.execution.json`. The package index's optional `facility` section records relative paths to the allocation, lowering manifest, reviewed plan, bundle roots, protocols, and PDFs.
+
+`lab plan` exposes that facility phase as a separate command, writing it under `.lab/plan/` without the portable module bundle. It requires an SBOLInventory document, applies the package's exact facility selector, allocates every reachable capability instance to one exact offering and Asset, and writes `facility_allocation.json` plus a validated `plan.execution.json`. Candidate ordering never chooses an asset: zero eligible offerings is an explained failure, and several eligible offerings require an explicit allocation policy. A planning-only or manual facility needs no adapter declaration. When an allocated Asset has a compatible lowering adapter, both `lab build` and `lab plan` emit its protocols and freeze its exact driver, profile, triggering requirements, child paths, formats, and digests in the reviewed plan.
 
 A `lab.toml` may instead declare a workspace, grouping member packages under one root:
 
@@ -31,47 +33,42 @@ default-member = "packages/device"
 
 A workspace root owns membership and nothing else; each member stays an ordinary package. `default-member` names the package a single-package command acts on, and is required once a workspace has more than one member.
 
-## Building for a bench
+## Facility-derived lowering
 
-`lab build --target <name>` reads `targets/<name>.toml`, lowers the default member and everything it depends on as one program, and hands the verified result to the backend that profile names:
+The portable frontend of `lab build` never contains an instrument selector: `[build]` names only the experiment entry, and the CLI has no `--target` mode. When the package names a facility document, the build derives device choice by matching the experiment's capability requirements against that validated facility. With no facility document, the same command stops after portable compilation.
 
-```sh
-lab build --target opentrons-ot2
-```
-
-The target's artifacts are written under `.lab/build/<name>/`, and the build prints the path of every runnable automation protocol it emitted, ready to hand to an instrument application. A target profile describes the laboratory — modules, labware, deck slots, pipettes, mounts, and capacity — and never the science; reaction chemistry belongs to the designs in `src/`. Every profile field defaults to the backend's reference bench, so a profile states only what differs, and unknown keys are rejected rather than ignored. A profile's filename is its name; the file itself declares only which backend consumes it.
-
-Editors and control planes use the compiler-owned target contract rather than copying backend structs. It reports each backend's JSON Schema, complete default, catalog choices, capabilities, and workcell station kinds; validation runs the same cross-field semantics as a build and returns canonical TOML, canonical JSON, the compiler and schema versions, and a SHA-256:
-
-```sh
-lab targets describe
-lab --json targets describe
-lab targets default opentrons.flex --name flex-bay-1
-lab targets validate targets/flex-bay-1.toml
-lab --json targets render targets/flex-bay-1.toml
-```
-
-The shipped backends are `opentrons.ot2`, `opentrons.flex`, `hamilton.star`, and `workcell`. `describe` is the discovery authority for the exact compiler binary in use; consumers should not assume that list remains fixed.
-
-A package that usually compiles for one bench names it in the manifest instead of on every invocation:
-
-```toml
-[build]
-entry = "src/programs/main.lab"
-target = "opentrons-ot2"
-```
-
-`lab build` then produces that bench's protocols, `--target <name>` compiles for a different one, and `--no-target` stops at portable module IR.
-
-An `[inventory]` table states what the laboratory has on hand, and a target build resolves every artifact dependency against it:
+An `[inventory]` table selects the SBOLInventory graph. Local adapter declarations connect exact Asset IRIs in that graph to installed Lab implementations:
 
 ```toml
 [inventory]
-materials = ["BsaI", "T4_DNA_ligase", "pSB1C3"]
-artifacts = ["composite_plasmid_1"]
+document = "inventory/facility.ttl"
+# Required when the document has several facilities:
+facility = "https://example.org/facilities/example-lab"
+
+[[execution.adapters]]
+asset = "https://example.org/facilities/example-lab/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-1.toml"
 ```
 
-`materials` are consumables a reaction may draw on; `artifacts` are already realized and are not built again. Both default to empty, so a package that declares no inventory builds everything from nothing and reports what it is missing.
+Each adapter declaration binds an implementation to one exact catalog Asset. Facility facts remain in RDF, driver selection is never inferred from product metadata, and endpoints and credentials remain local runtime configuration. The old symbolic `materials` and `artifacts` arrays are accepted only as a mutually exclusive migration form.
+
+The facility is the lowering surface. The facility phase shared by `lab build` and `lab plan` resolves exact MaterialLots, allocates requirements to CapabilityOfferings and their owning Assets, and invokes only the adapters attached to those selected Assets. The reviewed plan freezes the inventory, allocation, staged adapter profiles, and every emitted device and support artifact by SHA-256. Whole-program adapters produce one reviewed lowering bundle covering all of their triggering requirements; Lab does not pretend that one generated protocol corresponds to one arbitrary requirement.
+
+```sh
+lab build
+lab run .lab/build --dry-run
+```
+
+`lab adapters describe` is the discovery authority for the exact compiler binary. Its `lab.adapter-catalog.v1` output keeps semantic SBOLInventory capability IRIs separate from implementation features and declares accepted control modes, emitted document formats, configuration schemas, and actual planning, lowering, simulation, and runtime services. The explicit driver argument selects validation code; neither an adapter profile nor an Asset's manufacturer or model can select another implementation. `lab.adapter-profile.v2` contains no backend or Asset selector, rejects the removed `[target]` table, and places OT-2 API-version configuration under `[protocol]`.
+
+```sh
+lab adapters describe
+lab --json adapters describe --driver opentrons.flex
+lab adapters default opentrons.flex --name flex-bay-1
+lab adapters validate opentrons.flex adapters/flex-bay-1.toml
+lab --json adapters render opentrons.flex adapters/flex-bay-1.toml
+```
 
 All read-oriented commands support `--json` for editor and automation clients:
 
@@ -82,4 +79,4 @@ lab check --json
 
 Path dependencies may optionally carry a semver requirement, which is checked against the dependency manifest. Registry dependencies remain explicitly unsupported and fail closed; adding them requires a registry protocol and integrity model rather than silent fallback.
 
-`lab run <run-directory> --dry-run` validates and narrates reviewed Hamilton STAR or workcell run documents without touching hardware. A live workcell run connects the supported stations, confirms every handoff with the operator, and appends a durable node ledger so `--resume` can continue without repeating completed motion.
+`lab run <reviewed-plan-directory> --dry-run` validates the frozen inventory, exact bindings, adapter profiles, every reviewed child artifact, and the dependency DAG, then narrates every node without touching hardware. `lab run <reviewed-plan-directory> --simulate` walks the same exact plan through simulation adapters and writes `inventory-simulation.ttl`; `lab run <reviewed-plan-directory>` uses live executors and writes `inventory-after.ttl`. Both modes append a durable node ledger so `--resume` can continue without repeating completed work, but simulation and live ledgers are intentionally incompatible. Material movements and manual nodes remain explicit operator confirmations in either mode.

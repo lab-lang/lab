@@ -2,9 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use thiserror::Error;
 
+use crate::planning::model::MaterialLotCandidates;
 use crate::planning::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildInventory, DependencyBuildManifest,
-    DependencyBuildStatus, DependencyEdge, DependencyNode,
+    DependencyBuildStatus, DependencyEdge, DependencyInventorySource, DependencyNode,
+    MaterialLotBinding,
 };
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -19,31 +21,65 @@ pub enum DependencyGraphError {
          a catalogued name that was renamed leaves its old identity here"
     )]
     UnusedInventoryMaterial { material: String },
+    #[error(
+        "{kind} `{symbol}` has no exact sbol_identity; SBOLInventory matching never uses declaration names or display IDs"
+    )]
+    MissingDesignIdentity { kind: &'static str, symbol: String },
+    #[error(
+        "{kind} `{symbol}` realizes SBOL Component `{component}` through several active MaterialLots ({material_lots}); allocation policy must select one"
+    )]
+    AmbiguousMaterialLot {
+        kind: &'static str,
+        symbol: String,
+        component: String,
+        material_lots: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Availability {
+    Missing,
+    Legacy,
+    MaterialLot(MaterialLotBinding),
+}
+
+impl Availability {
+    fn is_available(&self) -> bool {
+        !matches!(self, Self::Missing)
+    }
+
+    fn binding(&self) -> Option<&MaterialLotBinding> {
+        match self {
+            Self::MaterialLot(binding) => Some(binding),
+            Self::Missing | Self::Legacy => None,
+        }
+    }
 }
 
 /// Resolve graph waves against inventory without interpreting any biological
-/// operation, execution target, or assembly hierarchy.
+/// operation, execution device, or assembly hierarchy.
 pub fn resolve_dependency_graph(
     graph: &BuildGraph,
     inventory: &BuildInventory,
 ) -> Result<DependencyBuildManifest, DependencyGraphError> {
-    // A catalogued name supplies its own external identity, so a rename that
-    // was meant to keep the supplier's name silently leaves the old one behind
-    // in the manifest. Declaring stock this build never asks for is that
-    // mistake, and a typo, and a stale entry — all worth stopping for.
-    let required = graph
-        .nodes
-        .values()
-        .flat_map(|node| node.required_materials.iter().cloned())
-        .collect::<BTreeSet<_>>();
-    if let Some(material) = inventory
-        .available_materials
-        .iter()
-        .find(|material| !required.contains(*material))
-    {
-        return Err(DependencyGraphError::UnusedInventoryMaterial {
-            material: material.clone(),
-        });
+    if let BuildInventory::LegacySymbols(inventory) = inventory {
+        // A legacy manifest is authored by hand, so an unused name is likely a
+        // typo or stale entry. A semantic catalog may contain any number of
+        // unrelated lots and is never subjected to this check.
+        let required = graph
+            .nodes
+            .values()
+            .flat_map(|node| node.required_materials.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        if let Some(material) = inventory
+            .available_materials
+            .iter()
+            .find(|material| !required.contains(*material))
+        {
+            return Err(DependencyGraphError::UnusedInventoryMaterial {
+                material: material.clone(),
+            });
+        }
     }
 
     let names = graph.nodes.keys().cloned().collect::<BTreeSet<_>>();
@@ -72,10 +108,17 @@ pub fn resolve_dependency_graph(
     if roots.is_empty() {
         roots.extend(names.iter().cloned());
     }
-    let existing = names
-        .intersection(&inventory.available_artifacts)
-        .cloned()
-        .collect::<BTreeSet<_>>();
+    let mut existing = BTreeSet::new();
+    let mut existing_material_lots = BTreeMap::new();
+    for artifact in &names {
+        let availability = artifact_availability(inventory, artifact)?;
+        if availability.is_available() {
+            existing.insert(artifact.clone());
+            if let Some(binding) = availability.binding() {
+                existing_material_lots.insert(artifact.clone(), binding.clone());
+            }
+        }
+    }
     let unresolved_graph = graph
         .nodes
         .iter()
@@ -92,6 +135,19 @@ pub fn resolve_dependency_graph(
         })
         .collect::<BTreeMap<_, _>>();
     let cyclic = cyclic_nodes(&unresolved_graph);
+    let required_materials = graph
+        .nodes
+        .iter()
+        .filter(|(artifact, _)| !existing.contains(*artifact))
+        .flat_map(|(_, node)| node.required_materials.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let material_availability = required_materials
+        .into_iter()
+        .map(|material| {
+            let availability = material_availability(inventory, &material)?;
+            Ok((material, availability))
+        })
+        .collect::<Result<BTreeMap<_, _>, DependencyGraphError>>()?;
     let mut available = existing.clone();
     let mut pending = names
         .difference(&available)
@@ -127,7 +183,7 @@ pub fn resolve_dependency_graph(
             let missing_materials = node
                 .required_materials
                 .iter()
-                .filter(|material| !inventory.available_materials.contains(*material))
+                .filter(|material| !material_availability[*material].is_available())
                 .cloned()
                 .collect::<Vec<_>>();
             let outcome = if missing_dependencies.is_empty() && missing_materials.is_empty() {
@@ -181,16 +237,25 @@ pub fn resolve_dependency_graph(
                         .collect(),
                     node.required_materials
                         .iter()
-                        .filter(|material| !inventory.available_materials.contains(*material))
+                        .filter(|material| !material_availability[*material].is_available())
                         .cloned()
                         .collect(),
                 )
             };
+            let material_lot_bindings = node
+                .required_materials
+                .iter()
+                .filter_map(|material| material_availability.get(material))
+                .filter_map(Availability::binding)
+                .cloned()
+                .collect();
             DependencyNode {
                 artifact: artifact.clone(),
                 dependencies: node.dependencies.iter().cloned().collect(),
                 steps: node.steps.clone(),
                 inventory_materials: node.required_materials.iter().cloned().collect(),
+                material_lot_bindings,
+                existing_material_lot: existing_material_lots.get(artifact).cloned(),
                 resolution,
                 generated_in_iteration: generated_at.get(artifact).copied(),
                 missing_dependencies,
@@ -211,7 +276,8 @@ pub fn resolve_dependency_graph(
     );
 
     Ok(DependencyBuildManifest {
-        schema_version: "lab.dependency-build.v0".into(),
+        schema_version: "lab.dependency-build.v1".into(),
+        inventory: inventory_source(inventory),
         status,
         roots,
         nodes,
@@ -220,6 +286,89 @@ pub fn resolve_dependency_graph(
         generated_artifacts: generated.into_iter().map(|(name, _)| name).collect(),
         existing_artifacts: existing.into_iter().collect(),
     })
+}
+
+fn inventory_source(inventory: &BuildInventory) -> DependencyInventorySource {
+    match inventory {
+        BuildInventory::MaterialLots(inventory) => DependencyInventorySource::SbolInventory {
+            source_sha256: inventory.source_sha256.clone(),
+            facility: inventory.facility.clone(),
+        },
+        BuildInventory::LegacySymbols(_) => DependencyInventorySource::LegacySymbols,
+    }
+}
+
+fn artifact_availability(
+    inventory: &BuildInventory,
+    artifact: &str,
+) -> Result<Availability, DependencyGraphError> {
+    match inventory {
+        BuildInventory::LegacySymbols(inventory) => {
+            Ok(if inventory.available_artifacts.contains(artifact) {
+                Availability::Legacy
+            } else {
+                Availability::Missing
+            })
+        }
+        BuildInventory::MaterialLots(inventory) => {
+            exact_availability(&inventory.artifacts, "artifact", artifact)
+        }
+    }
+}
+
+fn material_availability(
+    inventory: &BuildInventory,
+    material: &str,
+) -> Result<Availability, DependencyGraphError> {
+    match inventory {
+        BuildInventory::LegacySymbols(inventory) => {
+            Ok(if inventory.available_materials.contains(material) {
+                Availability::Legacy
+            } else {
+                Availability::Missing
+            })
+        }
+        BuildInventory::MaterialLots(inventory) => {
+            exact_availability(&inventory.materials, "material", material)
+        }
+    }
+}
+
+fn exact_availability(
+    entries: &BTreeMap<String, MaterialLotCandidates>,
+    kind: &'static str,
+    symbol: &str,
+) -> Result<Availability, DependencyGraphError> {
+    let Some(candidates) = entries.get(symbol) else {
+        return Err(DependencyGraphError::MissingDesignIdentity {
+            kind,
+            symbol: symbol.to_owned(),
+        });
+    };
+    let MaterialLotCandidates::Identified {
+        component,
+        material_lots,
+    } = candidates
+    else {
+        return Err(DependencyGraphError::MissingDesignIdentity {
+            kind,
+            symbol: symbol.to_owned(),
+        });
+    };
+    match material_lots.as_slice() {
+        [] => Ok(Availability::Missing),
+        [material_lot] => Ok(Availability::MaterialLot(MaterialLotBinding {
+            symbol: symbol.to_owned(),
+            component: component.clone(),
+            material_lot: material_lot.clone(),
+        })),
+        _ => Err(DependencyGraphError::AmbiguousMaterialLot {
+            kind,
+            symbol: symbol.to_owned(),
+            component: component.clone(),
+            material_lots: material_lots.join(", "),
+        }),
+    }
 }
 
 fn cyclic_nodes(graph: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<String> {
@@ -270,10 +419,30 @@ fn cyclic_nodes(graph: &BTreeMap<String, BTreeSet<String>>) -> BTreeSet<String> 
 #[cfg(test)]
 mod tests {
     use crate::planning::BuildGraphNode;
+    use crate::planning::model::{MaterialLotBuildInventory, MaterialLotCandidates};
     use crate::planning::resolution::*;
 
+    fn identified(component: &str, material_lots: &[&str]) -> MaterialLotCandidates {
+        MaterialLotCandidates::Identified {
+            component: component.to_owned(),
+            material_lots: material_lots.iter().map(|lot| (*lot).to_owned()).collect(),
+        }
+    }
+
+    fn semantic_inventory(
+        materials: BTreeMap<String, MaterialLotCandidates>,
+        artifacts: BTreeMap<String, MaterialLotCandidates>,
+    ) -> BuildInventory {
+        BuildInventory::MaterialLots(MaterialLotBuildInventory {
+            source_sha256: "abc123".to_owned(),
+            facility: "https://example.org/facility".to_owned(),
+            materials,
+            artifacts,
+        })
+    }
+
     #[test]
-    fn schedules_graph_waves_without_target_knowledge() {
+    fn schedules_graph_waves_without_facility_knowledge() {
         let graph = BuildGraph {
             nodes: BTreeMap::from([
                 (
@@ -292,12 +461,157 @@ mod tests {
                 ),
             ]),
         };
-        let inventory = BuildInventory {
-            available_materials: BTreeSet::from(["source".into()]),
-            available_artifacts: BTreeSet::new(),
-        };
+        let inventory = BuildInventory::legacy(["source".into()], []);
         let manifest = resolve_dependency_graph(&graph, &inventory).unwrap();
         assert_eq!(manifest.generated_artifacts, ["leaf", "root"]);
         assert_eq!(manifest.status, DependencyBuildStatus::Complete);
+    }
+
+    #[test]
+    fn freezes_exact_component_and_material_lot_bindings() {
+        let graph = BuildGraph {
+            nodes: BTreeMap::from([(
+                "product".into(),
+                BuildGraphNode {
+                    required_materials: BTreeSet::from(["input".into()]),
+                    ..BuildGraphNode::default()
+                },
+            )]),
+        };
+        let inventory = semantic_inventory(
+            BTreeMap::from([(
+                "input".into(),
+                identified(
+                    "https://example.org/component/input",
+                    &["https://example.org/lot/input-7"],
+                ),
+            )]),
+            BTreeMap::from([(
+                "product".into(),
+                identified("https://example.org/component/product", &[]),
+            )]),
+        );
+
+        let manifest = resolve_dependency_graph(&graph, &inventory).unwrap();
+
+        assert_eq!(manifest.schema_version, "lab.dependency-build.v1");
+        assert_eq!(
+            manifest.inventory,
+            DependencyInventorySource::SbolInventory {
+                source_sha256: "abc123".to_owned(),
+                facility: "https://example.org/facility".to_owned(),
+            }
+        );
+        assert_eq!(
+            manifest.nodes[0].material_lot_bindings,
+            [MaterialLotBinding {
+                symbol: "input".to_owned(),
+                component: "https://example.org/component/input".to_owned(),
+                material_lot: "https://example.org/lot/input-7".to_owned(),
+            }]
+        );
+        assert_eq!(manifest.nodes[0].resolution, ArtifactResolution::Generated);
+    }
+
+    #[test]
+    fn refuses_to_allocate_an_ambiguous_material_lot() {
+        let graph = BuildGraph {
+            nodes: BTreeMap::from([(
+                "product".into(),
+                BuildGraphNode {
+                    required_materials: BTreeSet::from(["input".into()]),
+                    ..BuildGraphNode::default()
+                },
+            )]),
+        };
+        let inventory = semantic_inventory(
+            BTreeMap::from([(
+                "input".into(),
+                identified(
+                    "https://example.org/component/input",
+                    &["https://example.org/lot/a", "https://example.org/lot/b"],
+                ),
+            )]),
+            BTreeMap::from([(
+                "product".into(),
+                identified("https://example.org/component/product", &[]),
+            )]),
+        );
+
+        let error = resolve_dependency_graph(&graph, &inventory).unwrap_err();
+
+        assert_eq!(
+            error,
+            DependencyGraphError::AmbiguousMaterialLot {
+                kind: "material",
+                symbol: "input".to_owned(),
+                component: "https://example.org/component/input".to_owned(),
+                material_lots: "https://example.org/lot/a, https://example.org/lot/b".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn exact_inventory_never_falls_back_to_a_symbol_name() {
+        let graph = BuildGraph {
+            nodes: BTreeMap::from([(
+                "product".into(),
+                BuildGraphNode {
+                    required_materials: BTreeSet::from(["input".into()]),
+                    ..BuildGraphNode::default()
+                },
+            )]),
+        };
+        let inventory = semantic_inventory(
+            BTreeMap::from([("input".into(), MaterialLotCandidates::Unidentified)]),
+            BTreeMap::from([(
+                "product".into(),
+                identified("https://example.org/component/product", &[]),
+            )]),
+        );
+
+        assert_eq!(
+            resolve_dependency_graph(&graph, &inventory).unwrap_err(),
+            DependencyGraphError::MissingDesignIdentity {
+                kind: "material",
+                symbol: "input".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_existing_artifact_binds_its_lot_without_resolving_recipe_leaves() {
+        let graph = BuildGraph {
+            nodes: BTreeMap::from([(
+                "product".into(),
+                BuildGraphNode {
+                    required_materials: BTreeSet::from(["unavailable_recipe_leaf".into()]),
+                    ..BuildGraphNode::default()
+                },
+            )]),
+        };
+        let inventory = semantic_inventory(
+            BTreeMap::new(),
+            BTreeMap::from([(
+                "product".into(),
+                identified(
+                    "https://example.org/component/product",
+                    &["https://example.org/lot/product"],
+                ),
+            )]),
+        );
+
+        let manifest = resolve_dependency_graph(&graph, &inventory).unwrap();
+
+        assert_eq!(manifest.nodes[0].resolution, ArtifactResolution::Existing);
+        assert_eq!(
+            manifest.nodes[0].existing_material_lot,
+            Some(MaterialLotBinding {
+                symbol: "product".to_owned(),
+                component: "https://example.org/component/product".to_owned(),
+                material_lot: "https://example.org/lot/product".to_owned(),
+            })
+        );
+        assert!(manifest.nodes[0].material_lot_bindings.is_empty());
     }
 }

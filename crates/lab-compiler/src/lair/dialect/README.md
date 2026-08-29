@@ -11,12 +11,12 @@ Pliron is an implementation detail of this layer. Pliron contexts, modules, valu
 The first vertical slice contains:
 
 - the `design` dialect for declarative plasmid artifact values;
-- the `workflow` dialect for target-neutral realization, provision, transformation, recovery, dilution, and plating intent with typed material use-def edges;
-- the `protocol` dialect for target-selected provision, synthesis, assembly, transformation, recovery, dilution, plating, selection, screening, growth, purification, sampling, sequencing, quantification, and acceptance;
+- the `workflow` dialect for method-neutral realization, provision, transformation, recovery, dilution, and plating intent with typed material use-def edges;
+- the `protocol` dialect for method-selected provision, synthesis, assembly, transformation, recovery, dilution, plating, selection, screening, growth, purification, sampling, sequencing, quantification, and acceptance;
 - Protocol material-state types such as `CircularDna`, `ColonyPool`, `CloneCulture`, and `PurifiedPlasmid`;
 - Protocol evidence types for sequence identity, concentration, and volume.
 
-The dialects are layers within LAIR; no individual dialect is itself “the LAIR dialect.” Design and Workflow form the portable source-lowering boundary. A dialect conversion selects Protocol operations and eliminates Workflow operations before a robot backend runs. Planned lower layers add resource binding and scheduling and execution-target operations.
+The dialects are layers within LAIR; no individual dialect is itself “the LAIR dialect.” Design and Workflow form the portable source-lowering boundary. A dialect conversion selects Protocol operations and eliminates Workflow operations while remaining independent of any facility. Planning then binds requirements to capability offerings and assets before an adapter lowers the bound protocol to device operations.
 
 ## Physical-resource rule
 

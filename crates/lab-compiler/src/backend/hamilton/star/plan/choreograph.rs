@@ -16,7 +16,7 @@
 
 use hamilton_star::catalog::{CorrectionCurve, TipType};
 
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 use crate::backend::hamilton::star::BACKEND;
 use crate::backend::hamilton::star::catalog::{LabwareDefinition, parse_well};
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
@@ -24,7 +24,7 @@ use crate::backend::hamilton::star::plan::execution::{
     ChannelLiquid, StarOperation, StarWell, TipClass, TipPickupPosition,
 };
 use crate::backend::hamilton::star::plan::liquids::{DeckIndex, LiquidState, wire_mm, wire_ul};
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::resources::plate_wells;
 
 /// Mix applied after assembly reagent additions: 3 × 15 µL.
@@ -116,8 +116,8 @@ impl TipFeeder {
     fn take(&mut self, count: usize) -> Result<Vec<Vec<StarWell>>, StarPlanningError> {
         let total = self.rack_count * self.capacity;
         if self.cursor + count > total {
-            return Err(TargetConstraintError::CapacityExceeded {
-                target: BACKEND.into(),
+            return Err(AdapterConstraintError::CapacityExceeded {
+                adapter: BACKEND.into(),
                 operation: "tip_pickup".into(),
                 subject: "automation_batch".into(),
                 resource: self.prefix.clone(),
@@ -163,7 +163,7 @@ impl TipFeeder {
 
 /// Builds one run's operation list.
 pub struct RunBuilder<'a> {
-    profile: &'a StarTargetProfile,
+    profile: &'a StarAdapterProfile,
     deck: &'a DeckIndex,
     liquids: &'a mut LiquidState,
     small: Option<TipFeeder>,
@@ -200,7 +200,7 @@ impl Curves {
 
 impl<'a> RunBuilder<'a> {
     pub fn new(
-        profile: &'a StarTargetProfile,
+        profile: &'a StarAdapterProfile,
         deck: &'a DeckIndex,
         liquids: &'a mut LiquidState,
         small: Option<TipFeeder>,
@@ -555,7 +555,7 @@ fn consecutive_in_column(previous: &StarWell, next: &StarWell) -> bool {
 mod tests {
     use super::*;
     use crate::backend::hamilton::star::plan::liquids::{DeckIndex, LiquidState};
-    use crate::backend::hamilton::star::profile::StarTargetProfile;
+    use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
     fn feeder(deck: &DeckIndex) -> TipFeeder {
         TipFeeder::new("assembly_small_tips", deck, 1, 96)
@@ -563,7 +563,7 @@ mod tests {
 
     #[test]
     fn a_full_column_of_aligned_transfers_batches_to_one_eight_channel_op() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
         let mut liquids = LiquidState::new();
         let transfers: Vec<Transfer> = (0..8)
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn a_lone_transfer_runs_single_channel() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
         let mut liquids = LiquidState::new();
         let transfers = [Transfer::new(
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn multi_dispense_chunks_split_at_the_tip_working_volume() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
         let mut liquids = LiquidState::new();
         // 4 × 20 µL of water correct to ~4 × 23.2 µL; a 60 µL working
@@ -670,7 +670,7 @@ mod tests {
 
     #[test]
     fn tip_exhaustion_names_the_rack_resource() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
         let mut feeder = TipFeeder::new("assembly_small_tips", &deck, 1, 96);
         feeder.take(96).expect("the rack holds 96 tips");
@@ -684,7 +684,7 @@ mod tests {
 
     #[test]
     fn multi_channel_pickups_split_at_rack_column_boundaries() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
         let mut feeder = TipFeeder::new("assembly_small_tips", &deck, 1, 96);
         feeder.take(6).expect("six tips leave two in the column");

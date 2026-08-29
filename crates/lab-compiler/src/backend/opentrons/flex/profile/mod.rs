@@ -1,14 +1,8 @@
-//! Site configuration for one Opentrons Flex bench.
+//! Operational configuration for the Opentrons Flex adapter.
 //!
-//! A profile describes the laboratory, not the science: which modules are
-//! installed, which labware sits in which deck slot, where the trash bin is,
-//! and which pipette is on which mount. Two laboratories running the same Lab
-//! program supply different profiles; neither program changes.
+//! Facility allocation has already selected an exact Asset before this profile is read. The profile contains only checked configuration the implementation still needs to produce an executable protocol. It cannot select a facility Asset or another adapter.
 //!
-//! Every field has a default, so a profile states only what differs from the
-//! bench this backend was developed against. Unknown keys are rejected,
-//! because a misspelled slot silently falling back to a default is how a
-//! protocol ends up aspirating from the wrong place.
+//! Every field has a default, so a profile states only what differs from the reference implementation configuration. Unknown keys are rejected, because a misspelled slot silently falling back to a default is how a protocol ends up aspirating from the wrong place.
 
 mod defaults;
 mod error;
@@ -20,22 +14,23 @@ use opentrons_protocol::{FlexPipetteName, FlexSlot, TrashArea};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::backend::opentrons::flex::BACKEND;
 pub use crate::backend::opentrons::flex::profile::error::FlexProfileError;
 // Only the field types other `flex` submodules reach into directly
-// are re-exported; the rest of the schema stays behind `FlexTargetProfile`.
-use crate::backend::opentrons::flex::profile::schema::{FlexDeck, Instruments, TargetMetadata};
+// are re-exported; the rest of the schema stays behind `FlexAdapterProfile`.
+use crate::backend::opentrons::flex::profile::schema::{FlexDeck, Instruments};
 pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Plates, Stages, TipRacks};
 
 /// Slots the installed thermocycler occupies.
 const THERMOCYCLER_SLOTS: [FlexSlot; 2] = [FlexSlot::A1, FlexSlot::B1];
 
-/// The complete Flex site configuration consumed by planning and emission.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// The complete Flex implementation configuration consumed by planning and emission.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FlexTargetProfile {
-    #[serde(default)]
-    pub target: TargetMetadata,
+pub struct FlexAdapterProfile {
+    /// File-stem label supplied by the exact Asset binding. It is review metadata, not profile input.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub name: String,
     #[serde(default)]
     pub instruments: Instruments,
     #[serde(default)]
@@ -44,24 +39,27 @@ pub struct FlexTargetProfile {
     pub stages: Stages,
 }
 
-impl FlexTargetProfile {
-    /// Load the profile named `name`. The name is the profile's filename under
-    /// `targets/`, supplied by whoever resolved it, so the file itself never
-    /// states which bench it is.
+impl Default for FlexAdapterProfile {
+    fn default() -> Self {
+        Self {
+            name: "opentrons.flex".to_owned(),
+            instruments: Instruments::default(),
+            deck: FlexDeck::default(),
+            stages: Stages::default(),
+        }
+    }
+}
+
+impl FlexAdapterProfile {
+    /// Load operational configuration for one exact Asset binding.
     pub fn parse(name: &str, text: &str) -> Result<Self, FlexProfileError> {
         let mut profile: Self = toml::from_str(text)?;
-        profile.target.name = name.to_owned();
+        profile.name = name.to_owned();
         profile.validate()?;
         Ok(profile)
     }
 
     pub fn validate(&self) -> Result<(), FlexProfileError> {
-        if self.target.backend != BACKEND {
-            return Err(FlexProfileError::WrongBackend {
-                expected: BACKEND,
-                found: self.target.backend.clone(),
-            });
-        }
         self.validate_instruments()?;
         self.validate_deck()?;
         for (stage, claims) in [
@@ -263,8 +261,8 @@ mod tests {
 
     #[test]
     fn an_empty_profile_describes_the_reference_bench() {
-        let profile = FlexTargetProfile::parse("reference-bench", "").unwrap();
-        assert_eq!(profile, FlexTargetProfile::default());
+        let profile = FlexAdapterProfile::parse("reference-bench", "").unwrap();
+        assert_eq!(profile.name, "reference-bench");
         assert_eq!(profile.deck.temperature_module.slot, "C1");
         assert_eq!(profile.deck.trash.area, "movableTrashA3");
         assert_eq!(profile.stages.plating.agar_plate.slots, ["B2", "B3"]);
@@ -273,7 +271,7 @@ mod tests {
 
     #[test]
     fn a_profile_overrides_only_what_it_states() {
-        let profile = FlexTargetProfile::parse(
+        let profile = FlexAdapterProfile::parse(
             "bench-two",
             r#"
 [stages.plating.agar_plate]
@@ -292,16 +290,16 @@ capacity = 96
     }
 
     #[test]
-    fn rejects_a_profile_written_for_another_backend() {
+    fn rejects_an_embedded_target_or_adapter_selector() {
         let error =
-            FlexTargetProfile::parse("bench-two", "[target]\nbackend = \"opentrons.ot2\"\n")
-                .expect_err("this backend compiles only its own profiles");
-        assert!(error.to_string().contains(BACKEND), "{error}");
+            FlexAdapterProfile::parse("flex-runtime", "[target]\nbackend = \"opentrons.ot2\"\n")
+                .expect_err("only the exact Asset binding may select an adapter");
+        assert!(error.to_string().contains("target"), "{error}");
     }
 
     #[test]
     fn rejects_an_ot2_pipette_on_a_flex_bench() {
-        let error = FlexTargetProfile::parse(
+        let error = FlexAdapterProfile::parse(
             "bench-two",
             "[instruments.small]\nmodel = \"p20_single_gen2\"\nmount = \"left\"\n",
         )
@@ -311,7 +309,7 @@ capacity = 96
 
     #[test]
     fn rejects_labware_placed_under_the_thermocycler() {
-        let error = FlexTargetProfile::parse(
+        let error = FlexAdapterProfile::parse(
             "bench-two",
             r#"
 [stages.assembly.small_tips]
@@ -326,7 +324,7 @@ capacity = 96
 
     #[test]
     fn rejects_labware_placed_in_the_trash_slot() {
-        let error = FlexTargetProfile::parse(
+        let error = FlexAdapterProfile::parse(
             "bench-two",
             r#"
 [stages.assembly.small_tips]
@@ -341,7 +339,7 @@ capacity = 96
 
     #[test]
     fn rejects_a_temperature_module_in_column_2() {
-        let error = FlexTargetProfile::parse(
+        let error = FlexAdapterProfile::parse(
             "bench-two",
             "[deck.temperature_module]\nmodel = \"temperatureModuleV2\"\nslot = \"C2\"\nlabware = \"opentrons_24_aluminumblock_nest_1.5ml_snapcap\"\ncapacity = 24\n",
         )
@@ -351,7 +349,7 @@ capacity = 96
 
     #[test]
     fn rejects_a_staging_slot() {
-        let error = FlexTargetProfile::parse(
+        let error = FlexAdapterProfile::parse(
             "bench-two",
             r#"
 [stages.transformation.dna_plate]
@@ -366,7 +364,7 @@ capacity = 96
 
     #[test]
     fn rejects_an_unknown_key_rather_than_silently_ignoring_it() {
-        let error = FlexTargetProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
+        let error = FlexAdapterProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
             .expect_err("a misspelled key must not fall back to a default");
         assert!(error.to_string().contains("parse"), "{error}");
     }

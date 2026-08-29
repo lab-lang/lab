@@ -4,23 +4,24 @@
 //! everything in this crate interprets those documents without ever
 //! planning or deriving new work. Two execution modes share one node walk:
 //!
-//! - **live execution** (`lab run`) drives real stations on a wall clock;
-//! - **dry run** validates every document and narrates the walk without
-//!   touching hardware.
+//! - **live execution** (`lab run`) drives exact bound Assets on a wall clock;
+//! - **simulation** (`lab run --simulate`) uses no-hardware executors and mode-bound evidence.
 //!
-//! The walk is parameterized over four ports: a [`clock::Clock`], an
+//! A dry run validates every document and narrates the walk without opening a ledger or touching
+//! hardware.
+//!
+//! Facility execution is parameterized over a [`clock::Clock`], an
 //! [`operator::Operator`] for confirmations, an [`events::EventSink`] for
-//! narration, and a [`stations::Connector`] that opens station sessions.
+//! narration, and exact Asset-bound document executors.
 
 pub mod clock;
+pub mod device_executors;
 pub mod events;
+pub mod execution;
 pub mod ledger;
+pub mod mode;
 pub mod operator;
+pub mod provenance;
 pub mod star;
-pub mod stations;
-pub mod workcell;
-
-#[cfg(test)]
-pub(crate) mod testing;
 
 pub use hamilton_star;

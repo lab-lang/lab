@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{ArtifactBundle, ArtifactError, ProtocolLairProgram};
 
-use crate::backend::opentrons::flex::profile::FlexTargetProfile;
+use crate::backend::opentrons::flex::profile::FlexAdapterProfile;
 use crate::planning::{BuildInventory, DependencyBuildManifest};
 use crate::planning::{DependencyGraphError, resolve_dependency_graph};
 
@@ -56,12 +56,12 @@ pub enum FlexDependencyBuildError {
 }
 
 /// Specialize a source-derived dependency graph into independently executable
-/// Flex packages. Graph resolution itself is target-neutral; only the
+/// Flex packages. Graph resolution itself is facility-independent; only the
 /// requirements projected into each graph node and the emitted batches are
 /// owned by this module.
 pub fn compile_dependency_build(
     protocol: &ProtocolLairProgram,
-    profile: &FlexTargetProfile,
+    profile: &FlexAdapterProfile,
     inventory: &BuildInventory,
 ) -> Result<FlexDependencyBuildBundle, FlexDependencyBuildError> {
     let graph =
@@ -97,7 +97,7 @@ pub fn compile_dependency_build(
             DocMeta::new(
                 "Dependency report",
                 "Artifact graph, wave schedule, and blockers",
-                &profile.target.name,
+                &profile.name,
                 "Opentrons Flex",
             ),
             &manifest,
@@ -145,7 +145,7 @@ pub fn compile_dependency_build(
             DocMeta::new(
                 "Automated plasmid build",
                 "Operator instructions for the full dependency-driven build",
-                &profile.target.name,
+                &profile.name,
                 "Opentrons Flex",
             ),
             &manifest,

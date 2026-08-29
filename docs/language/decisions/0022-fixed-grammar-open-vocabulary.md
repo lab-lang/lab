@@ -73,8 +73,4 @@ error: unknown declaration kind 'reagent'
   = help: kinds in scope: plasmid, strain
 ```
 
-**This removes biology from the frontend only.** The OT-2 backend still reads
-`reaction_volume` and `digest_temperature` by name, so biology does not leave
-the toolchain until target property contracts exist. What it gains is an honest
-failure: a target asked to build a kind it does not know now says so, rather
-than the checker refusing the word before a target ever sees it.
+**This removes biology from the frontend only.** The initial plasmid-build method still reads `reaction_volume` and `digest_temperature` by name, so biology does not leave the toolchain until method property contracts exist. What it gains is an honest failure: method selection asked to build a kind it does not know now says so, rather than the checker refusing the word before lowering ever sees it.

@@ -8,8 +8,7 @@
  * computes an assembled sequence rather than taking one on trust.
  *
  * The reaction chemistry in each design is scientific intent and travels with
- * the artifact; where the reaction physically happens is a target profile's
- * concern.
+ * the artifact; facility allocation determines where it physically happens.
  */
 
 use std.bio.designs
@@ -27,6 +26,7 @@ composite_plasmid_2_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAG
  * Gate with BsaI. Accepted only if the built sequence matches the design.
  */
 build plasmid composite_plasmid_1:
+  sbol_identity = "https://example.org/golden-gate/designs/composite_plasmid_1"
   sequence = composite_plasmid_1_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
@@ -53,6 +53,7 @@ build plasmid composite_plasmid_1:
  * reporters.
  */
 build plasmid composite_plasmid_2:
+  sbol_identity = "https://example.org/golden-gate/designs/composite_plasmid_2"
   sequence = composite_plasmid_2_sequence
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]

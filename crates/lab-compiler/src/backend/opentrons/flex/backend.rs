@@ -1,30 +1,28 @@
 //! Flex implementation of the compiler backend contracts.
 
-use std::collections::BTreeSet;
-
 use thiserror::Error;
 
-use crate::backend::{Backend, BackendDescriptor, BackendEmitter, BackendTarget};
+use crate::backend::{Backend, BackendEmitter};
 use crate::{ArtifactBundle, ProtocolLairProgram};
 
 use crate::backend::opentrons::flex::plan::{
     FlexEmissionError, FlexExecutionPlan, FlexPlanningError, emit_program, plan_build,
 };
-use crate::backend::opentrons::flex::profile::FlexTargetProfile;
+use crate::backend::opentrons::flex::profile::FlexAdapterProfile;
 
 /// The Flex backend bound to one bench. Planning reads every deck, labware,
 /// and instrument decision from the profile it carries.
 #[derive(Clone, Debug, Default)]
 pub struct FlexBackend {
-    profile: FlexTargetProfile,
+    profile: FlexAdapterProfile,
 }
 
 impl FlexBackend {
-    pub fn new(profile: FlexTargetProfile) -> Self {
+    pub fn new(profile: FlexAdapterProfile) -> Self {
         Self { profile }
     }
 
-    pub fn profile(&self) -> &FlexTargetProfile {
+    pub fn profile(&self) -> &FlexAdapterProfile {
         &self.profile
     }
 }
@@ -38,25 +36,6 @@ pub enum FlexCompileError {
 impl Backend<ProtocolLairProgram> for FlexBackend {
     type Program = FlexExecutionPlan;
     type Error = FlexCompileError;
-
-    fn descriptor(&self) -> BackendDescriptor {
-        BackendDescriptor {
-            id: "opentrons".into(),
-            display_name: "Opentrons JSON protocol".into(),
-            manufacturer: Some("Opentrons".into()),
-            targets: vec![BackendTarget {
-                id: "flex".into(),
-                display_name: "Opentrons Flex".into(),
-                capabilities: BTreeSet::from([
-                    "liquid_transfer".into(),
-                    "temperature_control".into(),
-                    "thermocycler".into(),
-                    "gripper".into(),
-                    "json_protocol".into(),
-                ]),
-            }],
-        }
-    }
 
     fn compile(&self, protocol: &ProtocolLairProgram) -> Result<Self::Program, Self::Error> {
         Ok(plan_build(protocol, &self.profile)?)
@@ -83,8 +62,6 @@ mod tests {
         let protocol = golden_gate_protocol();
         let backend = FlexBackend::default();
         let program = backend.compile(&protocol).unwrap();
-        assert_eq!(backend.descriptor().id, "opentrons");
-        assert_eq!(backend.descriptor().targets[0].id, "flex");
         assert_eq!(program.assemblies.len(), 2);
         // One plasmid feeds two chassis, so four strains come from two
         // assemblies rather than one strain per assembly.

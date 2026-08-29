@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use pliron::context::Context;
 
 use crate::ProtocolLairProgram;
-use crate::backend::opentrons::flex::profile::{FlexTargetProfile, Plates, Stages};
+use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, Plates, Stages};
 
 use crate::backend::opentrons::flex::BACKEND;
 use crate::backend::opentrons::flex::plan::constraints::{
@@ -29,14 +29,14 @@ use crate::backend::trace::{AssemblyTrace, ProtocolTraces, StrainTrace, analyze_
 /// Markdown emitters.
 pub fn plan_build(
     protocol: &ProtocolLairProgram,
-    profile: &FlexTargetProfile,
+    profile: &FlexAdapterProfile,
 ) -> Result<FlexExecutionPlan, FlexPlanningError> {
     plan_selected_build(protocol, profile, None)
 }
 
 pub(in crate::backend::opentrons::flex) fn plan_selected_build(
     protocol: &ProtocolLairProgram,
-    profile: &FlexTargetProfile,
+    profile: &FlexAdapterProfile,
     selected_artifacts: Option<&BTreeSet<String>>,
 ) -> Result<FlexExecutionPlan, FlexPlanningError> {
     let context = protocol.context();
@@ -74,8 +74,8 @@ pub(in crate::backend::opentrons::flex) fn plan_selected_build(
         assign_all_source_wells(&traces, context, rack_capacity)?;
 
     Ok(FlexExecutionPlan {
-        schema_version: "lab.automation.v0".into(),
-        target: BACKEND.into(),
+        schema_version: "lab.automation.v1".into(),
+        adapter: BACKEND.into(),
         deck: profile.clone(),
         assembly_source_wells,
         transformation_source_wells,
@@ -97,10 +97,8 @@ fn validate_traces(traces: &ProtocolTraces, context: &Context) -> Result<(), Fle
     validate_uniform_batch_settings(&traces.strains, context)
 }
 
-/// Rejects a target profile that declares labware in a well count this
-/// backend has no row/column layout for. The tip racks are included because
-/// the JSON emitter addresses tip wells by name.
-fn require_deck_geometry(profile: &FlexTargetProfile) -> Result<(), FlexPlanningError> {
+/// Rejects adapter configuration that declares labware in a well count this implementation has no row/column layout for. The tip racks are included because the JSON emitter addresses tip wells by name.
+fn require_deck_geometry(profile: &FlexAdapterProfile) -> Result<(), FlexPlanningError> {
     let deck = &profile.deck;
     let stages = &profile.stages;
     require_known_geometry("the source rack", deck.temperature_module.capacity)?;
@@ -397,15 +395,15 @@ fn assign_all_source_wells(
 #[cfg(test)]
 mod tests {
     use crate::backend::opentrons::flex::plan::build::*;
-    use crate::backend::opentrons::flex::profile::FlexTargetProfile;
+    use crate::backend::opentrons::flex::profile::FlexAdapterProfile;
     use crate::test_support::golden_gate_protocol;
 
     #[test]
     fn allocates_both_stages_against_the_reference_bench() {
         let protocol = golden_gate_protocol();
-        let plan = plan_build(&protocol, &FlexTargetProfile::default()).unwrap();
-        assert_eq!(plan.target, "opentrons.flex");
-        assert_eq!(plan.schema_version, "lab.automation.v0");
+        let plan = plan_build(&protocol, &FlexAdapterProfile::default()).unwrap();
+        assert_eq!(plan.adapter, "opentrons.flex");
+        assert_eq!(plan.schema_version, "lab.automation.v1");
         assert_eq!(plan.assemblies.len(), 2);
         assert_eq!(plan.strains.len(), 4);
         assert_eq!(plan.assemblies[0].assembly_wells, ["A1"]);
@@ -419,7 +417,7 @@ mod tests {
     #[test]
     fn a_narrow_agar_plate_is_a_capacity_error_naming_this_backend() {
         let protocol = golden_gate_protocol();
-        let mut narrow = FlexTargetProfile::default();
+        let mut narrow = FlexAdapterProfile::default();
         narrow.stages.plating.agar_plate.slots = vec!["B2".to_owned()];
         narrow.stages.plating.agar_plate.capacity = 15;
         let error = plan_build(&protocol, &narrow)

@@ -15,13 +15,17 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// declaration of its own and carries the properties its item states, `Data`
 /// carries no category, a schema field states whether an instance may omit it,
 /// an acceptance claim carries the evidence it is believed on, a role may name
-/// the ontology term it stands for, and an artifact kind carries the roles its
-/// produced type plays.
+/// the ontology term it stands for, an artifact kind carries the roles its
+/// produced type plays, and artifact instances preserve exact SBOL identities
+/// independently of laboratory provenance. Action capabilities are absolute
+/// SBOLInventory capability-kind IRIs rather than compiler-local names, and
+/// durable workflow calls preserve the resolved identity of their callee, and
+/// operational parameters preserve absolute SBOLInventory property-kind IRIs.
 ///
-/// A consumer that ignores the last two reads a design with nothing said about
-/// what it is, which is exactly the silence grounding exists to end. That is
-/// why they raise the version rather than riding along as optional fields.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v4";
+/// Grounding, design identities, and capability identities are semantic
+/// contracts, so each incompatible change raises the version rather than
+/// riding along as an optional field.
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v8";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -58,14 +62,19 @@ pub enum CheckedDeclaration {
     },
     /// A name a supplier lists, and the Lab type it stands for.
     ///
-    /// The identity is a field rather than an argument to a synthesized call,
-    /// so a backend reads it directly instead of recognizing a call shape.
+    /// Biological identity and supplier identity are separate fields rather
+    /// than arguments to a synthesized call, so consumers cannot confuse an
+    /// SBOL Component IRI with a catalog order identifier.
     Catalog {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         doc: Option<String>,
         name: String,
         r#type: CheckedType,
-        identity: String,
+        /// Exact SBOL Component IRI for the biological design, when stated.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sbol_identity: Option<String>,
+        /// Identifier an external catalog or supplier accepts for ordering.
+        supplier_identity: String,
         /// What the supplier's item states about itself, checked against the
         /// fields of the type it is listed as.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -104,6 +113,9 @@ pub enum CheckedDeclaration {
         artifact: String,
         name: String,
         produces: CheckedType,
+        /// Exact SBOL Component IRI for the biological design, when stated.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sbol_identity: Option<String>,
         properties: Vec<CheckedProperty>,
         requirements: Vec<TypedExpression>,
         acceptance: Vec<CheckedAcceptance>,
@@ -383,6 +395,12 @@ pub enum OwnershipMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedAction {
     pub operation: String,
+    /// Exact declaration identity for a durable workflow call.
+    ///
+    /// Standard-library actions have no callee because their `operation` is
+    /// already the stable semantic operation identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee: Option<DefinitionId>,
     pub capability: Option<String>,
     pub arguments: Vec<CheckedActionArgument>,
     pub results: Vec<CheckedField>,
@@ -392,6 +410,8 @@ pub struct ResolvedAction {
 pub struct CheckedActionArgument {
     pub name: String,
     pub mode: OwnershipMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameter_kind: Option<String>,
     pub value: TypedExpression,
 }
 

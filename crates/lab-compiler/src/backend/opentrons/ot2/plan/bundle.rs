@@ -9,7 +9,7 @@ use crate::backend::opentrons::ot2::emit::{
 };
 use crate::backend::{markdown, typst};
 
-use crate::backend::opentrons::ot2::profile::Ot2TargetProfile;
+use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 
 use crate::backend::opentrons::ot2::plan::{
     Ot2BuildError, Ot2EmissionError, Ot2ExecutionPlan, plan_build,
@@ -130,7 +130,7 @@ impl Ot2Bundle {
 
 pub fn compile_build(
     protocol: &ProtocolLairProgram,
-    profile: &Ot2TargetProfile,
+    profile: &Ot2AdapterProfile,
 ) -> Result<Ot2Bundle, Ot2BuildError> {
     Ok(Ot2Bundle::from_plan(plan_build(protocol, profile)?)?)
 }

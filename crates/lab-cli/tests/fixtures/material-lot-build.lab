@@ -1,0 +1,42 @@
+use std.bio.build
+use std.bio.designs
+use std.bio.golden_gate
+
+record Reagent
+
+artifact Reagent:
+  description?: String
+
+buy part source:
+  sbol_identity = "https://example.org/material-lot-test/source"
+
+buy backbone pSB1C3:
+  sbol_identity = "https://example.org/material-lot-test/backbone"
+
+buy restriction_enzyme BsaI:
+  sbol_identity = "https://example.org/material-lot-test/enzyme"
+
+buy reagent T4_DNA_ligase:
+  sbol_identity = "https://example.org/material-lot-test/ligase"
+
+buy reagent T4_DNA_ligase_buffer:
+  sbol_identity = "https://example.org/material-lot-test/buffer"
+
+buy reagent nuclease_free_water:
+  sbol_identity = "https://example.org/material-lot-test/water"
+
+product_sequence: DNA = dna("ATGCGTACGTTAGCTA")
+
+build plasmid product:
+  sbol_identity = "https://example.org/material-lot-test/product"
+  sequence = product_sequence
+  backbone = pSB1C3
+  components = [source]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow main() -> Material<Plasmid>:
+  material <- realize product
+  return material

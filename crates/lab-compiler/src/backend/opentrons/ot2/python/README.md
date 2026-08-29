@@ -4,16 +4,16 @@ This directory is the maintained Python implementation of Lab's Opentrons OT-2 b
 
 The maintained modules import `Ot2ExecutionPlan` unconditionally from `plan_types.py` and are always typechecked. During compiler emission, Rust deterministically replaces that package import with the same marked `TypedDict` definitions and injects the serialized execution plan. The generated protocol therefore remains a standalone file accepted by the robot while preserving the checked source's types and behavior.
 
-The Python and Opentrons versions are pinned in `uv.lock`. Run every Python target gate with:
+The Python and Opentrons versions are pinned in `uv.lock`. Run every Python adapter gate with:
 
 ```sh
-scripts/check-opentrons-target.sh
+scripts/check-opentrons-bundle.sh
 ```
 
 After generating `.lab/full-build`, also lint, typecheck, and byte-compile every emitted protocol:
 
 ```sh
-scripts/check-opentrons-target.sh .lab/full-build
+scripts/check-opentrons-bundle.sh .lab/full-build
 scripts/simulate-opentrons.sh .lab/full-build
 ```
 

@@ -12,6 +12,7 @@ use crate::checked::{
     CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
     CheckedSection,
 };
+use crate::iri::is_absolute_iri;
 use crate::semantic_error::SemanticError;
 use crate::source::{Identifier, Span};
 use crate::type_system::{Ty, to_checked_type};
@@ -914,6 +915,8 @@ impl Checker {
         }
         let mut properties = Vec::new();
         let mut property_names = BTreeSet::new();
+        let mut sbol_identity = None;
+        let mut supplier_identity = None;
         let mut requirements = Vec::new();
         let mut acceptance = Vec::new();
         // The declaration's standard is read first so a claim written above it
@@ -946,15 +949,52 @@ impl Checker {
                             format!("duplicate {keyword} property '{}'", property.name.value),
                         ));
                     }
+                    let is_sbol_identity = property.name.value == "sbol_identity";
+                    let is_supplier_identity = declaration.provenance == Provenance::Buy
+                        && matches!(
+                            property.name.value.as_str(),
+                            "identity" | "supplier_identity"
+                        );
+                    if is_sbol_identity || is_supplier_identity {
+                        let Expr::String { value, .. } = &property.value else {
+                            return Err(SemanticError::new(
+                                property.value.span(),
+                                format!(
+                                    "{} is a String literal",
+                                    if is_sbol_identity {
+                                        "an SBOL identity"
+                                    } else {
+                                        "a supplier identity"
+                                    }
+                                ),
+                            ));
+                        };
+                        if is_sbol_identity {
+                            if !is_absolute_iri(value) {
+                                return Err(SemanticError::new(
+                                    property.value.span(),
+                                    format!("SBOL identity '{value}' is not an absolute IRI"),
+                                )
+                                .help("use an absolute IRI such as 'https://example.org/design'"));
+                            }
+                            sbol_identity = Some(value.clone());
+                        } else {
+                            if supplier_identity.is_some() {
+                                return Err(SemanticError::new(
+                                    property.name.span,
+                                    "a bought item states its supplier identity twice",
+                                )
+                                .help("use 'supplier_identity'; 'identity' is its legacy alias"));
+                            }
+                            supplier_identity = Some(value.clone());
+                        }
+                        continue;
+                    }
                     // A schema says what a thing may state, so a name it does
-                    // not declare is a mistake rather than an extension. Every
-                    // bought thing may name what an order asks for, so
-                    // `identity` belongs to buying rather than to any one
-                    // kind's schema.
-                    if !(declaration.provenance == Provenance::Buy
-                        && property.name.value == "identity")
-                        && !signature.fields.contains_key(&property.name.value)
-                    {
+                    // not declare is a mistake rather than an extension. SBOL
+                    // and supplier identities were consumed above because
+                    // they describe the instance, not one artifact kind.
+                    if !signature.fields.contains_key(&property.name.value) {
                         let mut error = SemanticError::new(
                             property.name.span,
                             format!("{produces} has no property '{}'", property.name.value),
@@ -968,16 +1008,6 @@ impl Checker {
                         return Err(error);
                     }
                     let inferred = self.infer_expr(&property.value, &environment)?;
-                    if declaration.provenance == Provenance::Buy
-                        && property.name.value == "identity"
-                        && inferred != Ty::String
-                    {
-                        return Err(SemanticError::new(
-                            property.value.span(),
-                            format!("an identity is a String, found {inferred}"),
-                        )
-                        .help("an identity is what a supplier's catalogue calls this item"));
-                    }
                     if let Some(expected) = environment.get(&property.name.value)
                         && !self.compatible(&inferred, expected)
                     {
@@ -1072,21 +1102,15 @@ impl Checker {
         }
         if declaration.provenance == Provenance::Buy {
             // A supplier lists it, so it is never built and there is nothing to
-            // accept it against. The identity is what an order names, which is
-            // the declared name unless the item states otherwise.
-            let identity = properties
-                .iter()
-                .find(|property| property.name == "identity")
-                .and_then(|property| match &property.value.value {
-                    crate::checked::CheckedExpression::String { value } => Some(value.clone()),
-                    _ => None,
-                })
-                .unwrap_or_else(|| declaration.name.value.clone());
+            // accept it against. Its order identifier defaults to the declared
+            // name and stays independent of the biological design IRI.
             return Ok(CheckedDeclaration::Catalog {
                 doc: declaration.doc.clone(),
                 name: declaration.name.value.clone(),
                 r#type: to_checked_type(&produces),
-                identity,
+                sbol_identity,
+                supplier_identity: supplier_identity
+                    .unwrap_or_else(|| declaration.name.value.clone()),
                 properties,
             });
         }
@@ -1095,6 +1119,7 @@ impl Checker {
             artifact: keyword.to_owned(),
             name: declaration.name.value.clone(),
             produces: to_checked_type(&produces),
+            sbol_identity,
             properties,
             requirements,
             acceptance,

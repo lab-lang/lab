@@ -9,7 +9,7 @@
 #show: protocol-doc.with(
   title: "Automated plasmid build",
   subtitle: "Operator manual for one robot session",
-  target: "hamilton-star",
+  adapter-profile: "hamilton-star",
   instrument: "Hamilton STAR",
   version: "0.0.0-sample",
 )

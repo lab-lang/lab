@@ -1,4 +1,4 @@
-//! Dialect conversion from target-neutral Workflow intent to Protocol LAIR.
+//! Dialect conversion from method-neutral Workflow intent to Protocol LAIR.
 
 use pliron::attribute::AttrObj;
 use pliron::builtin::attributes::{StringAttr, VecAttr};

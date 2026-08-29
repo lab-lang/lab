@@ -1,16 +1,8 @@
-//! Site configuration for one Hamilton STAR/STARlet bench.
+//! Operational configuration for the Hamilton STAR adapter.
 //!
-//! A profile describes the laboratory, not the science: which catalog
-//! carriers sit on which rails, which labware sits on which carrier site,
-//! and where each build stage draws tips and liquid from. Two laboratories
-//! running the same Lab program supply different profiles; neither program
-//! changes.
+//! Facility allocation has already selected an exact Asset before this profile is read. The profile contains only checked configuration the implementation still needs to produce and execute reviewed firmware frames. It cannot select a facility Asset or another adapter.
 //!
-//! Every field has a default matching the reference bench, so a profile
-//! states only what differs. Unknown keys are rejected, because a
-//! misspelled site silently falling back to a default is how a protocol
-//! ends up aspirating from the wrong place. Labware sites are addressed as
-//! `"<carrier>/<site>"` with 1-based site numbers.
+//! Every field has a default matching the reference implementation configuration, so a profile states only what differs. Unknown keys are rejected, because a misspelled site silently falling back to a default is how a protocol ends up aspirating from the wrong place. Labware sites are addressed as `"<carrier>/<site>"` with 1-based site numbers.
 
 use std::collections::BTreeMap;
 
@@ -20,7 +12,6 @@ use thiserror::Error;
 
 pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
 
-use crate::backend::hamilton::star::BACKEND;
 use crate::backend::hamilton::star::catalog::{
     self, CarrierDefinition, DeckPosition, LabwareDefinition,
 };
@@ -28,13 +19,8 @@ use crate::backend::hamilton::star::catalog::{
 /// The error raised when a profile cannot describe a workable bench.
 #[derive(Debug, Error, PartialEq)]
 pub enum StarProfileError {
-    #[error("failed to parse target profile TOML: {0}")]
+    #[error("failed to parse STAR adapter profile TOML: {0}")]
     Toml(String),
-    #[error("target profile declares backend '{found}', but this profile schema is '{expected}'")]
-    WrongBackend {
-        expected: &'static str,
-        found: String,
-    },
     #[error("machine variant '{found}' is unknown; this backend knows 'star' and 'starlet'")]
     UnknownVariant { found: String },
     #[error(
@@ -145,27 +131,6 @@ impl MachineVariant {
         match self {
             MachineVariant::Star => "star",
             MachineVariant::Starlet => "starlet",
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TargetMetadata {
-    /// The bench this profile describes, named by whoever loaded it: a
-    /// profile is selected as `targets/<name>.toml`, so the file does not
-    /// repeat its own name and cannot disagree with it.
-    #[serde(skip_deserializing, default = "default_bench_name")]
-    pub name: String,
-    #[serde(default = "default_backend")]
-    pub backend: String,
-}
-
-impl Default for TargetMetadata {
-    fn default() -> Self {
-        Self {
-            name: default_bench_name(),
-            backend: default_backend(),
         }
     }
 }
@@ -350,12 +315,14 @@ impl Default for RunOptions {
     }
 }
 
-/// The complete STAR site configuration consumed by planning and emission.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// The complete STAR implementation configuration consumed by planning and emission.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct StarTargetProfile {
-    #[serde(default)]
-    pub target: TargetMetadata,
+pub struct StarAdapterProfile {
+    /// File-stem label supplied by the exact Asset binding. It is review metadata, not profile input.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub name: String,
     #[serde(default)]
     pub machine: Machine,
     #[serde(default)]
@@ -364,6 +331,18 @@ pub struct StarTargetProfile {
     pub stages: StarStages,
     #[serde(default)]
     pub run: RunOptions,
+}
+
+impl Default for StarAdapterProfile {
+    fn default() -> Self {
+        Self {
+            name: "hamilton.star".to_owned(),
+            machine: Machine::default(),
+            deck: StarDeck::default(),
+            stages: StarStages::default(),
+            run: RunOptions::default(),
+        }
+    }
 }
 
 /// A site address resolved against the catalog: everything needed to place
@@ -384,24 +363,17 @@ impl ResolvedSite {
     }
 }
 
-impl StarTargetProfile {
-    /// Load the profile named `name`. The name is the profile's filename
-    /// under `targets/`, supplied by whoever resolved it.
+impl StarAdapterProfile {
+    /// Load operational configuration for one exact Asset binding.
     pub fn parse(name: &str, text: &str) -> Result<Self, StarProfileError> {
         let mut profile: Self =
             toml::from_str(text).map_err(|error| StarProfileError::Toml(error.to_string()))?;
-        profile.target.name = name.to_owned();
+        profile.name = name.to_owned();
         profile.validate()?;
         Ok(profile)
     }
 
     pub fn validate(&self) -> Result<(), StarProfileError> {
-        if self.target.backend != BACKEND {
-            return Err(StarProfileError::WrongBackend {
-                expected: BACKEND,
-                found: self.target.backend.clone(),
-            });
-        }
         if self.machine.channels != 8 {
             return Err(StarProfileError::UnsupportedChannels {
                 found: self.machine.channels,
@@ -637,14 +609,6 @@ fn known_labware() -> String {
         .join(", ")
 }
 
-fn default_bench_name() -> String {
-    "hamilton-star".into()
-}
-
-fn default_backend() -> String {
-    BACKEND.into()
-}
-
 fn default_variant() -> MachineVariant {
     MachineVariant::Starlet
 }
@@ -797,7 +761,7 @@ mod tests {
 
     #[test]
     fn the_reference_bench_validates() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         profile
             .validate()
             .expect("the defaults describe a coherent bench");
@@ -805,10 +769,9 @@ mod tests {
 
     #[test]
     fn a_minimal_profile_parses_with_defaults() {
-        let profile =
-            StarTargetProfile::parse("bench-1", "[target]\nbackend = \"hamilton.star\"\n")
-                .expect("a profile stating only its backend takes every default");
-        assert_eq!(profile.target.name, "bench-1", "the loader names the bench");
+        let profile = StarAdapterProfile::parse("star-runtime", "")
+            .expect("an empty profile takes every checked implementation default");
+        assert_eq!(profile.name, "star-runtime");
         assert_eq!(
             profile.machine.variant,
             MachineVariant::Starlet,
@@ -817,22 +780,16 @@ mod tests {
     }
 
     #[test]
-    fn the_wrong_backend_is_rejected() {
-        let error = StarTargetProfile::parse("bench", "[target]\nbackend = \"opentrons.flex\"\n")
-            .expect_err("a Flex profile cannot describe a STAR");
-        assert_eq!(
-            error,
-            StarProfileError::WrongBackend {
-                expected: "hamilton.star",
-                found: "opentrons.flex".into()
-            },
-            "the error names both spellings"
-        );
+    fn an_embedded_target_or_adapter_selector_is_rejected() {
+        let error =
+            StarAdapterProfile::parse("star-runtime", "[target]\nbackend = \"opentrons.flex\"\n")
+                .expect_err("only the exact Asset binding may select an adapter");
+        assert!(error.to_string().contains("target"), "{error}");
     }
 
     #[test]
     fn a_carrier_off_the_deck_names_the_rail_span() {
-        let mut profile = StarTargetProfile::default();
+        let mut profile = StarAdapterProfile::default();
         profile.deck.carriers.insert(
             "tips".into(),
             CarrierPlacement {
@@ -858,7 +815,7 @@ mod tests {
 
     #[test]
     fn overlapping_carriers_are_rejected() {
-        let mut profile = StarTargetProfile::default();
+        let mut profile = StarAdapterProfile::default();
         profile.deck.carriers.insert(
             "rogue".into(),
             CarrierPlacement {
@@ -877,7 +834,7 @@ mod tests {
 
     #[test]
     fn two_resources_cannot_share_a_site() {
-        let mut profile = StarTargetProfile::default();
+        let mut profile = StarAdapterProfile::default();
         profile.stages.transformation.dna_plate.slots = vec!["plates_a/1".into()];
         let error = profile
             .validate()
@@ -890,7 +847,7 @@ mod tests {
 
     #[test]
     fn a_vessel_where_tips_belong_is_rejected() {
-        let mut profile = StarTargetProfile::default();
+        let mut profile = StarAdapterProfile::default();
         profile.stages.assembly.small_tips.labware = "pcr_plate_96".into();
         let error = profile
             .validate()
@@ -907,7 +864,7 @@ mod tests {
 
     #[test]
     fn labware_capacity_must_match_the_catalog() {
-        let mut profile = StarTargetProfile::default();
+        let mut profile = StarAdapterProfile::default();
         profile.deck.source_rack.capacity = 96;
         let error = profile
             .validate()
@@ -926,7 +883,7 @@ mod tests {
 
     #[test]
     fn site_addresses_resolve_to_catalog_geometry() {
-        let profile = StarTargetProfile::default();
+        let profile = StarAdapterProfile::default();
         let site = profile
             .resolve_labware("test", "plates_a/1", "pcr_plate_96")
             .expect("the reaction plate site resolves");

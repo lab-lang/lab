@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 use crate::backend::hamilton::star::catalog::{DeckPosition, HeightModel};
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::StarWell;
-use crate::backend::hamilton::star::profile::{ResolvedSite, StarProfileError, StarTargetProfile};
+use crate::backend::hamilton::star::profile::{ResolvedSite, StarAdapterProfile, StarProfileError};
 
 /// Aspiration depth below the tracked liquid surface, mm.
 pub const IMMERSION_DEPTH_MM: f64 = 2.0;
@@ -58,7 +58,7 @@ pub struct DeckIndex {
 
 impl DeckIndex {
     /// Resolves every deck and stage resource of a validated profile.
-    pub fn build(profile: &StarTargetProfile) -> Result<DeckIndex, StarPlanningError> {
+    pub fn build(profile: &StarAdapterProfile) -> Result<DeckIndex, StarPlanningError> {
         let mut resources = BTreeMap::new();
         let mut place = |key: String, site: Result<ResolvedSite, StarProfileError>| {
             site.map(|site| {
@@ -265,10 +265,10 @@ impl LiquidState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::hamilton::star::profile::StarTargetProfile;
+    use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
     fn deck() -> DeckIndex {
-        DeckIndex::build(&StarTargetProfile::default()).expect("the reference bench resolves")
+        DeckIndex::build(&StarAdapterProfile::default()).expect("the reference bench resolves")
     }
 
     #[test]

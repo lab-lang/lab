@@ -1,0 +1,61 @@
+<https://example.org/ebef-acceptance/microlab_prep_simulator> <http://sbols.org/v3#description> "A no-hardware digital twin shaped by the public Microlab Prep description. It makes no claim about the installed instrument's control path." ;
+	<http://sbols.org/v3#displayId> "microlab_prep_simulator" ;
+	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef-acceptance> ;
+	<http://sbols.org/v3#name> "EBEF Microlab Prep simulation asset" ;
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/ebef/microlab_prep> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef-acceptance/microlab_prep_simulator/liquid_handling> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> .
+
+<https://example.org/ebef-acceptance/microlab_prep_simulator/liquid_handling> <http://sbols.org/v3#displayId> "liquid_handling" ;
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#LiquidHandling> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#ReviewedFileControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Simulatable> .
+
+<https://example.org/ebef-acceptance/epoch_2_simulator> <http://sbols.org/v3#description> "A no-hardware digital twin shaped by the public Epoch 2 description. It makes no claim about the installed instrument's control path." ;
+	<http://sbols.org/v3#displayId> "epoch_2_simulator" ;
+	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef-acceptance> ;
+	<http://sbols.org/v3#name> "EBEF Epoch 2 simulation asset" ;
+	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
+	<http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/ebef/biotek_epoch_2> ;
+	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
+	<https://sbol.io/ns/facility#capability> <https://example.org/ebef-acceptance/epoch_2_simulator/incubation> , <https://example.org/ebef-acceptance/epoch_2_simulator/absorbance_measurement> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
+
+<https://example.org/ebef-acceptance/epoch_2_simulator/incubation> <http://sbols.org/v3#displayId> "incubation" ;
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#Incubation> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#ReviewedFileControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Simulatable> .
+
+<https://example.org/ebef-acceptance/epoch_2_simulator/absorbance_measurement> <http://sbols.org/v3#displayId> "absorbance_measurement" ;
+	a <http://sbols.org/v3#Identified> , <https://sbol.io/ns/facility#CapabilityOffering> ;
+	<https://sbol.io/ns/facility#capabilityKind> <https://sbol.io/ns/capability#AbsorbanceMeasurement> ;
+	<https://sbol.io/ns/facility#controlMode> <https://sbol.io/ns/facility#ReviewedFileControl> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#qualification> <https://sbol.io/ns/facility#Simulatable> .
+
+<https://example.org/ebef-acceptance/assay_plate_design> <http://sbols.org/v3#displayId> "assay_plate_design" ;
+	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef-acceptance> ;
+	<http://sbols.org/v3#name> "Plate growth and absorbance assay design" ;
+	a <http://sbols.org/v3#Component> ;
+	<http://sbols.org/v3#type> <https://identifiers.org/SBO:0000251> .
+
+<https://example.org/ebef-acceptance/assay_plate_lot> <http://sbols.org/v3#built> <https://example.org/ebef-acceptance/assay_plate_design> ;
+	<http://sbols.org/v3#description> "Synthetic input lot used only by the automated no-hardware acceptance scenario." ;
+	<http://sbols.org/v3#displayId> "assay_plate_lot" ;
+	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef-acceptance> ;
+	<http://sbols.org/v3#name> "Simulated assay plate lot" ;
+	a <http://sbols.org/v3#Implementation> ;
+	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
+	<https://sbol.io/ns/facility#isActive> true ;
+	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
+	<https://sbol.io/ns/facility#materialKind> <https://sbol.io/ns/inventory#MicrobialCulture> .

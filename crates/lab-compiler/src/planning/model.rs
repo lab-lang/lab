@@ -2,16 +2,86 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-/// Materials and already-realized artifacts available before planning begins.
+/// The inventory evidence available to dependency planning.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuildInventory {
+    /// Exact SBOL Component-to-MaterialLot candidates from one validated facility snapshot.
+    MaterialLots(MaterialLotBuildInventory),
+    /// Temporary compatibility for packages that still carry symbolic manifest arrays.
+    LegacySymbols(LegacyBuildInventory),
+}
+
+impl Default for BuildInventory {
+    fn default() -> Self {
+        Self::LegacySymbols(LegacyBuildInventory::default())
+    }
+}
+
+impl BuildInventory {
+    pub fn legacy(
+        available_materials: impl IntoIterator<Item = String>,
+        available_artifacts: impl IntoIterator<Item = String>,
+    ) -> Self {
+        Self::LegacySymbols(LegacyBuildInventory {
+            available_materials: available_materials.into_iter().collect(),
+            available_artifacts: available_artifacts.into_iter().collect(),
+        })
+    }
+
+    pub fn as_legacy_mut(&mut self) -> Option<&mut LegacyBuildInventory> {
+        match self {
+            Self::LegacySymbols(inventory) => Some(inventory),
+            Self::MaterialLots(_) => None,
+        }
+    }
+}
+
+/// Symbolic inventory accepted only while existing package manifests migrate.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BuildInventory {
+pub struct LegacyBuildInventory {
     #[serde(default)]
     pub available_materials: BTreeSet<String>,
     #[serde(default)]
     pub available_artifacts: BTreeSet<String>,
 }
 
-/// A target-neutral artifact dependency graph.
+/// Exact candidate lots for the checked declarations in one program.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterialLotBuildInventory {
+    pub(crate) source_sha256: String,
+    pub(crate) facility: String,
+    pub(crate) materials: BTreeMap<String, MaterialLotCandidates>,
+    pub(crate) artifacts: BTreeMap<String, MaterialLotCandidates>,
+}
+
+impl MaterialLotBuildInventory {
+    pub fn source_sha256(&self) -> &str {
+        &self.source_sha256
+    }
+
+    pub fn facility(&self) -> &str {
+        &self.facility
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum MaterialLotCandidates {
+    Unidentified,
+    Identified {
+        component: String,
+        material_lots: Vec<String>,
+    },
+}
+
+/// A frozen exact binding from a workflow symbol through its Component to one physical lot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct MaterialLotBinding {
+    pub symbol: String,
+    pub component: String,
+    pub material_lot: String,
+}
+
+/// A facility-independent artifact dependency graph.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BuildGraph {
     pub nodes: BTreeMap<String, BuildGraphNode>,
@@ -47,6 +117,8 @@ pub struct DependencyNode {
     pub dependencies: Vec<String>,
     pub steps: Vec<String>,
     pub inventory_materials: Vec<String>,
+    pub material_lot_bindings: Vec<MaterialLotBinding>,
+    pub existing_material_lot: Option<MaterialLotBinding>,
     pub resolution: ArtifactResolution,
     pub generated_in_iteration: Option<usize>,
     pub missing_dependencies: Vec<String>,
@@ -73,6 +145,7 @@ pub struct BuildAttempt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DependencyBuildManifest {
     pub schema_version: String,
+    pub inventory: DependencyInventorySource,
     pub status: DependencyBuildStatus,
     pub roots: Vec<String>,
     pub nodes: Vec<DependencyNode>,
@@ -80,4 +153,14 @@ pub struct DependencyBuildManifest {
     pub attempts: Vec<BuildAttempt>,
     pub generated_artifacts: Vec<String>,
     pub existing_artifacts: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DependencyInventorySource {
+    SbolInventory {
+        source_sha256: String,
+        facility: String,
+    },
+    LegacySymbols,
 }

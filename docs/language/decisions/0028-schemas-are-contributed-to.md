@@ -48,8 +48,6 @@ An undeclared property is now a mistake everywhere, reported with the name it
 most likely meant. That is the guarantee a schema was supposed to carry from the
 start.
 
-A quantity's unit is checked where it is written rather than when a target reads
-the IR, because the field that declares it is typed.
+A quantity's unit is checked where it is written rather than when method selection or an adapter reads the IR, because the field that declares it is typed.
 
-A method is a module, so it needs no keyword, no export kind, and no resolution
-machinery. Two backends running the same reaction import the same module.
+A method is a module, so it needs no keyword, no export kind, and no resolution machinery. Two adapters implementing the same reaction import the same module.

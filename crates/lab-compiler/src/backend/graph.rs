@@ -1,4 +1,4 @@
-//! Projection of Protocol provenance into target-independent build scheduling data.
+//! Projection of Protocol provenance into facility-independent build scheduling data.
 
 use std::collections::BTreeSet;
 

@@ -27,7 +27,7 @@ fn optimizer_verifies_runs_a_named_pipeline_and_prints_ir() {
     let output = run_with_stdin(
         &[
             "--input-stage",
-            "target-selected-protocol",
+            "method-selected-protocol",
             "--pass-pipeline",
             "builtin.module(protocol-check-material-linearity)",
         ],
@@ -88,7 +88,7 @@ fn optimizer_reports_non_local_material_linearity_failures() {
 }
 
 #[test]
-fn optimizer_lists_its_stable_target_independent_pass_surface() {
+fn optimizer_lists_its_stable_facility_independent_pass_surface() {
     let output = Command::new(env!("CARGO_BIN_EXE_lab-opt"))
         .arg("--list-passes")
         .output()
@@ -97,7 +97,7 @@ fn optimizer_lists_its_stable_target_independent_pass_surface() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("protocol-check-material-linearity"));
-    assert!(stdout.contains("target-selected-protocol -> target-selected-protocol"));
+    assert!(stdout.contains("method-selected-protocol -> method-selected-protocol"));
 }
 
 #[test]

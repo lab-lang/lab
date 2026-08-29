@@ -15,7 +15,7 @@ fn compiled_ir_round_trips_through_a_fresh_session() {
     parsed.parse_ir(ir).unwrap();
     assert_eq!(
         parsed.detect_stage().unwrap(),
-        IrStage::TargetSelectedProtocol
+        IrStage::MethodSelectedProtocol
     );
     let pipeline =
         PassPipeline::from_str("builtin.module(protocol-check-material-linearity)").unwrap();
@@ -25,7 +25,7 @@ fn compiled_ir_round_trips_through_a_fresh_session() {
     let mut reparsed = CompilerSession::default();
     reparsed.parse_ir(&reprinted).unwrap();
     reparsed
-        .verify_stage(IrStage::TargetSelectedProtocol)
+        .verify_stage(IrStage::MethodSelectedProtocol)
         .unwrap();
 }
 
@@ -39,7 +39,7 @@ fn parser_rejects_trailing_input_and_leaves_the_session_reusable() {
 
     session.parse_ir(protocol_ir()).unwrap();
     session
-        .verify_stage(IrStage::TargetSelectedProtocol)
+        .verify_stage(IrStage::MethodSelectedProtocol)
         .unwrap();
 }
 

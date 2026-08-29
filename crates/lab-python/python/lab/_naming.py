@@ -13,6 +13,7 @@ import re
 from collections.abc import Iterable
 
 from ._declarations import (
+    ArtifactKindDeclaration,
     CircuitDeclaration,
     Module,
     RecordDeclaration,
@@ -66,7 +67,10 @@ def taken_names(module: Module, prospective_uses: Iterable[str] = ()) -> set[str
     for path in (*module.imports(), *prospective_uses):
         taken.update(_mirror_exports(path))
     for item in module.declarations:
-        if isinstance(item, RecordDeclaration | CircuitDeclaration | WorkflowDeclaration):
+        if isinstance(
+            item,
+            RecordDeclaration | ArtifactKindDeclaration | CircuitDeclaration | WorkflowDeclaration,
+        ):
             taken.add(item.name)
         elif item._name is not None:
             # Artifact declarations and bindings are named by a Python

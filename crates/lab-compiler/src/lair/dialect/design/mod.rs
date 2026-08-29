@@ -126,7 +126,7 @@ impl Verify for DesignDnaSequenceOp {
     operands = (sequence: DnaSequenceType),
     results = (design: DesignType)
 )]
-/// Declare a target-neutral circular plasmid design and its acceptance intent.
+/// Declare a facility-independent circular plasmid design and its acceptance intent.
 pub struct DesignPlasmidOp;
 
 impl DesignPlasmidOp {
@@ -240,7 +240,7 @@ impl Verify for DesignPlasmidOp {
     interfaces = [NOpdsInterface<0>],
     results = (design: DesignType)
 )]
-/// Declare a target-neutral engineered organism: a chassis and the plasmid
+/// Declare a facility-independent engineered organism: a chassis and the plasmid
 /// designs it carries. A strain has no sequence of its own; its identity is the
 /// pairing of a host with a defined set of designs.
 pub struct DesignStrainOp;

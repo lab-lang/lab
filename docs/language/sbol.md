@@ -164,10 +164,7 @@ error: 'engineered region' is neither an IRI nor a compact identifier
 
 ## Layer 1: identity that resolves
 
-Today `CheckedDeclaration::Catalog` carries `identity: String`, defaulting to
-the declared name, and `source_lowering.rs` is its only consumer, reading it
-into a `BTreeMap<String, String>`. It is an opaque string: no scheme, no
-namespace, no resolution, no version.
+`CheckedDeclaration::Catalog` carries an optional exact `sbol_identity` separately from its `supplier_identity`, which defaults to the declared name. `CheckedDeclaration::Artifact` carries the same optional `sbol_identity`. The source lowerer uses only the supplier identifier for existing device-specific manifests; inventory resolution uses only the SBOL Component IRI.
 
 Two changes.
 
@@ -188,23 +185,19 @@ that `sbol3::design::sanitize_display_id` gets wrong, keeping `pUC19-A` and
 `pUC19_A` distinct, and carries a test asserting the encoding still satisfies
 rule sbol3-10201.
 
-**An identity distinguishes a registry record from an order line.** Both are
-written the same way, as the property they already are:
+**A design identity is separate from an order line.** The two meanings have distinct fields:
 
 ```lab
 buy:
   part J23101:
-    identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
+    sbol_identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
 
   restriction_enzyme BsaI:
-    identity = "NEB-R0535"
+    supplier_identity = "NEB-R0535"
     digest_temperature = 37 C
 ```
 
-An absolute IRI is resolvable and carries a design. A catalog number names
-something to order. The compiler treats them differently because they mean
-different things, which is the distinction
-[0021](decisions/0021-typed-external-identities.md) collapsed.
+`sbol_identity` is an absolute IRI naming the SBOL Component represented by either a `build` or `buy` declaration. `supplier_identity` is available only on `buy`, defaults to the declaration name, and names something to order. The legacy `identity` spelling remains an alias for `supplier_identity` during migration. The compiler carries both meanings separately, which restores the distinction [0021](decisions/0021-typed-external-identities.md) collapsed.
 
 Where an identity resolves, the local declaration is checkable against the
 registry record. A part declared `Promoter<Tetracycline>` whose SynBioHub record
@@ -359,7 +352,7 @@ The correspondence with `provenance.rs` is exact:
 | `across 3 biological replicates` | three Implementations with distinct `wasGeneratedBy` |
 | `accept concentration >= 100 ng/uL` | `ExperimentalData` and an OM `Measure`, gathered in an `Experiment` |
 | the workflow that built it | `prov:Plan`, with `Association.hadRole = DBTL_BUILD` |
-| the target profile and instrument | `prov:Agent` |
+| the allocated Asset and its execution adapter | `prov:Agent` |
 
 The property that matters: **independence survives the round trip.** A third
 party reading Lab's output can recompute which samples are biological replicates
@@ -620,69 +613,28 @@ catalogs expose sequences, provenance, and versions "without reducing them to
 untyped properties or compiling changing catalog contents into `std`". This is
 how.
 
-### The execution boundary becomes PROV-O
+### Facility catalogs and execution records have distinct owners
 
-This is the layer the earlier design did not reach, and the correspondence is
-field for field.
+SBOLInventory supplies the persistent facility graph that core SBOL 3 deliberately does not define. Its extension classes and properties express the stable catalog and ledger facts:
 
-```rust
-pub struct WorkcellNode { pub id: String, pub after: Vec<String>, pub action: WorkcellAction }
-pub struct LedgerEntry { pub node: String, pub event: LedgerEvent, pub at_unix_seconds: u64 }
-pub enum LedgerEvent { Started, Confirmed, Completed, Failed }
+```text
+a facility contains zones
+zones locate assets and material lots
+assets expose capability offerings
+workflows require capabilities
+plans bind requirements to offerings and assets
+runs record material changes and evidence
 ```
 
-against
+The first three statements and the persistent MaterialLot catalog belong to SBOLInventory. Workflow requirements belong to compiler IR. Allocation and scheduling belong to the Lab planner. The reviewed plan freezes every requirement-to-offering-to-Asset binding, exact MaterialLot binding, adapter profile, document digest, and dependency edge without translating the facility graph into a private TOML inventory model.
 
-```rust
-pub struct Activity { ..., pub started_at_time: Option<String>, pub ended_at_time: Option<String>,
-                      pub was_informed_by: Vec<Resource>,
-                      pub qualified_usage: Vec<Resource>, pub qualified_association: Vec<Resource> }
-pub struct Association { ..., pub agent: Option<Resource>, pub had_role: Vec<Iri>, pub had_plan: Option<Resource> }
-pub struct Usage { ..., pub entity: Option<Resource>, pub had_role: Vec<Iri> }
-```
+The runtime then appends standard SBOL and PROV structure to a new inventory document. One completed plan becomes an `Activity`; exact Assets and input MaterialLots become qualified `Usage` entities with SBOLInventory roles; the reviewed plan, ledger, adapter profiles, and child documents become hashed `Attachment` evidence; and each live output MaterialLot is an `Implementation` carrying `prov:wasGeneratedBy` and exact lineage. The source inventory is never modified in place.
 
-`after` is `wasInformedBy`. `Started` and `Completed` are `startedAtTime` and
-`endedAtTime`. `Confirmed` is an `Association` naming the operator as an
-`Agent`. A `WorkcellStation { name, kind }` is an `Agent`. The emitted plan is a
-`Plan`. The ledger's own comment already describes what it is: "the run's memory
-and its evidence".
+The reviewed execution DAG remains a versioned Lab document rather than pretending that RDF is an ordered dispatch language. `Execute`, `MoveMaterial`, and `Manual` nodes need explicit dependencies, replay rules, confirmations, and a durable event ledger. The runtime is keyed by the reviewed plan digest and never re-plans from the graph.
 
-Today the design document and the run record are two files with no identity in
-common. Keyed by the same IRIs, the chain from a design through the run that
-executed it to the physical tube it produced is one graph. That is also where
-`accept` claims finally put their runtime evidence, which `support.md` lists as
-unresolved, and it is the point at which the emitted document stops being a
-protocol and becomes a laboratory notebook.
+This boundary also preserves claim strength. A catalog offering may be `Described`, `Plannable`, `Simulatable`, `Executable`, or `Qualified`, and the planner may bind it only when the workflow's minimum qualification is met. An adapter declaration does not promote catalog qualification, and catalog product metadata never selects a driver. Simulation and live execution use incompatible ledger state, and only live execution may mint physical output MaterialLots.
 
-The shape maps; the resolution does not, and four gaps are worth knowing before
-committing to this as the record format rather than an export of it.
-
-`Activity` carries one `started_at_time` and one `ended_at_time`, and neither
-`Association` nor `Usage` has a time field. The ledger timestamps every event,
-so a step-level timeline has nowhere standard to go; it fits only as one
-Activity per node, or as extension triples.
-
-There is no `prov:generated` forward edge. Outputs are discoverable only by
-scanning for objects whose `wasGeneratedBy` names the activity, and
-`Document::resolve` is a linear scan, so this is quadratic on a large document
-without an index of your own.
-
-`Agent` and `Plan` have no fields beyond the shared Identified and TopLevel
-data. An instrument, an operator, and a piece of software are distinguishable
-only by name, description, or extension predicates. There is also no delegation,
-so "operator supervised instrument" is not expressible, and no attestation
-concept at all, so `Confirmed` maps to a custom `hadRole` IRI and nothing
-validates it.
-
-`hadRole` is checked against a closed four-value vocabulary, design, build,
-test, and learn. Custom lab roles are neither accepted nor rejected, they are
-skipped. And using the standard roles has teeth: a `test` entity is required to
-be `ExperimentalData` and a `build` entity an `Implementation`.
-
-None of this blocks the work. It does mean the run record is Lab's format
-carrying PROV-O structure, rather than PROV-O being the format, and the
-extension triples that make up the difference should be designed deliberately
-rather than accumulated.
+The resulting chain is one identity-preserving graph: a design Component is realized by an exact MaterialLot, consumed by an Activity through an exact Asset offering, and related to any generated MaterialLots and evidence. Lab keeps compiler and dispatch state private while emitting the durable laboratory record through the SBOLInventory profile.
 
 ### Where it should not go
 
@@ -958,20 +910,7 @@ things, and guessing wrong produces a parse error that blames the document
 rather than the guess. An SBOL document names its serialization in its
 extension or it is not discovered.
 
-**Moving designs into SBOL changes what an order names**, and the compiler said
-so before anything was built:
-
-```
-error: the manifest declares material 'B0015', which this build never uses;
-       a catalogued name that was renamed leaves its old identity here
-```
-
-A Lab `buy part B0015` defaults its identity to the symbol. The same part read
-from SBOL carries the registry IRI it resolves to, and that IRI is what an order
-names. The manifest's `[inventory]` list had to follow. That diagnostic is the
-mitigation [0021](decisions/0021-typed-external-identities.md) added after a
-rename silently turned "use stock" into "build it", and it caught a real
-identity change on its first encounter with a second language.
+**Moving designs into SBOL does not change what an order names.** An imported Component carries its registry IRI as `sbol_identity`; a bought declaration separately carries `supplier_identity`, defaulting to its Lab symbol when no order identifier is stated. Inventory-backed planning follows only `sbol_identity -> sbol:built -> MaterialLot`, while device manifests may still use the supplier identifier. The symbolic `[inventory] materials` array remains a legacy migration form and no longer defines the semantic model.
 
 ### Widening the mapping found three real modelling gaps
 
@@ -1245,11 +1184,7 @@ its omissions report intact. It is a projection of the output, not a peer of it.
 
 ## Open questions and risks
 
-**`sbol3` has no serde.** `CheckedModule` is serde-serialized under
-`lab.portable-module.v4`, so SBOL objects cannot ride inside the portable module
-IR. Keeping IRIs as strings in `CheckedModule` and rebuilding SBOL objects at
-emission is probably right, since it keeps the portable IR self-describing, but
-it needs deciding rather than discovering.
+**Portable SBOL identities are strings by design.** `CheckedModule` is serde-serialized under `lab.portable-module.v8`, so pySBOL3 and sbol-rs objects do not ride inside portable compiler IR. `sbol_identity` carries the exact absolute Component IRI as a string, while typed SBOL objects remain behind the authoring and inventory boundaries.
 
 **No OM unit constants in sbol-rs.** Lab has `Quantity<uL>`, `Quantity<C>`, and
 `Quantity<min>`, and emitting them as OM `Measure` values needs unit IRIs that
@@ -1299,13 +1234,7 @@ and the RDF I/O stack are not obviously fine. This is why the validation pass
 runs from `lab-project` rather than from `compile_parsed_module`, and it needs
 measuring rather than assuming.
 
-**Identity migration is broad, and it breaks two wire formats.**
-`PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding
-landed; `DependencyBuildManifest` serializes artifact names into an on-disk manifest
-with its own `schema_version`. Both are deliberate, versioned boundaries, so the
-break is manageable, but it should be one break rather than several. Land the
-identity type and the minting rules first, then move consumers, rather than
-letting IRIs leak outward one pass at a time.
+**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. The dependency manifest independently moved to `lab.dependency-build.v1` when it began recording inventory source provenance and exact Component-to-MaterialLot bindings.
 
 The checker's tables are the bulk of the mechanical work: fifteen
 `HashMap<String, _>` and `BTreeSet<String>` fields on `SemanticContext`, plus

@@ -1,7 +1,7 @@
 use crate::{CheckedDeclaration, CheckedModule};
 
 /// Render the verified portable module boundary without implying physical
-/// execution or target selection.
+/// execution or facility allocation.
 pub fn render_checked_module(module: &CheckedModule) -> String {
     let mut output = String::from("Lab module compiled\n\n");
     if !module.imports.is_empty() {
@@ -38,10 +38,10 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
             CheckedDeclaration::Catalog {
                 name,
                 r#type,
-                identity,
+                supplier_identity,
                 ..
             } => output.push_str(&format!(
-                "  - catalog {name}: {type} (\"{identity}\")\n",
+                "  - catalog {name}: {type} (supplier \"{supplier_identity}\")\n",
                 r#type = r#type
             )),
             CheckedDeclaration::Data { name, roles, .. } => {
@@ -83,7 +83,7 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
         }
     }
     output.push_str(
-        "\nThis is verified portable module IR; no laboratory target was selected or executed.\n",
+        "\nThis is verified portable module IR; no facility asset was allocated or executed.\n",
     );
     output
 }

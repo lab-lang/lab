@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Generic bench-instrument interfaces and adapters over vendor driver crates"
 
 [features]
-# The Byonoy station's device-opening constructors need the native HID
+# The Byonoy adapter's device-opening constructors need the native HID
 # library; everything else, including the adapter itself, works without it.
 hid = ["byonoy-hid/hid"]
 

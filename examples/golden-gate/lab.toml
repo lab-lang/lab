@@ -5,28 +5,11 @@ edition = "2026"
 
 [build]
 entry = "src/programs/reporter_panel.lab"
-target = "opentrons-ot2"
 
-# What this laboratory has on hand. A target build resolves every artifact
-# dependency against these names: a material listed here is available to a
-# reaction, and an artifact listed here is already realized and need not be
-# built again.
 [inventory]
-materials = [
-  "B0015",
-  "B0034",
-  "BL21",
-  "BsaI",
-  "DH5alpha",
-  "GFP",
-  "J23101",
-  "J23106",
-  "RFP",
-  "T4_DNA_ligase",
-  "T4_DNA_ligase_buffer",
-  "chloramphenicol",
-  "nuclease_free_water",
-  "pSB1C3",
-  "recovery_medium",
-]
-artifacts = []
+document = "inventory/facility.ttl"
+
+[[execution.adapters]]
+asset = "https://example.org/golden-gate/opentrons_ot2"
+driver = "opentrons.ot2"
+profile = "adapters/opentrons-ot2.toml"

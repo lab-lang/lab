@@ -106,8 +106,8 @@ type LineageTable = BTreeMap<String, Vec<Lineage>>;
 /// What every workflow in a module knows about where its materials came from,
 /// keyed by workflow name.
 ///
-/// A target reads this to decide what it may pool, and the language server
-/// reads it to explain a sample's history where it is written.
+/// Method selection and adapter planning read this to decide what may be
+/// pooled, and the language server reads it to explain a sample's history.
 pub fn lineage(module: &CheckedModule) -> BTreeMap<String, LineageMap> {
     let table = lineage_table(&StandardLibrary::bundled());
     module

@@ -12,7 +12,7 @@ plasmid reporter:
   backbone: pSB1C3
 ```
 
-The source AST and portable module IR preserve this distinction as properties rather than translating properties into ordinary bindings. Property values are typed expressions. Their names remain backend-neutral: target-specific names such as `restriction_enzyme` or `serial_dilutions` are interpreted by a target lowerer, not by parser productions or dedicated core AST fields.
+The source AST and portable module IR preserve this distinction as properties rather than translating properties into ordinary bindings. Property values are typed expressions. Their names remain implementation-neutral: method-specific names such as `restriction_enzyme` or `serial_dilutions` are interpreted during method selection, not by parser productions or dedicated core AST fields; adapter configuration remains outside source entirely.
 
 Workflow parameters and results form a mandatory callable signature in the declaration header:
 

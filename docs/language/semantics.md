@@ -71,15 +71,17 @@ it. Provenance is discarded after the type system has done its work, not before.
 
 ## Declarations, properties, and identities
 
-A biological declaration is immutable intent. Its `name = value` entries are typed declarative properties: deterministic expressions evaluated once, never mutations and never durable effects. Portable module IR preserves them as named checked expressions without assigning target-specific meaning to every property name.
+A biological declaration is immutable intent. Its `name = value` entries are typed declarative properties: deterministic expressions evaluated once, never mutations and never durable effects. Portable module IR preserves them as named checked expressions without assigning method- or adapter-specific meaning to every property name.
 
 Inside a declaration body the two operators divide cleanly. `=` associates a name with a value; `:` gives a name a type. That is what lets a declaration's shape be read before its meaning is resolved, because one token after the name decides which is which without knowing the word that opened the block.
 
-A source value may stand for an external identity. `buy part J23101` declares a source symbol of type `Part` whose identity — what a supplier's order names — defaults to the declared name and is written explicitly only where the two differ. The symbol name and external identifier are distinct: renaming one does not silently rewrite the other. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Chassis`, or `Antibiotic` is required is a type error.
+A declaration may carry an exact biological-design identity independently of how that design is obtained. `sbol_identity` is an absolute IRI naming the SBOL Component represented by either a `build` or `buy` declaration. A bought declaration may additionally state `supplier_identity`, the order identifier used to acquire it; that identifier defaults to the declared name. The source symbol, SBOL identity, and supplier identity are distinct, so renaming one does not silently rewrite either of the others. The typed symbol can appear in properties and expressions; using a bare string where a `Part`, `Backbone`, `Chassis`, or `Antibiotic` is required is a type error.
 
 `Chassis` and `Strain` are different kinds of thing. A chassis is a catalogued host organism, declared with `buy`. A strain is a declared artifact: a chassis together with the plasmid designs it carries. One chassis appears in many strains, and one plasmid design may appear in strains built on different chassis.
 
-Typed identity is not availability. It does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require inventory resolution and runtime evidence.
+Design identity is not availability. An `sbol_identity` does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require exact MaterialLot resolution against a validated SBOLInventory document and runtime evidence.
+
+During inventory-backed planning, a checked `sbol_identity` is joined only to active MaterialLots in the selected facility whose `sbol:built` names that exact Component IRI. A unique candidate is frozen in the dependency plan together with the facility IRI and source-document hash. No candidate is a missing input; several candidates are an allocation ambiguity requiring policy or review. The compiler never treats candidate ordering as allocation.
 
 ## Commands and events
 
@@ -87,7 +89,7 @@ An effect binding records a command and durably waits for the corresponding even
 
 Workflow replay must not repeat completed physical actions. Time, randomness, inventory queries, device interaction, network access, and human decisions are effects rather than ambient language operations.
 
-Every resolved action contract names the capability required to dispatch it, the type of each operand and result, and how each operand participates in physical ownership. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action.
+Every resolved action contract names the capability required to dispatch it as an absolute SBOLInventory capability-kind IRI, the type of each operand and result, and how each operand participates in physical ownership. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action. Capability matching is exact IRI equality; source actions that describe composite biological work retain an explicit refinement boundary rather than pretending to name one instrument operation. The complete standard-action audit is in [`capabilities.md`](capabilities.md).
 
 `=` and `<-` therefore have different replay laws. `=` evaluates a deterministic expression or commits an explicit state transition. `<-` creates a durable command boundary and obtains its value from a recorded completion event. The result may look like a local binding, but the physical action must not be repeated merely because a workflow is replayed.
 
@@ -107,9 +109,9 @@ Heterogeneous reusable design values may acquire a union element type. A compone
 
 ## Chemistry and site configuration
 
-A declaration's quantity-valued properties state reaction chemistry: reagent volumes, cycle counts, and thermal holds. These are claims about the science, so they belong to the artifact and travel with it into every target.
+A declaration's quantity-valued properties state reaction chemistry: reagent volumes, cycle counts, and thermal holds. These are claims about the science, so they belong to the artifact and travel with it into every facility plan.
 
-Which labware sits in which deck slot, which pipette is on which mount, and how many plates a bench holds are claims about a laboratory. A target specialization reads them from its own configuration, not from source. The same program compiled against two benches produces two different robot plans and one unchanged set of designs.
+Which labware sits in which deck slot, which pipette is on which mount, and how many plates a bench holds are claims about a facility Asset. Stable physical facts belong in SBOLInventory where the profile can express them; private or runtime-only implementation configuration belongs in the exact Asset-to-adapter overlay. The same program planned against two compatible facilities can produce two different device plans from one unchanged set of designs and requirements.
 
 ## Acceptance
 
@@ -121,11 +123,11 @@ The compiler may establish that a workflow can produce the kinds of evidence req
 
 Only the third judgment produces an accepted physical material.
 
-## Portable semantics and target specialization
+## Portable semantics and facility specialization
 
-Portable module checking resolves module-provided contracts, types expressions, verifies workflow returns, and checks affine material ownership. It does not choose a robot, a deck, a reaction chemistry, or a laboratory schedule.
+Portable module checking resolves module-provided contracts, types expressions, verifies workflow returns, and checks affine material ownership. It does not choose a facility, Asset, deck, or laboratory schedule.
 
-A target specialization may interpret a documented set of checked properties and resolved operations. It must fail explicitly when required properties, capabilities, value shapes, capacities, or operation sequences are unsupported. Target diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
+Method selection may interpret a documented set of checked scientific properties and resolved operations while remaining facility-independent. Facility planning then binds the resulting requirements to exact capability offerings and Assets, and only the adapter bound to that Asset may interpret implementation-specific configuration. Each boundary must fail explicitly when required properties, capabilities, value shapes, capacities, or operation sequences are unsupported. Diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
 
 ## Reactive execution
 

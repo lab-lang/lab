@@ -30,6 +30,7 @@ rfp_reporter_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAA
  * has to clear a bar on enough independent clones to mean something.
  */
 build plasmid composite_plasmid_1:
+  sbol_identity = "https://example.org/golden-gate/designs/composite_plasmid_1"
   sequence = gfp_reporter_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
@@ -60,6 +61,7 @@ build plasmid composite_plasmid_1:
  * is a property of the design rather than of the protocol that built it.
  */
 build plasmid composite_plasmid_2:
+  sbol_identity = "https://example.org/golden-gate/designs/composite_plasmid_2"
   sequence = rfp_reporter_sequence
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]
@@ -89,5 +91,6 @@ build plasmid composite_plasmid_2:
  * above, and only its provenance differs.
  */
 buy plasmid reference_gfp:
-  identity = "Addgene-#134516"
+  sbol_identity = "https://example.org/golden-gate/materials/reference_gfp"
+  supplier_identity = "Addgene-#134516"
   sequence = gfp_reporter_sequence

@@ -137,7 +137,7 @@ class TypedSbolTests(unittest.TestCase):
         source = module.source()
 
         self.assertIsInstance(declaration, lab.BuyDeclaration)
-        self.assertIn(f'identity = "{identity}"', source)
+        self.assertIn(f'sbol_identity = "{identity}"', source)
         self.assertNotIn("require topology", source)
 
     def test_module_emission_materializes_and_validates_only_once(self) -> None:
@@ -326,7 +326,7 @@ class TypedSbolTests(unittest.TestCase):
         LabPlasmid.buy(design=second, module=module, name="second")
 
         source = module.source()
-        self.assertEqual(source.count(f'identity = "{identity}"'), 2)
+        self.assertEqual(source.count(f'sbol_identity = "{identity}"'), 2)
 
     def test_raw_py_sbol_objects_remain_an_explicit_escape_hatch(self) -> None:
         module = lab.Module("raw.escape")

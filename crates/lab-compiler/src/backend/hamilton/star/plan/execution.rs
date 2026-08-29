@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
 /// A well on a named plan resource. Resource keys are stable strings the
 /// deck summary and emitters share: `source_rack`, `reaction_plate`,
@@ -33,12 +33,10 @@ impl StarWell {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StarExecutionPlan {
     pub schema_version: String,
-    /// The backend that produced this plan, spelled exactly as a target
-    /// profile declares it.
-    pub target: String,
-    /// The bench this plan was allocated against. Emission reads every
-    /// carrier, site, and labware decision from here.
-    pub deck: StarTargetProfile,
+    /// The explicit adapter implementation that produced this device plan.
+    pub adapter: String,
+    /// Checked implementation configuration for the allocated Asset binding.
+    pub deck: StarAdapterProfile,
     /// Source-rack well for each assembly-stage reagent, DNA, and enzyme
     /// key.
     pub assembly_source_wells: BTreeMap<String, String>,
@@ -156,9 +154,9 @@ pub struct StarRunPlan {
     pub title: String,
     pub operations: Vec<StarOperation>,
     pub manual_after: Vec<ManualStep>,
-    /// The thermal programs behind this run's manual steps, structured so a
-    /// workcell can assign them to a thermocycler station. On a bare STAR
-    /// target the operator prose in `manual_after` is the whole story, so
+    /// The thermal programs behind this run's manual steps, structured for
+    /// projection into separate thermocycler documents. On a standalone STAR
+    /// adapter the operator prose in `manual_after` is the whole story, so
     /// these never reach the serialized manifest.
     #[serde(skip)]
     pub thermal_after: Vec<ThermalRequirement>,
@@ -166,8 +164,8 @@ pub struct StarRunPlan {
 
 /// A thermal program a run needs after its liquid handling. Each
 /// requirement shadows one step of `manual_after` (named by
-/// `fallback_index`): a workcell with a thermocycler station executes the
-/// profile and drops the prose; anything else keeps the prose verbatim.
+/// `fallback_index`) so a facility plan can replace the prose with an exact
+/// thermocycler binding.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThermalRequirement {
     /// Stable identity within the run, e.g. `assembly_thermocycle`.

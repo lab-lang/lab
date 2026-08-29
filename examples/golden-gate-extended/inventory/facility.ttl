@@ -1,0 +1,459 @@
+@prefix cap: <https://sbol.io/ns/capability#> .
+@prefix designs: <https://example.org/golden-gate/designs/> .
+@prefix ex: <https://example.org/golden-gate/> .
+@prefix fac: <https://sbol.io/ns/facility#> .
+@prefix igem: <https://synbiohub.org/public/igem/> .
+@prefix inv: <https://sbol.io/ns/inventory#> .
+@prefix lots: <https://example.org/golden-gate/lots/> .
+@prefix materials: <https://example.org/golden-gate/materials/> .
+@prefix sbol: <http://sbols.org/v3#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+ex:facility
+    a sbol:TopLevel, fac:Facility ;
+    sbol:displayId "facility" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Golden Gate example facility" .
+
+ex:lab
+    a sbol:TopLevel, fac:Zone ;
+    sbol:displayId "lab" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Teaching laboratory" ;
+    fac:facility ex:facility ;
+    fac:zoneKind fac:Room ;
+    fac:isActive true .
+
+ex:automation_bench
+    a sbol:TopLevel, fac:Zone ;
+    sbol:displayId "automation_bench" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Automation bench" ;
+    fac:facility ex:facility ;
+    fac:parentZone ex:lab ;
+    fac:zoneKind fac:WorkArea ;
+    fac:isActive true .
+
+ex:stock_storage
+    a sbol:TopLevel, fac:Zone ;
+    sbol:displayId "stock_storage" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Golden Gate stock storage" ;
+    fac:facility ex:facility ;
+    fac:parentZone ex:lab ;
+    fac:zoneKind fac:StorageZone ;
+    fac:isActive true .
+
+ex:opentrons_ot2
+    a sbol:TopLevel, fac:Asset ;
+    sbol:displayId "opentrons_ot2" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Opentrons OT-2 with Thermocycler Module" ;
+    fac:facility ex:facility ;
+    fac:assetKind fac:Instrument ;
+    fac:locatedIn ex:automation_bench ;
+    fac:manufacturer "Opentrons" ;
+    fac:model "OT-2 with Thermocycler Module Gen2" ;
+    fac:isActive true ;
+    fac:capability ex:opentrons_ot2_liquid_handling, ex:opentrons_ot2_thermal_cycling .
+
+ex:opentrons_ot2_liquid_handling
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "liquid_handling" ;
+    fac:capabilityKind cap:LiquidHandling ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:opentrons_ot2_thermal_cycling
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "thermal_cycling" ;
+    fac:capabilityKind cap:ThermalCycling ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:manual_workstation
+    a sbol:TopLevel, fac:Asset ;
+    sbol:displayId "manual_workstation" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Golden Gate manual workstation" ;
+    fac:facility ex:facility ;
+    fac:assetKind fac:Workstation ;
+    fac:locatedIn ex:automation_bench ;
+    fac:isActive true ;
+    fac:capability ex:manual_artifact_realization,
+        ex:manual_material_provisioning,
+        ex:manual_chemical_transformation,
+        ex:manual_incubation,
+        ex:manual_antibiotic_selection,
+        ex:manual_plate_imaging,
+        ex:manual_waste_handling .
+
+ex:manual_artifact_realization
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "artifact_realization" ;
+    fac:capabilityKind cap:ArtifactRealization ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+ex:manual_material_provisioning
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "material_provisioning" ;
+    fac:capabilityKind cap:MaterialProvisioning ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+ex:manual_chemical_transformation
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "chemical_transformation" ;
+    fac:capabilityKind cap:ChemicalTransformation ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+ex:manual_incubation
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "incubation" ;
+    fac:capabilityKind cap:Incubation ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true ;
+    fac:parameter ex:manual_incubation_duration .
+
+ex:manual_incubation_duration
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "duration" ;
+    fac:propertyKind cap:Duration ;
+    fac:realValue "1"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/HR> .
+
+ex:manual_antibiotic_selection
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "antibiotic_selection" ;
+    fac:capabilityKind cap:AntibioticSelection ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+ex:manual_plate_imaging
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "plate_imaging" ;
+    fac:capabilityKind cap:PlateImaging ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+ex:manual_waste_handling
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "waste_handling" ;
+    fac:capabilityKind cap:WasteHandling ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+igem:J23101
+    a sbol:Component ;
+    sbol:displayId "J23101" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+igem:J23106
+    a sbol:Component ;
+    sbol:displayId "J23106" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+igem:B0034
+    a sbol:Component ;
+    sbol:displayId "B0034" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+igem:B0015
+    a sbol:Component ;
+    sbol:displayId "B0015" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+igem:GFP
+    a sbol:Component ;
+    sbol:displayId "GFP" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+igem:RFP
+    a sbol:Component ;
+    sbol:displayId "RFP" ;
+    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+materials:pSB1C3
+    a sbol:Component ;
+    sbol:displayId "pSB1C3" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+materials:BsaI
+    a sbol:Component ;
+    sbol:displayId "BsaI" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000252> .
+
+materials:T4_DNA_ligase
+    a sbol:Component ;
+    sbol:displayId "T4_DNA_ligase" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000252> .
+
+materials:T4_DNA_ligase_buffer
+    a sbol:Component ;
+    sbol:displayId "T4_DNA_ligase_buffer" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+materials:nuclease_free_water
+    a sbol:Component ;
+    sbol:displayId "nuclease_free_water" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000247> .
+
+materials:recovery_medium
+    a sbol:Component ;
+    sbol:displayId "recovery_medium" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+materials:DH5alpha
+    a sbol:Component ;
+    sbol:displayId "DH5alpha" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+materials:BL21
+    a sbol:Component ;
+    sbol:displayId "BL21" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+materials:chloramphenicol
+    a sbol:Component ;
+    sbol:displayId "chloramphenicol" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000247> .
+
+materials:reference_gfp
+    a sbol:Component ;
+    sbol:displayId "reference_gfp" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+designs:composite_plasmid_1
+    a sbol:Component ;
+    sbol:displayId "composite_plasmid_1" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+designs:composite_plasmid_2
+    a sbol:Component ;
+    sbol:displayId "composite_plasmid_2" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000251> .
+
+designs:composite_strain_1
+    a sbol:Component ;
+    sbol:displayId "composite_strain_1" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+designs:composite_strain_2
+    a sbol:Component ;
+    sbol:displayId "composite_strain_2" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+designs:composite_strain_3
+    a sbol:Component ;
+    sbol:displayId "composite_strain_3" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+designs:composite_strain_4
+    a sbol:Component ;
+    sbol:displayId "composite_strain_4" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+designs:expression_strain
+    a sbol:Component ;
+    sbol:displayId "expression_strain" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+designs:reference_strain
+    a sbol:Component ;
+    sbol:displayId "reference_strain" ;
+    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
+lots:J23101_lot
+    a sbol:Implementation ;
+    sbol:displayId "J23101_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built igem:J23101 ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:J23106_lot
+    a sbol:Implementation ;
+    sbol:displayId "J23106_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built igem:J23106 ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:B0034_lot
+    a sbol:Implementation ;
+    sbol:displayId "B0034_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built igem:B0034 ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:B0015_lot
+    a sbol:Implementation ;
+    sbol:displayId "B0015_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built igem:B0015 ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:GFP_lot
+    a sbol:Implementation ;
+    sbol:displayId "GFP_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built igem:GFP ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:RFP_lot
+    a sbol:Implementation ;
+    sbol:displayId "RFP_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built igem:RFP ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:pSB1C3_lot
+    a sbol:Implementation ;
+    sbol:displayId "pSB1C3_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:pSB1C3 ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:BsaI_lot
+    a sbol:Implementation ;
+    sbol:displayId "BsaI_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:BsaI ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:T4_DNA_ligase_lot
+    a sbol:Implementation ;
+    sbol:displayId "T4_DNA_ligase_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:T4_DNA_ligase ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:T4_DNA_ligase_buffer_lot
+    a sbol:Implementation ;
+    sbol:displayId "T4_DNA_ligase_buffer_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:T4_DNA_ligase_buffer ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:nuclease_free_water_lot
+    a sbol:Implementation ;
+    sbol:displayId "nuclease_free_water_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:nuclease_free_water ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:recovery_medium_lot
+    a sbol:Implementation ;
+    sbol:displayId "recovery_medium_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:recovery_medium ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:DH5alpha_lot
+    a sbol:Implementation ;
+    sbol:displayId "DH5alpha_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:DH5alpha ;
+    fac:materialKind inv:BacterialStock ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:BL21_lot
+    a sbol:Implementation ;
+    sbol:displayId "BL21_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:BL21 ;
+    fac:materialKind inv:BacterialStock ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:chloramphenicol_lot
+    a sbol:Implementation ;
+    sbol:displayId "chloramphenicol_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:chloramphenicol ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:reference_gfp_lot
+    a sbol:Implementation ;
+    sbol:displayId "reference_gfp_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:reference_gfp ;
+    fac:materialKind inv:ProcuredMaterial ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .

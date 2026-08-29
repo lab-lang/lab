@@ -1,5 +1,5 @@
 [project]
-name = "lab-opentrons-ot2-target"
+name = "lab-opentrons-ot2-adapter"
 version = "0.1.0"
 description = "Maintained Python implementation for Lab's Opentrons OT-2 backend"
 requires-python = ">=3.12,<3.13"

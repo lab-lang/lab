@@ -4,14 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 
-use crate::backend::TargetConstraintError;
+use crate::backend::AdapterConstraintError;
 
 use crate::backend::error::PlanningError;
 use crate::backend::profile::Plates;
 use crate::backend::trace::{AssemblyTrace, StrainTrace};
 
 /// A well on one of the plates a stage may hold several of. `plate` indexes
-/// the stage's declared slot list, so adding a slot to a target profile raises
+/// the stage's declared slot list, so adding a slot to adapter configuration raises
 /// the build's capacity without changing any address already assigned.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Well {
@@ -61,8 +61,8 @@ pub(in crate::backend) fn assign_source_wells(
     capacity: usize,
 ) -> Result<BTreeMap<String, String>, PlanningError> {
     if keys.len() > capacity {
-        return Err(TargetConstraintError::CapacityExceeded {
-            target: backend.into(),
+        return Err(AdapterConstraintError::CapacityExceeded {
+            adapter: backend.into(),
             operation: stage.into(),
             subject: "automation_batch".into(),
             resource: "source_rack".into(),
@@ -112,8 +112,8 @@ impl<'a> PlateAllocator<'a> {
     fn next_well(&mut self) -> Result<Well, PlanningError> {
         let capacity = self.plates.total_capacity();
         if self.cursor >= capacity {
-            return Err(TargetConstraintError::CapacityExceeded {
-                target: self.backend.into(),
+            return Err(AdapterConstraintError::CapacityExceeded {
+                adapter: self.backend.into(),
                 operation: self.stage.into(),
                 subject: "automation_batch".into(),
                 resource: self.resource.into(),
@@ -162,7 +162,7 @@ pub(in crate::backend) fn require_known_geometry(
 ) -> Result<(), PlanningError> {
     if plate_wells(capacity).is_empty() {
         return Err(PlanningError::InvalidProtocol(format!(
-            "target profile gives {resource} {capacity} wells, which is not a labware format this backend can address"
+            "adapter configuration gives {resource} {capacity} wells, which is not a labware format this implementation can address"
         )));
     }
     Ok(())

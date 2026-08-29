@@ -5,6 +5,7 @@ members = [
     "crates/lab-compiler",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
+    "crates/lab-inventory",
     "crates/lab-instruments",
     "crates/lab-language",
     "crates/lab-language-server",
@@ -40,9 +41,11 @@ rusb = "0.9"
 # SBOL 3 terms, serialization, and validation. Designs are read from and
 # written to SBOL documents, so the standard's object model is the compiler's
 # own rather than something a backend projects onto at the end.
-sbol3 = "1"
+sbol3 = { git = "https://github.com/SynBioDex/sbol-rs", rev = "2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4" }
+sbol-inventory = { git = "https://github.com/SynBioDex/sbol-rs", rev = "2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4" }
 semver = "1"
 thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
 toml = "0.8"
 lsp-server = "0.7"
 lsp-types = "0.97"
@@ -75,6 +78,7 @@ hamilton-star = { version = "0.1.0", default-features = false }
 lab-ide = { path = "crates/lab-ide", version = "0.1.2" }
 inheco-sila = "0.1.0"
 lab-ide-wasm = { path = "crates/lab-ide-wasm", version = "0.1.2" }
+lab-inventory = { path = "crates/lab-inventory", version = "0.1.2" }
 lab-instruments = { path = "crates/lab-instruments", version = "0.1.2" }
 lab-language = { path = "crates/lab-language", version = "0.1.2" }
 lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }

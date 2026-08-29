@@ -33,27 +33,28 @@ reporter_sequence: DNA = dna("ACGTACGT")
 
 buy:
   promoter J23101:
-    identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
+    sbol_identity = "https://synbiohub.org/public/igem/BBa_J23101/1"
 
   part B0034:
-    identity = "https://synbiohub.org/public/igem/BBa_B0034/1"
+    sbol_identity = "https://synbiohub.org/public/igem/BBa_B0034/1"
 
   cds GFP:
-    identity = "https://synbiohub.org/public/igem/BBa_E0040/1"
+    sbol_identity = "https://synbiohub.org/public/igem/BBa_E0040/1"
 
   part B0015:
-    identity = "https://synbiohub.org/public/igem/BBa_B0015/1"
+    sbol_identity = "https://synbiohub.org/public/igem/BBa_B0015/1"
 
   backbone pSB1C3:
-    identity = "https://synbiohub.org/public/igem/pSB1C3/1"
+    sbol_identity = "https://synbiohub.org/public/igem/pSB1C3/1"
 
   restriction_enzyme BsaI:
-    identity = "NEB-R0535"
+    supplier_identity = "NEB-R0535"
     digest_temperature = 37 C
     digest_duration = 2 min
 
 /** The GFP reporter under a strong constitutive promoter. */
 build plasmid reporter:
+  sbol_identity = "https://synbiohub.org/user/marpaia/reporter/reporter"
   components = [J23101, B0034, GFP, B0015]
   sequence = reporter_sequence
   backbone = pSB1C3

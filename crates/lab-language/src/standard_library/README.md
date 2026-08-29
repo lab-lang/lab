@@ -8,6 +8,7 @@ checker special cases.
 
 - `catalog.rs` defines immutable standard modules, their export kinds, catalog
   validation, and lookup.
+- `capability.rs` defines the absolute SBOLInventory capability-kind IRIs used by bundled durable actions.
 - `contract.rs` defines the typed phrase, ownership, capability, and result
   contract for durable actions.
 - `prelude.rs` contains the explicitly identified implicit prelude. Names in

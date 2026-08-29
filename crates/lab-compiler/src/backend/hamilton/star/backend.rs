@@ -1,31 +1,29 @@
 //! STAR implementation of the compiler backend contracts.
 
-use std::collections::BTreeSet;
-
 use thiserror::Error;
 
-use crate::backend::{Backend, BackendDescriptor, BackendEmitter, BackendTarget};
+use crate::backend::{Backend, BackendEmitter};
 use crate::{ArtifactBundle, ProtocolLairProgram};
 
 use crate::backend::hamilton::star::emit::emit_program;
 use crate::backend::hamilton::star::plan::{
     StarEmissionError, StarExecutionPlan, StarPlanningError, plan_build,
 };
-use crate::backend::hamilton::star::profile::StarTargetProfile;
+use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
 /// The STAR backend bound to one bench. Planning reads every carrier,
 /// labware, and tip decision from the profile it carries.
 #[derive(Clone, Debug, Default)]
 pub struct StarBackend {
-    profile: StarTargetProfile,
+    profile: StarAdapterProfile,
 }
 
 impl StarBackend {
-    pub fn new(profile: StarTargetProfile) -> Self {
+    pub fn new(profile: StarAdapterProfile) -> Self {
         Self { profile }
     }
 
-    pub fn profile(&self) -> &StarTargetProfile {
+    pub fn profile(&self) -> &StarAdapterProfile {
         &self.profile
     }
 }
@@ -39,24 +37,6 @@ pub enum StarCompileError {
 impl Backend<ProtocolLairProgram> for StarBackend {
     type Program = StarExecutionPlan;
     type Error = StarCompileError;
-
-    fn descriptor(&self) -> BackendDescriptor {
-        BackendDescriptor {
-            id: "hamilton".into(),
-            display_name: "Hamilton firmware protocol".into(),
-            manufacturer: Some("Hamilton".into()),
-            targets: vec![BackendTarget {
-                id: "star".into(),
-                display_name: "Hamilton STAR/STARlet".into(),
-                capabilities: BTreeSet::from([
-                    "liquid_transfer".into(),
-                    "eight_channel".into(),
-                    "firmware_protocol".into(),
-                    "live_run".into(),
-                ]),
-            }],
-        }
-    }
 
     fn compile(&self, protocol: &ProtocolLairProgram) -> Result<Self::Program, Self::Error> {
         Ok(plan_build(protocol, &self.profile)?)
@@ -83,8 +63,6 @@ mod tests {
         let protocol = golden_gate_protocol();
         let backend = StarBackend::default();
         let program = backend.compile(&protocol).unwrap();
-        assert_eq!(backend.descriptor().id, "hamilton");
-        assert_eq!(backend.descriptor().targets[0].id, "star");
         assert_eq!(program.assemblies.len(), 2);
         // One plasmid feeds two chassis, so four strains come from two
         // assemblies rather than one strain per assembly.

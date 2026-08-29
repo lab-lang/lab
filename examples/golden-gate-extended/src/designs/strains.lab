@@ -14,6 +14,7 @@ use golden_gate_extended.designs.plasmids
 
 /** The GFP reporter carried in the DH5alpha cloning strain. */
 build strain composite_strain_1:
+  sbol_identity = "https://example.org/golden-gate/designs/composite_strain_1"
   chassis = DH5alpha
   plasmids = [composite_plasmid_1]
   selection = chloramphenicol
@@ -31,6 +32,7 @@ build strain composite_strain_1:
 
 /** The RFP reporter in the same cloning strain. */
 build strain composite_strain_2:
+  sbol_identity = "https://example.org/golden-gate/designs/composite_strain_2"
   chassis = DH5alpha
   plasmids = [composite_plasmid_2]
   selection = chloramphenicol
@@ -48,6 +50,7 @@ build strain composite_strain_2:
 
 /** The GFP reporter in BL21, where it is expressed rather than stored. */
 build strain expression_strain:
+  sbol_identity = "https://example.org/golden-gate/designs/expression_strain"
   chassis = BL21
   plasmids = [composite_plasmid_1]
   selection = chloramphenicol
@@ -70,6 +73,7 @@ build strain expression_strain:
  * is the point of stating provenance on the thing rather than on its type.
  */
 build strain reference_strain:
+  sbol_identity = "https://example.org/golden-gate/designs/reference_strain"
   chassis = BL21
   plasmids = [reference_gfp]
   selection = chloramphenicol

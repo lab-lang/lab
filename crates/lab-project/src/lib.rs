@@ -189,8 +189,8 @@ impl LabProject {
 
     /// The packages that make up one runnable program: the default member and
     /// everything it depends on, in dependency-first compilation order. A
-    /// target build lowers exactly these packages' modules together, so an
-    /// artifact declared in a dependency reaches the backend.
+    /// package build lowers exactly these packages' modules together, so an
+    /// artifact declared in a dependency reaches planning and adapter lowering.
     pub fn program_packages(&self) -> Vec<String> {
         let mut reachable = BTreeSet::new();
         self.collect_reachable(&self.default_member, &mut reachable);
@@ -801,5 +801,13 @@ workflow main() -> Material<Plasmid>:
             &[("main.lab", DONOR)],
         );
         assert!(LabProject::discover(root).unwrap().compile().is_ok());
+    }
+
+    #[test]
+    fn ebef_reference_package_compiles_as_a_portable_library() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ebef");
+        let compiled = LabProject::discover(root).unwrap().compile().unwrap();
+        assert_eq!(compiled.modules.len(), 1);
+        assert_eq!(compiled.modules[0].source.module, "ebef_reference.facility");
     }
 }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Superseded by [0044: Facility graphs and capability binding replace workcell targets](0044-facility-graphs-replace-workcell-targets.md).
 
 ## Context
 

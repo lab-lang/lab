@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ use crate::PackageError;
 /// else, so member packages stay ordinary self-contained packages.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabManifest {
-    Package(PackageManifest),
+    Package(Box<PackageManifest>),
     Workspace(WorkspaceManifest),
 }
 
@@ -20,7 +20,7 @@ impl LabManifest {
         if table.contains_key("workspace") {
             Ok(Self::Workspace(WorkspaceManifest::parse(text)?))
         } else {
-            Ok(Self::Package(PackageManifest::parse(text)?))
+            Ok(Self::Package(Box::new(PackageManifest::parse(text)?)))
         }
     }
 
@@ -59,6 +59,8 @@ pub struct PackageManifest {
     #[serde(default)]
     pub inventory: InventoryMetadata,
     #[serde(default)]
+    pub execution: ExecutionMetadata,
+    #[serde(default)]
     pub dependencies: BTreeMap<String, DependencySpec>,
 }
 
@@ -75,23 +77,42 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
-    /// Target profile a build compiles for when none is named on the command
-    /// line, resolved by filename under `targets/`. A package without one
-    /// builds portable module IR and stops.
-    pub target: Option<String>,
 }
 
-/// What a target build may draw on before it plans anything: the materials an
-/// operator has on hand and the artifacts already realized. Names are the
-/// symbolic identities `src/` declares, so the inventory reads as a statement
-/// about this package's stock rather than as an opaque data file.
+/// The facility catalog a package may plan against.
+///
+/// `document` selects the portable SBOLInventory graph and `facility` disambiguates
+/// that graph when it contains several facilities. The symbolic sets remain only
+/// as a mutually exclusive migration form for existing packages.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InventoryMetadata {
+    pub document: Option<PathBuf>,
+    pub facility: Option<String>,
     #[serde(default)]
     pub materials: BTreeSet<String>,
     #[serde(default)]
     pub artifacts: BTreeSet<String>,
+}
+
+/// Local operational bindings from exact SBOLInventory Assets to Lab adapters.
+///
+/// These records do not describe the facility. Manufacturer, model, capabilities, qualification,
+/// and control mode remain facts in the inventory graph. A binding only states which installed
+/// Lab implementation and non-secret profile may operate one exact catalog Asset.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionMetadata {
+    #[serde(default)]
+    pub adapters: Vec<AdapterBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdapterBinding {
+    pub asset: String,
+    pub driver: String,
+    pub profile: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,13 +191,8 @@ impl PackageManifest {
                 self.package.edition.clone(),
             ));
         }
-        // A target is a filename under `targets/`, so it must not be able to
-        // reach outside that directory.
-        if let Some(target) = &self.build.target
-            && !valid_target_name(target)
-        {
-            return Err(PackageError::InvalidTarget(target.clone()));
-        }
+        self.inventory.validate()?;
+        self.execution.validate(&self.inventory)?;
         for (name, dependency) in &self.dependencies {
             if !valid_package_name(name) {
                 return Err(PackageError::InvalidDependency {
@@ -225,14 +241,125 @@ impl PackageManifest {
     }
 }
 
+impl InventoryMetadata {
+    pub fn uses_legacy_symbols(&self) -> bool {
+        !self.materials.is_empty() || !self.artifacts.is_empty()
+    }
+
+    fn validate(&self) -> Result<(), PackageError> {
+        if let Some(document) = &self.document {
+            if self.uses_legacy_symbols() {
+                return Err(PackageError::InvalidInventory(
+                    "'document' cannot be combined with legacy 'materials' or 'artifacts'"
+                        .to_owned(),
+                ));
+            }
+            let invalid = document.as_os_str().is_empty()
+                || document.is_absolute()
+                || document.components().any(|component| {
+                    matches!(
+                        component,
+                        Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                    )
+                });
+            if invalid {
+                return Err(PackageError::InvalidInventory(format!(
+                    "document '{}' must be a package-relative path without '..'",
+                    document.display()
+                )));
+            }
+        } else if self.facility.is_some() {
+            return Err(PackageError::InvalidInventory(
+                "'facility' requires an inventory 'document'".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ExecutionMetadata {
+    fn validate(&self, inventory: &InventoryMetadata) -> Result<(), PackageError> {
+        if !self.adapters.is_empty() && inventory.document.is_none() {
+            return Err(PackageError::InvalidExecution(
+                "adapter bindings require an SBOLInventory 'document'".to_owned(),
+            ));
+        }
+
+        let mut bindings = BTreeSet::new();
+        for adapter in &self.adapters {
+            if !valid_absolute_iri(&adapter.asset) {
+                return Err(PackageError::InvalidExecution(format!(
+                    "adapter asset '{}' must be an absolute IRI",
+                    adapter.asset
+                )));
+            }
+            if !valid_adapter_id(&adapter.driver) {
+                return Err(PackageError::InvalidExecution(format!(
+                    "adapter driver '{}' must be a lowercase dotted identifier",
+                    adapter.driver
+                )));
+            }
+            if !valid_relative_path(&adapter.profile) {
+                return Err(PackageError::InvalidExecution(format!(
+                    "adapter profile '{}' must be a package-relative path without '..'",
+                    adapter.profile.display()
+                )));
+            }
+            if !bindings.insert((&adapter.asset, &adapter.driver)) {
+                return Err(PackageError::InvalidExecution(format!(
+                    "asset '{}' binds adapter '{}' more than once",
+                    adapter.asset, adapter.driver
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
 fn default_edition() -> String {
     "2026".to_owned()
 }
 
-fn valid_target_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.chars().all(|character| {
-            character.is_ascii_alphanumeric() || character == '-' || character == '_'
+fn valid_adapter_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment.chars().all(|character| {
+                    character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+                })
+        })
+}
+
+fn valid_absolute_iri(value: &str) -> bool {
+    let Some((scheme, rest)) = value.split_once(':') else {
+        return false;
+    };
+    !rest.is_empty()
+        && scheme
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic())
+        && scheme.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '+' | '-' | '.')
+        })
+        && !value.chars().any(|character| {
+            character.is_whitespace()
+                || character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | '"' | '{' | '}' | '|' | '\\' | '^' | '`'
+                )
+        })
+}
+
+fn valid_relative_path(path: &std::path::Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
         })
 }
 
@@ -314,7 +441,7 @@ default-member = "packages/device"
     }
 
     #[test]
-    fn reads_the_default_target_and_rejects_one_that_is_not_a_profile_name() {
+    fn build_metadata_rejects_the_removed_target_selector() {
         let manifest = PackageManifest::parse(
             r#"[package]
 name = "tet-reporter"
@@ -324,23 +451,15 @@ version = "0.1.0"
 entry = "src/programs/main.lab"
 target = "opentrons-ot2"
 "#,
-        )
-        .unwrap();
-        assert_eq!(manifest.build.target.as_deref(), Some("opentrons-ot2"));
-        manifest.validate().unwrap();
-
-        let escaping = PackageManifest::parse(
-            "[package]\nname = \"tet-reporter\"\nversion = \"0.1.0\"\n\n[build]\ntarget = \"../benches/ot2\"\n",
-        )
-        .unwrap();
-        assert!(matches!(
-            escaping.validate(),
-            Err(PackageError::InvalidTarget(_))
-        ));
+        );
+        assert!(
+            manifest.is_err(),
+            "facility allocation replaces build targets"
+        );
     }
 
     #[test]
-    fn reads_the_inventory_a_target_build_resolves_against() {
+    fn reads_the_legacy_symbolic_inventory() {
         let manifest = PackageManifest::parse(
             r#"[package]
 name = "tet-reporter"
@@ -371,6 +490,189 @@ artifacts = ["composite_plasmid_1"]
             misspelled.is_err(),
             "a misspelled key must not silently empty the inventory"
         );
+    }
+
+    #[test]
+    fn reads_an_sbol_inventory_document_and_optional_facility() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "tet-reporter"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/ebef.ttl"
+facility = "https://example.org/ebef/facility"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.inventory.document.as_deref(),
+            Some(std::path::Path::new("inventory/ebef.ttl"))
+        );
+        assert_eq!(
+            manifest.inventory.facility.as_deref(),
+            Some("https://example.org/ebef/facility")
+        );
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn reads_explicit_adapter_bindings_to_exact_assets() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "tet-reporter"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/facility.ttl"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-1.toml"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/cycler-1"
+driver = "inheco.odtc"
+profile = "adapters/cycler-1.toml"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.execution.adapters.len(), 2);
+        assert_eq!(
+            manifest.execution.adapters[0].asset,
+            "https://example.org/facility/star-1"
+        );
+        assert_eq!(manifest.execution.adapters[0].driver, "hamilton.star");
+        assert_eq!(
+            manifest.execution.adapters[0].profile,
+            PathBuf::from("adapters/star-1.toml")
+        );
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_non_portable_or_duplicate_adapter_bindings() {
+        let without_inventory = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-1.toml"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            without_inventory.validate(),
+            Err(PackageError::InvalidExecution(_))
+        ));
+
+        let escaping_profile = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/facility.ttl"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/star-1"
+driver = "hamilton.star"
+profile = "../private/star-1.toml"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            escaping_profile.validate(),
+            Err(PackageError::InvalidExecution(_))
+        ));
+
+        let duplicate = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/facility.ttl"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-a.toml"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/star-1"
+driver = "hamilton.star"
+profile = "adapters/star-b.toml"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            duplicate.validate(),
+            Err(PackageError::InvalidExecution(_))
+        ));
+
+        let invalid_driver = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/facility.ttl"
+
+[[execution.adapters]]
+asset = "https://example.org/facility/star-1"
+driver = "Hamilton STAR"
+profile = "adapters/star.toml"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            invalid_driver.validate(),
+            Err(PackageError::InvalidExecution(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_ambiguous_or_non_portable_inventory_configuration() {
+        let mixed = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[inventory]
+document = "inventory/catalog.ttl"
+materials = ["BsaI"]
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            mixed.validate(),
+            Err(PackageError::InvalidInventory(_))
+        ));
+
+        let escaping = PackageManifest::parse(
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[inventory]\ndocument = \"../catalog.ttl\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            escaping.validate(),
+            Err(PackageError::InvalidInventory(_))
+        ));
+
+        let selector_only = PackageManifest::parse(
+            "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[inventory]\nfacility = \"https://example.org/facility\"\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            selector_only.validate(),
+            Err(PackageError::InvalidInventory(_))
+        ));
     }
 
     #[test]

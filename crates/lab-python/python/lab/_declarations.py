@@ -302,6 +302,51 @@ class RecordDeclaration:
         return f"<lab record {self.name}>"
 
 
+@dataclass(frozen=True)
+class ArtifactField:
+    """One property contributed by a package-local artifact kind."""
+
+    name: str
+    annotation: str
+    optional: bool = False
+
+
+class ArtifactKindDeclaration:
+    """An `artifact` declaration connecting an instance word to a typed schema."""
+
+    def __init__(
+        self,
+        *,
+        module: Module,
+        name: str,
+        fields: Sequence[ArtifactField] = (),
+        uses: Sequence[str] = (),
+        origin: Origin | None = None,
+    ) -> None:
+        self.module = module
+        self.name = name
+        self.fields = list(fields)
+        self.uses = tuple(uses)
+        self.origin = origin
+
+    def lab_modules(self) -> Iterator[str]:
+        yield from self.uses
+
+    def write(self, writer: SourceWriter) -> None:
+        with writer.region(self.origin):
+            if not self.fields:
+                writer.line(f"artifact {self.name}")
+                return
+            writer.line(f"artifact {self.name}:")
+            with writer.indented():
+                for field in self.fields:
+                    optional = "?" if field.optional else ""
+                    writer.line(f"{field.name}{optional}: {field.annotation}")
+
+    def __repr__(self) -> str:
+        return f"<lab artifact kind {self.name}>"
+
+
 class CircuitDeclaration:
     """A `circuit` declaration: typed inputs, an output type, and a layout.
 
@@ -496,7 +541,12 @@ class _ItemReference(Expression):
 
 #: Everything a module can hold, in the order it is written.
 ModuleItem = (
-    Declaration[Any] | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+    Declaration[Any]
+    | RecordDeclaration
+    | ArtifactKindDeclaration
+    | CircuitDeclaration
+    | WorkflowDeclaration
+    | Binding
 )
 
 
@@ -613,7 +663,12 @@ def _module_path(target: object) -> str:
 #: What `emit`-style grouping produces: a run of bought declarations written as
 #: one block, or a single item that writes itself.
 Group = (
-    list[Declaration[Any]] | RecordDeclaration | CircuitDeclaration | WorkflowDeclaration | Binding
+    list[Declaration[Any]]
+    | RecordDeclaration
+    | ArtifactKindDeclaration
+    | CircuitDeclaration
+    | WorkflowDeclaration
+    | Binding
 )
 
 

@@ -1,44 +1,42 @@
 //! Backend-independent vocabulary for reporting lowering constraints.
 //!
-//! A specialization supplies target, operation, resource, and parameter names;
-//! the compiler infrastructure owns only the general shapes of constraint
-//! failure.
+//! An adapter specialization supplies implementation, operation, resource, and parameter names; the compiler infrastructure owns only the general shapes of constraint failure.
 
 use thiserror::Error;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
-pub enum TargetConstraintError {
+pub enum AdapterConstraintError {
     #[error(
-        "target '{target}' does not support the operation sequence for '{subject}': expected {expected:?}, found {found:?}"
+        "adapter '{adapter}' does not support the operation sequence for '{subject}': expected {expected:?}, found {found:?}"
     )]
     UnsupportedOperationSequence {
-        target: String,
+        adapter: String,
         subject: String,
         expected: Vec<String>,
         found: Vec<String>,
     },
     #[error(
-        "target '{target}' requires parameter '{parameter}' for '{subject}' to be between {minimum} and {maximum}, found {found}"
+        "adapter '{adapter}' requires parameter '{parameter}' for '{subject}' to be between {minimum} and {maximum}, found {found}"
     )]
     ParameterOutOfRange {
-        target: String,
+        adapter: String,
         subject: String,
         parameter: String,
         minimum: u64,
         maximum: u64,
         found: u64,
     },
-    #[error("target '{target}' requires uniform values for {parameters:?} across '{subject}'")]
+    #[error("adapter '{adapter}' requires uniform values for {parameters:?} across '{subject}'")]
     NonUniformParameters {
-        target: String,
+        adapter: String,
         subject: String,
         parameters: Vec<String>,
     },
     #[error(
-        "target '{target}' capacity exceeded during '{operation}' for '{subject}' resource '{resource}': required {required} {unit}, capacity {capacity} {unit}"
+        "adapter '{adapter}' capacity exceeded during '{operation}' for '{subject}' resource '{resource}': required {required} {unit}, capacity {capacity} {unit}"
     )]
     CapacityExceeded {
-        target: String,
+        adapter: String,
         operation: String,
         subject: String,
         resource: String,
@@ -50,12 +48,12 @@ pub enum TargetConstraintError {
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::constraints::TargetConstraintError;
+    use crate::backend::constraints::AdapterConstraintError;
 
     #[test]
     fn capacity_diagnostics_do_not_encode_a_protocol() {
-        let error = TargetConstraintError::CapacityExceeded {
-            target: "example_target".into(),
+        let error = AdapterConstraintError::CapacityExceeded {
+            adapter: "example_adapter".into(),
             operation: "example_operation".into(),
             subject: "example_subject".into(),
             resource: "reaction_volume".into(),
@@ -65,7 +63,7 @@ mod tests {
         };
         assert_eq!(
             error.to_string(),
-            "target 'example_target' capacity exceeded during 'example_operation' for 'example_subject' resource 'reaction_volume': required 24 uL, capacity 20 uL"
+            "adapter 'example_adapter' capacity exceeded during 'example_operation' for 'example_subject' resource 'reaction_volume': required 24 uL, capacity 20 uL"
         );
     }
 }

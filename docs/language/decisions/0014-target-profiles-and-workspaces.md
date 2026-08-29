@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted.
+Partially superseded by [0044: Facility graphs and capability binding replace workcell targets](0044-facility-graphs-replace-workcell-targets.md). The workspace decision remains accepted; the independent target-profile selection described below is historical.
 
 ## Context
 

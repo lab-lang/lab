@@ -1,0 +1,5 @@
+/*!
+ * This package exercises Lab's portable SBOLInventory ingestion against the
+ * public-data EBEF reference catalog. It intentionally declares no workflow:
+ * public equipment descriptions are not operational adapter bindings.
+ */

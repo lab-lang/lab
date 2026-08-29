@@ -38,12 +38,6 @@ fn render_blocks(blocks: &[Block], offset: u8) -> String {
                 }
                 output.push('\n');
             }
-            Block::Numbered(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    writeln!(output, "{}. {}", index + 1, inlines(item)).unwrap();
-                }
-                output.push('\n');
-            }
             Block::Table { columns, rows } => {
                 let headers = columns
                     .iter()
@@ -97,18 +91,17 @@ mod tests {
         let mut doc = Doc::new(DocMeta {
             title: "Manual protocol".into(),
             subtitle: "Operator manual".into(),
-            target: "bench-1".into(),
+            adapter_profile: "adapter-1".into(),
             instrument: "Test rig".into(),
         });
         doc.notice([
             text("Generated concept protocol for "),
-            code("bench-1"),
+            code("adapter-1"),
             text("."),
         ]);
         doc.heading(1, [text("Stage 1")]);
         doc.para([text("Keep everything at 4 °C.")]);
         doc.bullets([vec![text("Volume: 30 µL")]]);
-        doc.numbered([vec![text("first")], vec![text("second")]]);
         doc.table(
             [Column::left("Reagent"), Column::right("Volume")],
             [
@@ -119,11 +112,10 @@ mod tests {
 
         let rendered = render(&doc);
         assert!(rendered.starts_with("# Manual protocol\n"));
-        assert!(rendered.contains("> Generated concept protocol for `bench-1`."));
+        assert!(rendered.contains("> Generated concept protocol for `adapter-1`."));
         assert!(rendered.contains("## Stage 1"));
         assert!(rendered.contains("Keep everything at 4 °C."));
         assert!(rendered.contains("- Volume: 30 µL"));
-        assert!(rendered.contains("1. first\n2. second"));
         assert!(rendered.contains("| Reagent | Volume |"));
         assert!(rendered.contains("| --- | ---: |"));
         assert!(rendered.contains("| **Total** | **30 µL** |"));

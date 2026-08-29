@@ -1,5 +1,4 @@
-//! Deserializable shape of a Flex target profile: instruments, deck modules,
-//! the trash bin, and the labware each build stage claims.
+//! Deserializable shape of Flex adapter configuration: instruments, deck modules, the trash bin, and the labware each build stage claims.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -7,28 +6,6 @@ use serde::{Deserialize, Serialize};
 pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
 
 use crate::backend::opentrons::flex::profile::defaults::*;
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TargetMetadata {
-    /// The bench this profile describes, named by whoever loaded it: a profile
-    /// is selected as `targets/<name>.toml`, so the file does not repeat its
-    /// own name and cannot disagree with it. Emitted plans carry the name so
-    /// an operator can see which bench a protocol was compiled for.
-    #[serde(skip_deserializing, default = "default_bench_name")]
-    pub name: String,
-    #[serde(default = "default_backend")]
-    pub backend: String,
-}
-
-impl Default for TargetMetadata {
-    fn default() -> Self {
-        Self {
-            name: default_bench_name(),
-            backend: default_backend(),
-        }
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

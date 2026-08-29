@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use pliron::context::Context;
 
 use crate::ProtocolLairProgram;
-use crate::backend::opentrons::ot2::profile::{Ot2TargetProfile, Plates, Stages};
+use crate::backend::opentrons::ot2::profile::{Ot2AdapterProfile, Plates, Stages};
 
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::plan::constraints::{
@@ -29,14 +29,14 @@ use crate::backend::trace::{AssemblyTrace, ProtocolTraces, StrainTrace, analyze_
 /// Markdown, and JSON emitters.
 pub fn plan_build(
     protocol: &ProtocolLairProgram,
-    profile: &Ot2TargetProfile,
+    profile: &Ot2AdapterProfile,
 ) -> Result<Ot2ExecutionPlan, Ot2PlanningError> {
     plan_selected_build(protocol, profile, None)
 }
 
 pub(in crate::backend::opentrons::ot2) fn plan_selected_build(
     protocol: &ProtocolLairProgram,
-    profile: &Ot2TargetProfile,
+    profile: &Ot2AdapterProfile,
     selected_artifacts: Option<&BTreeSet<String>>,
 ) -> Result<Ot2ExecutionPlan, Ot2PlanningError> {
     let context = protocol.context();
@@ -74,9 +74,9 @@ pub(in crate::backend::opentrons::ot2) fn plan_selected_build(
         assign_all_source_wells(&traces, context, rack_capacity)?;
 
     Ok(Ot2ExecutionPlan {
-        schema_version: "lab.automation.v0".into(),
-        target: BACKEND.into(),
-        api_level: profile.target.api_level.clone(),
+        schema_version: "lab.automation.v1".into(),
+        adapter: BACKEND.into(),
+        api_level: profile.protocol.api_level.clone(),
         deck: profile.clone(),
         assembly_source_wells,
         transformation_source_wells,
@@ -98,9 +98,8 @@ fn validate_traces(traces: &ProtocolTraces, context: &Context) -> Result<(), Ot2
     validate_uniform_batch_settings(&traces.strains, context)
 }
 
-/// Rejects a target profile that declares labware in a well count this
-/// backend has no row/column layout for.
-fn require_deck_geometry(profile: &Ot2TargetProfile) -> Result<(), Ot2PlanningError> {
+/// Rejects adapter configuration that declares labware in a well count this implementation has no row/column layout for.
+fn require_deck_geometry(profile: &Ot2AdapterProfile) -> Result<(), Ot2PlanningError> {
     let deck = &profile.deck;
     let stages = &profile.stages;
     require_known_geometry("the source rack", deck.temperature_module.capacity)?;
@@ -446,7 +445,7 @@ workflow build_reporter_host(
     #[test]
     fn allocates_both_stages_against_the_reference_bench() {
         let protocol = protocol(SOURCE);
-        let profile = Ot2TargetProfile::default();
+        let profile = Ot2AdapterProfile::default();
         let plan = plan_build(&protocol, &profile).unwrap();
         let bundle = compile_build(&protocol, &profile).unwrap();
 
@@ -475,7 +474,7 @@ workflow build_reporter_host(
             "  assembly_replicates = 1\n",
             "  assembly_replicates = 1\n  reaction_volume = 30 uL\n  part_volume = 3 uL\n  assembly_cycles = 40\n",
         );
-        let plan = plan_build(&protocol(&tuned), &Ot2TargetProfile::default()).unwrap();
+        let plan = plan_build(&protocol(&tuned), &Ot2AdapterProfile::default()).unwrap();
         let chemistry = &plan.assemblies[0].chemistry;
 
         assert_eq!(chemistry.reaction_volume_ul, 30);
@@ -494,7 +493,7 @@ workflow build_reporter_host(
             "buy restriction_enzyme BsaI\n",
             "buy restriction_enzyme BsaI:\n  digest_temperature = 55 C\n  digest_duration = 7 min\n",
         );
-        let plan = plan_build(&protocol(&owned), &Ot2TargetProfile::default()).unwrap();
+        let plan = plan_build(&protocol(&owned), &Ot2AdapterProfile::default()).unwrap();
         let chemistry = &plan.assemblies[0].chemistry;
 
         assert_eq!(chemistry.digest_temperature_c, 55);
@@ -514,7 +513,7 @@ workflow build_reporter_host(
                 "  assembly_replicates = 1\n",
                 "  assembly_replicates = 1\n  digest_temperature = 30 C\n",
             );
-        let plan = plan_build(&protocol(&owned), &Ot2TargetProfile::default()).unwrap();
+        let plan = plan_build(&protocol(&owned), &Ot2AdapterProfile::default()).unwrap();
 
         assert_eq!(plan.assemblies[0].chemistry.digest_temperature_c, 30);
     }
@@ -534,7 +533,7 @@ workflow build_reporter_host(
 
     /// A method declares the unit each of its quantities is measured in, so a
     /// thousandfold error is caught where it is written rather than when a
-    /// target reads it.
+    /// adapter reads it.
     #[test]
     fn rejects_a_chemistry_quantity_in_the_wrong_unit() {
         let wrong = SOURCE.replace(
@@ -556,7 +555,7 @@ workflow build_reporter_host(
         let crowded = SOURCE.replace("  plating_replicates = 2", "  plating_replicates = 8");
         let protocol = protocol(&crowded);
 
-        let mut single = Ot2TargetProfile::default();
+        let mut single = Ot2AdapterProfile::default();
         single.stages.plating.agar_plate.slots = vec!["5".to_owned()];
         single.stages.plating.small_tips.slots = vec!["9".to_owned(), "10".to_owned()];
         let plan = plan_build(&protocol, &single).unwrap();

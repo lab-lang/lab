@@ -20,10 +20,7 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 fn flex_profile() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/golden-gate/targets/opentrons-flex.toml")
-        .canonicalize()
-        .unwrap()
+    fixture("opentrons-flex-adapter.toml")
 }
 
 fn command_types(protocol: &Value) -> Vec<&str> {
@@ -108,7 +105,9 @@ fn writes_a_complete_flex_automation_bundle_of_json_protocols() {
             fixture("reporter-library.lab").to_str().unwrap(),
             "--emit",
             "automation-bundle",
-            "--target-profile",
+            "--adapter",
+            "opentrons.flex",
+            "--adapter-profile",
             flex_profile().to_str().unwrap(),
             "--output-dir",
             output_dir.to_str().unwrap(),
@@ -140,9 +139,9 @@ fn writes_a_complete_flex_automation_bundle_of_json_protocols() {
         &std::fs::read_to_string(output_dir.join("automation_manifest.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(manifest["target"], "opentrons.flex");
-    assert_eq!(manifest["schema_version"], "lab.automation.v0");
-    assert_eq!(manifest["deck"]["target"]["backend"], "opentrons.flex");
+    assert_eq!(manifest["adapter"], "opentrons.flex");
+    assert_eq!(manifest["schema_version"], "lab.automation.v1");
+    assert!(manifest["deck"].get("target").is_none());
     assert_eq!(manifest["assemblies"].as_array().unwrap().len(), 2);
     assert_eq!(manifest["strains"].as_array().unwrap().len(), 2);
 
@@ -310,7 +309,9 @@ fn packages_a_dependency_driven_flex_build_by_wave() {
             fixture("full-build.lab").to_str().unwrap(),
             "--emit",
             "full-build-bundle",
-            "--target-profile",
+            "--adapter",
+            "opentrons.flex",
+            "--adapter-profile",
             flex_profile().to_str().unwrap(),
             "--inventory",
             fixture("full-build-inventory.json").to_str().unwrap(),

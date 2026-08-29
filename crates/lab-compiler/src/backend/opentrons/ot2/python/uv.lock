@@ -95,7 +95,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lab-opentrons-ot2-target"
+name = "lab-opentrons-ot2-adapter"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

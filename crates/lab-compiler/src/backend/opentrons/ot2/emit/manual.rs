@@ -7,7 +7,7 @@
 
 use crate::backend::document::{Block, Column, Doc, DocMeta, bold, code, text};
 use crate::backend::opentrons::ot2::plan::{Ot2ExecutionPlan, Ot2Well};
-use crate::backend::opentrons::ot2::profile::Ot2TargetProfile;
+use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 
 /// Wells are addressed as plate and well, because a stage may hold several
 /// identical plates. The first plate is unnumbered so the common
@@ -32,7 +32,7 @@ fn fragment() -> Doc {
 
 /// The machine, its modules, and the deck: everything that holds for any
 /// run compiled against this bench profile.
-pub(in crate::backend) fn bench_blocks(deck: &Ot2TargetProfile) -> Vec<Block> {
+pub(in crate::backend) fn bench_blocks(deck: &Ot2AdapterProfile) -> Vec<Block> {
     let mut doc = fragment();
 
     doc.heading(1, [text("How Lab and the robot divide the work")]);
@@ -452,7 +452,7 @@ pub(in crate::backend) fn boundary_blocks() -> Vec<Block> {
     let mut doc = fragment();
     doc.heading(1, [text("Execution boundary")]);
     doc.para_text(
-        "This concept spike allocates one 96-well reaction plate, one DNA plate, one dilution plate, one agar plate, and 24-well source racks. It does not resolve inventory lots, verify DNA concentrations, design overhangs, domesticate internal restriction sites, or qualify the protocol for a specific lab.",
+        "This concept spike allocates one 96-well reaction plate, one DNA plate, one dilution plate, one agar plate, and 24-well source racks. Dependency planning may freeze exact inventory lots, but this device plan does not reason over their quantities, verify DNA concentrations, design overhangs, domesticate internal restriction sites, or qualify the protocol for a specific lab.",
     );
     doc.blocks
 }
@@ -461,12 +461,12 @@ pub(in crate::backend) fn render_manual_protocol(manifest: &Ot2ExecutionPlan) ->
     let mut doc = Doc::new(DocMeta::new(
         "Automated plasmid build",
         "Operator manual for one robot session",
-        &manifest.target,
+        &manifest.adapter,
         "Opentrons OT-2",
     ));
     doc.notice([
         text("Concept protocol generated for "),
-        code(&manifest.target),
+        code(&manifest.adapter),
         text(". Review and qualify it for the actual laboratory before execution."),
     ]);
     doc.blocks.extend(bench_blocks(&manifest.deck));
@@ -548,7 +548,7 @@ workflow build_reporter_host(
             .unwrap()
             .select_protocol()
             .unwrap();
-        let plan = plan_build(&protocol, &Ot2TargetProfile::default()).unwrap();
+        let plan = plan_build(&protocol, &Ot2AdapterProfile::default()).unwrap();
         let manual = markdown::render(&render_manual_protocol(&plan));
 
         assert!(

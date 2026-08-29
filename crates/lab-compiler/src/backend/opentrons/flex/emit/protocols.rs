@@ -16,7 +16,7 @@ use opentrons_protocol::{
 };
 
 use crate::backend::opentrons::flex::plan::{FlexEmissionError, FlexExecutionPlan};
-use crate::backend::opentrons::flex::profile::{FlexTargetProfile, TipRacks};
+use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, TipRacks};
 use crate::backend::resources::plate_wells;
 
 pub(in crate::backend::opentrons::flex) fn render_assembly_protocol(
@@ -369,7 +369,7 @@ struct Instrument {
     max_volume: f64,
 }
 
-fn stage_builder(profile: &FlexTargetProfile, protocol_name: &str) -> FlexProtocolBuilder {
+fn stage_builder(profile: &FlexAdapterProfile, protocol_name: &str) -> FlexProtocolBuilder {
     FlexProtocolBuilder::with_trash(
         Metadata {
             protocol_name: Some(protocol_name.into()),

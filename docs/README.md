@@ -33,7 +33,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0001: Minimal language kernel](language/decisions/0001-language-kernel.md) | indentation for behavior, braces for data, `=` for pure work, `<-` for durable effects |
 | [0002: Reactive durable workflows](language/decisions/0002-reactive-workflows.md) | deterministic state machines driven by recorded actions, timers, and events |
 | [0003: Modules and packages](language/decisions/0003-modules-and-packages.md) | whole-module imports and conventional project organization |
-| [0004: Portable module IR](language/decisions/0004-portable-module-ir.md) | a typed frontend boundary before target selection and execution |
+| [0004: Portable module IR](language/decisions/0004-portable-module-ir.md) | a typed frontend boundary before facility allocation and execution |
 | [0005: Explicit workflow state](language/decisions/0005-explicit-workflow-state.md) | immutable ordinary bindings and explicit durable mutation |
 | [0006: Affine material flow](language/decisions/0006-affine-material-flow.md) | one owning place for each physical material, checked across control flow |
 | [0007: Toolchain CLI boundary](language/decisions/0007-toolchain-cli-boundary.md) | `lab` for working with Lab; `labc` and `lab-opt` for compiler internals |
@@ -43,7 +43,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0011: Dependencies from material dataflow](language/decisions/0011-dependencies-from-material-dataflow.md) | build graphs derived from checked workflow values rather than biological level labels |
 | [0012: Named workflow results](language/decisions/0012-named-workflow-results.md) | explicit named result fields and direct comma-separated returns without synthetic wrapper records |
 | [0013: Strain artifacts](language/decisions/0013-strain-artifacts.md) | engineered organisms as first-class artifacts rather than a host property on a plasmid |
-| [0014: Target profiles and workspaces](language/decisions/0014-target-profiles-and-workspaces.md) | benches configured by target profile, science stated in source, packages grouped by workspace |
+| [0014: Target profiles and workspaces](language/decisions/0014-target-profiles-and-workspaces.md) | historical target-profile design, now retained only for its workspace decision |
 | [0015: Roles classify types](language/decisions/0015-roles-classify-types.md) | types gain capabilities through declared roles rather than hardcoded bounds |
 | [0016: Callable circuit signatures](language/decisions/0016-callable-circuit-signatures.md) | circuits declare callable signatures with inline type parameters |
 | [0017: Forgotten type arguments](language/decisions/0017-forgotten-type-arguments.md) | a type argument may be deliberately forgotten with `any Role` |
@@ -58,9 +58,9 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0026: Lineage and replicates](language/decisions/0026-lineage-and-replicates.md) | replicate class is lineage recovered from dataflow, not a property |
 | [0027: Provenance is stated per thing](language/decisions/0027-provenance-is-stated-per-thing.md) | provenance is a fact about a thing, not about its type |
 | [0028: Schemas are contributed to](language/decisions/0028-schemas-are-contributed-to.md) | several packages describe one artifact kind |
-| [0029: Backend dispatch](language/decisions/0029-backend-dispatch.md) | a profile's `backend` key selects its backend; a registry stays deferred |
+| [0029: Backend dispatch](language/decisions/0029-backend-dispatch.md) | superseded historical direct-target backend dispatch |
 | [0030: Reviewed frames are the execution boundary](language/decisions/0030-reviewed-frames-are-the-execution-boundary.md) | the runtime interprets reviewed run documents and never plans |
-| [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | a workcell target composes stations; assignment is planning, not language |
+| [0031: Workcell targets](language/decisions/0031-workcell-targets.md) | superseded historical design for compiler-specific multi-device composition |
 | [0032: Provenance blocks](language/decisions/0032-provenance-blocks.md) | a provenance verb can open a block |
 | [0033: Typeset protocol documents](language/decisions/0033-typeset-protocol-documents.md) | protocol documents are typeset PDFs emitted beside their sources |
 | [0039: Roles carry ontology terms](language/decisions/0039-roles-carry-ontology-terms.md) | roles may name the ontology terms they stand for, grounding Lab types in shared vocabularies |
@@ -68,11 +68,12 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0041: Typed SBOL authoring separates design from provenance](language/decisions/0041-typed-sbol-authoring-separates-design-from-provenance.md) | typed Python designs preserve biological kinds while explicit declarations state build or buy provenance |
 | [0042: Robotics incubates separately](language/decisions/0042-robotics-incubates-separately.md) | simulation, visualization, embodied robotics, and their compute control plane live in the robotics repository |
 | [0043: Sequences are first-class design values](language/decisions/0043-sequences-are-first-class-design-values.md) | DNA and protein sequences are independent typed values referenced by designs |
+| [0044: Facility graphs replace workcell targets](language/decisions/0044-facility-graphs-replace-workcell-targets.md) | SBOLInventory facilities compose exact capability, Asset, material, plan, and run bindings |
 
 ## Implementation and embedding
 
 - [LAIR overview](../crates/lab-compiler/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
-- [Protocol IR](../crates/lab-compiler/src/lair/dialect/protocol/README.md) describes the current target-selected biological-procedure boundary and what deliberately remains for resource and hardware lowering.
+- [Protocol IR](../crates/lab-compiler/src/lair/dialect/protocol/README.md) describes the selected biological-procedure boundary and what deliberately remains for facility allocation and hardware lowering.
 - [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.

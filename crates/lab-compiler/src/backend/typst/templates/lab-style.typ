@@ -137,7 +137,7 @@
 #let protocol-doc(
   title: "",
   subtitle: "",
-  target: "",
+  adapter-profile: "",
   instrument: "",
   version: "",
   kicker-text: "Generated protocol document",
@@ -158,7 +158,7 @@
         column-gutter: 6pt,
         align: horizon,
         lab-mark(size: 8.5pt),
-        [Lab v#version#if target != "" [ · #raw(target)]],
+        [Lab v#version#if adapter-profile != "" [ · #raw(adapter-profile)]],
         counter(page).display("1 of 1", both: true),
       )
     },
@@ -209,7 +209,7 @@
       columns: 3,
       gutter: 16pt,
       if instrument != "" [Instrument: #text(fill: ink)[#instrument]],
-      if target != "" [Target: #raw(target)],
+      if adapter-profile != "" [Adapter profile: #raw(adapter-profile)],
       [Lab toolchain v#version],
     )
     #v(5pt)

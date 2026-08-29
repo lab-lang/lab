@@ -19,6 +19,7 @@ import json
 from typing import Any, cast
 
 from . import sbol as sbol
+from ._artifacts import artifact
 from ._circuits import (
     CircuitError,
     Network,
@@ -181,6 +182,7 @@ __all__ = [
     "analyze",
     "analyze_sources",
     "and_",
+    "artifact",
     "assemble",
     "capture",
     "case",

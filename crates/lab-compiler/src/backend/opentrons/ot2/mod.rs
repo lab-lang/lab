@@ -11,9 +11,7 @@ mod package;
 mod plan;
 mod profile;
 
-/// This backend's identity. A target profile declares it, planning stamps it
-/// into every execution plan and target-constraint error, and no other
-/// spelling of it exists.
+/// Stable adapter identity used by explicit Asset bindings, device plans, and adapter diagnostics.
 pub(in crate::backend::opentrons::ot2) const BACKEND: &str = "opentrons.ot2";
 
 pub use crate::backend::opentrons::ot2::backend::{Ot2Backend, Ot2CompileError};
@@ -25,4 +23,4 @@ pub use crate::backend::opentrons::ot2::plan::{
     Ot2ExecutionPlan, Ot2PlanningError, Ot2PlatingPlan, Ot2StrainChemistry, Ot2StrainPlan,
     Ot2TransformationPlan, compile_build, emit_program, plan_build,
 };
-pub use crate::backend::opentrons::ot2::profile::{Ot2ProfileError, Ot2TargetProfile};
+pub use crate::backend::opentrons::ot2::profile::{Ot2AdapterProfile, Ot2ProfileError};

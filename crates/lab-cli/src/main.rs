@@ -1,9 +1,9 @@
+mod adapters;
 mod commands;
-mod run;
-mod targets;
+mod execution_run;
+mod facility_lowering;
 mod typeset;
 mod update;
-mod workcell_run;
 
 use std::path::PathBuf;
 
@@ -42,8 +42,7 @@ enum Command {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Build a package into verified portable module artifacts, and into
-    /// automation protocols when a target is named.
+    /// Build verified experiment artifacts and specialize through a configured facility.
     Build {
         /// Package directory or any path inside a package.
         #[arg(default_value = ".")]
@@ -51,46 +50,42 @@ enum Command {
         /// Artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
-        /// Target profile to compile for, named by a file under `targets/`;
-        /// defaults to `[build] target` in the manifest.
+    },
+    /// Write only the reviewed facility plan and its adapter lowerings.
+    Plan {
+        /// Package directory or any path inside a package.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Plan artifact directory, relative to the project root unless absolute.
         #[arg(long)]
-        target: Option<String>,
-        /// Build portable module IR only, ignoring the manifest's default
-        /// target.
-        #[arg(long, conflicts_with = "target")]
-        no_target: bool,
+        out_dir: Option<PathBuf>,
     },
-    /// Discover, validate, and render compiler-owned target profiles.
-    Targets {
+    /// Discover, validate, and render asset-bound adapter profiles.
+    Adapters {
         #[command(subcommand)]
-        command: TargetsCommand,
+        command: AdaptersCommand,
     },
-    /// Execute an emitted run package — a Hamilton STAR package or a
-    /// workcell wave — on the connected stations, or review it with
-    /// --dry-run.
+    /// Execute a reviewed facility plan, or validate and review it with --dry-run.
     Run {
-        /// A run directory produced by `lab build` (the target output
-        /// directory, or one wave directory of a dependency build). A
-        /// directory holding `plan.workcell.json` runs as a workcell
-        /// wave; anything else runs as a Hamilton STAR package.
+        /// A directory containing plan.execution.json.
         path: PathBuf,
         /// Validate and print the full step table without touching
         /// hardware.
         #[arg(long)]
         dry_run: bool,
+        /// Execute through simulation adapters without touching physical hardware.
+        #[arg(long, conflicts_with = "dry_run")]
+        simulate: bool,
         /// Skip the initial confirmation. Handoffs and manual steps still
         /// require the operator.
         #[arg(long)]
         yes: bool,
-        /// Continue a workcell wave from its ledger, skipping nodes it
-        /// records as completed.
+        /// Continue the exact reviewed plan from its durable ledger.
         #[arg(long)]
         resume: bool,
-        /// Where a networked station answers on this bench, as
-        /// NAME=ADDRESS (repeatable). Compiled artifacts never carry
-        /// addresses; the bench supplies them at run time.
-        #[arg(long = "station", value_name = "NAME=ADDRESS")]
-        station: Vec<String>,
+        /// Where a networked Asset answers, as ASSET_IRI=ADDRESS (repeatable).
+        #[arg(long, value_name = "ASSET_IRI=ADDRESS")]
+        asset_endpoint: Vec<String>,
     },
     /// Print resolved package metadata and source-module names.
     Metadata {
@@ -107,25 +102,24 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
-enum TargetsCommand {
-    /// Describe every backend and station kind, or one backend in detail.
+enum AdaptersCommand {
+    /// Describe every adapter implementation, or one driver in detail.
     Describe {
-        /// Concrete `[target] backend` value to describe.
+        /// Stable adapter ID such as `hamilton.star`.
         #[arg(long)]
-        backend: Option<String>,
+        driver: Option<String>,
     },
-    /// Print the complete reference profile for one backend.
+    /// Print the complete reference profile for one adapter.
     Default {
-        /// Concrete `[target] backend` value.
-        backend: String,
+        driver: String,
         /// Profile filename stem used for validation metadata.
-        #[arg(long, default_value = "target")]
+        #[arg(long, default_value = "adapter")]
         name: String,
     },
-    /// Parse and semantically validate a target profile.
-    Validate { path: PathBuf },
-    /// Validate and print a complete canonical target profile.
-    Render { path: PathBuf },
+    /// Parse and semantically validate an adapter profile against an explicit driver.
+    Validate { driver: String, path: PathBuf },
+    /// Validate and print a complete canonical adapter profile.
+    Render { driver: String, path: PathBuf },
 }
 
 struct Output {
@@ -169,35 +163,30 @@ fn run() -> Result<()> {
     match cli.command {
         Command::New { path, name } => commands::new_project(path, name, &output),
         Command::Check { path } => commands::check(path, &output),
-        Command::Build {
-            path,
-            out_dir,
-            target,
-            no_target,
-        } => commands::build(path, out_dir, target, no_target, &output),
-        Command::Targets { command } => match command {
-            TargetsCommand::Describe { backend } => targets::describe(backend, &output),
-            TargetsCommand::Default { backend, name } => targets::default(backend, name, &output),
-            TargetsCommand::Validate { path } => targets::validate(path, &output),
-            TargetsCommand::Render { path } => targets::render(path, &output),
+        Command::Build { path, out_dir } => commands::build(path, out_dir, &output),
+        Command::Plan { path, out_dir } => commands::plan(path, out_dir, &output),
+        Command::Adapters { command } => match command {
+            AdaptersCommand::Describe { driver } => adapters::describe(driver, &output),
+            AdaptersCommand::Default { driver, name } => adapters::default(driver, name, &output),
+            AdaptersCommand::Validate { driver, path } => adapters::validate(driver, path, &output),
+            AdaptersCommand::Render { driver, path } => adapters::render(driver, path, &output),
         },
         Command::Run {
             path,
             dry_run,
+            simulate,
             yes,
             resume,
-            station,
-        } => {
-            if workcell_run::is_workcell_directory(&path) {
-                workcell_run::run_workcell_command(path, dry_run, yes, resume, station, &output)
-            } else if resume || !station.is_empty() {
-                anyhow::bail!(
-                    "--resume and --station apply to workcell waves; this directory holds a Hamilton STAR package, which re-runs from its documents"
-                )
-            } else {
-                run::run(path, dry_run, yes, &output)
-            }
-        }
+            asset_endpoint,
+        } => execution_run::run_execution_command(
+            path,
+            dry_run,
+            simulate,
+            yes,
+            resume,
+            asset_endpoint,
+            &output,
+        ),
         Command::Metadata { path } => commands::metadata(path, &output),
         Command::Update { check } => update::update(check, &output),
     }
@@ -209,32 +198,67 @@ mod tests {
 
     #[test]
     fn parses_package_build_options() {
-        let cli = Cli::try_parse_from([
-            "lab",
-            "build",
-            "project",
-            "--out-dir",
-            "dist",
-            "--target",
-            "opentrons-ot2",
-        ])
-        .unwrap();
+        let cli = Cli::try_parse_from(["lab", "build", "project", "--out-dir", "dist"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Build { path, out_dir, target, no_target }
+            Command::Build { path, out_dir }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
-                    && target.as_deref() == Some("opentrons-ot2")
-                    && !no_target
         ));
     }
 
     #[test]
-    fn rejects_naming_a_target_and_opting_out_of_one() {
-        assert!(
-            Cli::try_parse_from(["lab", "build", "--target", "opentrons-ot2", "--no-target"])
-                .is_err()
-        );
+    fn parses_facility_plan_options() {
+        let cli = Cli::try_parse_from(["lab", "plan", "project", "--out-dir", "review"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Plan { path, out_dir }
+                if path.as_path() == std::path::Path::new("project")
+                    && out_dir.as_deref() == Some(std::path::Path::new("review"))
+        ));
+    }
+
+    #[test]
+    fn parses_exact_asset_endpoints_for_facility_runs() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "run",
+            "review",
+            "--resume",
+            "--asset-endpoint",
+            "https://example.org/facility/odtc=192.0.2.1:8080",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Run {
+                path,
+                resume: true,
+                asset_endpoint,
+                ..
+            } if path.as_path() == std::path::Path::new("review")
+                && asset_endpoint == ["https://example.org/facility/odtc=192.0.2.1:8080"]
+        ));
+    }
+
+    #[test]
+    fn parses_explicit_facility_simulation_mode() {
+        let cli = Cli::try_parse_from(["lab", "run", "review", "--simulate", "--resume"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Run {
+                path,
+                simulate: true,
+                resume: true,
+                ..
+            } if path.as_path() == std::path::Path::new("review")
+        ));
+    }
+
+    #[test]
+    fn rejects_the_removed_target_surfaces() {
+        assert!(Cli::try_parse_from(["lab", "build", "--target", "opentrons-ot2"]).is_err());
+        assert!(Cli::try_parse_from(["lab", "targets", "describe"]).is_err());
     }
 
     #[test]
@@ -244,12 +268,12 @@ mod tests {
     }
 
     #[test]
-    fn parses_target_contract_commands() {
+    fn parses_adapter_contract_commands() {
         let cli = Cli::try_parse_from([
             "lab",
-            "targets",
+            "adapters",
             "describe",
-            "--backend",
+            "--driver",
             "hamilton.star",
             "--json",
         ])
@@ -257,18 +281,27 @@ mod tests {
         assert!(cli.json);
         assert!(matches!(
             cli.command,
-            Command::Targets {
-                command: TargetsCommand::Describe { backend: Some(backend) }
-            } if backend == "hamilton.star"
+            Command::Adapters {
+                command: AdaptersCommand::Describe {
+                    driver: Some(driver)
+                }
+            } if driver == "hamilton.star"
         ));
 
-        let cli = Cli::try_parse_from(["lab", "targets", "default", "workcell", "--name", "bench"])
-            .unwrap();
+        let cli = Cli::try_parse_from([
+            "lab",
+            "adapters",
+            "validate",
+            "inheco.odtc",
+            "adapters/cycler.toml",
+        ])
+        .unwrap();
         assert!(matches!(
             cli.command,
-            Command::Targets {
-                command: TargetsCommand::Default { backend, name }
-            } if backend == "workcell" && name == "bench"
+            Command::Adapters {
+                command: AdaptersCommand::Validate { driver, path }
+            } if driver == "inheco.odtc"
+                && path.as_path() == std::path::Path::new("adapters/cycler.toml")
         ));
     }
 

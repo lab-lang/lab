@@ -367,7 +367,7 @@ record PlateObservation:
   colonies: ColonyMap
 ```
 
-Duplicate property names are rejected. Portable checked IR preserves the property name and typed value; a target may consume a documented subset without the core AST growing one field per backend.
+Duplicate property names are rejected. Portable checked IR preserves the property name and typed value; method selection or an allocated adapter may consume a documented subset without the core AST growing one field per implementation.
 
 ## Plasmid requirements and acceptance
 
@@ -386,9 +386,9 @@ plasmid p_sensor:
 
 `require` is checked before physical construction. `accept` describes a runtime claim that must be supported by evidence.
 
-## Typed inventory identities and target properties
+## Typed design identities and specialization properties
 
-Inventory identities enter through `buy` declarations against imported kinds, and plasmid properties refer to those symbols. Properties are backend-neutral typed expressions—not executable bindings and not evidence that inventory is physically available:
+Biological designs enter through `build` and `buy` declarations against imported kinds, and plasmid properties refer to those typed symbols. An exact SBOL Component IRI may be attached to either provenance. These declarations and properties are not executable bindings or evidence that a material lot is physically available:
 
 ```lab
 use std.lab.plasmid
@@ -422,9 +422,9 @@ strain reporter_host:
   serial_dilutions = 2
 ```
 
-A bought item's external identity is what a supplier's order names. It defaults to the declared name and is stated as an `identity` property only where the two differ, so renaming a source symbol and changing an external identifier are distinct operations. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
+An `sbol_identity` is an absolute IRI naming the SBOL Component represented by a built or bought declaration. A bought item's `supplier_identity` names what a supplier's order line calls it and defaults to the declared name; `identity` remains a legacy alias for `supplier_identity`. The source symbol, design identity, and supplier identity are distinct, so renaming one does not silently rewrite the others. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
 
-The OT-2 specialization interprets these properties after ordinary module checking. Another target may ignore them, interpret other metadata, or reject the module. Target-specific property names are not encoded in the core checker.
+The current plasmid-build method interprets the scientific properties after ordinary module checking, and the OT-2 adapter interprets its documented operational subset only after facility allocation. Another method or compatible adapter may interpret other metadata or reject the module. Method- and adapter-specific property names are not encoded in the core checker.
 
 The component list above has type `List<Part>`. A list that refers to both a dependent plasmid and ordinary parts has the inferred type `List<Plasmid | Part>`:
 
@@ -434,7 +434,7 @@ components: [promoter_carrier, B0034, GFP, B0015]
 
 The union preserves the nominal alternatives; it does not convert the symbols to strings or a universal metadata value.
 
-Multiple property-bearing artifacts and their realization workflows may be compiled by a compatible target. Replicate and dilution settings are currently interpreted by the initial OT-2 specialization, not by the core language.
+Multiple property-bearing artifacts and their realization workflows may be compiled by a supported method and lowered through a compatible facility adapter. Replicate and dilution settings are currently interpreted by the initial plasmid-build method and OT-2 adapter, not by the core language.
 
 ## Plasmids and strains
 
@@ -469,7 +469,7 @@ plasmid p_gfp:
   ligate_duration = 5 min
 ```
 
-Units are checked rather than assumed: `20 mL` where microlitres are expected is a diagnostic, not a thousandfold error on the bench. Water makes each reaction up to its stated volume, and reagents that over-subscribe that volume are rejected before any target sees the design.
+Units are checked rather than assumed: `20 mL` where microlitres are expected is a diagnostic, not a thousandfold error on the bench. Water makes each reaction up to its stated volume, and reagents that over-subscribe that volume are rejected before facility allocation or adapter lowering.
 
 ## Evidence a claim is believed on
 

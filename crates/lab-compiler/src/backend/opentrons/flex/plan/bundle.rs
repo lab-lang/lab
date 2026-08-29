@@ -9,7 +9,7 @@ use crate::backend::opentrons::flex::emit::{
 };
 use crate::backend::{markdown, typst};
 
-use crate::backend::opentrons::flex::profile::FlexTargetProfile;
+use crate::backend::opentrons::flex::profile::FlexAdapterProfile;
 
 use crate::backend::opentrons::flex::plan::{
     FlexBuildError, FlexEmissionError, FlexExecutionPlan, plan_build,
@@ -130,7 +130,7 @@ impl FlexBundle {
 
 pub fn compile_build(
     protocol: &ProtocolLairProgram,
-    profile: &FlexTargetProfile,
+    profile: &FlexAdapterProfile,
 ) -> Result<FlexBundle, FlexBuildError> {
     Ok(FlexBundle::from_plan(plan_build(protocol, profile)?)?)
 }

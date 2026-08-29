@@ -148,9 +148,9 @@ def _read_typed_design(
         )
 
     identity = _typed_identity(design)
+    properties["sbol_identity"] = identity
     if provenance == "buy":
         _remember_typed_buy(module, identity, before, design)
-        properties["identity"] = identity
 
     requirements: list[Claim] = []
     topology = getattr(design, "topology", None)
@@ -194,11 +194,10 @@ def _read_raw_design(
             fallback_name=f"{declaration_name}_sequence",
         )
 
-    if provenance == "buy":
-        identity = getattr(raw, "identity", None)
-        if identity is None:
-            raise DesignError(f"a design passed to {kind.produces}.buy has no SBOL identity")
-        properties["identity"] = str(identity)
+    identity = getattr(raw, "identity", None)
+    if identity is None:
+        raise DesignError(f"a design passed to {kind.produces} has no SBOL identity")
+    properties["sbol_identity"] = str(identity)
 
     requirements: list[Claim] = []
     if provenance == "build" and _terms.CIRCULAR in types:

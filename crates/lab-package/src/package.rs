@@ -88,7 +88,7 @@ impl LabWorkspace {
 /// What a `lab.toml` found by an upward search turned out to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiscoveredRoot {
-    Package(LabPackage),
+    Package(Box<LabPackage>),
     Workspace(LabWorkspace),
 }
 
@@ -96,7 +96,7 @@ impl DiscoveredRoot {
     pub fn discover(start: impl AsRef<Path>) -> Result<Self, PackageError> {
         let root = find_manifest_directory(start.as_ref())?;
         match read_manifest(&root)? {
-            LabManifest::Package(_) => Ok(Self::Package(LabPackage::load(root)?)),
+            LabManifest::Package(_) => Ok(Self::Package(Box::new(LabPackage::load(root)?))),
             LabManifest::Workspace(manifest) => {
                 Ok(Self::Workspace(LabWorkspace { root, manifest }))
             }
@@ -139,10 +139,10 @@ pub enum PackageError {
     UnsupportedEdition(String),
     #[error("invalid dependency '{name}': {message}")]
     InvalidDependency { name: String, message: String },
-    #[error(
-        "invalid default target '{0}'; a target names a profile under 'targets/' using letters, digits, '-' or '_'"
-    )]
-    InvalidTarget(String),
+    #[error("invalid inventory configuration: {0}")]
+    InvalidInventory(String),
+    #[error("invalid execution configuration: {0}")]
+    InvalidExecution(String),
     #[error("package '{package}' has no Lab source modules under {source_root}")]
     NoSources {
         package: String,
@@ -204,7 +204,7 @@ fn read_manifest(root: &Path) -> Result<LabManifest, PackageError> {
 impl LabPackage {
     pub fn discover(start: impl AsRef<Path>) -> Result<Self, PackageError> {
         match DiscoveredRoot::discover(start)? {
-            DiscoveredRoot::Package(package) => Ok(package),
+            DiscoveredRoot::Package(package) => Ok(*package),
             DiscoveredRoot::Workspace(workspace) => Err(PackageError::NotAPackage {
                 path: workspace.root,
             }),
@@ -214,7 +214,7 @@ impl LabPackage {
     pub fn load(root: impl AsRef<Path>) -> Result<Self, PackageError> {
         let root = root.as_ref().to_path_buf();
         let manifest = match read_manifest(&root)? {
-            LabManifest::Package(manifest) => manifest,
+            LabManifest::Package(manifest) => *manifest,
             LabManifest::Workspace(_) => {
                 return Err(PackageError::NotAPackage { path: root });
             }

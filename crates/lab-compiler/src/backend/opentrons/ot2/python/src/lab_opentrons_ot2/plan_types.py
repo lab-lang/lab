@@ -69,14 +69,12 @@ class Stages(TypedDict):
     plating: PlatingStage
 
 
-class TargetMetadata(TypedDict):
-    name: str
-    backend: str
+class ProtocolOptions(TypedDict):
     api_level: str
 
 
-class TargetProfile(TypedDict):
-    target: TargetMetadata
+class AdapterProfile(TypedDict):
+    protocol: ProtocolOptions
     instruments: Instruments
     deck: SharedDeck
     stages: Stages
@@ -154,9 +152,9 @@ class StrainPlan(TypedDict):
 
 class Ot2ExecutionPlan(TypedDict):
     schema_version: str
-    target: str
+    adapter: str
     api_level: str
-    deck: TargetProfile
+    deck: AdapterProfile
     assembly_source_wells: dict[str, str]
     transformation_source_wells: dict[str, str]
     dna_source_wells: dict[str, Well]

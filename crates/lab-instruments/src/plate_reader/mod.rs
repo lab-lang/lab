@@ -1,4 +1,4 @@
-//! Plate measurements, the plate-reader interface, and its stations.
+//! Plate measurements, the plate-reader interface, and concrete adapters.
 
 mod byonoy;
 
@@ -110,7 +110,7 @@ impl PlateData {
 /// every sensor, so well selection is a reporting concern the caller
 /// applies to the returned data. Plate access is physical — a reader with
 /// no drawer relies on whoever (or whatever) carries the plate, which is
-/// exactly what a workcell handoff models.
+/// represented as an explicit material-movement node in a reviewed facility plan.
 pub trait PlateReader {
     type Error: std::error::Error + Send + Sync + 'static;
 

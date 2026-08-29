@@ -710,7 +710,7 @@ mod tests {
     fn rejects_malformed_action_contracts_during_registration() {
         let malformed = ActionContractSpec {
             operation: "std.test.broken",
-            capability: "testing",
+            capability: "https://example.org/capability#Testing",
             phrase: vec![PhrasePart::Operand {
                 name: "input",
                 r#type: ContractType::Concrete(Ty::String),

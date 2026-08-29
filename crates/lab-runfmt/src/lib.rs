@@ -10,7 +10,8 @@
 //! loaders in this crate, so a wrong or missing format string fails the same
 //! way everywhere.
 
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -23,11 +24,14 @@ pub const THERMOCYCLE_RUN_FORMAT: &str = "lab.thermocycle-run.v0";
 /// The format string every `lab.plate-read.v0` document declares.
 pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 
-/// The format string every `lab.workcell-run.v0` document declares.
-pub const WORKCELL_RUN_FORMAT: &str = "lab.workcell-run.v0";
+/// The format string every semantic capability simulation document declares.
+pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
 
-/// The file name a wave directory's coordination plan is stored under.
-pub const WORKCELL_PLAN_FILE: &str = "plan.workcell.json";
+/// The reviewed, facility-wide execution plan format.
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v1";
+
+/// The well-known file name for a facility-wide reviewed plan.
+pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
 
 /// Why a run document failed to load.
 #[derive(Debug, thiserror::Error)]
@@ -50,6 +54,8 @@ pub enum RunDocumentError {
         expected: &'static str,
         found: String,
     },
+    #[error("{path} is not a valid execution plan: {message}")]
+    InvalidPlan { path: String, message: String },
 }
 
 fn load_document<T>(path: &Path) -> Result<T, RunDocumentError>
@@ -99,16 +105,532 @@ pub fn load_plate_read(path: &Path) -> Result<PlateReadDocument, RunDocumentErro
     Ok(document)
 }
 
-/// Load and format-check the coordination plan in a wave directory.
-pub fn load_workcell_plan(directory: &Path) -> Result<WorkcellRunDocument, RunDocumentError> {
-    let path = directory.join(WORKCELL_PLAN_FILE);
-    let document: WorkcellRunDocument = load_document(&path)?;
-    check_format(&path, WORKCELL_RUN_FORMAT, &document.format)?;
+/// Load and format-check one `lab.simulation-run.v1` document.
+pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocumentError> {
+    let document: SimulationRunDocument = load_document(path)?;
+    check_format(path, SIMULATION_RUN_FORMAT, &document.format)?;
     Ok(document)
 }
 
+/// Load, format-check, and structurally validate one `lab.execution-plan.v1` document.
+pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
+    let document: ExecutionPlanDocument = load_document(path)?;
+    check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
+    document
+        .validate()
+        .map_err(|message| RunDocumentError::InvalidPlan {
+            path: path.display().to_string(),
+            message,
+        })?;
+    Ok(document)
+}
+
+/// One reviewed facility-wide plan. Runtime interpretation is restricted to these frozen facts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionPlanDocument {
+    /// Always [`EXECUTION_PLAN_FORMAT`].
+    pub format: String,
+    pub inventory: ExecutionInventoryReference,
+    pub requirements: Vec<ExecutionRequirementBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<ExecutionMaterialBinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<ExecutionMaterialOutput>,
+    /// Immutable whole-program adapter outputs that implement several semantic requirements
+    /// together and therefore cannot be attached honestly to one Execute node.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lowerings: Vec<ExecutionLoweringBundle>,
+    pub nodes: Vec<ExecutionPlanNode>,
+}
+
+impl ExecutionPlanDocument {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.format != EXECUTION_PLAN_FORMAT {
+            return Err(format!(
+                "format is '{}', expected '{EXECUTION_PLAN_FORMAT}'",
+                self.format
+            ));
+        }
+        require_sha256("inventory source", &self.inventory.source_sha256)?;
+        require_relative_path("inventory source", &self.inventory.document)?;
+
+        let mut requirements = BTreeMap::new();
+        for requirement in &self.requirements {
+            if requirement.requirement_instance.is_empty() {
+                return Err("a requirement binding has an empty instance ID".to_owned());
+            }
+            if requirements
+                .insert(requirement.requirement_instance.as_str(), requirement)
+                .is_some()
+            {
+                return Err(format!(
+                    "requirement instance '{}' is bound more than once",
+                    requirement.requirement_instance
+                ));
+            }
+            if let Some(adapter) = &requirement.adapter {
+                require_sha256(
+                    &format!("adapter profile for '{}'", requirement.requirement_instance),
+                    &adapter.profile_sha256,
+                )?;
+                require_relative_path("adapter profile", &adapter.profile_path)?;
+            }
+        }
+
+        let mut materials = BTreeSet::new();
+        for material in &self.materials {
+            if material.id.is_empty() || !materials.insert(material.id.as_str()) {
+                return Err(format!(
+                    "material binding ID '{}' is empty or repeated",
+                    material.id
+                ));
+            }
+        }
+        let mut material_lots = self
+            .materials
+            .iter()
+            .map(|material| material.material_lot.as_str())
+            .collect::<BTreeSet<_>>();
+        for output in &self.outputs {
+            if output.id.is_empty() || !materials.insert(output.id.as_str()) {
+                return Err(format!(
+                    "output material binding ID '{}' is empty or repeated",
+                    output.id
+                ));
+            }
+            if output.namespace.ends_with('/')
+                || output.namespace.is_empty()
+                || output.display_id.is_empty()
+                || output.material_lot != format!("{}/{}", output.namespace, output.display_id)
+            {
+                return Err(format!(
+                    "output material '{}' identity must equal namespace/display_id",
+                    output.id
+                ));
+            }
+            if !material_lots.insert(output.material_lot.as_str()) {
+                return Err(format!(
+                    "material lot IRI '{}' is bound more than once",
+                    output.material_lot
+                ));
+            }
+            for source in &output.derived_from {
+                if !self.materials.iter().any(|material| material.id == *source) {
+                    return Err(format!(
+                        "output material '{}' derives from unknown input material '{}'",
+                        output.id, source
+                    ));
+                }
+            }
+        }
+
+        let mut lowering_ids = BTreeSet::new();
+        let mut lowered_requirements = BTreeSet::new();
+        let mut lowering_artifact_paths = BTreeSet::new();
+        for lowering in &self.lowerings {
+            if lowering.id.is_empty() || !lowering_ids.insert(lowering.id.as_str()) {
+                return Err(format!(
+                    "adapter lowering ID '{}' is empty or repeated",
+                    lowering.id
+                ));
+            }
+            if lowering.asset.is_empty() {
+                return Err(format!(
+                    "adapter lowering '{}' has an empty Asset IRI",
+                    lowering.id
+                ));
+            }
+            require_relative_path("adapter lowering profile", &lowering.adapter.profile_path)?;
+            require_sha256(
+                &format!("adapter lowering profile for '{}'", lowering.id),
+                &lowering.adapter.profile_sha256,
+            )?;
+            if lowering.requirements.is_empty() {
+                return Err(format!(
+                    "adapter lowering '{}' does not identify any triggering requirements",
+                    lowering.id
+                ));
+            }
+            let mut route_requirements = BTreeSet::new();
+            for requirement_id in &lowering.requirements {
+                if !route_requirements.insert(requirement_id.as_str()) {
+                    return Err(format!(
+                        "adapter lowering '{}' repeats requirement '{}'",
+                        lowering.id, requirement_id
+                    ));
+                }
+                if !lowered_requirements.insert(requirement_id.as_str()) {
+                    return Err(format!(
+                        "requirement '{}' belongs to more than one adapter lowering",
+                        requirement_id
+                    ));
+                }
+                let requirement = requirements.get(requirement_id.as_str()).ok_or_else(|| {
+                    format!(
+                        "adapter lowering '{}' references unknown requirement '{}'",
+                        lowering.id, requirement_id
+                    )
+                })?;
+                if requirement.asset != lowering.asset {
+                    return Err(format!(
+                        "adapter lowering '{}' binds Asset '{}', but requirement '{}' binds '{}'",
+                        lowering.id, lowering.asset, requirement_id, requirement.asset
+                    ));
+                }
+                if requirement.adapter.as_ref() != Some(&lowering.adapter) {
+                    return Err(format!(
+                        "adapter lowering '{}' does not match the frozen adapter for requirement '{}'",
+                        lowering.id, requirement_id
+                    ));
+                }
+            }
+            if lowering.artifacts.is_empty() {
+                return Err(format!(
+                    "adapter lowering '{}' has no reviewed artifacts",
+                    lowering.id
+                ));
+            }
+            let mut device_protocols = 0;
+            for artifact in &lowering.artifacts {
+                require_relative_path("reviewed lowering artifact", &artifact.path)?;
+                require_sha256(
+                    &format!(
+                        "reviewed lowering artifact '{}' in '{}'",
+                        artifact.path, lowering.id
+                    ),
+                    &artifact.sha256,
+                )?;
+                if artifact.media_type.is_empty() {
+                    return Err(format!(
+                        "reviewed lowering artifact '{}' in '{}' has no media type",
+                        artifact.path, lowering.id
+                    ));
+                }
+                if !lowering_artifact_paths.insert(artifact.path.as_str()) {
+                    return Err(format!(
+                        "reviewed lowering artifact path '{}' is repeated",
+                        artifact.path
+                    ));
+                }
+                match artifact.role {
+                    ReviewedLoweringArtifactRole::DeviceProtocol => {
+                        device_protocols += 1;
+                        if artifact.format.as_deref().is_none_or(str::is_empty) {
+                            return Err(format!(
+                                "device protocol '{}' in '{}' has no run-document format",
+                                artifact.path, lowering.id
+                            ));
+                        }
+                    }
+                    ReviewedLoweringArtifactRole::OperatorDocument
+                    | ReviewedLoweringArtifactRole::Support => {
+                        if artifact.format.is_some() {
+                            return Err(format!(
+                                "non-protocol artifact '{}' in '{}' declares a run-document format",
+                                artifact.path, lowering.id
+                            ));
+                        }
+                    }
+                }
+            }
+            if device_protocols == 0 {
+                return Err(format!(
+                    "adapter lowering '{}' has no reviewed device protocol",
+                    lowering.id
+                ));
+            }
+        }
+
+        let mut nodes = BTreeMap::new();
+        for node in &self.nodes {
+            if node.id.is_empty() || nodes.insert(node.id.as_str(), node).is_some() {
+                return Err(format!("node ID '{}' is empty or repeated", node.id));
+            }
+        }
+        for node in &self.nodes {
+            let mut dependencies = BTreeSet::new();
+            for dependency in &node.after {
+                if !dependencies.insert(dependency) {
+                    return Err(format!(
+                        "node '{}' repeats dependency '{}'",
+                        node.id, dependency
+                    ));
+                }
+                if dependency == &node.id {
+                    return Err(format!("node '{}' depends on itself", node.id));
+                }
+                if !nodes.contains_key(dependency.as_str()) {
+                    return Err(format!(
+                        "node '{}' depends on unknown node '{}'",
+                        node.id, dependency
+                    ));
+                }
+            }
+            match &node.action {
+                ExecutionPlanAction::Execute {
+                    requirement,
+                    document,
+                } => {
+                    if !requirements.contains_key(requirement.as_str()) {
+                        return Err(format!(
+                            "execute node '{}' references unknown requirement '{}'",
+                            node.id, requirement
+                        ));
+                    }
+                    if let Some(document) = document {
+                        if lowered_requirements.contains(requirement.as_str()) {
+                            return Err(format!(
+                                "execute node '{}' attaches a single run document to requirement '{}', which already belongs to whole-program adapter lowering",
+                                node.id, requirement
+                            ));
+                        }
+                        require_relative_path("reviewed run document", &document.path)?;
+                        require_sha256(
+                            &format!("reviewed run document for node '{}'", node.id),
+                            &document.sha256,
+                        )?;
+                        if document.format.is_empty() {
+                            return Err(format!(
+                                "reviewed run document for node '{}' has no format",
+                                node.id
+                            ));
+                        }
+                    }
+                }
+                ExecutionPlanAction::MoveMaterial { material, .. } => {
+                    if !materials.contains(material.as_str()) {
+                        return Err(format!(
+                            "material-movement node '{}' references unknown material binding '{}'",
+                            node.id, material
+                        ));
+                    }
+                }
+                ExecutionPlanAction::Manual { title, .. } if title.is_empty() => {
+                    return Err(format!("manual node '{}' has an empty title", node.id));
+                }
+                ExecutionPlanAction::Manual { .. } => {}
+            }
+        }
+        validate_acyclic(&nodes)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionInventoryReference {
+    /// Exact source graph copied into the reviewed execution package.
+    pub document: String,
+    pub source_sha256: String,
+    pub facility: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionRequirementBinding {
+    pub requirement_instance: String,
+    pub requirement_template: String,
+    pub capability_kind: String,
+    pub offering: String,
+    pub asset: String,
+    pub minimum_qualification: String,
+    pub observed_qualification: String,
+    pub control_mode: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<ExecutionParameterBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<ExecutionAdapterBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionParameterBinding {
+    pub argument: String,
+    pub property_kind: String,
+    pub relation: String,
+    #[serde(flatten)]
+    pub required: ExecutionParameterValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_unit: Option<String>,
+    pub offering_parameter: String,
+    pub observed: ExecutionParameterValue,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_unit: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "value_type", content = "value", rename_all = "snake_case")]
+pub enum ExecutionParameterValue {
+    Text(String),
+    Integer(String),
+    Real(String),
+    Boolean(bool),
+    Iri(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionAdapterBinding {
+    pub driver: String,
+    pub profile_path: String,
+    pub profile_sha256: String,
+}
+
+/// One immutable adapter invocation whose device artifacts jointly realize several requirements.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionLoweringBundle {
+    pub id: String,
+    pub asset: String,
+    pub adapter: ExecutionAdapterBinding,
+    pub requirements: Vec<String>,
+    pub artifacts: Vec<ReviewedLoweringArtifact>,
+}
+
+/// One hash-addressed child of a reviewed whole-program adapter lowering.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewedLoweringArtifact {
+    pub path: String,
+    pub media_type: String,
+    pub sha256: String,
+    pub role: ReviewedLoweringArtifactRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewedLoweringArtifactRole {
+    DeviceProtocol,
+    OperatorDocument,
+    Support,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionMaterialBinding {
+    pub id: String,
+    pub component: String,
+    pub material_lot: String,
+}
+
+/// One new MaterialLot whose exact identity and lineage are frozen before execution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionMaterialOutput {
+    pub id: String,
+    pub material_lot: String,
+    pub namespace: String,
+    pub display_id: String,
+    pub component: String,
+    pub material_kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub located_in: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ExecutionPlanNode {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<String>,
+    #[serde(flatten)]
+    pub action: ExecutionPlanAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum ExecutionPlanAction {
+    Execute {
+        requirement: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        document: Option<ReviewedRunDocument>,
+    },
+    MoveMaterial {
+        material: String,
+        from: String,
+        to: String,
+        instructions: String,
+    },
+    Manual {
+        title: String,
+        instructions: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReviewedRunDocument {
+    pub path: String,
+    pub format: String,
+    pub sha256: String,
+}
+
+fn require_sha256(label: &str, value: &str) -> Result<(), String> {
+    if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(format!("{label} SHA-256 must be 64 hexadecimal characters"))
+    }
+}
+
+fn require_relative_path(label: &str, value: &str) -> Result<(), String> {
+    let path = Path::new(value);
+    let invalid = value.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        });
+    if invalid {
+        Err(format!(
+            "{label} path '{value}' must be a non-empty relative path without '..'"
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_acyclic(nodes: &BTreeMap<&str, &ExecutionPlanNode>) -> Result<(), String> {
+    let mut indegree = nodes
+        .iter()
+        .map(|(id, node)| (*id, node.after.len()))
+        .collect::<BTreeMap<_, _>>();
+    let mut dependents = BTreeMap::<&str, Vec<&str>>::new();
+    for (id, node) in nodes {
+        for dependency in &node.after {
+            dependents.entry(dependency).or_default().push(id);
+        }
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(id, degree)| (*degree == 0).then_some(*id))
+        .collect::<VecDeque<_>>();
+    let mut visited = 0;
+    while let Some(id) = ready.pop_front() {
+        visited += 1;
+        for dependent in dependents.get(id).into_iter().flatten() {
+            let degree = indegree
+                .get_mut(dependent)
+                .expect("every dependent is a declared node");
+            *degree -= 1;
+            if *degree == 0 {
+                ready.push_back(dependent);
+            }
+        }
+    }
+    if visited == nodes.len() {
+        Ok(())
+    } else {
+        let cyclic = indegree
+            .into_iter()
+            .filter_map(|(id, degree)| (degree > 0).then_some(id))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Err(format!(
+            "execution plan contains a dependency cycle among {cyclic}"
+        ))
+    }
+}
+
 /// One `lab.thermocycle-run.v0` document: a device-neutral thermal program
-/// for one plate. The station's kind decides which instrument executes it;
+/// for one plate. The exact Asset and adapter binding selects the executor;
 /// the document never names a vendor.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThermocycleRunDocument {
@@ -146,59 +668,20 @@ pub enum PlateReadMode {
     Luminescence { integration_seconds: f64 },
 }
 
-/// One `lab.workcell-run.v0` document: the coordination plan for one wave
-/// of a multi-station build. Nodes execute in dependency order; every
-/// physical plate movement is an explicit handoff node the operator
-/// confirms.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorkcellRunDocument {
-    /// Always [`WORKCELL_RUN_FORMAT`]; readers reject any other value.
-    pub format: String,
-    pub stations: Vec<WorkcellStation>,
-    pub nodes: Vec<WorkcellNode>,
-}
-
-/// One station as the coordination plan sees it: a name, the kind that
-/// selects its executor, and where its program documents live relative to
-/// the wave directory.
+/// One reviewed semantic simulation step.
+///
+/// This document records what a simulator is asked to model. It is never a hardware protocol and
+/// never implies that a physical Asset has a compatible control path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct WorkcellStation {
-    pub name: String,
-    /// The station kind string, e.g. `hamilton.star` or `inheco.odtc`.
-    pub kind: String,
-    pub program_dir: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct WorkcellNode {
-    /// Stable, human-readable identity, e.g. `assembly_run` or
-    /// `assembly_thermocycle.to-odtc-1`.
+pub struct SimulationRunDocument {
+    /// Always [`SIMULATION_RUN_FORMAT`].
+    pub format: String,
     pub id: String,
-    /// Node ids that must complete first.
-    #[serde(default)]
-    pub after: Vec<String>,
-    #[serde(flatten)]
-    pub action: WorkcellAction,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "kebab-case")]
-pub enum WorkcellAction {
-    /// Execute one station program document.
-    StationProgram {
-        station: String,
-        /// The document path relative to the wave directory.
-        document: String,
-    },
-    /// A human moves labware between stations and confirms.
-    Handoff {
-        from: String,
-        to: String,
-        labware: String,
-        instructions: String,
-    },
-    /// A human performs a step that is not a movement, and confirms.
-    Manual { title: String, instructions: String },
+    pub title: String,
+    /// Exact capability-kind IRI this simulation models.
+    pub capability_kind: String,
+    /// Human-readable scope or assumptions reviewed with the simulation.
+    pub assumptions: Vec<String>,
 }
 
 /// One replayable Hamilton STAR step: the id-less firmware frame and the
@@ -241,6 +724,176 @@ pub struct StarRunDocument {
 mod tests {
     use super::*;
 
+    fn execution_plan() -> ExecutionPlanDocument {
+        ExecutionPlanDocument {
+            format: EXECUTION_PLAN_FORMAT.to_owned(),
+            inventory: ExecutionInventoryReference {
+                document: "inventory-source.ttl".to_owned(),
+                source_sha256: "a".repeat(64),
+                facility: "https://example.org/facility".to_owned(),
+            },
+            requirements: vec![ExecutionRequirementBinding {
+                requirement_instance: "example::main/body[0]".to_owned(),
+                requirement_template: "example::main::body[0]".to_owned(),
+                capability_kind: "https://sbol.io/ns/capability#Incubation".to_owned(),
+                offering: "https://example.org/incubator/incubation".to_owned(),
+                asset: "https://example.org/incubator".to_owned(),
+                minimum_qualification: "https://sbol.io/ns/facility#Plannable".to_owned(),
+                observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
+                parameters: Vec::new(),
+                adapter: Some(ExecutionAdapterBinding {
+                    driver: "example.incubator".to_owned(),
+                    profile_path: "adapters/incubator.toml".to_owned(),
+                    profile_sha256: "b".repeat(64),
+                }),
+            }],
+            materials: Vec::new(),
+            outputs: Vec::new(),
+            lowerings: Vec::new(),
+            nodes: vec![ExecutionPlanNode {
+                id: "execute-0001".to_owned(),
+                after: Vec::new(),
+                action: ExecutionPlanAction::Execute {
+                    requirement: "example::main/body[0]".to_owned(),
+                    document: None,
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn an_execution_plan_round_trips_and_validates() {
+        let plan = execution_plan();
+        plan.validate().unwrap();
+        let text = serde_json::to_string_pretty(&plan).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ExecutionPlanDocument>(&text).unwrap(),
+            plan
+        );
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(EXECUTION_PLAN_FILE);
+        std::fs::write(&path, text).unwrap();
+        assert_eq!(load_execution_plan(&path).unwrap(), plan);
+    }
+
+    #[test]
+    fn execution_plan_validation_rejects_dangling_and_cyclic_dependencies() {
+        let mut dangling = execution_plan();
+        dangling.nodes[0].after.push("missing".to_owned());
+        assert!(
+            dangling
+                .validate()
+                .unwrap_err()
+                .contains("depends on unknown node")
+        );
+
+        let mut cyclic = execution_plan();
+        cyclic.nodes.push(ExecutionPlanNode {
+            id: "execute-0002".to_owned(),
+            after: vec!["execute-0001".to_owned()],
+            action: ExecutionPlanAction::Manual {
+                title: "inspect".to_owned(),
+                instructions: "confirm".to_owned(),
+            },
+        });
+        cyclic.nodes[0].after.push("execute-0002".to_owned());
+        assert!(cyclic.validate().unwrap_err().contains("dependency cycle"));
+    }
+
+    #[test]
+    fn execution_plan_validation_checks_exact_references_and_digests() {
+        let mut plan = execution_plan();
+        let ExecutionPlanAction::Execute { requirement, .. } = &mut plan.nodes[0].action else {
+            unreachable!()
+        };
+        *requirement = "missing".to_owned();
+        assert!(plan.validate().unwrap_err().contains("unknown requirement"));
+
+        let mut plan = execution_plan();
+        plan.inventory.source_sha256 = "not-a-digest".to_owned();
+        assert!(plan.validate().unwrap_err().contains("SHA-256"));
+    }
+
+    #[test]
+    fn execution_plan_validation_freezes_whole_program_adapter_lowerings() {
+        let mut plan = execution_plan();
+        let adapter = plan.requirements[0].adapter.clone().unwrap();
+        plan.lowerings.push(ExecutionLoweringBundle {
+            id: "example-incubator-a1b2c3d4e5f6".to_owned(),
+            asset: "https://example.org/incubator".to_owned(),
+            adapter,
+            requirements: vec!["example::main/body[0]".to_owned()],
+            artifacts: vec![ReviewedLoweringArtifact {
+                path: "lowerings/incubator/run.json".to_owned(),
+                media_type: "application/json".to_owned(),
+                sha256: "c".repeat(64),
+                role: ReviewedLoweringArtifactRole::DeviceProtocol,
+                format: Some("example.incubator-run.v1".to_owned()),
+            }],
+        });
+        plan.validate().unwrap();
+
+        let mut wrong_asset = plan.clone();
+        wrong_asset.lowerings[0].asset = "https://example.org/other".to_owned();
+        assert!(
+            wrong_asset
+                .validate()
+                .unwrap_err()
+                .contains("but requirement")
+        );
+
+        let mut missing_format = plan;
+        missing_format.lowerings[0].artifacts[0].format = None;
+        assert!(
+            missing_format
+                .validate()
+                .unwrap_err()
+                .contains("no run-document format")
+        );
+    }
+
+    #[test]
+    fn execution_plan_validation_freezes_output_material_identity_and_lineage() {
+        let mut plan = execution_plan();
+        plan.materials.push(ExecutionMaterialBinding {
+            id: "input".to_owned(),
+            component: "https://example.org/design".to_owned(),
+            material_lot: "https://example.org/input".to_owned(),
+        });
+        plan.outputs.push(ExecutionMaterialOutput {
+            id: "output".to_owned(),
+            material_lot: "https://example.org/results/output".to_owned(),
+            namespace: "https://example.org/results".to_owned(),
+            display_id: "output".to_owned(),
+            component: "https://example.org/design".to_owned(),
+            material_kind: "https://sbol.io/ns/inventory#DnaSample".to_owned(),
+            located_in: None,
+            position: None,
+            derived_from: vec!["input".to_owned()],
+        });
+        plan.validate().unwrap();
+
+        let mut wrong_identity = plan.clone();
+        wrong_identity.outputs[0].material_lot = "https://example.org/results/other".to_owned();
+        assert!(
+            wrong_identity
+                .validate()
+                .unwrap_err()
+                .contains("namespace/display_id")
+        );
+
+        let mut unknown_source = plan;
+        unknown_source.outputs[0].derived_from = vec!["missing".to_owned()];
+        assert!(
+            unknown_source
+                .validate()
+                .unwrap_err()
+                .contains("unknown input material")
+        );
+    }
+
     #[test]
     fn a_star_run_document_round_trips_through_json() {
         let document = StarRunDocument {
@@ -263,6 +916,22 @@ mod tests {
         let text = serde_json::to_string_pretty(&document).expect("the document serializes");
         let back: StarRunDocument = serde_json::from_str(&text).expect("the document parses");
         assert_eq!(back, document, "emitter and runner read the same schema");
+    }
+
+    #[test]
+    fn a_capability_simulation_document_round_trips() {
+        let document = SimulationRunDocument {
+            format: SIMULATION_RUN_FORMAT.to_owned(),
+            id: "growth".to_owned(),
+            title: "Simulate plate growth".to_owned(),
+            capability_kind: "https://sbol.io/ns/capability#Incubation".to_owned(),
+            assumptions: vec!["No physical hardware is contacted.".to_owned()],
+        };
+        let text = serde_json::to_string_pretty(&document).unwrap();
+        assert_eq!(
+            serde_json::from_str::<SimulationRunDocument>(&text).unwrap(),
+            document
+        );
     }
 
     #[test]
@@ -294,17 +963,5 @@ mod tests {
             matches!(error, RunDocumentError::WrongFormat { expected, .. } if expected == STAR_RUN_FORMAT),
             "the error names the expected format: {error}"
         );
-    }
-
-    #[test]
-    fn the_workcell_plan_loader_reads_from_its_well_known_file_name() {
-        let directory = tempfile::tempdir().expect("the test directory is creatable");
-        std::fs::write(
-            directory.path().join(WORKCELL_PLAN_FILE),
-            r#"{ "format": "lab.workcell-run.v0", "stations": [], "nodes": [] }"#,
-        )
-        .expect("the fixture writes");
-        let plan = load_workcell_plan(directory.path()).expect("the plan loads");
-        assert!(plan.nodes.is_empty(), "the empty plan round-trips");
     }
 }

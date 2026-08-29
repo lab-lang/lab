@@ -168,9 +168,10 @@ fn declaration_for(
     };
     let kind = kind_of(component, kinds, &identity)?;
 
-    // The registry's own IRI, stated the way a supplier's catalogue number is,
-    // so an import stays resolvable back to where it came from.
-    let mut members = vec![property("identity", string(&identity))];
+    // The registry's Component IRI is biological design identity. It is not a
+    // supplier order number and remains the same whether a laboratory builds
+    // or buys a realization of the design.
+    let mut members = vec![property("sbol_identity", string(&identity))];
     if let Some(sequence) = sequence_expression(document, component, &identity)? {
         members.push(property("sequence", sequence));
     }
@@ -630,7 +631,7 @@ mod tests {
 
         let CheckedDeclaration::Catalog {
             r#type,
-            identity,
+            sbol_identity,
             doc,
             ..
         } = catalogued(&module, "BBa_J23101")
@@ -638,7 +639,10 @@ mod tests {
             panic!("catalogued");
         };
         assert_eq!(r#type.to_string(), "Promoter");
-        assert_eq!(identity, "https://synbiohub.org/public/igem/BBa_J23101");
+        assert_eq!(
+            sbol_identity.as_deref(),
+            Some("https://synbiohub.org/public/igem/BBa_J23101")
+        );
         assert_eq!(doc.as_deref(), Some("constitutive promoter"));
 
         // The module publishes what it read, so a later `use` resolves it.
@@ -676,7 +680,7 @@ mod tests {
             panic!("catalogued");
         };
         let names: Vec<&str> = properties.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["identity", "sequence"]);
+        assert_eq!(names, vec!["sequence"]);
     }
 
     /// The point of building declarations rather than checked IR: the checker
@@ -720,7 +724,7 @@ mod tests {
             panic!("catalogued");
         };
         let names: Vec<&str> = properties.iter().map(|p| p.name.as_str()).collect();
-        assert_eq!(names, vec!["identity", "sequence", "components"]);
+        assert_eq!(names, vec!["sequence", "components"]);
 
         let components = properties
             .iter()
