@@ -89,6 +89,22 @@ fn lab_standard_library() -> PyResult<String> {
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
+/// Describe every adapter implementation and profile schema in this compiler build.
+#[pyfunction]
+fn lab_adapter_catalog() -> PyResult<String> {
+    let catalog = lab_compiler::backend::adapter_catalog()
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    serde_json::to_string(&catalog).map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
+/// Validate and canonicalize one operational adapter profile through its explicit driver.
+#[pyfunction]
+fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyResult<String> {
+    let profile = lab_compiler::backend::validate_adapter_profile(driver, name, contents)
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 fn method_definitions(
     definitions_json: &str,
     include_standard: bool,
@@ -261,6 +277,8 @@ pub fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(compile_lab_module, module)?)?;
     module.add_function(wrap_pyfunction!(analyze_lab_modules, module)?)?;
     module.add_function(wrap_pyfunction!(lab_standard_library, module)?)?;
+    module.add_function(wrap_pyfunction!(lab_adapter_catalog, module)?)?;
+    module.add_function(wrap_pyfunction!(validate_lab_adapter_profile, module)?)?;
     module.add_function(wrap_pyfunction!(validate_method_definitions, module)?)?;
     module.add_function(wrap_pyfunction!(refine_lab_modules, module)?)?;
     module.add_function(wrap_pyfunction!(plan_lab_project, module)?)?;

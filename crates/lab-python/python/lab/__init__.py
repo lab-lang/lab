@@ -18,6 +18,7 @@ mapped back to the line of Python that produced the Lab it is about.
 import json
 from typing import Any, cast
 
+from . import adapters as adapters
 from . import methods as methods
 from . import planning as planning
 from . import sbol as sbol
@@ -73,6 +74,8 @@ from ._source import Origin
 from ._types import TypeApplication
 from ._vocabulary import ArtifactKind, Function, Symbol
 from ._workflows import Context, Workflow, WorkflowCall, WorkflowError, workflow
+from .adapters import catalog as adapter_catalog
+from .adapters import validate_profile as validate_adapter_profile
 
 # The durable effects of the standard library, which a workflow performs
 # through `wf.perform`. They are the generated mirror's own objects, so
@@ -185,6 +188,8 @@ __all__ = [
     "WorkflowError",
     "acceptance_failed",
     "accepts",
+    "adapter_catalog",
+    "adapters",
     "analyze",
     "analyze_sources",
     "and_",
@@ -232,5 +237,6 @@ __all__ = [
     "store",
     "synthesize",
     "transform",
+    "validate_adapter_profile",
     "workflow",
 ]
