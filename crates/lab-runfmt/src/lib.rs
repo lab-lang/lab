@@ -450,12 +450,6 @@ impl ExecutionPlanningReference {
             require_relative_path(label, &artifact.path)?;
             require_sha256(label, &artifact.sha256)?;
         }
-        if self.planning_problem.sha256 != self.problem_sha256 {
-            return Err(
-                "planning problem artifact digest must equal the selected problem digest"
-                    .to_owned(),
-            );
-        }
         if self.allocated_lair.sha256 != self.allocated_lair_sha256 {
             return Err(
                 "allocated LAIR artifact digest must equal the selected LAIR digest".to_owned(),

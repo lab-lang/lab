@@ -37,6 +37,20 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+fn read_json(path: impl AsRef<Path>) -> Value {
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+fn solution_requirements(solution: &Value) -> Vec<&Value> {
+    solution["selections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|selection| selection["tasks"].as_array().unwrap())
+        .flat_map(|task| task["requirements"].as_array().unwrap())
+        .collect()
+}
+
 #[test]
 fn new_check_build_and_metadata_form_one_project_loop() {
     let project = temporary_project();
@@ -75,60 +89,45 @@ fn new_check_build_and_metadata_form_one_project_loop() {
         "{build_output}"
     );
     let index_path = project.join(".lab/build/package.json");
-    let index: Value = serde_json::from_slice(&std::fs::read(index_path).unwrap()).unwrap();
-    assert_eq!(index["schema_version"], 6);
+    let index = read_json(index_path);
+    assert_eq!(index["schema_version"], 7);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
+    assert_eq!(index["compiler"]["refined_lair"], "compiler/refined.lair");
     assert_eq!(
-        index["capability_requirements"],
-        "capability_requirements.json"
+        index["compiler"]["planning_problem"],
+        "compiler/planning-problem.json"
     );
-    assert_eq!(index["capability_instances"], "capability_instances.json");
+    assert!(index["compiler"].get("facility_solution").is_none());
+    assert!(index.get("capability_requirements").is_none());
+    assert!(index.get("capability_instances").is_none());
     assert!(index.get("facility").is_none());
-    let requirements: Value = serde_json::from_slice(
-        &std::fs::read(project.join(".lab/build/capability_requirements.json")).unwrap(),
-    )
-    .unwrap();
+    assert!(project.join(".lab/build/compiler/refined.lair").is_file());
+    let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v1");
+    assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
-        requirements["schema_version"],
-        "lab.capability-requirements.v2"
+        problem["choices"][0]["source_operation"],
+        "std.bio.build.realize"
     );
-    assert_eq!(requirements["requirements"].as_array().unwrap().len(), 1);
     assert_eq!(
-        requirements["requirements"][0]["capability_kind"],
+        problem["choices"][0]["candidates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        problem["choices"][0]["candidates"][0]["method"],
+        "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
+    );
+    assert_eq!(
+        problem["choices"][0]["candidates"][0]["tasks"][0]["requirements"][0]["capability_kind"],
         "https://sbol.io/ns/capability#ArtifactRealization"
     );
     assert_eq!(
-        requirements["requirements"][0]["minimum_qualification"],
+        problem["choices"][0]["candidates"][0]["tasks"][0]["requirements"][0]["minimum_qualification"],
         "https://sbol.io/ns/facility#Plannable"
-    );
-    assert_eq!(
-        requirements["requirements"][0]["value_inputs"][0]["argument"],
-        "design"
-    );
-    assert!(
-        requirements["requirements"][0]
-            .get("parameter_constraints")
-            .is_none()
-    );
-    let instances: Value = serde_json::from_slice(
-        &std::fs::read(project.join(".lab/build/capability_instances.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(
-        instances["schema_version"],
-        "lab.capability-requirement-instances.v2"
-    );
-    assert_eq!(
-        instances["requirements_schema_version"],
-        "lab.capability-requirements.v2"
-    );
-    assert_eq!(instances["entry"]["module"], "test_project.programs.main");
-    assert_eq!(instances["entry"]["workflow"], "main");
-    assert_eq!(instances["instances"].as_array().unwrap().len(), 1);
-    assert_eq!(
-        instances["instances"][0]["template"],
-        "test_project.programs.main::main::body[0]"
     );
     assert!(project.join("lab.lock").is_file());
 
@@ -212,25 +211,36 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
         "{}",
         String::from_utf8_lossy(&planned.stderr)
     );
-    let allocation: Value = serde_json::from_slice(
-        &std::fs::read(project.join(".lab/plan/facility_allocation.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(allocation["schema_version"], "lab.facility-allocation.v1");
+    let solution = read_json(project.join(".lab/plan/compiler/facility-solution.json"));
     assert_eq!(
-        allocation["allocations"][0]["offering"],
+        solution["schema_version"],
+        "lab.facility-planning-solution.v1"
+    );
+    assert_eq!(
+        solution["selections"][0]["method"],
+        "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
+    );
+    let requirements = solution_requirements(&solution);
+    assert_eq!(requirements.len(), 1);
+    assert_eq!(
+        requirements[0]["offering"],
         "https://example.org/facility/operator/realization"
     );
     assert_eq!(
-        allocation["allocations"][0]["asset"],
+        requirements[0]["asset"],
         "https://example.org/facility/operator"
     );
-    assert!(allocation["allocations"][0].get("adapter").is_none());
-    let plan: Value = serde_json::from_slice(
-        &std::fs::read(project.join(".lab/plan/plan.execution.json")).unwrap(),
-    )
-    .unwrap();
+    assert!(requirements[0].get("adapter").is_none());
+    let plan = read_json(project.join(".lab/plan/plan.execution.json"));
     assert_eq!(plan["format"], "lab.execution-plan.v2");
+    assert_eq!(
+        plan["planning"]["facility_solution"]["path"],
+        "compiler/facility-solution.json"
+    );
+    assert_eq!(
+        plan["planning"]["methods"][0]["method"],
+        "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
+    );
     assert_eq!(plan["inventory"]["document"], "inventory-source.ttl");
     assert_eq!(
         std::fs::read(project.join(".lab/plan/inventory-source.ttl")).unwrap(),
@@ -382,19 +392,22 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         String::from_utf8_lossy(&built.stderr)
     );
 
-    let index: Value =
-        serde_json::from_slice(&std::fs::read(project.join(".lab/build/package.json")).unwrap())
-            .unwrap();
-    assert_eq!(index["schema_version"], 6);
+    let index = read_json(project.join(".lab/build/package.json"));
+    assert_eq!(index["schema_version"], 7);
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
+    assert_eq!(
+        index["compiler"]["facility_solution"],
+        "compiler/facility-solution.json"
+    );
+    assert_eq!(
+        index["compiler"]["adapter_invocations"],
+        "compiler/adapter-invocations.json"
+    );
     assert_eq!(
         index["facility"]["facility"],
         "https://example.org/sbolinventory/facility"
     );
-    let bindings: Value = serde_json::from_slice(
-        &std::fs::read(project.join(".lab/build/adapter_bindings.json")).unwrap(),
-    )
-    .unwrap();
+    let bindings = read_json(project.join(".lab/build/adapter_bindings.json"));
     assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v2");
     assert_eq!(
         bindings["facility"],
@@ -589,10 +602,17 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     assert!(out_dir.join("assets/opentrons_ot2").is_dir());
     assert!(!out_dir.join("lowerings").exists());
     assert!(out_dir.join("package.json").is_file());
-    let index: Value =
-        serde_json::from_slice(&std::fs::read(out_dir.join("package.json")).unwrap()).unwrap();
+    let index = read_json(out_dir.join("package.json"));
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
-    assert_eq!(index["schema_version"], 6);
+    assert_eq!(index["schema_version"], 7);
+    assert_eq!(
+        index["compiler"]["planning_problem"],
+        "compiler/planning-problem.json"
+    );
+    assert_eq!(
+        index["facility"]["facility_solution"],
+        "compiler/facility-solution.json"
+    );
     assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 3);
     assert!(
         index["facility"]["protocols"][0]
@@ -626,8 +646,15 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     );
     assert!(
         printed.contains(&format!(
-            "Allocation: {}",
-            out_dir.join("facility_allocation.json").display()
+            "Facility solution: {}",
+            out_dir.join("compiler/facility-solution.json").display()
+        )),
+        "{printed}"
+    );
+    assert!(
+        printed.contains(&format!(
+            "Adapter invocations: {}",
+            out_dir.join("compiler/adapter-invocations.json").display()
         )),
         "{printed}"
     );
@@ -670,18 +697,17 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let allocation: Value =
-        serde_json::from_slice(&std::fs::read(out_dir.join("facility_allocation.json")).unwrap())
-            .unwrap();
+    let solution = read_json(out_dir.join("compiler/facility-solution.json"));
     assert_eq!(
-        allocation["facility"],
+        solution["facility"],
         "https://example.org/golden-gate/facility"
     );
-    assert_eq!(allocation["allocations"].as_array().unwrap().len(), 28);
-    let liquid_handling = allocation["allocations"]
-        .as_array()
-        .unwrap()
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
+    let requirements = solution_requirements(&solution);
+    assert_eq!(requirements.len(), 24);
+    let liquid_handling = requirements
         .iter()
+        .copied()
         .filter(|binding| {
             binding["capability_kind"] == "https://sbol.io/ns/capability#LiquidHandling"
         })
@@ -694,11 +720,9 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
             && binding["adapter"]["driver"] == "opentrons.ot2"
     }));
 
-    let lowering: Value =
-        serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
-            .unwrap();
+    let lowering = read_json(out_dir.join("facility_lowering.json"));
     assert_eq!(lowering["schema_version"], "lab.facility-lowering.v1");
-    assert_eq!(lowering["inventory_sha256"], allocation["inventory_sha256"]);
+    assert_eq!(lowering["inventory_sha256"], solution["inventory_sha256"]);
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
     assert_eq!(
@@ -708,7 +732,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     assert_eq!(route["driver"], "opentrons.ot2");
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 6);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
@@ -725,16 +749,22 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
                 .is_file()
     }));
 
-    let execution_plan: Value =
-        serde_json::from_slice(&std::fs::read(out_dir.join("plan.execution.json")).unwrap())
-            .unwrap();
+    let execution_plan = read_json(out_dir.join("plan.execution.json"));
+    assert_eq!(
+        execution_plan["planning"]["methods"][0]["method"],
+        "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+    );
+    assert_eq!(
+        execution_plan["planning"]["allocated_lair"]["path"],
+        "compiler/allocated.lair"
+    );
     let reviewed_lowering = &execution_plan["lowerings"][0];
     assert_eq!(reviewed_lowering["id"], route["id"]);
     assert_eq!(reviewed_lowering["asset"], route["asset"]);
     assert_eq!(reviewed_lowering["adapter"]["driver"], "opentrons.ot2");
     assert_eq!(
         reviewed_lowering["requirements"].as_array().unwrap().len(),
-        6
+        8
     );
     let reviewed_protocols = reviewed_lowering["artifacts"]
         .as_array()
@@ -759,6 +789,21 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         String::from_utf8_lossy(&dry_run.stderr)
     );
     assert!(String::from_utf8_lossy(&dry_run.stdout).contains("reviewed adapter lowerings"));
+
+    let allocated_lair_path = out_dir.join("compiler/allocated.lair");
+    let allocated_lair = std::fs::read(&allocated_lair_path).unwrap();
+    std::fs::write(&allocated_lair_path, b"changed after review\n").unwrap();
+    let rejected = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["run", out_dir.to_str().unwrap(), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("SHA-256"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+    std::fs::write(&allocated_lair_path, allocated_lair).unwrap();
 
     let tampered = reviewed_protocols[0]["path"].as_str().unwrap();
     std::fs::write(out_dir.join(tampered), "# changed after review\n").unwrap();
@@ -838,14 +883,13 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         "https://example.org/golden-gate/lots/reference_gfp_lot"
     );
 
-    let allocation: Value =
-        serde_json::from_slice(&std::fs::read(plan_dir.join("facility_allocation.json")).unwrap())
-            .unwrap();
-    assert_eq!(allocation["allocations"].as_array().unwrap().len(), 30);
-    let liquid_handling = allocation["allocations"]
-        .as_array()
-        .unwrap()
+    let solution = read_json(plan_dir.join("compiler/facility-solution.json"));
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 23);
+    let requirements = solution_requirements(&solution);
+    assert_eq!(requirements.len(), 25);
+    let liquid_handling = requirements
         .iter()
+        .copied()
         .filter(|binding| {
             binding["capability_kind"] == "https://sbol.io/ns/capability#LiquidHandling"
         })

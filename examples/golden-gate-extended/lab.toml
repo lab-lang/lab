@@ -6,6 +6,10 @@ edition = "2026"
 [build]
 entry = "src/programs/panel.lab"
 
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+
 [inventory]
 document = "inventory/facility.ttl"
 

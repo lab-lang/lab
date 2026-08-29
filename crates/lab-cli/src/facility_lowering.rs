@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use lab_compiler::backend::{adapter_catalog, lower_dependency_build_with_adapter};
 use lab_compiler::planning::{
-    AdapterBindingSnapshot, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION, FacilityAllocation,
+    AdapterInvocationPlan, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
     FacilityLoweringManifest, FacilityLoweringRoute,
 };
@@ -27,58 +27,45 @@ pub(crate) struct FacilityLoweringOutput {
 /// A package never selects a device implementation here. Each route exists only because a reachable semantic
 /// requirement was allocated to an offering, that offering belongs to an exact Asset, and the
 /// Asset has an explicit local adapter binding whose implementation provides lowering.
-pub(crate) fn lower_allocated_adapters(
+pub(crate) fn lower_adapter_invocations(
     package: &LabPackage,
     modules: &[&CheckedModule],
     inventory: &InventorySnapshot,
-    allocation: &FacilityAllocation,
-    bindings: Option<&AdapterBindingSnapshot>,
+    invocation_plan: &AdapterInvocationPlan,
     output_root: &Path,
 ) -> Result<FacilityLoweringOutput> {
+    invocation_plan
+        .validate()
+        .context("allocated adapter invocations are invalid")?;
+    if invocation_plan.inventory_sha256 != inventory.source_sha256()
+        || invocation_plan.facility != inventory.facility().as_str()
+    {
+        bail!("adapter invocations and the selected inventory snapshot do not match");
+    }
     let catalog = adapter_catalog().context("failed to load the compiler adapter catalog")?;
     let descriptors = catalog
         .adapters
         .iter()
         .map(|descriptor| (descriptor.id.as_str(), descriptor))
         .collect::<BTreeMap<_, _>>();
-    let mut grouped =
-        BTreeMap::<(String, String, PathBuf, String), Vec<FacilityLoweredRequirement>>::new();
-    for selected in &allocation.allocations {
-        let Some(adapter) = selected.adapter.as_ref() else {
-            continue;
-        };
-        grouped
-            .entry((
-                selected.asset.clone(),
-                adapter.driver.clone(),
-                adapter.profile_path.clone(),
-                adapter.profile_sha256.clone(),
-            ))
-            .or_default()
-            .push(FacilityLoweredRequirement {
-                requirement_instance: selected.requirement_instance.clone(),
-                capability_kind: selected.capability_kind.clone(),
-                offering: selected.offering.clone(),
-            });
-    }
-
-    if let Some(bindings) = bindings
-        && (bindings.inventory_sha256 != allocation.inventory_sha256
-            || bindings.facility != allocation.facility)
-    {
-        bail!(
-            "adapter bindings and facility allocation do not describe the same inventory snapshot"
-        );
-    }
+    let requirements = invocation_plan
+        .methods
+        .iter()
+        .flat_map(|method| &method.tasks)
+        .flat_map(|task| &task.requirements)
+        .map(|requirement| (requirement.id.clone(), requirement))
+        .collect::<BTreeMap<_, _>>();
 
     let mut lowerable = Vec::new();
-    for (key, mut requirements) in grouped {
-        let descriptor = descriptors.get(key.1.as_str()).with_context(|| {
-            format!(
-                "allocated adapter '{}' is not present in this compiler build",
-                key.1
-            )
-        })?;
+    for invocation in &invocation_plan.invocations {
+        let descriptor = descriptors
+            .get(invocation.adapter.driver.as_str())
+            .with_context(|| {
+                format!(
+                    "allocated adapter '{}' is not present in this compiler build",
+                    invocation.adapter.driver
+                )
+            })?;
         if !descriptor.services.lowering {
             continue;
         }
@@ -95,9 +82,32 @@ pub(crate) fn lower_allocated_adapters(
                 descriptor.id
             );
         }
-        requirements
+        let mut lowered_requirements = invocation
+            .requirements
+            .iter()
+            .map(|requirement_id| {
+                let requirement = requirements
+                    .get(requirement_id)
+                    .expect("validated invocation Requirement exists");
+                FacilityLoweredRequirement {
+                    requirement_instance: requirement.id.to_string(),
+                    capability_kind: requirement.capability_kind.to_string(),
+                    offering: requirement.offering.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        lowered_requirements
             .sort_by(|left, right| left.requirement_instance.cmp(&right.requirement_instance));
-        lowerable.push((key, requirements, automation_format));
+        lowerable.push((
+            (
+                invocation.asset.clone(),
+                invocation.adapter.driver.clone(),
+                invocation.adapter.profile_path.clone(),
+                invocation.adapter.profile_sha256.clone(),
+            ),
+            lowered_requirements,
+            automation_format,
+        ));
     }
     if lowerable.len() > 1 {
         let routes = lowerable
@@ -119,11 +129,23 @@ pub(crate) fn lower_allocated_adapters(
     let mut protocols = Vec::new();
     let mut documents = Vec::new();
     if !lowerable.is_empty() {
+        if invocation_plan.methods.iter().any(|method| {
+            method.source_operation.as_str() == "std.bio.build.realize"
+                && method.method.as_str()
+                    != "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+        }) {
+            bail!(
+                "the selected realization Method is not supported by the current dependency-build adapter bridge"
+            );
+        }
+        // The current OT-2, Flex, and STAR emitters still share the mature dependency-build
+        // planner. This compatibility projection is guarded by the exact selected Method above;
+        // adapter discovery and invocation identity come only from allocated Procedure LAIR.
         let lair = PortableLairProgram::lower_program(modules)
-            .context("failed to lower the allocated program for facility adapters")?;
+            .context("failed to construct the dependency-build adapter projection")?;
         let protocol = lair
             .select_protocol()
-            .context("failed to select a concrete protocol for facility adapter lowering")?;
+            .context("failed to project selected Procedure semantics into the legacy backend IR")?;
         let build_inventory = semantic_build_inventory(modules, inventory)?;
 
         for (
@@ -189,8 +211,8 @@ pub(crate) fn lower_allocated_adapters(
     Ok(FacilityLoweringOutput {
         manifest: FacilityLoweringManifest {
             schema_version: FACILITY_LOWERING_SCHEMA_VERSION.to_owned(),
-            inventory_sha256: allocation.inventory_sha256.clone(),
-            facility: allocation.facility.clone(),
+            inventory_sha256: invocation_plan.inventory_sha256.clone(),
+            facility: invocation_plan.facility.clone(),
             routes,
         },
         protocols,

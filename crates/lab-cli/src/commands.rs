@@ -2,17 +2,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use lab_capability::MethodId;
 use lab_compiler::planning::{
-    CapabilityRequirements, ExecutionPlanOptions, FacilityAllocation, build_execution_plan,
-    reviewed_lowering_bundles,
+    AdapterRequirement, ExecutionPlanOptions, FacilityPlanningPolicy, FacilityPlanningSolution,
+    MethodPin, MethodPinSelector, build_execution_plan_from_invocations, reviewed_lowering_bundles,
 };
 use lab_compiler::{
-    CheckedDeclaration, DiagnosticSeverity, SourceId, analyze_module, render_diagnostic,
+    CheckedDeclaration, DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module,
+    render_diagnostic,
 };
 use lab_inventory::InventorySnapshot;
-use lab_package::{LabPackage, PackageManifest};
+use lab_method::{IntentOperationId, LocalId};
+use lab_package::{
+    LabPackage, PackageManifest, PlanningAdapterRequirement as ManifestAdapterRequirement,
+};
 use lab_project::{CompiledModule, CompiledProject, LOCK_FILE, LabProject};
-use lab_runfmt::{EXECUTION_PLAN_FILE, ExecutionPlanDocument};
+use lab_runfmt::{
+    EXECUTION_PLAN_FILE, ExecutionMethodSelection, ExecutionPlanDocument,
+    ExecutionPlanningArtifact, ExecutionPlanningReference,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -147,28 +155,6 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         .filter(|module| program_packages.contains(&module.package))
         .map(|module| &module.module)
         .collect::<Vec<_>>();
-    let capability_requirements = CapabilityRequirements::extract(&program_modules)
-        .context("failed to derive workflow capability requirements")?;
-    let capability_requirements_artifact = PathBuf::from("capability_requirements.json");
-    let capability_requirements_path = output_root.join(&capability_requirements_artifact);
-    let mut capability_requirements_json = serde_json::to_string_pretty(&capability_requirements)?;
-    capability_requirements_json.push('\n');
-    fs::write(&capability_requirements_path, capability_requirements_json)
-        .with_context(|| format!("failed to write {}", capability_requirements_path.display()))?;
-
-    let capability_instances_artifact = if let Some(entry) = package.entry_source() {
-        let instances = capability_requirements
-            .instantiate_reachable(&program_modules, &entry.module, "main")
-            .context("failed to instantiate reachable workflow capability requirements")?;
-        let artifact = PathBuf::from("capability_instances.json");
-        let path = output_root.join(&artifact);
-        let mut json = serde_json::to_string_pretty(&instances)?;
-        json.push('\n');
-        fs::write(&path, json).with_context(|| format!("failed to write {}", path.display()))?;
-        Some(artifact)
-    } else {
-        None
-    };
 
     let adapter_bindings_artifact = if let Some(snapshot) = package_inventory_snapshot(package)? {
         if let Some(bindings) = crate::adapters::resolve_package_bindings(package, &snapshot)? {
@@ -220,16 +206,25 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         .as_ref()
         .map(|planned| build_facility_index(planned, &output_root))
         .transpose()?;
+    let compiler = if let Some(planned) = &facility {
+        Some(build_compiler_index(planned, &output_root)?)
+    } else if package.entry_source().is_some() {
+        Some(write_unallocated_compiler_frontier(
+            &program_modules,
+            &output_root,
+        )?)
+    } else {
+        None
+    };
     let index = BuildIndex {
-        schema_version: 6,
+        schema_version: 7,
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         edition: package.manifest.package.edition.clone(),
         entry: package.manifest.build.entry.clone(),
         members: compiled.members.clone(),
         modules: artifacts,
-        capability_requirements: capability_requirements_artifact,
-        capability_instances: capability_instances_artifact,
+        compiler,
         adapter_bindings: adapter_bindings_artifact,
         facility: facility_index,
     };
@@ -263,11 +258,15 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
     ));
     if let Some(facility) = &facility {
         human.push_str(&format!(
-            "\n\nFacility outputs:\n  Facility: {}\n  Requirements allocated: {}\n  Adapter lowerings: {}\n  Allocation: {}\n  Lowering manifest: {}\n  Reviewed plan: {}",
+            "\n\nFacility outputs:\n  Facility: {}\n  Methods selected: {}\n  Requirements allocated: {}\n  Adapter invocations lowered: {}\n  Planning problem: {}\n  Facility solution: {}\n  Allocated LAIR: {}\n  Adapter invocations: {}\n  Lowering manifest: {}\n  Reviewed plan: {}",
             facility.facility,
+            facility.selected_methods,
             facility.allocated_requirements,
             facility.adapter_lowerings,
-            human_path(&facility.allocation),
+            human_path(&facility.planning_problem),
+            human_path(&facility.facility_solution),
+            human_path(&facility.allocated_lair),
+            human_path(&facility.adapter_invocations),
             human_path(&facility.lowering),
             human_path(&facility.execution_plan)
         ));
@@ -322,13 +321,18 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
     };
     let planned = write_facility_plan(&project, &compiled, &output_root)?;
     let mut human = format!(
-        "Planned {} {} against {}\n  Requirements: {}\n  Adapter lowerings: {}\n  Plan output: {}\n  Reviewed plan: {}",
+        "Planned {} {} against {}\n  Methods selected: {}\n  Requirements allocated: {}\n  Adapter invocations lowered: {}\n  Plan output: {}\n  Planning problem: {}\n  Facility solution: {}\n  Allocated LAIR: {}\n  Adapter invocations: {}\n  Reviewed plan: {}",
         planned.package,
         planned.version,
         planned.facility,
+        planned.selected_methods,
         planned.allocated_requirements,
         planned.adapter_lowerings,
         human_path(&planned.output),
+        human_path(&planned.planning_problem),
+        human_path(&planned.facility_solution),
+        human_path(&planned.allocated_lair),
+        human_path(&planned.adapter_invocations),
         human_path(&planned.execution_plan)
     );
     append_facility_artifacts(&mut human, &planned);
@@ -341,7 +345,7 @@ fn write_facility_plan(
     output_root: &Path,
 ) -> Result<PlanCompleted> {
     let package = project.default_package();
-    let entry = package.entry_source().with_context(|| {
+    package.entry_source().with_context(|| {
         format!(
             "package '{}' is a library with no build.entry; a facility plan needs an exact main workflow",
             package.manifest.package.name
@@ -360,38 +364,98 @@ fn write_facility_plan(
         .filter(|module| program_packages.contains(&module.package))
         .map(|module| &module.module)
         .collect::<Vec<_>>();
-    let requirements = CapabilityRequirements::extract(&modules)
-        .context("failed to derive workflow capability requirements")?;
-    let instances = requirements
-        .instantiate_reachable(&modules, &entry.module, "main")
-        .context("failed to instantiate reachable workflow capability requirements")?;
+    let portable = PortableLairProgram::lower_program(&modules)
+        .context("failed to lower the checked program into Design and Intent LAIR")?;
+    let refined = portable
+        .refine_standard_methods()
+        .context("failed to refine workflow intent into Method alternatives")?;
+    let refined_ir = refined.ir();
+    let problem = refined
+        .planning_problem()
+        .context("failed to project the verified Method graph into a planning problem")?;
     let adapter_bindings = crate::adapters::resolve_package_bindings(package, &inventory)?;
-    let allocation = FacilityAllocation::allocate(
-        &requirements,
-        &instances,
-        &inventory,
-        adapter_bindings.as_ref(),
-    )
-    .context("failed to allocate reachable requirements across the selected facility")?;
+    let policy = facility_planning_policy(package)?;
+    let solution =
+        FacilityPlanningSolution::solve(&problem, &inventory, adapter_bindings.as_ref(), policy)
+            .context("failed to solve Method and facility choices as one complete plan")?;
+    let allocated = refined
+        .allocate(solution.clone())
+        .context("failed to apply the facility solution to refined LAIR")?;
+    let allocated_ir = allocated.ir();
+    let invocations = allocated
+        .adapter_invocations()
+        .context("failed to project allocated LAIR into adapter invocations")?;
     fs::create_dir_all(output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
     reset_facility_bundle_directories(output_root)?;
 
-    let lowered = crate::facility_lowering::lower_allocated_adapters(
+    let refined_lair_artifact = PathBuf::from("compiler/refined.lair");
+    let planning_problem_artifact = PathBuf::from("compiler/planning-problem.json");
+    let facility_solution_artifact = PathBuf::from("compiler/facility-solution.json");
+    let allocated_lair_artifact = PathBuf::from("compiler/allocated.lair");
+    let adapter_invocations_artifact = PathBuf::from("compiler/adapter-invocations.json");
+    write_frozen_artifact(output_root, &refined_lair_artifact, refined_ir.as_bytes())?;
+    let planning_problem_reference = write_frozen_artifact(
+        output_root,
+        &planning_problem_artifact,
+        &pretty_json_bytes(&problem)?,
+    )?;
+    let facility_solution_reference = write_frozen_artifact(
+        output_root,
+        &facility_solution_artifact,
+        &pretty_json_bytes(&solution)?,
+    )?;
+    let allocated_lair_reference = write_frozen_artifact(
+        output_root,
+        &allocated_lair_artifact,
+        allocated_ir.as_bytes(),
+    )?;
+    if allocated_lair_reference.sha256 != invocations.allocated_lair_sha256 {
+        bail!("allocated LAIR changed while projecting adapter invocations");
+    }
+    let adapter_invocations_reference = write_frozen_artifact(
+        output_root,
+        &adapter_invocations_artifact,
+        &pretty_json_bytes(&invocations)?,
+    )?;
+
+    let lowered = crate::facility_lowering::lower_adapter_invocations(
         package,
         &modules,
         &inventory,
-        &allocation,
-        adapter_bindings.as_ref(),
+        &invocations,
         output_root,
     )?;
     let inventory_document = staged_inventory_name(&inventory)?;
     let reviewed_lowerings = reviewed_lowering_bundles(&lowered.manifest)
         .context("failed to freeze allocated adapter lowerings into the reviewed plan")?;
-    let mut execution_plan = build_execution_plan(
-        &allocation,
+    let planning_reference = ExecutionPlanningReference {
+        problem_sha256: problem.sha256(),
+        allocated_lair_sha256: invocations.allocated_lair_sha256.clone(),
+        planning_problem: planning_problem_reference,
+        facility_solution: facility_solution_reference,
+        allocated_lair: allocated_lair_reference,
+        adapter_invocations: adapter_invocations_reference,
+        methods: invocations
+            .methods
+            .iter()
+            .map(|method| ExecutionMethodSelection {
+                choice: method.choice.to_string(),
+                source_operation: method.source_operation.to_string(),
+                method: method.method.to_string(),
+                tasks: method
+                    .tasks
+                    .iter()
+                    .map(|task| task.id.to_string())
+                    .collect(),
+            })
+            .collect(),
+    };
+    let mut execution_plan = build_execution_plan_from_invocations(
+        &invocations,
         ExecutionPlanOptions {
             inventory_document: inventory_document.clone(),
+            planning: Some(planning_reference),
             ..ExecutionPlanOptions::default()
         },
     )
@@ -401,14 +465,8 @@ fn write_facility_plan(
     execution_plan
         .validate()
         .map_err(|message| anyhow::anyhow!("reviewed execution plan is invalid: {message}"))?;
-    let requirements_path = output_root.join("capability_requirements.json");
-    let instances_path = output_root.join("capability_instances.json");
-    let allocation_path = output_root.join("facility_allocation.json");
     let lowering_path = output_root.join("facility_lowering.json");
     let execution_plan_path = output_root.join(EXECUTION_PLAN_FILE);
-    write_pretty_json(&requirements_path, &requirements)?;
-    write_pretty_json(&instances_path, &instances)?;
-    write_pretty_json(&allocation_path, &allocation)?;
     write_pretty_json(&lowering_path, &lowered.manifest)?;
     write_pretty_json(&execution_plan_path, &execution_plan)?;
     let adapter_bindings_path = if let Some(bindings) = adapter_bindings.as_ref() {
@@ -429,13 +487,21 @@ fn write_facility_plan(
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         output: output_root.to_path_buf(),
-        facility: allocation.facility.clone(),
-        allocated_requirements: allocation.allocations.len(),
+        facility: invocations.facility.clone(),
+        selected_methods: invocations.methods.len(),
+        allocated_requirements: invocations
+            .methods
+            .iter()
+            .flat_map(|method| &method.tasks)
+            .map(|task| task.requirements.len())
+            .sum(),
         adapter_lowerings: lowered.manifest.routes.len(),
-        requirements: requirements_path,
-        instances: instances_path,
+        refined_lair: output_root.join(refined_lair_artifact),
+        planning_problem: output_root.join(planning_problem_artifact),
+        facility_solution: output_root.join(facility_solution_artifact),
+        allocated_lair: output_root.join(allocated_lair_artifact),
+        adapter_invocations: output_root.join(adapter_invocations_artifact),
         adapter_bindings: adapter_bindings_path,
-        allocation: allocation_path,
         lowering: lowering_path,
         execution_plan: execution_plan_path,
         bundles,
@@ -465,6 +531,37 @@ fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {
     }
 }
 
+fn facility_planning_policy(package: &LabPackage) -> Result<FacilityPlanningPolicy> {
+    let method_pins = package
+        .manifest
+        .planning
+        .methods
+        .iter()
+        .map(|pin| {
+            let selector = match (&pin.source_operation, &pin.choice) {
+                (Some(source_operation), None) => MethodPinSelector::SourceOperation {
+                    source_operation: IntentOperationId::new(source_operation.clone())?,
+                },
+                (None, Some(choice)) => MethodPinSelector::Choice {
+                    choice: LocalId::new(choice.clone())?,
+                },
+                _ => unreachable!("package validation requires exactly one method selector"),
+            };
+            Ok(MethodPin {
+                selector,
+                method: MethodId::new(pin.method.clone())?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(FacilityPlanningPolicy {
+        method_pins,
+        adapter_requirement: match package.manifest.planning.adapter_requirement {
+            ManifestAdapterRequirement::Optional => AdapterRequirement::Optional,
+            ManifestAdapterRequirement::NonManual => AdapterRequirement::NonManual,
+        },
+    })
+}
+
 fn human_path(path: &Path) -> String {
     let displayed = std::env::current_dir()
         .ok()
@@ -481,7 +578,7 @@ fn human_path(path: &Path) -> String {
 /// `lowerings/` path is removed during migration so a successful rebuild never
 /// leaves an obsolete protocol beside the reviewed `assets/` bundle.
 fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
-    for name in ["assets", "lowerings"] {
+    for name in ["assets", "lowerings", "adapters", "compiler"] {
         let path = output_root.join(name);
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
@@ -502,6 +599,43 @@ fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn write_unallocated_compiler_frontier(
+    modules: &[&lab_compiler::CheckedModule],
+    output_root: &Path,
+) -> Result<BuildCompilerIndex> {
+    let compiler = output_root.join("compiler");
+    if compiler.exists() {
+        let metadata = fs::symlink_metadata(&compiler)
+            .with_context(|| format!("failed to inspect {}", compiler.display()))?;
+        if !metadata.is_dir() {
+            bail!(
+                "refusing to replace managed compiler output {} because it is not a directory",
+                compiler.display()
+            );
+        }
+        fs::remove_dir_all(&compiler)
+            .with_context(|| format!("failed to replace {}", compiler.display()))?;
+    }
+    let refined = PortableLairProgram::lower_program(modules)
+        .context("failed to lower the checked program into Design and Intent LAIR")?
+        .refine_standard_methods()
+        .context("failed to refine workflow intent into Method alternatives")?;
+    let problem = refined
+        .planning_problem()
+        .context("failed to project the verified Method graph into a planning problem")?;
+    let refined_path = PathBuf::from("compiler/refined.lair");
+    let problem_path = PathBuf::from("compiler/planning-problem.json");
+    write_frozen_artifact(output_root, &refined_path, refined.ir().as_bytes())?;
+    write_frozen_artifact(output_root, &problem_path, &pretty_json_bytes(&problem)?)?;
+    Ok(BuildCompilerIndex {
+        refined_lair: refined_path,
+        planning_problem: problem_path,
+        facility_solution: None,
+        allocated_lair: None,
+        adapter_invocations: None,
+    })
+}
+
 fn build_facility_index(planned: &PlanCompleted, output_root: &Path) -> Result<BuildFacilityIndex> {
     let relative = |path: &Path| {
         path.strip_prefix(output_root)
@@ -516,7 +650,8 @@ fn build_facility_index(planned: &PlanCompleted, output_root: &Path) -> Result<B
     };
     Ok(BuildFacilityIndex {
         facility: planned.facility.clone(),
-        allocation: relative(&planned.allocation)?,
+        facility_solution: relative(&planned.facility_solution)?,
+        adapter_invocations: relative(&planned.adapter_invocations)?,
         lowering: relative(&planned.lowering)?,
         execution_plan: relative(&planned.execution_plan)?,
         bundles: planned
@@ -534,6 +669,27 @@ fn build_facility_index(planned: &PlanCompleted, output_root: &Path) -> Result<B
             .iter()
             .map(|path| relative(path))
             .collect::<Result<Vec<_>>>()?,
+    })
+}
+
+fn build_compiler_index(planned: &PlanCompleted, output_root: &Path) -> Result<BuildCompilerIndex> {
+    let relative = |path: &Path| {
+        path.strip_prefix(output_root)
+            .map(Path::to_path_buf)
+            .with_context(|| {
+                format!(
+                    "compiler artifact {} is outside build output {}",
+                    path.display(),
+                    output_root.display()
+                )
+            })
+    };
+    Ok(BuildCompilerIndex {
+        refined_lair: relative(&planned.refined_lair)?,
+        planning_problem: relative(&planned.planning_problem)?,
+        facility_solution: Some(relative(&planned.facility_solution)?),
+        allocated_lair: Some(relative(&planned.allocated_lair)?),
+        adapter_invocations: Some(relative(&planned.adapter_invocations)?),
     })
 }
 
@@ -714,9 +870,34 @@ fn write_new(path: &Path, contents: &str) -> Result<()> {
 }
 
 fn write_pretty_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let mut json = serde_json::to_string_pretty(value)?;
-    json.push('\n');
-    fs::write(path, json).with_context(|| format!("failed to write {}", path.display()))
+    fs::write(path, pretty_json_bytes(value)?)
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn pretty_json_bytes(value: &impl Serialize) -> Result<Vec<u8>> {
+    let mut json = serde_json::to_vec_pretty(value)?;
+    json.push(b'\n');
+    Ok(json)
+}
+
+fn write_frozen_artifact(
+    output_root: &Path,
+    relative_path: &Path,
+    bytes: &[u8],
+) -> Result<ExecutionPlanningArtifact> {
+    let path = output_root.join(relative_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(&path, bytes).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(ExecutionPlanningArtifact {
+        path: relative_path
+            .to_str()
+            .context("compiler artifact paths must be UTF-8")?
+            .to_owned(),
+        sha256: sha256_hex(bytes),
+    })
 }
 
 #[derive(Serialize)]
@@ -764,13 +945,16 @@ struct PlanCompleted {
     version: String,
     output: PathBuf,
     facility: String,
+    selected_methods: usize,
     allocated_requirements: usize,
     adapter_lowerings: usize,
-    requirements: PathBuf,
-    instances: PathBuf,
+    refined_lair: PathBuf,
+    planning_problem: PathBuf,
+    facility_solution: PathBuf,
+    allocated_lair: PathBuf,
+    adapter_invocations: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     adapter_bindings: Option<PathBuf>,
-    allocation: PathBuf,
     lowering: PathBuf,
     execution_plan: PathBuf,
     bundles: Vec<PathBuf>,
@@ -800,9 +984,8 @@ struct BuildIndex {
     entry: Option<PathBuf>,
     members: Vec<String>,
     modules: Vec<BuildModule>,
-    capability_requirements: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
-    capability_instances: Option<PathBuf>,
+    compiler: Option<BuildCompilerIndex>,
     #[serde(skip_serializing_if = "Option::is_none")]
     adapter_bindings: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -810,9 +993,22 @@ struct BuildIndex {
 }
 
 #[derive(Serialize)]
+struct BuildCompilerIndex {
+    refined_lair: PathBuf,
+    planning_problem: PathBuf,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    facility_solution: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allocated_lair: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    adapter_invocations: Option<PathBuf>,
+}
+
+#[derive(Serialize)]
 struct BuildFacilityIndex {
     facility: String,
-    allocation: PathBuf,
+    facility_solution: PathBuf,
+    adapter_invocations: PathBuf,
     lowering: PathBuf,
     execution_plan: PathBuf,
     bundles: Vec<PathBuf>,
