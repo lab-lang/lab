@@ -193,7 +193,7 @@ impl AdapterInvocationPlan {
         let invocations = groups
             .into_iter()
             .map(|((asset, adapter), members)| AdapterInvocation {
-                id: invocation_id(&asset, &adapter),
+                id: adapter_invocation_id(&asset, &adapter),
                 asset,
                 adapter,
                 tasks: members.tasks.into_iter().collect(),
@@ -305,7 +305,7 @@ impl AdapterInvocationPlan {
         let mut invocation_ids = BTreeSet::new();
         let mut invoked_requirements = BTreeSet::new();
         for invocation in &self.invocations {
-            if invocation.id != invocation_id(&invocation.asset, &invocation.adapter) {
+            if invocation.id != adapter_invocation_id(&invocation.asset, &invocation.adapter) {
                 return Err(AdapterInvocationValidationError::InvalidInvocation {
                     invocation: invocation.id.clone(),
                 });
@@ -425,7 +425,8 @@ struct InvocationMembers {
     requirements: BTreeSet<LocalId>,
 }
 
-fn invocation_id(asset: &str, adapter: &InvocationAdapter) -> String {
+/// Derive the stable logical ID for an exact Asset and adapter binding.
+pub fn adapter_invocation_id(asset: &str, adapter: &InvocationAdapter) -> String {
     let identity = format!(
         "{}\0{}\0{}\0{}",
         asset,

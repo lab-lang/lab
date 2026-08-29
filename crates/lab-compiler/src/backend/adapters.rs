@@ -19,11 +19,14 @@ use thiserror::Error;
 use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
-use crate::planning::BuildInventory;
+use crate::planning::{AdapterInvocation, AdapterInvocationPlan, BuildInventory};
 use crate::{AllocatedLairProgram, ArtifactBundle, ProtocolLairProgram};
-use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
+use lab_method::LocalId;
+use lab_runfmt::{
+    SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
+};
 
-pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v1";
+pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v2";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
 
 const OPENTRONS_PYTHON_PROTOCOL: &str = "opentrons.python-protocol";
@@ -41,10 +44,20 @@ const KNOWN_ADAPTERS: [&str; 6] = [
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterServices {
     pub planning: bool,
-    /// This adapter can lower a complete checked Lab program into device artifacts.
-    pub lowering: bool,
+    /// How this adapter consumes allocated Procedure work, when it provides lowering.
+    pub lowering: Option<AdapterLoweringScope>,
     pub simulation: bool,
     pub runtime: bool,
+}
+
+/// The semantic unit accepted by an adapter lowerer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdapterLoweringScope {
+    /// Transitional built-ins that still consume the complete allocated dependency build.
+    WholeProgram,
+    /// The adapter consumes only the tasks and requirements in one exact invocation.
+    Invocation,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -117,7 +130,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [OPENTRONS_PYTHON_PROTOCOL],
                 AdapterServices {
                     planning: true,
-                    lowering: true,
+                    lowering: Some(AdapterLoweringScope::WholeProgram),
                     simulation: false,
                     runtime: false,
                 },
@@ -134,7 +147,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [OPENTRONS_PROTOCOL_DESIGNER],
                 AdapterServices {
                     planning: true,
-                    lowering: true,
+                    lowering: Some(AdapterLoweringScope::WholeProgram),
                     simulation: false,
                     runtime: false,
                 },
@@ -151,7 +164,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [STAR_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: true,
+                    lowering: Some(AdapterLoweringScope::WholeProgram),
                     simulation: true,
                     runtime: true,
                 },
@@ -168,7 +181,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [THERMOCYCLE_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: false,
+                    lowering: None,
                     simulation: true,
                     runtime: true,
                 },
@@ -185,7 +198,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [],
                 AdapterServices {
                     planning: false,
-                    lowering: false,
+                    lowering: None,
                     simulation: false,
                     runtime: false,
                 },
@@ -195,14 +208,19 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 "lab.simulator",
                 "Lab semantic capability simulator",
                 None,
-                [LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT],
+                [
+                    LIQUID_HANDLING,
+                    THERMAL_CYCLING,
+                    INCUBATION,
+                    ABSORBANCE_MEASUREMENT,
+                ],
                 ["no-hardware", "semantic-simulation"],
                 [ControlMode::ReviewedFile],
                 [SIMULATION_RUN_FORMAT],
                 [SIMULATION_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: false,
+                    lowering: Some(AdapterLoweringScope::Invocation),
                     simulation: true,
                     runtime: false,
                 },
@@ -376,6 +394,122 @@ pub fn lower_allocated_dependency_build_with_adapter(
     lower_dependency_build_with_adapter(driver, name, contents, &protocol, inventory)
 }
 
+/// One reviewed run document emitted for an exact allocated requirement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdapterInvocationDocument {
+    pub requirement: LocalId,
+    pub path: String,
+    pub format: String,
+}
+
+/// Artifacts emitted by a requirement-scoped adapter invocation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdapterInvocationLowering {
+    pub artifacts: ArtifactBundle,
+    pub documents: Vec<AdapterInvocationDocument>,
+}
+
+/// Lower one exact allocated invocation without exposing LAIR or the rest of the experiment.
+pub fn lower_adapter_invocation_with_adapter(
+    driver: &str,
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
+    invocation_plan
+        .validate()
+        .map_err(|error| AdapterLoweringError::InvalidInvocation {
+            driver: driver.to_owned(),
+            message: error.to_string(),
+        })?;
+    if invocation.adapter.driver != driver
+        || !invocation_plan
+            .invocations
+            .iter()
+            .any(|candidate| candidate == invocation)
+    {
+        return Err(AdapterLoweringError::InvalidInvocation {
+            driver: driver.to_owned(),
+            message: "the invocation is not an exact member of its validated plan".to_owned(),
+        });
+    }
+    match driver {
+        "lab.simulator" => lower_simulator_invocation(invocation_plan, invocation),
+        _ => Err(AdapterLoweringError::UnsupportedInvocation {
+            driver: driver.to_owned(),
+        }),
+    }
+}
+
+fn lower_simulator_invocation(
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
+    let requirements = invocation_plan
+        .methods
+        .iter()
+        .flat_map(|method| &method.tasks)
+        .flat_map(|task| {
+            task.requirements
+                .iter()
+                .map(move |requirement| (requirement.id.clone(), task))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut artifacts = ArtifactBundle::new();
+    let mut documents = Vec::new();
+    for (ordinal, requirement_id) in invocation.requirements.iter().enumerate() {
+        let task = requirements
+            .get(requirement_id)
+            .expect("validated invocation requirements belong to exact tasks");
+        let requirement = task
+            .requirements
+            .iter()
+            .find(|requirement| &requirement.id == requirement_id)
+            .expect("the requirement index preserves the owning requirement");
+        let document = SimulationRunDocument {
+            format: SIMULATION_RUN_FORMAT.to_owned(),
+            id: requirement_id.to_string(),
+            title: format!("Simulate {}", task.operation),
+            capability_kind: requirement.capability_kind.to_string(),
+            assumptions: vec![
+                "Semantic simulation only; no physical hardware is contacted.".to_owned(),
+                format!("Allocated Asset: {}", invocation.asset),
+                format!("Procedure operation: {}", task.operation),
+            ],
+        };
+        let path = format!(
+            "requirement-{:03}-{}.simulation.json",
+            ordinal + 1,
+            short_digest(requirement_id.as_str())
+        );
+        let mut contents = serde_json::to_string_pretty(&document).map_err(|error| {
+            AdapterLoweringError::Lowering {
+                driver: invocation.adapter.driver.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        contents.push('\n');
+        artifacts
+            .insert_text(&path, "application/json", contents)
+            .map_err(|error| AdapterLoweringError::Lowering {
+                driver: invocation.adapter.driver.clone(),
+                message: error.to_string(),
+            })?;
+        documents.push(AdapterInvocationDocument {
+            requirement: requirement_id.clone(),
+            path,
+            format: SIMULATION_RUN_FORMAT.to_owned(),
+        });
+    }
+    Ok(AdapterInvocationLowering {
+        artifacts,
+        documents,
+    })
+}
+
+fn short_digest(value: &str) -> String {
+    sha256(value.as_bytes())[..8].to_owned()
+}
+
 fn lab_compiler_ot2(
     protocol: &ProtocolLairProgram,
     profile: &Ot2AdapterProfile,
@@ -410,6 +544,10 @@ fn lab_compiler_star(
 pub enum AdapterLoweringError {
     #[error("adapter '{driver}' does not provide whole-program lowering")]
     Unsupported { driver: String },
+    #[error("adapter '{driver}' does not provide requirement-scoped lowering")]
+    UnsupportedInvocation { driver: String },
+    #[error("invalid invocation for adapter '{driver}': {message}")]
+    InvalidInvocation { driver: String, message: String },
     #[error("invalid operational profile for adapter '{driver}': {message}")]
     InvalidProfile { driver: String, message: String },
     #[error("adapter '{driver}' could not lower the allocated program: {message}")]
@@ -545,7 +683,15 @@ fn unknown_driver(found: &str) -> AdapterProfileContractError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
+    use crate::planning::{
+        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+        MaterialLotBuildInventory,
+    };
+    use lab_capability::{MethodId, OperationId, QualificationLevel};
+    use lab_method::IntentOperationId;
 
     #[test]
     fn registry_separates_semantic_capabilities_from_features() {
@@ -573,7 +719,10 @@ mod tests {
         );
         assert!(star.control_modes.contains(&ControlMode::Api));
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
-        assert!(star.services.lowering);
+        assert_eq!(
+            star.services.lowering,
+            Some(AdapterLoweringScope::WholeProgram)
+        );
         assert!(star.services.runtime);
 
         let simulator = catalog
@@ -582,7 +731,10 @@ mod tests {
             .find(|adapter| adapter.id == "lab.simulator")
             .unwrap();
         assert!(simulator.services.simulation);
-        assert!(!simulator.services.lowering);
+        assert_eq!(
+            simulator.services.lowering,
+            Some(AdapterLoweringScope::Invocation)
+        );
         assert!(!simulator.services.runtime);
         assert!(
             simulator
@@ -591,10 +743,135 @@ mod tests {
         );
         assert_eq!(
             simulator.capabilities,
-            [LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT]
-                .into_iter()
-                .map(|kind| CapabilityKind::new(kind).unwrap())
-                .collect()
+            [
+                LIQUID_HANDLING,
+                THERMAL_CYCLING,
+                INCUBATION,
+                ABSORBANCE_MEASUREMENT,
+            ]
+            .into_iter()
+            .map(|kind| CapabilityKind::new(kind).unwrap())
+            .collect()
+        );
+    }
+
+    #[test]
+    fn simulator_lowers_each_exact_invocation_without_receiving_other_assets_work() {
+        let adapter = InvocationAdapter {
+            driver: "lab.simulator".to_owned(),
+            profile_path: "adapters/simulator.toml".into(),
+            profile_sha256: "b".repeat(64),
+            features: BTreeSet::from(["no-hardware".to_owned(), "semantic-simulation".to_owned()]),
+            accepted_run_formats: BTreeSet::from([SIMULATION_RUN_FORMAT.to_owned()]),
+            emitted_run_formats: BTreeSet::from([SIMULATION_RUN_FORMAT.to_owned()]),
+        };
+        let make_task =
+            |choice: &str, operation: &str, capability: &str, asset: &str, offering: &str| {
+                let task_id = LocalId::new(format!("{choice}::task")).unwrap();
+                let requirement_id =
+                    LocalId::new(format!("{choice}::task::requirement::capability")).unwrap();
+                let requirement = AllocatedRequirementBinding {
+                    id: requirement_id.clone(),
+                    capability_kind: CapabilityKind::new(capability).unwrap(),
+                    minimum_qualification: QualificationLevel::Simulatable,
+                    accepted_control_modes: BTreeSet::from([ControlMode::ReviewedFile]),
+                    offering: offering.to_owned(),
+                    asset: asset.to_owned(),
+                    observed_qualification: QualificationLevel::Simulatable.to_string(),
+                    control_mode: ControlMode::ReviewedFile.to_string(),
+                    parameters: Vec::new(),
+                    adapter: Some(adapter.clone()),
+                };
+                (
+                    AllocatedMethod {
+                        choice: LocalId::new(choice).unwrap(),
+                        source_operation: IntentOperationId::new(format!(
+                            "https://example.org/intent/{choice}"
+                        ))
+                        .unwrap(),
+                        method: MethodId::new(format!("https://example.org/method/{choice}"))
+                            .unwrap(),
+                        tasks: vec![AllocatedProcedureTask {
+                            id: task_id.clone(),
+                            operation: OperationId::new(operation).unwrap(),
+                            inputs: Vec::new(),
+                            outputs: Vec::new(),
+                            parameters: Vec::new(),
+                            requirements: vec![requirement],
+                        }],
+                    },
+                    task_id,
+                    requirement_id,
+                )
+            };
+        let first_asset = "https://example.org/facility/liquid-handler";
+        let second_asset = "https://example.org/facility/reader";
+        let (first_method, first_task, first_requirement) = make_task(
+            "prepare",
+            "https://example.org/procedure/prepare-plate",
+            LIQUID_HANDLING,
+            first_asset,
+            "https://example.org/facility/liquid-handler/liquid-handling",
+        );
+        let (second_method, second_task, second_requirement) = make_task(
+            "measure",
+            "https://example.org/procedure/measure-plate",
+            ABSORBANCE_MEASUREMENT,
+            second_asset,
+            "https://example.org/facility/reader/absorbance",
+        );
+        let make_invocation = |asset: &str, task: LocalId, requirement: LocalId| {
+            let mut invocation = AdapterInvocation {
+                id: String::new(),
+                asset: asset.to_owned(),
+                adapter: adapter.clone(),
+                tasks: vec![task],
+                requirements: vec![requirement],
+            };
+            invocation.id =
+                crate::planning::adapter_invocation_id(&invocation.asset, &invocation.adapter);
+            invocation
+        };
+        let first = make_invocation(first_asset, first_task, first_requirement.clone());
+        let second = make_invocation(second_asset, second_task, second_requirement.clone());
+        let plan = AdapterInvocationPlan {
+            schema_version: crate::planning::ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
+            problem_sha256: "a".repeat(64),
+            allocated_lair_sha256: "c".repeat(64),
+            inventory_sha256: "d".repeat(64),
+            facility: "https://example.org/facility".to_owned(),
+            material_inventory: MaterialLotBuildInventory {
+                source_sha256: "d".repeat(64),
+                facility: "https://example.org/facility".to_owned(),
+                materials: BTreeMap::new(),
+                artifacts: BTreeMap::new(),
+            },
+            methods: vec![first_method, second_method],
+            invocations: vec![first.clone(), second.clone()],
+        };
+        plan.validate().unwrap();
+
+        let first_lowered =
+            lower_adapter_invocation_with_adapter("lab.simulator", &plan, &first).unwrap();
+        let second_lowered =
+            lower_adapter_invocation_with_adapter("lab.simulator", &plan, &second).unwrap();
+        assert_eq!(first_lowered.documents[0].requirement, first_requirement);
+        assert_eq!(second_lowered.documents[0].requirement, second_requirement);
+        assert_eq!(first_lowered.artifacts.len(), 1);
+        assert_eq!(second_lowered.artifacts.len(), 1);
+        let first_document: SimulationRunDocument =
+            serde_json::from_slice(first_lowered.artifacts.iter().next().unwrap().contents())
+                .unwrap();
+        let second_document: SimulationRunDocument =
+            serde_json::from_slice(second_lowered.artifacts.iter().next().unwrap().contents())
+                .unwrap();
+        assert_eq!(first_document.capability_kind, LIQUID_HANDLING);
+        assert_eq!(second_document.capability_kind, ABSORBANCE_MEASUREMENT);
+        assert!(
+            first_document
+                .assumptions
+                .iter()
+                .all(|assumption| !assumption.contains(second_asset))
         );
     }
 

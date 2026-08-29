@@ -742,7 +742,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     }));
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v1");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
     assert_eq!(lowering["inventory_sha256"], solution["inventory_sha256"]);
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
@@ -751,6 +751,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "https://example.org/golden-gate/opentrons_ot2"
     );
     assert_eq!(route["driver"], "opentrons.ot2");
+    assert_eq!(route["scope"], "whole_program");
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
     assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
@@ -840,6 +841,145 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     );
 
     std::fs::remove_dir_all(out_dir).unwrap();
+}
+
+#[test]
+fn a_facility_can_lower_exact_requirements_through_several_assets() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate")
+        .canonicalize()
+        .unwrap();
+    let project = temporary_project();
+    copy_dir(&example, &project);
+
+    let manifest_path = project.join("lab.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    let configured_ot2 = r#"[[execution.adapters]]
+asset = "https://example.org/golden-gate/opentrons_ot2"
+driver = "opentrons.ot2"
+profile = "adapters/opentrons-ot2.toml""#;
+    assert!(manifest.contains(configured_ot2));
+    let simulator_bindings = r#"[[execution.adapters]]
+asset = "https://example.org/golden-gate/opentrons_ot2"
+driver = "lab.simulator"
+profile = "adapters/simulator.toml"
+
+[[execution.adapters]]
+asset = "https://example.org/golden-gate/thermal_simulator"
+driver = "lab.simulator"
+profile = "adapters/simulator.toml""#;
+    std::fs::write(
+        &manifest_path,
+        manifest.replace(configured_ot2, simulator_bindings),
+    )
+    .unwrap();
+    std::fs::write(project.join("adapters/simulator.toml"), "").unwrap();
+
+    let inventory_path = project.join("inventory/facility.ttl");
+    let inventory = std::fs::read_to_string(&inventory_path).unwrap();
+    let combined_offerings =
+        "    fac:capability ex:opentrons_ot2_liquid_handling, ex:opentrons_ot2_thermal_cycling .";
+    assert!(inventory.contains(combined_offerings));
+    let split_assets = r#"    fac:capability ex:opentrons_ot2_liquid_handling .
+
+ex:thermal_simulator
+    a sbol:TopLevel, fac:Asset ;
+    sbol:displayId "thermal_simulator" ;
+    sbol:hasNamespace <https://example.org/golden-gate> ;
+    sbol:name "Thermal cycling semantic simulator" ;
+    fac:facility ex:facility ;
+    fac:assetKind fac:Instrument ;
+    fac:locatedIn ex:automation_bench ;
+    fac:isActive true ;
+    fac:capability ex:opentrons_ot2_thermal_cycling ."#;
+    std::fs::write(
+        &inventory_path,
+        inventory.replace(combined_offerings, split_assets),
+    )
+    .unwrap();
+
+    let out_dir = project.join("review");
+    let built = run(&[
+        "build",
+        project.to_str().unwrap(),
+        "--out-dir",
+        out_dir.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        built.status.success(),
+        "multi-Asset facility build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let lowering = read_json(out_dir.join("facility_lowering.json"));
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
+    let routes = lowering["routes"].as_array().unwrap();
+    assert_eq!(routes.len(), 2);
+    assert!(
+        routes
+            .iter()
+            .all(|route| { route["driver"] == "lab.simulator" && route["scope"] == "invocation" })
+    );
+    let assets = routes
+        .iter()
+        .map(|route| route["asset"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        assets,
+        std::collections::BTreeSet::from([
+            "https://example.org/golden-gate/opentrons_ot2",
+            "https://example.org/golden-gate/thermal_simulator",
+        ])
+    );
+    let lowered_requirements = routes
+        .iter()
+        .map(|route| route["requirements"].as_array().unwrap().len())
+        .sum::<usize>();
+    assert!(routes.iter().all(|route| {
+        route["artifacts"].as_array().unwrap().len()
+            == route["requirements"].as_array().unwrap().len()
+    }));
+    assert!(
+        routes
+            .iter()
+            .flat_map(|route| route["artifacts"].as_array().unwrap())
+            .all(|artifact| {
+                artifact["role"] == "automation_protocol"
+                    && artifact["format"] == "lab.simulation-run.v1"
+                    && artifact["sha256"].as_str().unwrap().len() == 64
+            })
+    );
+
+    let plan = read_json(out_dir.join("plan.execution.json"));
+    assert!(plan["lowerings"].as_array().is_none_or(Vec::is_empty));
+    let reviewed_documents = plan["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|node| node.get("document"))
+        .collect::<Vec<_>>();
+    assert_eq!(reviewed_documents.len(), lowered_requirements);
+    for document in reviewed_documents {
+        assert_eq!(document["format"], "lab.simulation-run.v1");
+        let path = document["path"].as_str().unwrap();
+        assert!(
+            path.starts_with("assets/opentrons_ot2/")
+                || path.starts_with("assets/thermal_simulator/"),
+            "unexpected invocation document path: {path}"
+        );
+        assert!(out_dir.join(path).is_file());
+    }
+
+    let result: Value = serde_json::from_slice(&built.stdout).unwrap();
+    assert_eq!(
+        result["result"]["facility"]["protocols"]
+            .as_array()
+            .unwrap()
+            .len(),
+        lowered_requirements
+    );
+    std::fs::remove_dir_all(project).unwrap();
 }
 
 #[test]

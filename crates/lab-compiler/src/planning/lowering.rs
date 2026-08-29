@@ -9,7 +9,7 @@ use lab_runfmt::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v1";
+pub const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v2";
 
 /// Device artifacts emitted only after capability requirements have been allocated to a facility.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -28,9 +28,18 @@ pub struct FacilityLoweringRoute {
     pub driver: String,
     pub profile_path: PathBuf,
     pub profile_sha256: String,
+    pub scope: FacilityLoweringScope,
     pub requirements: Vec<FacilityLoweredRequirement>,
     pub output: PathBuf,
     pub artifacts: Vec<FacilityLoweredArtifact>,
+}
+
+/// Whether route artifacts cover an entire compatibility backend or exact invocation requirements.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FacilityLoweringScope {
+    WholeProgram,
+    Invocation,
 }
 
 /// A semantic requirement whose allocated route caused this adapter lowering to exist.
@@ -72,6 +81,7 @@ pub fn reviewed_lowering_bundles(
     manifest
         .routes
         .iter()
+        .filter(|route| route.scope == FacilityLoweringScope::WholeProgram)
         .map(|route| {
             let profile_path = utf8_path(&route.profile_path, &route.id, "adapter profile")?;
             let artifacts = route
@@ -146,7 +156,7 @@ mod tests {
 
     #[test]
     fn a_facility_lowering_becomes_one_exact_reviewed_child_bundle() {
-        let manifest = FacilityLoweringManifest {
+        let mut manifest = FacilityLoweringManifest {
             schema_version: FACILITY_LOWERING_SCHEMA_VERSION.to_owned(),
             inventory_sha256: "a".repeat(64),
             facility: "https://example.org/facility".to_owned(),
@@ -156,6 +166,7 @@ mod tests {
                 driver: "opentrons.ot2".to_owned(),
                 profile_path: PathBuf::from("adapters/opentrons.ot2-profile.toml"),
                 profile_sha256: "b".repeat(64),
+                scope: FacilityLoweringScope::WholeProgram,
                 requirements: vec![FacilityLoweredRequirement {
                     requirement_instance: "example::main/body[0]".to_owned(),
                     capability_kind: "https://example.org/LiquidHandling".to_owned(),
@@ -171,6 +182,11 @@ mod tests {
                 }],
             }],
         };
+        let mut invocation_route = manifest.routes[0].clone();
+        invocation_route.id = "simulator-c6d7e8f90123".to_owned();
+        invocation_route.driver = "lab.simulator".to_owned();
+        invocation_route.scope = FacilityLoweringScope::Invocation;
+        manifest.routes.push(invocation_route);
 
         let reviewed = reviewed_lowering_bundles(&manifest).unwrap();
         assert_eq!(reviewed.len(), 1);

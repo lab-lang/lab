@@ -458,6 +458,7 @@ fn write_facility_plan(
         ExecutionPlanOptions {
             inventory_document: inventory_document.clone(),
             planning: Some(planning_reference),
+            reviewed_documents: lowered.reviewed_documents.clone(),
             ..ExecutionPlanOptions::default()
         },
     )
