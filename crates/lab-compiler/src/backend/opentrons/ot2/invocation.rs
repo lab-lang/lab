@@ -1,6 +1,6 @@
 //! Requirement-scoped lowering from exact facility allocations to standalone OT-2 protocols.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 use lab_method::LocalId;
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
@@ -8,12 +8,14 @@ use serde::Serialize;
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
-use crate::backend::invocation::{
-    DEGREE_CELSIUS, MICROLITRE, MINUTE, ProcedureTaskView, exact_invocation_tasks, material_symbols,
-};
+use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::emit::python_string_expression;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
+use crate::backend::procedure::{
+    CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, serial_dilution, setup_golden_gate,
+    thermal_cycle_golden_gate,
+};
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
 use crate::planning::{
@@ -23,12 +25,6 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const SETUP_GOLDEN_GATE: &str = "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction";
-const CYCLE_GOLDEN_GATE: &str =
-    "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction";
-const SERIAL_DILUTION: &str = "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture";
-const LIQUID_HANDLING: &str = "https://sbol.io/ns/capability#LiquidHandling";
-const THERMAL_CYCLING: &str = "https://sbol.io/ns/capability#ThermalCycling";
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v1";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
@@ -219,23 +215,19 @@ fn plan_task(
     task: &AllocatedProcedureTask,
     requirement: &AllocatedRequirementBinding,
 ) -> Result<(&'static str, Ot2TaskExecution), String> {
-    let view = ProcedureTaskView::new("OT-2", task);
     match task.operation.as_str() {
-        SETUP_GOLDEN_GATE => {
-            view.require_capability(requirement, LIQUID_HANDLING)?;
-            Ok(("setup-golden-gate-reaction", plan_setup(profile, task)?))
-        }
-        CYCLE_GOLDEN_GATE => {
-            view.require_capability(requirement, THERMAL_CYCLING)?;
-            Ok((
-                "thermal-cycle-golden-gate-reaction",
-                plan_cycle(profile, task)?,
-            ))
-        }
-        SERIAL_DILUTION => {
-            view.require_capability(requirement, LIQUID_HANDLING)?;
-            Ok(("serial-dilution", plan_dilution(profile, task)?))
-        }
+        SETUP_GOLDEN_GATE => Ok((
+            "setup-golden-gate-reaction",
+            plan_setup(profile, task, requirement)?,
+        )),
+        CYCLE_GOLDEN_GATE => Ok((
+            "thermal-cycle-golden-gate-reaction",
+            plan_cycle(profile, task, requirement)?,
+        )),
+        SERIAL_DILUTION => Ok((
+            "serial-dilution",
+            plan_dilution(profile, task, requirement)?,
+        )),
         operation => Err(format!(
             "OT-2 invocation contains unsupported Procedure operation '{operation}' in task '{}'",
             task.id
@@ -246,145 +238,47 @@ fn plan_task(
 fn plan_setup(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
+    requirement: &AllocatedRequirementBinding,
 ) -> Result<Ot2TaskExecution, String> {
+    let procedure = setup_golden_gate("OT-2", task, requirement)?;
     let view = ProcedureTaskView::new("OT-2", task);
-    view.require_material_roles(&[
-        "backbone",
-        "components",
-        "dependencies",
-        "restriction-enzyme",
-        "ligase",
-        "buffer",
-        "water",
-    ])?;
-    let artifact = view.text_parameter("artifact")?;
-    let backbone = view.text_parameter("backbone")?;
-    let components = view.text_list_parameter("components")?;
-    let dependencies = view.text_list_parameter("dependencies")?;
-    let restriction_enzyme = view.text_parameter("restriction_enzyme")?;
-    let replicates = view.usize_parameter("assembly_replicates", None)?;
-    view.require_nonzero("assembly_replicates", replicates as u32)?;
-    let reaction_volume_ul = view.integer_parameter("reaction_volume_ul", Some(MICROLITRE))?;
-    let part_volume_ul = view.integer_parameter("part_volume_ul", Some(MICROLITRE))?;
-    let enzyme_volume_ul = view.integer_parameter("enzyme_volume_ul", Some(MICROLITRE))?;
-    let ligase_volume_ul = view.integer_parameter("ligase_volume_ul", Some(MICROLITRE))?;
-    let buffer_volume_ul = view.integer_parameter("buffer_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
-    let mix_volume_ul = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
-    for (name, value) in [
-        ("reaction_volume_ul", reaction_volume_ul),
-        ("part_volume_ul", part_volume_ul),
-        ("enzyme_volume_ul", enzyme_volume_ul),
-        ("ligase_volume_ul", ligase_volume_ul),
-        ("buffer_volume_ul", buffer_volume_ul),
-        ("mix_cycles", mix_cycles),
-        ("mix_volume_ul", mix_volume_ul),
-    ] {
-        view.require_nonzero(name, value)?;
-    }
-    if mix_volume_ul > reaction_volume_ul {
-        return Err(format!(
-            "OT-2 Procedure task '{}' mix volume {} uL exceeds its {} uL reaction",
-            task.id, mix_volume_ul, reaction_volume_ul
-        ));
-    }
-
-    let backbone_material = view.one_material("backbone")?;
-    if backbone_material.symbol != backbone {
-        return Err(view.material_parameter_mismatch("backbone"));
-    }
-    let component_materials = view.materials("components");
-    if material_symbols(&component_materials) != components {
-        return Err(view.material_parameter_mismatch("components"));
-    }
-    let dependency_materials = view.materials("dependencies");
-    if material_symbols(&dependency_materials) != dependencies {
-        return Err(view.material_parameter_mismatch("dependencies"));
-    }
-    let enzyme_material = view.one_material("restriction-enzyme")?;
-    if enzyme_material.symbol != restriction_enzyme {
-        return Err(view.material_parameter_mismatch("restriction_enzyme"));
-    }
-    let ligase_material = view.one_material("ligase")?;
-    let buffer_material = view.one_material("buffer")?;
-    let water_material = view.one_material("water")?;
-
-    let dna_piece_count = u32::try_from(component_materials.len() + 1)
-        .map_err(|_| format!("OT-2 Procedure task '{}' has too many DNA pieces", task.id))?;
-    let consumed = buffer_volume_ul
-        .checked_add(ligase_volume_ul)
-        .and_then(|value| value.checked_add(enzyme_volume_ul))
-        .and_then(|value| value.checked_add(part_volume_ul.checked_mul(dna_piece_count)?))
-        .ok_or_else(|| {
-            format!(
-                "OT-2 Procedure task '{}' reaction volume overflows",
-                task.id
-            )
-        })?;
-    let water_volume_ul = reaction_volume_ul.checked_sub(consumed).ok_or_else(|| {
-        format!(
-            "OT-2 Procedure task '{}' requires {consumed} uL before water in a {reaction_volume_ul} uL reaction",
-            task.id
-        )
-    })?;
-
-    let mut additions = vec![
-        ("water", water_material, water_volume_ul),
-        ("buffer", buffer_material, buffer_volume_ul),
-        ("ligase", ligase_material, ligase_volume_ul),
-        ("restriction-enzyme", enzyme_material, enzyme_volume_ul),
-        ("backbone", backbone_material, part_volume_ul),
-    ];
-    additions.extend(
-        component_materials
-            .iter()
-            .copied()
-            .map(|material| ("component", material, part_volume_ul)),
-    );
-
-    let mut sources = BTreeMap::<String, &SelectedMaterialSource>::new();
-    for (_, material, _) in &additions {
-        if let Some(previous) = sources.insert(material.symbol.clone(), &material.source)
-            && previous != &material.source
-        {
-            return Err(format!(
-                "OT-2 Procedure task '{}' assigns material '{}' to several physical sources",
-                task.id, material.symbol
-            ));
-        }
-    }
+    let source_keys = procedure
+        .additions
+        .iter()
+        .map(|addition| addition.material.symbol.clone())
+        .collect::<BTreeSet<_>>();
     let source_wells = assign_source_wells(
         BACKEND,
         "setup-golden-gate-reaction",
-        sources.keys().cloned().collect(),
+        source_keys,
         profile.deck.temperature_module.capacity,
     )
     .map_err(|error| error.to_string())?;
-    let additions = additions
+    let additions = procedure
+        .additions
         .into_iter()
-        .map(|(role, material, volume_ul)| MaterialAddition {
+        .map(|addition| MaterialAddition {
             placement: MaterialPlacement {
-                role: role.to_owned(),
-                input: material.input.clone(),
-                symbol: material.symbol.clone(),
-                source: material.source.clone(),
-                source_well: source_wells[&material.symbol].clone(),
+                role: addition.role.to_owned(),
+                input: addition.material.input.clone(),
+                symbol: addition.material.symbol.clone(),
+                source: addition.material.source.clone(),
+                source_well: source_wells[&addition.material.symbol].clone(),
             },
-            volume_ul,
+            volume_ul: addition.volume_ul,
         })
         .collect::<Vec<_>>();
 
     let reaction_plate = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
-    if replicates > reaction_plate.len() {
-        return Err(view.capacity_error("reaction plate", replicates, reaction_plate.len()));
+    if procedure.replicates > reaction_plate.len() {
+        return Err(view.capacity_error(
+            "reaction plate",
+            procedure.replicates,
+            reaction_plate.len(),
+        ));
     }
-    let tips_per_reaction = additions
-        .iter()
-        .filter(|addition| addition.volume_ul > 0)
-        .count()
-        + 1;
-    let required_tips = tips_per_reaction
-        .checked_mul(replicates)
+    let required_tips = (additions.len() + 1)
+        .checked_mul(procedure.replicates)
         .ok_or_else(|| format!("OT-2 Procedure task '{}' tip count overflows", task.id))?;
     let tip_capacity = profile.stages.assembly.small_tips.total_capacity();
     if required_tips > tip_capacity {
@@ -392,66 +286,46 @@ fn plan_setup(
     }
 
     Ok(Ot2TaskExecution::SetupGoldenGateReaction {
-        artifact,
-        reaction_wells: reaction_plate.into_iter().take(replicates).collect(),
+        artifact: procedure.artifact,
+        reaction_wells: reaction_plate
+            .into_iter()
+            .take(procedure.replicates)
+            .collect(),
         additions,
-        reaction_volume_ul,
-        mix_cycles,
-        mix_volume_ul,
+        reaction_volume_ul: procedure.reaction_volume_ul,
+        mix_cycles: procedure.mix_cycles,
+        mix_volume_ul: procedure.mix_volume_ul,
     })
 }
 
 fn plan_cycle(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
+    requirement: &AllocatedRequirementBinding,
 ) -> Result<Ot2TaskExecution, String> {
+    let procedure = thermal_cycle_golden_gate("OT-2", task, requirement)?;
     let view = ProcedureTaskView::new("OT-2", task);
-    view.require_material_roles(&[])?;
-    let artifact = view.text_parameter("artifact")?;
-    let replicates = view.usize_parameter("assembly_replicates", None)?;
-    view.require_nonzero("assembly_replicates", replicates as u32)?;
     let reaction_wells = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
-    if replicates > reaction_wells.len() {
-        return Err(view.capacity_error("reaction plate", replicates, reaction_wells.len()));
-    }
-    let reaction_volume_ul = view.integer_parameter("reaction_volume_ul", Some(MICROLITRE))?;
-    let cycles = view.integer_parameter("cycles", None)?;
-    let digest_temperature_c =
-        view.integer_parameter("digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let digest_minutes = view.integer_parameter("digest_minutes", Some(MINUTE))?;
-    let ligate_temperature_c =
-        view.integer_parameter("ligate_temperature_c", Some(DEGREE_CELSIUS))?;
-    let ligate_minutes = view.integer_parameter("ligate_minutes", Some(MINUTE))?;
-    let lid_temperature_c = view.integer_parameter("lid_temperature_c", Some(DEGREE_CELSIUS))?;
-    let final_digest_temperature_c =
-        view.integer_parameter("final_digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let final_digest_minutes = view.integer_parameter("final_digest_minutes", Some(MINUTE))?;
-    let heat_inactivation_temperature_c =
-        view.integer_parameter("heat_inactivation_temperature_c", Some(DEGREE_CELSIUS))?;
-    let heat_inactivation_minutes =
-        view.integer_parameter("heat_inactivation_minutes", Some(MINUTE))?;
-    let hold_temperature_c = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
-    for (name, value) in [
-        ("reaction_volume_ul", reaction_volume_ul),
-        ("cycles", cycles),
-        ("digest_minutes", digest_minutes),
-        ("ligate_minutes", ligate_minutes),
-        ("lid_temperature_c", lid_temperature_c),
-        ("final_digest_minutes", final_digest_minutes),
-        ("heat_inactivation_minutes", heat_inactivation_minutes),
-    ] {
-        view.require_nonzero(name, value)?;
+    if procedure.replicates > reaction_wells.len() {
+        return Err(view.capacity_error(
+            "reaction plate",
+            procedure.replicates,
+            reaction_wells.len(),
+        ));
     }
     for (name, value) in [
-        ("digest_temperature_c", digest_temperature_c),
-        ("ligate_temperature_c", ligate_temperature_c),
-        ("lid_temperature_c", lid_temperature_c),
-        ("final_digest_temperature_c", final_digest_temperature_c),
+        ("digest_temperature_c", procedure.digest_temperature_c),
+        ("ligate_temperature_c", procedure.ligate_temperature_c),
+        ("lid_temperature_c", procedure.lid_temperature_c),
+        (
+            "final_digest_temperature_c",
+            procedure.final_digest_temperature_c,
+        ),
         (
             "heat_inactivation_temperature_c",
-            heat_inactivation_temperature_c,
+            procedure.heat_inactivation_temperature_c,
         ),
-        ("hold_temperature_c", hold_temperature_c),
+        ("hold_temperature_c", procedure.hold_temperature_c),
     ] {
         if value > 110 {
             return Err(format!(
@@ -462,65 +336,33 @@ fn plan_cycle(
     }
 
     Ok(Ot2TaskExecution::ThermalCycleGoldenGateReaction {
-        artifact,
-        reaction_wells: reaction_wells.into_iter().take(replicates).collect(),
-        reaction_volume_ul,
-        cycles,
-        digest_temperature_c,
-        digest_minutes,
-        ligate_temperature_c,
-        ligate_minutes,
-        lid_temperature_c,
-        final_digest_temperature_c,
-        final_digest_minutes,
-        heat_inactivation_temperature_c,
-        heat_inactivation_minutes,
-        hold_temperature_c,
+        artifact: procedure.artifact,
+        reaction_wells: reaction_wells
+            .into_iter()
+            .take(procedure.replicates)
+            .collect(),
+        reaction_volume_ul: procedure.reaction_volume_ul,
+        cycles: procedure.cycles,
+        digest_temperature_c: procedure.digest_temperature_c,
+        digest_minutes: procedure.digest_minutes,
+        ligate_temperature_c: procedure.ligate_temperature_c,
+        ligate_minutes: procedure.ligate_minutes,
+        lid_temperature_c: procedure.lid_temperature_c,
+        final_digest_temperature_c: procedure.final_digest_temperature_c,
+        final_digest_minutes: procedure.final_digest_minutes,
+        heat_inactivation_temperature_c: procedure.heat_inactivation_temperature_c,
+        heat_inactivation_minutes: procedure.heat_inactivation_minutes,
+        hold_temperature_c: procedure.hold_temperature_c,
     })
 }
 
 fn plan_dilution(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
+    requirement: &AllocatedRequirementBinding,
 ) -> Result<Ot2TaskExecution, String> {
+    let procedure = serial_dilution("OT-2", task, requirement)?;
     let view = ProcedureTaskView::new("OT-2", task);
-    view.require_material_roles(&["medium"])?;
-    if task.inputs.len() != 1 {
-        return Err(format!(
-            "OT-2 serial-dilution task '{}' must have exactly one culture input",
-            task.id
-        ));
-    }
-    let serial_dilutions = view.usize_parameter("serial_dilutions", None)?;
-    view.require_nonzero("serial_dilutions", serial_dilutions as u32)?;
-    let medium_volume_ul = view.integer_parameter("medium_volume_ul", Some(MICROLITRE))?;
-    let culture_volume_ul = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
-    let mix_volume_ul = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
-    for (name, value) in [
-        ("medium_volume_ul", medium_volume_ul),
-        ("culture_volume_ul", culture_volume_ul),
-        ("mix_cycles", mix_cycles),
-        ("mix_volume_ul", mix_volume_ul),
-    ] {
-        view.require_nonzero(name, value)?;
-    }
-    let diluted_volume = medium_volume_ul
-        .checked_add(culture_volume_ul)
-        .ok_or_else(|| {
-            format!(
-                "OT-2 Procedure task '{}' dilution volume overflows",
-                task.id
-            )
-        })?;
-    if mix_volume_ul > diluted_volume {
-        return Err(format!(
-            "OT-2 Procedure task '{}' mix volume {} uL exceeds its {} uL dilution",
-            task.id, mix_volume_ul, diluted_volume
-        ));
-    }
-
-    let medium = view.one_material("medium")?;
     let mut allocator = PlateAllocator::new(
         BACKEND,
         "serial-dilution",
@@ -528,17 +370,17 @@ fn plan_dilution(
         &profile.stages.plating.dilution_plate,
     );
     let dilution_wells = allocator
-        .take(serial_dilutions)
+        .take(procedure.serial_dilutions)
         .map_err(|error| error.to_string())?;
     let culture_wells = known_wells(
         task,
         "culture staging plate",
         profile.deck.thermocycler.capacity,
     )?;
-    if serial_dilutions > profile.stages.plating.small_tips.total_capacity() {
+    if procedure.serial_dilutions > profile.stages.plating.small_tips.total_capacity() {
         return Err(view.capacity_error(
             "dilution small-tip racks",
-            serial_dilutions,
+            procedure.serial_dilutions,
             profile.stages.plating.small_tips.total_capacity(),
         ));
     }
@@ -547,20 +389,20 @@ fn plan_dilution(
     }
 
     Ok(Ot2TaskExecution::SerialDilution {
-        culture_source: task.inputs[0].source.clone(),
+        culture_source: procedure.culture_source.clone(),
         culture_well: culture_wells[0].clone(),
         medium: MaterialPlacement {
             role: "medium".to_owned(),
-            input: medium.input.clone(),
-            symbol: medium.symbol.clone(),
-            source: medium.source.clone(),
+            input: procedure.medium.input.clone(),
+            symbol: procedure.medium.symbol.clone(),
+            source: procedure.medium.source.clone(),
             source_well: profile.stages.plating.media_rack.medium_well.clone(),
         },
         dilution_wells,
-        medium_volume_ul,
-        culture_volume_ul,
-        mix_cycles,
-        mix_volume_ul,
+        medium_volume_ul: procedure.medium_volume_ul,
+        culture_volume_ul: procedure.culture_volume_ul,
+        mix_cycles: procedure.mix_cycles,
+        mix_volume_ul: procedure.mix_volume_ul,
     })
 }
 

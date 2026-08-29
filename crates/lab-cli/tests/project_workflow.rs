@@ -1290,6 +1290,80 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     std::fs::remove_dir_all(output_root).unwrap();
 }
 
+#[test]
+fn an_ot2_setup_transfers_dependency_dna_from_an_earlier_choice() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/golden-gate-extended")
+        .canonicalize()
+        .unwrap();
+    let project = temporary_project();
+    copy_dir(&example, &project);
+
+    let assemble_path = project.join("src/workflows/assemble.lab");
+    let assemble = std::fs::read_to_string(&assemble_path).unwrap().replace(
+        "workflow assemble_composite_plasmid_2() -> Material<Plasmid>:\n  product <- realize composite_plasmid_2",
+        "workflow assemble_composite_plasmid_2(\n  composite_plasmid_1: Material<Plasmid>,\n) -> Material<Plasmid>:\n  dependencies = [composite_plasmid_1]\n  product <- realize composite_plasmid_2 from dependencies",
+    );
+    std::fs::write(assemble_path, assemble).unwrap();
+
+    let panel_path = project.join("src/programs/panel.lab");
+    let panel = std::fs::read_to_string(&panel_path).unwrap().replace(
+        "  composite_plasmid_1 <- assemble_composite_plasmid_1\n  composite_plasmid_2 <- assemble_composite_plasmid_2\n\n  // One plasmid goes into two chassis. Material is affine, so a transformation\n  // consumes an aliquot of its own rather than the same value twice.\n  for_cloning, for_expression <- split composite_plasmid_1",
+        "  composite_plasmid_1 <- assemble_composite_plasmid_1\n\n  // One plasmid supplies a later assembly and two transformations.\n  for_assembly, for_transformations <- split composite_plasmid_1\n  for_cloning, for_expression <- split for_transformations\n  composite_plasmid_2 <- assemble_composite_plasmid_2 for_assembly",
+    );
+    std::fs::write(panel_path, panel).unwrap();
+
+    let out_dir = project.join("review");
+    let planned = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args([
+            "plan",
+            project.to_str().unwrap(),
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        planned.status.success(),
+        "dependent Golden Gate facility plan failed: {}",
+        String::from_utf8_lossy(&planned.stderr)
+    );
+
+    let lowering = read_json(out_dir.join("facility_lowering.json"));
+    let route = &lowering["routes"][0];
+    let target_root = out_dir.join(route["output"].as_str().unwrap());
+    let mut dependency_transfer = false;
+    for artifact in route["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|artifact| {
+            artifact["path"]
+                .as_str()
+                .unwrap()
+                .ends_with("invocation_manifest.json")
+        })
+    {
+        let manifest = read_json(target_root.join(artifact["path"].as_str().unwrap()));
+        dependency_transfer |=
+            manifest["execution"]["additions"]
+                .as_array()
+                .is_some_and(|additions| {
+                    additions.iter().any(|addition| {
+                        addition["role"] == "dependency"
+                            && addition["symbol"] == "composite_plasmid_1"
+                            && addition["source"]["kind"] == "choice_output"
+                    })
+                });
+    }
+    assert!(
+        dependency_transfer,
+        "an OT-2 setup invocation must transfer DNA produced by an earlier choice"
+    );
+
+    std::fs::remove_dir_all(project).unwrap();
+}
+
 /// A different facility Asset and exact adapter binding lower the same experiment for a Flex
 /// without a source edit or an independent device selector.
 #[test]
