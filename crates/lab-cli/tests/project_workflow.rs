@@ -104,7 +104,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert!(index.get("facility").is_none());
     assert!(project.join(".lab/build/compiler/refined.lair").is_file());
     let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
-    assert_eq!(problem["schema_version"], "lab.planning-problem.v2");
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v3");
     assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
         problem["choices"][0]["source_operation"],
@@ -627,7 +627,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v3");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v4");
     assert_eq!(
         invocations["material_inventory"]["facility"],
         "https://example.org/golden-gate/facility"
@@ -785,6 +785,58 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     assert_eq!(
         execution_plan["planning"]["allocated_lair"]["path"],
         "compiler/allocated.lair"
+    );
+    let execution_nodes = execution_plan["nodes"].as_array().unwrap();
+    assert!(
+        execution_nodes
+            .iter()
+            .filter(|node| node["after"].as_array().is_none_or(Vec::is_empty))
+            .count()
+            > 1,
+        "independent Procedure branches should remain parallel"
+    );
+    let node_id = |requirement_fragment: &str| {
+        execution_nodes
+            .iter()
+            .find(|node| {
+                node["requirement"]
+                    .as_str()
+                    .is_some_and(|requirement| requirement.contains(requirement_fragment))
+            })
+            .unwrap_or_else(|| panic!("missing execution node for {requirement_fragment}"))["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let assembly_setup = node_id(
+        "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#automated-golden-gate::setup-reaction",
+    );
+    let assembly_cycle = node_id(
+        "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#automated-golden-gate::cycle-reaction",
+    );
+    let cell_provision = node_id("std-lab-plasmid-provision-0::");
+    let transform = execution_nodes
+        .iter()
+        .find(|node| {
+            node["requirement"]
+                .as_str()
+                .is_some_and(|requirement| requirement.contains("std-lab-plasmid-transform-0::"))
+        })
+        .unwrap();
+    let transform_dependencies = transform["after"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|dependency| dependency.as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        transform_dependencies,
+        std::collections::BTreeSet::from([
+            assembly_setup.as_str(),
+            assembly_cycle.as_str(),
+            cell_provision.as_str(),
+        ]),
+        "transformation must wait for both its realized plasmid and provisioned cells"
     );
     let reviewed_lowering = &execution_plan["lowerings"][0];
     assert_eq!(reviewed_lowering["id"], route["id"]);

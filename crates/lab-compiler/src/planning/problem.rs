@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v2";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v3";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///
@@ -29,6 +29,10 @@ pub struct PlanningProblem {
 pub struct PlanningMethodChoice {
     pub id: LocalId,
     pub source_operation: IntentOperationId,
+    /// Explicit completion dependencies that are not represented by an SSA operand, such as a
+    /// strain build's requirement for a separately realized plasmid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<LocalId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<PlanningPort>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -40,6 +44,10 @@ pub struct PlanningMethodChoice {
 pub struct PlanningPort {
     pub name: LocalId,
     pub port_type: PortType,
+    /// The output of an earlier method choice that supplies this input, when it is not a
+    /// module-level Design or other external value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<PlanningValueSource>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -103,6 +111,7 @@ pub struct PlanningMethodYield {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PlanningValueSource {
     ChoiceInput { input: LocalId },
+    ChoiceOutput { choice: LocalId, output: LocalId },
     TaskOutput { task: LocalId, output: LocalId },
 }
 
@@ -128,6 +137,7 @@ impl PlanningProblem {
         let mut task_ids = BTreeSet::new();
         let mut requirement_ids = BTreeSet::new();
         let mut parameter_ids = BTreeSet::new();
+        let mut output_ports = BTreeMap::new();
         for choice in &self.choices {
             if !choices.insert(choice.id.clone()) {
                 return Err(PlanningProblemValidationError::DuplicateChoice {
@@ -136,6 +146,42 @@ impl PlanningProblem {
             }
             validate_ports(&choice.id, "input", &choice.inputs)?;
             validate_ports(&choice.id, "output", &choice.outputs)?;
+            if let Some(output) = choice.outputs.iter().find(|output| output.source.is_some()) {
+                return Err(PlanningProblemValidationError::InvalidPortSource {
+                    choice: choice.id.clone(),
+                    port: output.name.clone(),
+                });
+            }
+            for input in &choice.inputs {
+                if input.source.as_ref().is_some_and(|source| {
+                    !matches!(source, PlanningValueSource::ChoiceOutput { .. })
+                }) {
+                    return Err(PlanningProblemValidationError::InvalidPortSource {
+                        choice: choice.id.clone(),
+                        port: input.name.clone(),
+                    });
+                }
+            }
+            for output in &choice.outputs {
+                output_ports.insert(
+                    PlanningValueSource::ChoiceOutput {
+                        choice: choice.id.clone(),
+                        output: output.name.clone(),
+                    },
+                    output.port_type.clone(),
+                );
+            }
+            let mut explicit_dependencies = BTreeSet::new();
+            if let Some(dependency) = choice
+                .after
+                .iter()
+                .find(|dependency| !explicit_dependencies.insert((*dependency).clone()))
+            {
+                return Err(PlanningProblemValidationError::DuplicateChoiceDependency {
+                    choice: choice.id.clone(),
+                    dependency: dependency.clone(),
+                });
+            }
             if choice.candidates.is_empty() {
                 return Err(PlanningProblemValidationError::EmptyChoice {
                     choice: choice.id.clone(),
@@ -158,8 +204,91 @@ impl PlanningProblem {
                 )?;
             }
         }
+        let mut dependencies = self
+            .choices
+            .iter()
+            .map(|choice| (choice.id.clone(), BTreeSet::new()))
+            .collect::<BTreeMap<_, _>>();
+        for choice in &self.choices {
+            for producer in &choice.after {
+                if !dependencies.contains_key(producer) {
+                    return Err(PlanningProblemValidationError::UnknownChoiceDependency {
+                        choice: choice.id.clone(),
+                        dependency: producer.clone(),
+                    });
+                }
+                dependencies
+                    .get_mut(&choice.id)
+                    .expect("every validated choice has a dependency set")
+                    .insert(producer.clone());
+            }
+            for input in &choice.inputs {
+                let Some(
+                    source @ PlanningValueSource::ChoiceOutput {
+                        choice: producer, ..
+                    },
+                ) = &input.source
+                else {
+                    continue;
+                };
+                let Some(source_type) = output_ports.get(source) else {
+                    return Err(PlanningProblemValidationError::UnknownChoiceOutput {
+                        choice: choice.id.clone(),
+                        port: input.name.clone(),
+                        value_source: source.clone(),
+                    });
+                };
+                if source_type != &input.port_type {
+                    return Err(PlanningProblemValidationError::ValueTypeMismatch {
+                        owner: choice.id.clone(),
+                        value_source: source.clone(),
+                    });
+                }
+                dependencies
+                    .get_mut(&choice.id)
+                    .expect("every validated choice has a dependency set")
+                    .insert(producer.clone());
+            }
+        }
+        if !choice_dependencies_are_acyclic(&dependencies) {
+            return Err(PlanningProblemValidationError::ChoiceDependencyCycle);
+        }
         Ok(())
     }
+}
+
+fn choice_dependencies_are_acyclic(dependencies: &BTreeMap<LocalId, BTreeSet<LocalId>>) -> bool {
+    let mut indegree = dependencies
+        .iter()
+        .map(|(choice, producers)| (choice.clone(), producers.len()))
+        .collect::<BTreeMap<_, _>>();
+    let mut dependents = BTreeMap::<LocalId, BTreeSet<LocalId>>::new();
+    for (choice, producers) in dependencies {
+        for producer in producers {
+            dependents
+                .entry(producer.clone())
+                .or_default()
+                .insert(choice.clone());
+        }
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(choice, degree)| (*degree == 0).then_some(choice.clone()))
+        .collect::<BTreeSet<_>>();
+    let mut visited = 0;
+    while let Some(choice) = ready.pop_first() {
+        visited += 1;
+        for dependent in dependents.get(&choice).into_iter().flatten() {
+            let degree = indegree
+                .get_mut(dependent)
+                .expect("every dependent is a declared choice");
+            *degree -= 1;
+            if *degree == 0 {
+                ready.insert(dependent.clone());
+            }
+        }
+    }
+    visited == dependencies.len()
 }
 
 fn hex_sha256(bytes: &[u8]) -> String {
@@ -324,6 +453,26 @@ pub enum PlanningProblemValidationError {
         choice: LocalId,
         kind: &'static str,
         port: LocalId,
+    },
+    #[error("method choice `{choice}` port `{port}` has an invalid value source")]
+    InvalidPortSource { choice: LocalId, port: LocalId },
+    #[error("method choice `{choice}` input `{port}` references unknown output `{value_source:?}`")]
+    UnknownChoiceOutput {
+        choice: LocalId,
+        port: LocalId,
+        value_source: PlanningValueSource,
+    },
+    #[error("method-choice dataflow contains a dependency cycle")]
+    ChoiceDependencyCycle,
+    #[error("method choice `{choice}` repeats completion dependency `{dependency}`")]
+    DuplicateChoiceDependency {
+        choice: LocalId,
+        dependency: LocalId,
+    },
+    #[error("method choice `{choice}` references unknown completion dependency `{dependency}`")]
+    UnknownChoiceDependency {
+        choice: LocalId,
+        dependency: LocalId,
     },
     #[error("method choice `{choice}` repeats candidate `{method}`")]
     DuplicateCandidate { choice: LocalId, method: MethodId },

@@ -801,6 +801,8 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![(lab_method::LocalId::new("sample").unwrap(), material_type)],
             },
+            None,
+            &[],
         );
         let operation = OperationId::new("https://example.org/procedure/incubate").unwrap();
         let capability = CapabilityKind::new("https://sbol.io/ns/capability#Incubation").unwrap();

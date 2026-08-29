@@ -943,12 +943,14 @@ mod tests {
             choices: vec![PlanningMethodChoice {
                 id: id("build-0"),
                 source_operation: IntentOperationId::new("std.bio.build.realize").unwrap(),
+                after: Vec::new(),
                 inputs: Vec::new(),
                 outputs: vec![PlanningPort {
                     name: id("product"),
                     port_type: PortType::Data {
                         data_kind: AbsoluteIri::new("https://example.org/data/result").unwrap(),
                     },
+                    source: None,
                 }],
                 candidates: vec![
                     PlanningMethodCandidate {

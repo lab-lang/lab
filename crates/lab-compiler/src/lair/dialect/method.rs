@@ -36,7 +36,9 @@ use crate::lair::dialect::procedure::is_stable_local_id;
         source_operation: StringAttr,
         candidates: VecAttr,
         choice_input_names: VecAttr,
-        choice_output_names: VecAttr
+        choice_output_names: VecAttr,
+        choice_artifact: StringAttr,
+        choice_dependencies: VecAttr
     ),
     interfaces = [SingleBlockRegionInterface]
 )]
@@ -54,6 +56,8 @@ impl ChoiceOp {
         source_operation: impl Into<String>,
         candidates: &[MethodId],
         ports: ChoicePorts,
+        artifact: Option<&str>,
+        dependencies: &[String],
     ) -> Self {
         let (input_names, operands): (Vec<_>, Vec<_>) = ports.inputs.into_iter().unzip();
         let (output_names, result_types): (Vec<_>, Vec<_>) = ports.outputs.into_iter().unzip();
@@ -80,6 +84,11 @@ impl ChoiceOp {
             context,
             string_vec(output_names.iter().map(ToString::to_string).collect()),
         );
+        result.set_attr_choice_artifact(
+            context,
+            StringAttr::new(artifact.unwrap_or_default().to_owned()),
+        );
+        result.set_attr_choice_dependencies(context, string_vec(dependencies.to_vec()));
         for index in 0..candidates.len() {
             let block = BasicBlock::new(context, None, vec![]);
             block.insert_at_front(result.candidate_region(context, index), context);
@@ -144,6 +153,27 @@ impl ChoiceOp {
         )
     }
 
+    pub(crate) fn artifact_name(&self, context: &Context) -> Option<String> {
+        self.get_attr_choice_artifact(context)
+            .map(|artifact| artifact.as_str().to_owned())
+            .filter(|artifact| !artifact.is_empty())
+    }
+
+    pub(crate) fn dependency_artifacts(&self, context: &Context) -> Vec<String> {
+        self.get_attr_choice_dependencies(context)
+            .expect("verified method.choice carries choice_dependencies")
+            .0
+            .iter()
+            .map(|dependency| {
+                dependency
+                    .downcast_ref::<StringAttr>()
+                    .expect("verified choice_dependencies are strings")
+                    .as_str()
+                    .to_owned()
+            })
+            .collect()
+    }
+
     pub(crate) fn append_candidate_operation(
         &self,
         context: &mut Context,
@@ -204,6 +234,33 @@ impl Verify for ChoiceOp {
         }
         self.verify_port_names(context, true)?;
         self.verify_port_names(context, false)?;
+        if self.get_attr_choice_artifact(context).is_none() {
+            return verify_err!(
+                self.loc(context),
+                "method.choice is missing choice_artifact"
+            );
+        }
+        let Some(dependencies) = self.get_attr_choice_dependencies(context) else {
+            return verify_err!(
+                self.loc(context),
+                "method.choice is missing choice_dependencies"
+            );
+        };
+        let mut dependency_names = BTreeSet::new();
+        for dependency in &dependencies.0 {
+            let Some(dependency) = dependency.downcast_ref::<StringAttr>() else {
+                return verify_err!(
+                    self.loc(context),
+                    "method.choice choice_dependencies must contain only strings"
+                );
+            };
+            if dependency.as_str().is_empty() || !dependency_names.insert(dependency.as_str()) {
+                return verify_err!(
+                    self.loc(context),
+                    "method.choice choice_dependencies must be non-empty and unique"
+                );
+            }
+        }
         let mut seen = BTreeSet::new();
         for candidate in &candidates.0 {
             let Some(candidate) = candidate.downcast_ref::<StringAttr>() else {

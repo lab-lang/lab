@@ -13,7 +13,10 @@ use lab_runfmt::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding};
+use super::{
+    AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
+    PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningValueSource,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPlanOptions {
@@ -47,11 +50,18 @@ impl Default for ExecutionPlanOptions {
 /// Build a reviewed plan from the exact selected Method graph and adapter invocations.
 pub fn build_execution_plan_from_invocations(
     invocations: &AdapterInvocationPlan,
+    problem: &PlanningProblem,
     mut options: ExecutionPlanOptions,
 ) -> Result<ExecutionPlanDocument, ExecutionPlanBuildError> {
     invocations
         .validate()
         .map_err(|error| ExecutionPlanBuildError::InvalidInvocations(error.to_string()))?;
+    problem
+        .validate()
+        .map_err(|error| ExecutionPlanBuildError::InvalidProblem(error.to_string()))?;
+    if problem.sha256() != invocations.problem_sha256 {
+        return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
+    }
     let planning = options
         .planning
         .take()
@@ -95,7 +105,8 @@ pub fn build_execution_plan_from_invocations(
 
     let mut requirements = Vec::new();
     let mut nodes = Vec::new();
-    let mut previous = None;
+    let mut node_tasks = Vec::new();
+    let mut task_nodes = BTreeMap::<lab_method::LocalId, Vec<String>>::new();
     for method in &invocations.methods {
         for task in &method.tasks {
             for binding in &task.requirements {
@@ -184,10 +195,11 @@ pub fn build_execution_plan_from_invocations(
                 };
                 nodes.push(ExecutionPlanNode {
                     id: id.clone(),
-                    after: previous.into_iter().collect(),
+                    after: Vec::new(),
                     action,
                 });
-                previous = Some(id);
+                node_tasks.push(task.id.clone());
+                task_nodes.entry(task.id.clone()).or_default().push(id);
             }
         }
     }
@@ -195,6 +207,10 @@ pub fn build_execution_plan_from_invocations(
         return Err(ExecutionPlanBuildError::UnknownDocumentRequirement {
             requirement: requirement.clone(),
         });
+    }
+    let dependencies = execution_task_dependencies(invocations, problem, &task_nodes)?;
+    for (node, task) in nodes.iter_mut().zip(node_tasks) {
+        node.after = dependencies.get(&task).cloned().unwrap_or_default();
     }
     let plan = ExecutionPlanDocument {
         format: EXECUTION_PLAN_FORMAT.to_owned(),
@@ -215,10 +231,191 @@ pub fn build_execution_plan_from_invocations(
     Ok(plan)
 }
 
+type SelectedChoices<'a> =
+    BTreeMap<lab_method::LocalId, (&'a PlanningMethodChoice, &'a PlanningMethodCandidate)>;
+
+fn execution_task_dependencies(
+    invocations: &AdapterInvocationPlan,
+    problem: &PlanningProblem,
+    task_nodes: &BTreeMap<lab_method::LocalId, Vec<String>>,
+) -> Result<BTreeMap<lab_method::LocalId, Vec<String>>, ExecutionPlanBuildError> {
+    let problem_choices = problem
+        .choices
+        .iter()
+        .map(|choice| (choice.id.clone(), choice))
+        .collect::<BTreeMap<_, _>>();
+    let mut selected = SelectedChoices::new();
+    for method in &invocations.methods {
+        let Some(choice) = problem_choices.get(&method.choice).copied() else {
+            return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
+        };
+        let Some(candidate) = choice
+            .candidates
+            .iter()
+            .find(|candidate| candidate.method == method.method)
+        else {
+            return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
+        };
+        if method.source_operation != choice.source_operation
+            || !allocated_method_matches_candidate(method, candidate)
+        {
+            return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
+        }
+        selected.insert(method.choice.clone(), (choice, candidate));
+    }
+
+    let mut dependencies = BTreeMap::new();
+    for method in &invocations.methods {
+        let (choice, candidate) = selected
+            .get(&method.choice)
+            .expect("every invocation Method was matched to its planning candidate");
+        for task in &candidate.tasks {
+            let mut nodes = BTreeSet::new();
+            for producer in &choice.after {
+                let (_, producer_candidate) = selected.get(producer).ok_or_else(|| {
+                    ExecutionPlanBuildError::InvalidExecutionDataflow {
+                        message: format!(
+                            "method choice '{}' depends on unselected choice '{}'",
+                            method.choice, producer
+                        ),
+                    }
+                })?;
+                for producer_task in &producer_candidate.tasks {
+                    nodes.extend(task_nodes.get(&producer_task.id).cloned().ok_or_else(|| {
+                        ExecutionPlanBuildError::InvalidExecutionDataflow {
+                            message: format!(
+                                "method choice '{}' depends on unknown Procedure task '{}'",
+                                method.choice, producer_task.id
+                            ),
+                        }
+                    })?);
+                }
+            }
+            for input in &task.inputs {
+                nodes.extend(source_execution_nodes(
+                    &method.choice,
+                    &input.source,
+                    &selected,
+                    task_nodes,
+                    &mut BTreeSet::new(),
+                )?);
+            }
+            dependencies.insert(task.id.clone(), nodes.into_iter().collect());
+        }
+    }
+    Ok(dependencies)
+}
+
+fn allocated_method_matches_candidate(
+    method: &AllocatedMethod,
+    candidate: &PlanningMethodCandidate,
+) -> bool {
+    method.tasks.len() == candidate.tasks.len()
+        && method
+            .tasks
+            .iter()
+            .zip(&candidate.tasks)
+            .all(|(allocated, planned)| {
+                allocated.id == planned.id
+                    && allocated.operation == planned.operation
+                    && allocated.inputs == planned.inputs
+                    && allocated.outputs == planned.outputs
+                    && allocated.parameters == planned.parameters
+                    && allocated.requirements.len() == planned.requirements.len()
+                    && allocated
+                        .requirements
+                        .iter()
+                        .zip(&planned.requirements)
+                        .all(|(binding, requirement)| {
+                            binding.id == requirement.id
+                                && binding.capability_kind == requirement.capability_kind
+                                && binding.minimum_qualification
+                                    == requirement.minimum_qualification
+                                && binding.accepted_control_modes
+                                    == requirement.accepted_control_modes
+                        })
+            })
+}
+
+fn source_execution_nodes(
+    owner: &lab_method::LocalId,
+    source: &PlanningValueSource,
+    selected: &SelectedChoices<'_>,
+    task_nodes: &BTreeMap<lab_method::LocalId, Vec<String>>,
+    visiting_inputs: &mut BTreeSet<(lab_method::LocalId, lab_method::LocalId)>,
+) -> Result<Vec<String>, ExecutionPlanBuildError> {
+    match source {
+        PlanningValueSource::TaskOutput { task, .. } => {
+            task_nodes.get(task).cloned().ok_or_else(|| {
+                ExecutionPlanBuildError::InvalidExecutionDataflow {
+                    message: format!("Procedure task '{owner}' depends on unknown task '{task}'"),
+                }
+            })
+        }
+        PlanningValueSource::ChoiceInput { input } => {
+            let key = (owner.clone(), input.clone());
+            if !visiting_inputs.insert(key.clone()) {
+                return Err(ExecutionPlanBuildError::InvalidExecutionDataflow {
+                    message: format!(
+                        "method choice '{owner}' recursively resolves input '{input}'"
+                    ),
+                });
+            }
+            let (choice, _) = selected.get(owner).ok_or_else(|| {
+                ExecutionPlanBuildError::InvalidExecutionDataflow {
+                    message: format!("unknown selected method choice '{owner}'"),
+                }
+            })?;
+            let port = choice
+                .inputs
+                .iter()
+                .find(|port| port.name == *input)
+                .ok_or_else(|| ExecutionPlanBuildError::InvalidExecutionDataflow {
+                    message: format!("method choice '{owner}' has no input '{input}'"),
+                })?;
+            let nodes = port.source.as_ref().map_or_else(
+                || Ok(Vec::new()),
+                |source| {
+                    source_execution_nodes(owner, source, selected, task_nodes, visiting_inputs)
+                },
+            )?;
+            visiting_inputs.remove(&key);
+            Ok(nodes)
+        }
+        PlanningValueSource::ChoiceOutput { choice, output } => {
+            let (_, candidate) = selected.get(choice).ok_or_else(|| {
+                ExecutionPlanBuildError::InvalidExecutionDataflow {
+                    message: format!("unknown producer method choice '{choice}'"),
+                }
+            })?;
+            let yielded = candidate
+                .yields
+                .iter()
+                .find(|yielded| yielded.output == *output)
+                .ok_or_else(|| ExecutionPlanBuildError::InvalidExecutionDataflow {
+                    message: format!("method choice '{choice}' has no selected output '{output}'"),
+                })?;
+            source_execution_nodes(
+                choice,
+                &yielded.source,
+                selected,
+                task_nodes,
+                visiting_inputs,
+            )
+        }
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ExecutionPlanBuildError {
     #[error("adapter invocation plan is invalid: {0}")]
     InvalidInvocations(String),
+    #[error("planning problem is invalid: {0}")]
+    InvalidProblem(String),
+    #[error("adapter invocations do not project from the frozen planning problem")]
+    InvocationProblemMismatch,
+    #[error("cannot derive the execution DAG: {message}")]
+    InvalidExecutionDataflow { message: String },
     #[error("compiler-derived execution planning requires frozen compiler artifacts")]
     MissingPlanningReference,
     #[error("frozen compiler artifacts do not match the adapter invocation plan")]

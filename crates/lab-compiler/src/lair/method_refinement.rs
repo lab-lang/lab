@@ -129,6 +129,8 @@ impl DialectConversion for MethodRefinement<'_> {
             .iter()
             .map(|output| port_type(context, &output.port_type))
             .collect::<Vec<_>>();
+        let choice_artifact = text_parameter(&instance.parameters, "artifact");
+        let choice_dependencies = text_list_parameter(&instance.parameters, "dependencies");
         let choice = ChoiceOp::new(
             context,
             &choice_id,
@@ -148,6 +150,8 @@ impl DialectConversion for MethodRefinement<'_> {
                     .map(|(output, ty)| (output.name.clone(), ty))
                     .collect(),
             },
+            choice_artifact.as_deref(),
+            &choice_dependencies,
         );
 
         for (candidate_index, candidate) in candidates.iter().enumerate() {
@@ -174,6 +178,29 @@ impl DialectConversion for MethodRefinement<'_> {
         rewriter.erase_operation(context, operation);
         Ok(())
     }
+}
+
+fn text_parameter(parameters: &BTreeMap<LocalId, ProcedureValue>, name: &str) -> Option<String> {
+    let ProcedureValue::Scalar { value } = parameters.get(&local(name))? else {
+        return None;
+    };
+    let ScalarValue::Text(value) = &value.value else {
+        return None;
+    };
+    Some(value.clone())
+}
+
+fn text_list_parameter(parameters: &BTreeMap<LocalId, ProcedureValue>, name: &str) -> Vec<String> {
+    let Some(ProcedureValue::List { values, .. }) = parameters.get(&local(name)) else {
+        return Vec::new();
+    };
+    values
+        .iter()
+        .filter_map(|value| match &value.value {
+            ScalarValue::Text(value) => Some(value.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 struct IntentInstance {

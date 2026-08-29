@@ -49,6 +49,8 @@ pub enum PlanningProblemExtractionError {
         requirement: LocalId,
         message: String,
     },
+    #[error("several method choices claim to realize artifact `{artifact}`")]
+    DuplicateArtifactChoice { artifact: String },
     #[error(transparent)]
     InvalidProblem(#[from] PlanningProblemValidationError),
 }
@@ -67,11 +69,50 @@ pub(crate) fn extract_planning_problem(
         .deref(context)
         .get_head()
         .ok_or(PlanningProblemExtractionError::MissingModuleBlock)?;
-    let choices = block
+    let choice_operations = block
         .deref(context)
         .iter(context)
         .filter_map(|operation| Operation::get_op::<ChoiceOp>(operation, context))
-        .map(|choice| extract_choice(context, &choice))
+        .collect::<Vec<_>>();
+    let choice_outputs = choice_operations
+        .iter()
+        .flat_map(|choice| {
+            let choice_id = choice.semantic_choice_id(context);
+            let results = choice
+                .get_operation()
+                .deref(context)
+                .results()
+                .collect::<Vec<_>>();
+            results
+                .into_iter()
+                .zip(choice.output_names(context))
+                .map(move |(value, output)| {
+                    (
+                        value,
+                        PlanningValueSource::ChoiceOutput {
+                            choice: choice_id.clone(),
+                            output,
+                        },
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut artifact_choices = BTreeMap::new();
+    for choice in &choice_operations {
+        let Some(artifact) = choice.artifact_name(context) else {
+            continue;
+        };
+        if artifact_choices
+            .insert(artifact.clone(), choice.semantic_choice_id(context))
+            .is_some()
+        {
+            return Err(PlanningProblemExtractionError::DuplicateArtifactChoice { artifact });
+        }
+    }
+    let choices = choice_operations
+        .iter()
+        .map(|choice| extract_choice(context, choice, &choice_outputs, &artifact_choices))
         .collect::<Result<Vec<_>, _>>()?;
     let problem = PlanningProblem {
         schema_version: PLANNING_PROBLEM_SCHEMA_VERSION.to_owned(),
@@ -84,6 +125,8 @@ pub(crate) fn extract_planning_problem(
 fn extract_choice(
     context: &Context,
     choice: &ChoiceOp,
+    choice_outputs: &[(Value, PlanningValueSource)],
+    artifact_choices: &BTreeMap<String, LocalId>,
 ) -> Result<PlanningMethodChoice, PlanningProblemExtractionError> {
     let choice_id = choice.semantic_choice_id(context);
     let operation = choice.get_operation().deref(context);
@@ -99,6 +142,7 @@ fn extract_choice(
                     value,
                     format!("method choice `{choice_id}` input"),
                 )?,
+                source: source_for_value(choice_outputs, value),
             })
         })
         .collect::<Result<Vec<_>, PlanningProblemExtractionError>>()?;
@@ -114,10 +158,16 @@ fn extract_choice(
                     value,
                     format!("method choice `{choice_id}` output"),
                 )?,
+                source: None,
             })
         })
         .collect::<Result<Vec<_>, PlanningProblemExtractionError>>()?;
     let methods = choice.candidate_ids(context);
+    let after = choice
+        .dependency_artifacts(context)
+        .into_iter()
+        .filter_map(|artifact| artifact_choices.get(&artifact).cloned())
+        .collect();
     let candidates = methods
         .into_iter()
         .enumerate()
@@ -128,6 +178,7 @@ fn extract_choice(
     Ok(PlanningMethodChoice {
         id: choice_id,
         source_operation: choice.source_operation(context),
+        after,
         inputs,
         outputs,
         candidates,

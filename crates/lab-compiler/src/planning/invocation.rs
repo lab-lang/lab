@@ -17,7 +17,7 @@ use super::{
     SelectedCapabilityParameter,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v3";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v4";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
