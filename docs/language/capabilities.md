@@ -47,6 +47,8 @@ Method candidate regions contain first-class capability requirements. Each requi
 
 The compiler now has the first structural slice of this IR: verifier-valid `method.choice` candidate regions containing generic `procedure.task`, `capability.requirement`, and exact `capability.constraint` operations. It round-trips as the named `refined-alternatives` LAIR stage and rejects cross-candidate references, duplicate stable identities, and Procedure tasks without requirements. Source refinement, global solver extraction, solution application, and `allocated-procedure` are not yet connected, so current `lab build` continues to emit the v2 transitional records described above.
 
+Portable method authors do not construct Pliron operations. The RDF-free [`lab-method`](../../crates/lab-method/README.md) contract represents typed method signatures, topologically ordered Procedure tasks, value edges, requirements, and exact constraints as serializable owned Rust values. Its registry validates graphs and candidate compatibility before `lab-compiler` projects them into LAIR; the same contract is the intended boundary for Python method packages.
+
 Planning extracts a constraint problem from the verified refined-alternatives LAIR stage. It selects method candidates, offerings, Assets, adapters, MaterialLots, locations, and scheduling together. The solution is applied back to the same stable LAIR identities, producing an allocated-procedure stage with no unresolved method choice. Requirement extraction never walks the checked workflow independently.
 
 ## Matching rules

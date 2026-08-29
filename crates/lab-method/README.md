@@ -1,0 +1,9 @@
+# Lab Method
+
+`lab-method` defines the portable, facility-independent contract by which a semantic Intent operation expands into one or more Procedure graphs and first-class Capability requirements. It depends on `lab-capability` for nominal IRIs, qualification, control modes, and exact property constraints, but it contains no RDF model and no Pliron objects.
+
+A `MethodDefinition` names the exact Intent operation it refines, declares a typed input signature, lists Procedure tasks in topological order, attaches one or more capability requirements to every task, and yields a typed output signature. Task operations, material states, data kinds, methods, capabilities, properties, and units use absolute IRIs. Local task, port, and requirement identities are validated stable names.
+
+`MethodRegistry` validates every graph before indexing it. It rejects dangling or forward value references, duplicate identities, tasks without requirements, descriptive `UnspecifiedControl`, duplicate Method IRIs, and candidates whose signatures disagree for the same Intent operation. Candidate order is the lexical Method-IRI order and is deterministic only for review; it is not a selection policy.
+
+The crate is deliberately independent from facility selection. A method cannot name a Facility, Zone, Asset, CapabilityOffering, MaterialLot, adapter, location, schedule, or runtime endpoint. `lab-compiler` consumes validated definitions to construct Method, Procedure, and Capability LAIR, and later extracts a graph-wide allocation problem from that verifier-valid compiler IR. Rust and Python method authoring can therefore share the serialized definition contract without exposing Pliron as an extension ABI.

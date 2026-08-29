@@ -76,6 +76,7 @@ Decision records preserve the reasoning and status behind the language rather th
 - [Protocol IR](../crates/lab-compiler/src/lair/dialect/protocol/README.md) describes the selected biological-procedure boundary and what deliberately remains for facility allocation and hardware lowering.
 - [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
+- [Portable method definitions](../crates/lab-method/README.md) describe the facility-independent Method, Procedure, and Capability contract shared by compiler and Python extensions.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.

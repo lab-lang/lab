@@ -1790,6 +1790,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-method"
+version = "0.1.2"
+dependencies = [
+ "lab-capability",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-package"
 version = "0.1.2"
 dependencies = [
