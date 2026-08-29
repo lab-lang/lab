@@ -2,7 +2,7 @@
 
 `crates/lab-compiler/` builds the experimental `labc` compiler and `lab-opt` IR tool. These are deliberately compiler-development interfaces. The standard Lab workflow is exposed through the repository's `lab` binary. None is a stable interface yet.
 
-`CheckedModule` is the portable source-compilation boundary, and verified LAIR is the mandatory backend boundary. Source lowering constructs a `PortableLairProgram` containing Design and Workflow LAIR. Protocol selection consumes that program and returns a `ProtocolLairProgram`; typed robot backends consume only that verified Protocol boundary and cannot accept a checked source module directly. Artifact emission remains a separate operation. Output selection therefore does not choose a different parser or semantic pipeline or bypass LAIR.
+`CheckedModule` is the portable source-compilation boundary, and verified LAIR is the mandatory backend boundary. Source lowering constructs a `PortableLairProgram` containing Design and Workflow LAIR. The accepted path consumes it with a validated `MethodRegistry` and returns a `RefinedLairProgram` containing every applicable Method candidate, typed Procedure parameters, and first-class Capability requirements. The existing fixed Protocol conversion remains in parallel while current device backends migrate; those backends still consume only a verified `ProtocolLairProgram` and cannot accept a checked source module directly. Artifact emission remains a separate operation. Output selection therefore does not choose a different parser or semantic pipeline or bypass LAIR.
 
 This is the first vertical slice of a larger progressive lowering stack. LAIR preserves high-level biological and workflow intent while later dialects select laboratory methods, bind materials and resources, schedule work, and finally produce device-specific operations for instruments, people, and services. An SBOLInventory facility graph describes installed capability offerings, while an adapter implements planning, lowering, simulation, or execution for exact Assets selected by reviewed plans.
 
@@ -10,7 +10,7 @@ The current Protocol IR is method-selected but not hardware-level. Containers, i
 
 The source tree follows semantic ownership and dependency direction:
 
-- `src/lair/` contains Design, Workflow, and Protocol dialects; the Workflow-to-Protocol dialect conversion; material-linearity analysis and pass; stage contracts; and the textual IR session;
+- `src/lair/` contains Design, Workflow, Method, Procedure, Capability, and transitional Protocol dialects; portable method projection; the transitional Workflow-to-Protocol conversion; material-linearity analysis and pass; stage contracts; and the textual IR session;
 - `src/planning/` resolves artifact graphs against inventory without robot knowledge;
 - `src/backend/` defines the adapter registry and concrete single-device compilers, grouped by vendor family under `opentrons/` and `hamilton/`;
 - `src/artifact/` defines generated files independently of filesystem persistence;

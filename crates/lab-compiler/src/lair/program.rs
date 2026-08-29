@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use lab_language::CheckedModule;
+use lab_method::MethodRegistry;
 use pliron::builtin::op_interfaces::SingleBlockRegionInterface;
 use pliron::builtin::ops::ModuleOp;
 use pliron::context::Context;
@@ -42,6 +43,16 @@ pub enum ProtocolLairError {
     #[error("generated Protocol LAIR failed material-linearity analysis: {0}")]
     MaterialLinearity(String),
     #[error("generated LAIR does not satisfy the method-selected Protocol contract: {0}")]
+    Stage(String),
+}
+
+#[derive(Debug, Error)]
+pub enum RefinedLairError {
+    #[error("Intent-to-Method refinement failed: {0}")]
+    Conversion(String),
+    #[error("generated refined-alternatives LAIR failed verification: {0}")]
+    Verification(String),
+    #[error("generated LAIR does not satisfy the refined-alternatives contract: {0}")]
     Stage(String),
 }
 
@@ -148,6 +159,39 @@ impl PortableLairProgram {
         self.module.get_operation().disp(&self.context).to_string()
     }
 
+    /// Enumerate every applicable portable method without selecting a facility or candidate.
+    pub fn refine_methods(
+        mut self,
+        registry: &MethodRegistry,
+    ) -> Result<RefinedLairProgram, RefinedLairError> {
+        crate::lair::method_refinement::refine_method_alternatives(
+            &mut self.context,
+            self.module.get_operation(),
+            registry,
+        )
+        .map_err(|error| RefinedLairError::Conversion(error.disp(&self.context).to_string()))?;
+        set_stage(&mut self.context, self.module, IrStage::RefinedAlternatives)
+            .map_err(RefinedLairError::Stage)?;
+        verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
+            RefinedLairError::Verification(error.disp(&self.context).to_string())
+        })?;
+        let stage = detect_stage(&self.context, self.module).map_err(RefinedLairError::Stage)?;
+        if stage != IrStage::RefinedAlternatives {
+            return Err(RefinedLairError::Stage(format!(
+                "expected refined-alternatives, found {stage}"
+            )));
+        }
+        Ok(RefinedLairProgram {
+            context: self.context,
+            module: self.module,
+        })
+    }
+
+    /// Refine with the validated methods bundled into this compiler build.
+    pub fn refine_standard_methods(self) -> Result<RefinedLairProgram, RefinedLairError> {
+        self.refine_methods(crate::lair::methods::standard_method_registry())
+    }
+
     /// Consume method-neutral Workflow LAIR and select the supported concrete
     /// plasmid-build Protocol. No backend planning occurs at this boundary.
     pub fn select_protocol(mut self) -> Result<ProtocolLairProgram, ProtocolLairError> {
@@ -183,6 +227,18 @@ impl PortableLairProgram {
             context: self.context,
             module: self.module,
         })
+    }
+}
+
+/// Owned, verifier-valid Method alternatives with no facility allocation or selected candidate.
+pub struct RefinedLairProgram {
+    context: Context,
+    module: ModuleOp,
+}
+
+impl RefinedLairProgram {
+    pub fn ir(&self) -> String {
+        self.module.get_operation().disp(&self.context).to_string()
     }
 }
 
@@ -394,6 +450,9 @@ mod tests {
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
 
+    use crate::lair::session::CompilerSession;
+    use crate::lair::stage::IrStage;
+
     use super::PortableLairProgram;
 
     const DESIGNS: &str = r#"use std.bio.designs
@@ -564,5 +623,76 @@ workflow build_second() -> Material<Plasmid>:
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn standard_methods_replace_every_workflow_op_with_verified_alternatives() {
+        let checked = compile_module(
+            &format!("{DESIGNS}{WORKFLOWS}")
+                .replace("use demo.designs\n", "")
+                .replace("use std.bio.designs\nuse std.bio.golden_gate\n", "")
+                .replacen(
+                    "use std.bio.build",
+                    "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.build",
+                    1,
+                ),
+        )
+        .expect("program checks");
+        let refined = PortableLairProgram::lower(&checked)
+            .expect("portable LAIR lowers")
+            .refine_standard_methods()
+            .expect("standard methods refine");
+        let ir = refined.ir();
+
+        assert!(ir.contains("lair.stage") && ir.contains("refined-alternatives"));
+        assert!(!ir.contains("workflow."), "{ir}");
+        assert!(ir.contains("https://www.lab-compiler.org/ns/method#automated-golden-gate"));
+        assert!(ir.contains("https://www.lab-compiler.org/ns/method#manual-artifact-realization"));
+        assert!(ir.contains("procedure.parameter"));
+        assert!(ir.contains("capability.requirement"));
+        assert!(ir.contains("capability.constraint"));
+        assert!(ir.contains("http://qudt.org/vocab/unit/HR"));
+
+        let mut session = CompilerSession::default();
+        session.parse_ir(&ir).unwrap();
+        session.verify_stage(IrStage::RefinedAlternatives).unwrap();
+    }
+
+    #[test]
+    fn refinement_fails_closed_when_the_registry_has_no_method() {
+        let checked = compile_module(SHARED_SEQUENCE_PROGRAM).expect("program checks");
+        let error = PortableLairProgram::lower(&checked)
+            .expect("portable LAIR lowers")
+            .refine_methods(&lab_method::MethodRegistry::default())
+            .err()
+            .expect("an empty method registry cannot refine reachable Intent");
+
+        assert!(
+            error.to_string().contains("no method definition"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn method_refinement_preserves_the_source_quantity_unit() {
+        let source = format!("{DESIGNS}{WORKFLOWS}")
+            .replace("use demo.designs\n", "")
+            .replace("use std.bio.designs\nuse std.bio.golden_gate\n", "")
+            .replacen(
+                "use std.bio.build",
+                "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.build",
+                1,
+            )
+            .replace("recover culture for 1 h", "recover culture for 30 min");
+        let checked = compile_module(&source).expect("minute-scale recovery checks");
+        let ir = PortableLairProgram::lower(&checked)
+            .expect("portable LAIR lowers")
+            .refine_standard_methods()
+            .expect("standard methods refine")
+            .ir();
+
+        assert!(ir.contains("http://qudt.org/vocab/unit/MIN"), "{ir}");
+        assert!(ir.contains("builtin.string \"30\""), "{ir}");
+        assert!(!ir.contains("http://qudt.org/vocab/unit/HR"), "{ir}");
     }
 }

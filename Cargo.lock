@@ -1711,6 +1711,7 @@ dependencies = [
  "lab-instruments",
  "lab-inventory",
  "lab-language",
+ "lab-method",
  "lab-runfmt",
  "opentrons-protocol",
  "pliron",
