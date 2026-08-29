@@ -15,9 +15,10 @@ use hamilton_star::RawCommand;
 use lab_inventory::{FacilityScalarValue, InventorySnapshot};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
-    ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding, PLATE_READ_FORMAT,
-    PlateReadDocument, ReviewedLoweringArtifactRole, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
-    SimulationRunDocument, StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
+    ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding,
+    OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT, PlateReadDocument,
+    ReviewedLoweringArtifactRole, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument,
+    StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
 };
 use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
@@ -151,15 +152,23 @@ pub enum LoadedReviewedDocument {
     Thermocycle(ThermocycleRunDocument),
     PlateRead(PlateReadDocument),
     Simulation(SimulationRunDocument),
+    /// A reviewed file whose execution is delegated to an external device application.
+    /// The runtime validates and narrates it, but does not claim a live connector.
+    ExternalFile {
+        format: String,
+        title: String,
+        contents: Vec<u8>,
+    },
 }
 
 impl LoadedReviewedDocument {
-    pub fn format(&self) -> &'static str {
+    pub fn format(&self) -> &str {
         match self {
             Self::Star { .. } => STAR_RUN_FORMAT,
             Self::Thermocycle(_) => THERMOCYCLE_RUN_FORMAT,
             Self::PlateRead(_) => PLATE_READ_FORMAT,
             Self::Simulation(_) => SIMULATION_RUN_FORMAT,
+            Self::ExternalFile { format, .. } => format,
         }
     }
 
@@ -169,6 +178,7 @@ impl LoadedReviewedDocument {
             Self::Thermocycle(document) => &document.title,
             Self::PlateRead(document) => &document.title,
             Self::Simulation(document) => &document.title,
+            Self::ExternalFile { title, .. } => title,
         }
     }
 }
@@ -1207,6 +1217,36 @@ fn load_reviewed_document(
             }
             Ok(LoadedReviewedDocument::Simulation(document))
         }
+        ("opentrons.ot2", OPENTRONS_PYTHON_PROTOCOL_FORMAT) => {
+            let source = std::str::from_utf8(bytes).with_context(|| {
+                format!(
+                    "{} is not a UTF-8 Opentrons Python protocol",
+                    path.display()
+                )
+            })?;
+            for marker in [
+                "from opentrons import protocol_api",
+                "def run(protocol: protocol_api.ProtocolContext) -> None:",
+                "# LAB:INVOCATION_PLAN",
+            ] {
+                if !source.contains(marker) {
+                    bail!(
+                        "{} is missing required Opentrons protocol marker {:?}",
+                        path.display(),
+                        marker
+                    );
+                }
+            }
+            let capability = expected_capability_kind
+                .rsplit(['#', '/'])
+                .find(|segment| !segment.is_empty())
+                .unwrap_or(expected_capability_kind);
+            Ok(LoadedReviewedDocument::ExternalFile {
+                format: format.to_owned(),
+                title: format!("Opentrons OT-2 {capability} protocol"),
+                contents: bytes.to_vec(),
+            })
+        }
         _ => bail!(
             "adapter '{driver}' has no runtime executor for reviewed document format '{format}'"
         ),
@@ -1326,6 +1366,44 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
 
     struct RecordingExecutor {
         calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[test]
+    fn preflight_validates_external_ot2_protocols_without_claiming_a_live_executor() {
+        let source = br#"from opentrons import protocol_api
+PLAN_JSON = "{}"  # LAB:INVOCATION_PLAN
+def run(protocol: protocol_api.ProtocolContext) -> None:
+    pass
+"#;
+        let loaded = load_reviewed_document(
+            "opentrons.ot2",
+            "opentrons.python-protocol",
+            "https://sbol.io/ns/capability#LiquidHandling",
+            source,
+            Path::new("automation_protocol.py"),
+        )
+        .unwrap();
+
+        assert_eq!(loaded.format(), "opentrons.python-protocol");
+        assert_eq!(loaded.title(), "Opentrons OT-2 LiquidHandling protocol");
+        assert!(matches!(
+            loaded,
+            LoadedReviewedDocument::ExternalFile { contents, .. } if contents == source
+        ));
+
+        let error = load_reviewed_document(
+            "opentrons.ot2",
+            "opentrons.python-protocol",
+            "https://sbol.io/ns/capability#LiquidHandling",
+            b"def run(): pass\n",
+            Path::new("automation_protocol.py"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("missing required Opentrons protocol marker"),
+            "{error}"
+        );
     }
 
     impl DocumentExecutor for RecordingExecutor {

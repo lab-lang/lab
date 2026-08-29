@@ -7,6 +7,7 @@
 
 mod backend;
 mod emit;
+mod invocation;
 mod package;
 mod plan;
 mod profile;
@@ -24,3 +25,4 @@ pub use crate::backend::opentrons::ot2::plan::{
     Ot2TransformationPlan, compile_build, emit_program, plan_build,
 };
 pub use crate::backend::opentrons::ot2::profile::{Ot2AdapterProfile, Ot2ProfileError};
+pub(in crate::backend) use invocation::lower_invocation;

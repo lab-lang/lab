@@ -37,6 +37,19 @@ fn copy_dir(from: &Path, to: &Path) {
     }
 }
 
+fn walk_files(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(root).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            files.extend(walk_files(&entry.path()));
+        } else {
+            files.push(entry.path());
+        }
+    }
+    files
+}
+
 fn read_json(path: impl AsRef<Path>) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
@@ -463,7 +476,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
 }
 
 #[test]
-fn facility_lowering_emits_automation_protocols_for_every_wave() {
+fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
@@ -497,14 +510,15 @@ fn facility_lowering_emits_automation_protocols_for_every_wave() {
     assert!(!out_dir.join("lowerings").exists());
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "planned");
-    // Planning names every runnable protocol, so a path can go straight into
-    // a device application.
+    // Planning names every requirement-scoped protocol, so a path can go straight into the
+    // device application without asking the backend to rediscover the experiment.
     let protocols = result["result"]["protocols"].as_array().unwrap();
-    assert_eq!(protocols.len(), 3);
+    assert_eq!(protocols.len(), 8);
     assert!(
         protocols
             .iter()
-            .all(|path| path.as_str().unwrap().ends_with("_protocol.py")),
+            .all(|path| path.as_str().unwrap().contains("/tasks/")
+                && path.as_str().unwrap().ends_with("/automation_protocol.py")),
         "{protocols:?}"
     );
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -519,7 +533,7 @@ fn facility_lowering_emits_automation_protocols_for_every_wave() {
     let printed = String::from_utf8(human.stdout).unwrap();
     assert!(printed.contains("Automation protocols:"), "{printed}");
     assert!(
-        printed.contains("wave-001/assembly_protocol.py"),
+        printed.contains("tasks/001-setup-golden-gate-reaction/automation_protocol.py"),
         "{printed}"
     );
 
@@ -527,26 +541,62 @@ fn facility_lowering_emits_automation_protocols_for_every_wave() {
         serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
             .unwrap();
     let target_root = out_dir.join(lowering["routes"][0]["output"].as_str().unwrap());
-    // Assembly precedes transformation, and every artifact in a wave shares
-    // one robot run.
-    assert!(target_root.join("wave-001/assembly_protocol.py").is_file());
+    assert_eq!(lowering["routes"][0]["scope"], "invocation");
     assert!(
         target_root
-            .join("wave-002/transformation_protocol.py")
+            .join("tasks/001-setup-golden-gate-reaction/automation_protocol.py")
             .is_file()
     );
-    assert!(target_root.join("wave-002/plating_protocol.py").is_file());
-    assert!(!target_root.join("wave-001/plating_protocol.py").exists());
+    assert!(
+        target_root
+            .join("tasks/002-thermal-cycle-golden-gate-reaction/automation_protocol.py")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("tasks/005-serial-dilution/automation_protocol.py")
+            .is_file()
+    );
+    assert!(
+        !walk_files(&target_root)
+            .iter()
+            .any(|path| path.to_string_lossy().contains("transformation_protocol")),
+        "the OT-2 must not absorb transformation allocated to the manual workstation"
+    );
+    assert!(
+        !walk_files(&target_root)
+            .iter()
+            .any(|path| path.to_string_lossy().contains("plating_protocol")),
+        "the dilution requirement must not absorb downstream plating"
+    );
 
-    let manifest: Value = serde_json::from_str(
-        &std::fs::read_to_string(target_root.join("wave-002/automation_manifest.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest["strains"].as_array().unwrap().len(), 4);
+    let manifest = read_json(
+        target_root.join("tasks/001-setup-golden-gate-reaction/invocation_manifest.json"),
+    );
+    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-task.v1");
+    assert_eq!(
+        manifest["task"]["operation"],
+        "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
+    );
+    assert_eq!(manifest["execution"]["kind"], "setup_golden_gate_reaction");
+    assert!(
+        manifest["execution"]["additions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|addition| addition["source"]["kind"] == "material_lot")
+    );
     assert_eq!(
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
         serde_json::json!(["5", "6"]),
         "the allocated adapter emits the concrete deck plan"
+    );
+    let dilution =
+        read_json(target_root.join("tasks/005-serial-dilution/invocation_manifest.json"));
+    assert_eq!(dilution["execution"]["kind"], "serial_dilution");
+    assert_eq!(
+        dilution["execution"]["medium"]["source"]["material_lot"],
+        "https://example.org/golden-gate/lots/recovery_medium_lot"
     );
 
     std::fs::remove_dir_all(out_dir).unwrap();
@@ -609,8 +659,8 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "https://example.org/golden-gate/facility"
     );
     assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
-    assert_eq!(facility["protocols"].as_array().unwrap().len(), 3);
-    assert_eq!(facility["documents"].as_array().unwrap().len(), 4);
+    assert_eq!(facility["protocols"].as_array().unwrap().len(), 8);
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 8);
     for path in facility["protocols"]
         .as_array()
         .unwrap()
@@ -634,7 +684,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         index["facility"]["facility_solution"],
         "compiler/facility-solution.json"
     );
-    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 3);
+    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 8);
     assert!(
         index["facility"]["protocols"][0]
             .as_str()
@@ -701,9 +751,9 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "{printed}"
     );
     assert!(printed.contains("Automation protocols:"), "{printed}");
-    assert!(printed.contains("assembly_protocol.py"), "{printed}");
+    assert!(printed.contains("automation_protocol.py"), "{printed}");
     assert!(printed.contains("Documents:"), "{printed}");
-    assert!(printed.contains("dependency_report.pdf"), "{printed}");
+    assert!(printed.contains("manual_protocol.pdf"), "{printed}");
 
     std::fs::remove_dir_all(out_dir).unwrap();
 }
@@ -772,7 +822,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "https://example.org/golden-gate/opentrons_ot2"
     );
     assert_eq!(route["driver"], "opentrons.ot2");
-    assert_eq!(route["scope"], "whole_program");
+    assert_eq!(route["scope"], "invocation");
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
     assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
@@ -782,7 +832,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         .iter()
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(protocols.len(), 3);
+    assert_eq!(protocols.len(), 8);
     assert!(protocols.iter().all(|artifact| {
         artifact["format"] == "opentrons.python-protocol"
             && artifact["sha256"].as_str().unwrap().len() == 64
@@ -861,25 +911,21 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         ]),
         "transformation must wait for both its realized plasmid and provisioned cells"
     );
-    let reviewed_lowering = &execution_plan["lowerings"][0];
-    assert_eq!(reviewed_lowering["id"], route["id"]);
-    assert_eq!(reviewed_lowering["asset"], route["asset"]);
-    assert_eq!(reviewed_lowering["adapter"]["driver"], "opentrons.ot2");
-    assert_eq!(
-        reviewed_lowering["requirements"].as_array().unwrap().len(),
-        8
+    assert!(
+        execution_plan["lowerings"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+        "an exact requirement document belongs on its Execute node, not in a whole-program lowering"
     );
-    let reviewed_protocols = reviewed_lowering["artifacts"]
-        .as_array()
-        .unwrap()
+    let reviewed_protocols = execution_nodes
         .iter()
-        .filter(|artifact| artifact["role"] == "device_protocol")
+        .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
-    assert_eq!(reviewed_protocols.len(), 3);
-    assert!(reviewed_protocols.iter().all(|artifact| {
-        artifact["format"] == "opentrons.python-protocol"
-            && artifact["sha256"].as_str().unwrap().len() == 64
-            && out_dir.join(artifact["path"].as_str().unwrap()).is_file()
+    assert_eq!(reviewed_protocols.len(), 8);
+    assert!(reviewed_protocols.iter().all(|document| {
+        document["format"] == "opentrons.python-protocol"
+            && document["sha256"].as_str().unwrap().len() == 64
+            && out_dir.join(document["path"].as_str().unwrap()).is_file()
     }));
 
     let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -891,7 +937,9 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "reviewed plan failed preflight: {}",
         String::from_utf8_lossy(&dry_run.stderr)
     );
-    assert!(String::from_utf8_lossy(&dry_run.stdout).contains("reviewed adapter lowerings"));
+    assert!(
+        String::from_utf8_lossy(&dry_run.stdout).contains("Opentrons OT-2 LiquidHandling protocol")
+    );
 
     let allocated_lair_path = out_dir.join("compiler/allocated.lair");
     let allocated_lair = std::fs::read(&allocated_lair_path).unwrap();
@@ -1088,40 +1136,46 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         String::from_utf8_lossy(&planned.stderr)
     );
     let result: Value = serde_json::from_slice(&planned.stdout).unwrap();
-    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 5);
+    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 8);
 
     let lowering: Value =
         serde_json::from_slice(&std::fs::read(plan_dir.join("facility_lowering.json")).unwrap())
             .unwrap();
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
-    let manifest: Value = serde_json::from_slice(
-        &std::fs::read(
-            plan_dir
-                .join(route["output"].as_str().unwrap())
-                .join("dependency_manifest.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    assert_eq!(manifest["inventory"]["kind"], "sbol_inventory");
+    assert_eq!(route["scope"], "invocation");
+    let invocations = read_json(plan_dir.join("compiler/adapter-invocations.json"));
     assert_eq!(
-        manifest["inventory"]["facility"],
+        invocations["facility"],
         "https://example.org/golden-gate/facility"
     );
-    let reference_binding = manifest["nodes"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|node| node["material_lot_bindings"].as_array().unwrap())
-        .find(|binding| binding["symbol"] == "reference_gfp")
-        .unwrap();
     assert_eq!(
-        reference_binding["component"],
+        invocations["material_inventory"]["materials"]["reference_gfp"]["component"],
         "https://example.org/golden-gate/materials/reference_gfp"
     );
     assert_eq!(
-        reference_binding["material_lot"],
+        invocations["material_inventory"]["materials"]["reference_gfp"]["material_lots"],
+        serde_json::json!(["https://example.org/golden-gate/lots/reference_gfp_lot"])
+    );
+    let reference_binding = invocations["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|method| method["tasks"].as_array().unwrap())
+        .flat_map(|task| {
+            task.get("materials")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .find(|binding| binding["symbol"] == "reference_gfp")
+        .unwrap();
+    assert_eq!(
+        reference_binding["source"]["component"],
+        "https://example.org/golden-gate/materials/reference_gfp"
+    );
+    assert_eq!(
+        reference_binding["source"]["material_lot"],
         "https://example.org/golden-gate/lots/reference_gfp_lot"
     );
 

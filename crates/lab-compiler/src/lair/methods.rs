@@ -91,6 +91,7 @@ fn automated_golden_gate() -> MethodDefinition {
         "buffer_volume_ul",
     ];
     let cycling_parameters = [
+        "artifact",
         "assembly_replicates",
         "reaction_volume_ul",
         "cycles",

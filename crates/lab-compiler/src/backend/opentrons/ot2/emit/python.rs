@@ -64,7 +64,9 @@ fn render_protocol(
     Ok(output)
 }
 
-fn python_string_expression(value: &str) -> Result<String, Ot2EmissionError> {
+pub(in crate::backend::opentrons::ot2) fn python_string_expression(
+    value: &str,
+) -> Result<String, Ot2EmissionError> {
     const MAX_LITERAL_WIDTH: usize = 88;
 
     let mut chunks = Vec::new();

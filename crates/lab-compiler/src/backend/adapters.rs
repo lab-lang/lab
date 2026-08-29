@@ -23,13 +23,13 @@ use crate::planning::{AdapterInvocation, AdapterInvocationPlan, BuildInventory};
 use crate::{AllocatedLairProgram, ArtifactBundle, ProtocolLairProgram};
 use lab_method::LocalId;
 use lab_runfmt::{
-    SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
+    OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
+    SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
 };
 
 pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v2";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
 
-const OPENTRONS_PYTHON_PROTOCOL: &str = "opentrons.python-protocol";
 const OPENTRONS_PROTOCOL_DESIGNER: &str = "opentrons.protocol-designer-json";
 
 const KNOWN_ADAPTERS: [&str; 6] = [
@@ -127,10 +127,10 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 ["on-deck-modules", "python-protocol-api", "single-channel"],
                 [ControlMode::ReviewedFile],
                 [],
-                [OPENTRONS_PYTHON_PROTOCOL],
+                [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::WholeProgram),
+                    lowering: Some(AdapterLoweringScope::Invocation),
                     simulation: false,
                     runtime: false,
                 },
@@ -411,17 +411,31 @@ pub struct AdapterInvocationLowering {
 
 /// Lower one exact allocated invocation without exposing LAIR or the rest of the experiment.
 pub fn lower_adapter_invocation_with_adapter(
-    driver: &str,
+    profile: &ValidatedAdapterProfile,
     invocation_plan: &AdapterInvocationPlan,
     invocation: &AdapterInvocation,
 ) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
+    let driver = profile.driver.as_str();
     invocation_plan
         .validate()
         .map_err(|error| AdapterLoweringError::InvalidInvocation {
             driver: driver.to_owned(),
             message: error.to_string(),
         })?;
+    let revalidated = validate_adapter_profile(driver, &profile.name, &profile.canonical_toml)
+        .map_err(|error| AdapterLoweringError::InvalidProfile {
+            driver: driver.to_owned(),
+            message: error.to_string(),
+        })?;
+    if revalidated != *profile {
+        return Err(AdapterLoweringError::InvalidProfile {
+            driver: driver.to_owned(),
+            message: "the validated profile does not match its canonical adapter representation"
+                .to_owned(),
+        });
+    }
     if invocation.adapter.driver != driver
+        || invocation.adapter.profile_sha256 != profile.sha256
         || !invocation_plan
             .invocations
             .iter()
@@ -433,6 +447,19 @@ pub fn lower_adapter_invocation_with_adapter(
         });
     }
     match driver {
+        "opentrons.ot2" => {
+            let parsed = Ot2AdapterProfile::parse(&profile.name, &profile.canonical_toml).map_err(
+                |error| AdapterLoweringError::InvalidProfile {
+                    driver: driver.to_owned(),
+                    message: error.to_string(),
+                },
+            )?;
+            crate::backend::opentrons::ot2::lower_invocation(&parsed, invocation_plan, invocation)
+                .map_err(|message| AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                })
+        }
         "lab.simulator" => lower_simulator_invocation(invocation_plan, invocation),
         _ => Err(AdapterLoweringError::UnsupportedInvocation {
             driver: driver.to_owned(),
@@ -725,6 +752,17 @@ mod tests {
         );
         assert!(star.services.runtime);
 
+        let ot2 = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "opentrons.ot2")
+            .unwrap();
+        assert_eq!(
+            ot2.services.lowering,
+            Some(AdapterLoweringScope::Invocation)
+        );
+        assert!(!ot2.services.runtime);
+
         let simulator = catalog
             .adapters
             .iter()
@@ -757,10 +795,11 @@ mod tests {
 
     #[test]
     fn simulator_lowers_each_exact_invocation_without_receiving_other_assets_work() {
+        let profile = default_adapter_profile("lab.simulator", "simulator").unwrap();
         let adapter = InvocationAdapter {
             driver: "lab.simulator".to_owned(),
             profile_path: "adapters/simulator.toml".into(),
-            profile_sha256: "b".repeat(64),
+            profile_sha256: profile.sha256.clone(),
             features: BTreeSet::from(["no-hardware".to_owned(), "semantic-simulation".to_owned()]),
             accepted_run_formats: BTreeSet::from([SIMULATION_RUN_FORMAT.to_owned()]),
             emitted_run_formats: BTreeSet::from([SIMULATION_RUN_FORMAT.to_owned()]),
@@ -852,10 +891,9 @@ mod tests {
         };
         plan.validate().unwrap();
 
-        let first_lowered =
-            lower_adapter_invocation_with_adapter("lab.simulator", &plan, &first).unwrap();
+        let first_lowered = lower_adapter_invocation_with_adapter(&profile, &plan, &first).unwrap();
         let second_lowered =
-            lower_adapter_invocation_with_adapter("lab.simulator", &plan, &second).unwrap();
+            lower_adapter_invocation_with_adapter(&profile, &plan, &second).unwrap();
         assert_eq!(first_lowered.documents[0].requirement, first_requirement);
         assert_eq!(second_lowered.documents[0].requirement, second_requirement);
         assert_eq!(first_lowered.artifacts.len(), 1);

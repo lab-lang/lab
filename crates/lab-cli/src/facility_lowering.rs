@@ -215,7 +215,7 @@ pub(crate) fn lower_adapter_invocations(
                 ),
                 AdapterLoweringScope::Invocation => {
                     let lowered = lower_adapter_invocation_with_adapter(
-                        &driver,
+                        &profile,
                         invocation_plan,
                         &invocation,
                     )

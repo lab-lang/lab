@@ -27,6 +27,9 @@ pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 /// The format string every semantic capability simulation document declares.
 pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
 
+/// The reviewed-file format for a standalone Opentrons Python protocol.
+pub const OPENTRONS_PYTHON_PROTOCOL_FORMAT: &str = "opentrons.python-protocol";
+
 /// The reviewed, facility-wide execution plan format.
 pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v4";
 
