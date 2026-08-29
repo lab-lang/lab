@@ -89,6 +89,41 @@ impl RequirementOp {
             .as_str()
             .to_owned()
     }
+
+    pub(crate) fn semantic_capability_kind(&self, context: &Context) -> CapabilityKind {
+        CapabilityKind::new(
+            self.get_attr_capability_kind(context)
+                .expect("verified capability.requirement carries capability_kind")
+                .as_str(),
+        )
+        .expect("verified capability.requirement capability kind is an absolute IRI")
+    }
+
+    pub(crate) fn semantic_minimum_qualification(&self, context: &Context) -> QualificationLevel {
+        QualificationLevel::try_from(
+            self.get_attr_minimum_qualification(context)
+                .expect("verified capability.requirement carries minimum_qualification")
+                .as_str(),
+        )
+        .expect("verified capability.requirement carries a closed qualification")
+    }
+
+    pub(crate) fn semantic_control_modes(&self, context: &Context) -> BTreeSet<ControlMode> {
+        self.get_attr_accepted_control_modes(context)
+            .expect("verified capability.requirement carries accepted_control_modes")
+            .0
+            .iter()
+            .map(|value| {
+                ControlMode::try_from(
+                    value
+                        .downcast_ref::<StringAttr>()
+                        .expect("verified control modes are strings")
+                        .as_str(),
+                )
+                .expect("verified control modes belong to the closed vocabulary")
+            })
+            .collect()
+    }
 }
 
 impl Verify for RequirementOp {
@@ -218,7 +253,10 @@ impl ConstraintOp {
             .to_owned()
     }
 
-    fn decode(&self, context: &Context) -> std::result::Result<PropertyConstraint, String> {
+    pub(crate) fn decode(
+        &self,
+        context: &Context,
+    ) -> std::result::Result<PropertyConstraint, String> {
         let requirement_id = required_attr(
             self.get_attr_constraint_requirement_id(context),
             "constraint_requirement_id",

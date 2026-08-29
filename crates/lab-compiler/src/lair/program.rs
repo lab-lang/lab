@@ -56,6 +56,8 @@ pub enum RefinedLairError {
     Stage(String),
 }
 
+pub use crate::lair::planning_problem::PlanningProblemExtractionError;
+
 /// A Pliron context and its root module, owned together for the complete
 /// lifetime of all IR handles.
 pub struct PortableLairProgram {
@@ -239,6 +241,13 @@ pub struct RefinedLairProgram {
 impl RefinedLairProgram {
     pub fn ir(&self) -> String {
         self.module.get_operation().disp(&self.context).to_string()
+    }
+
+    /// Project immutable, facility-independent constraints for the global planner.
+    pub fn planning_problem(
+        &self,
+    ) -> Result<crate::planning::PlanningProblem, PlanningProblemExtractionError> {
+        crate::lair::planning_problem::extract_planning_problem(&self.context, self.module)
     }
 }
 
@@ -446,12 +455,14 @@ fn workflow_value(
 
 #[cfg(test)]
 mod tests {
+    use lab_capability::ScalarValue;
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
 
     use crate::lair::session::CompilerSession;
     use crate::lair::stage::IrStage;
+    use crate::planning::{PlanningProblem, PlanningValueSource};
 
     use super::PortableLairProgram;
 
@@ -694,5 +705,76 @@ workflow build_second() -> Material<Plasmid>:
         assert!(ir.contains("http://qudt.org/vocab/unit/MIN"), "{ir}");
         assert!(ir.contains("builtin.string \"30\""), "{ir}");
         assert!(!ir.contains("http://qudt.org/vocab/unit/HR"), "{ir}");
+    }
+
+    #[test]
+    fn refined_lair_projects_a_stable_facility_independent_planning_problem() {
+        let source = format!("{DESIGNS}{WORKFLOWS}")
+            .replace("use demo.designs\n", "")
+            .replace("use std.bio.designs\nuse std.bio.golden_gate\n", "")
+            .replacen(
+                "use std.bio.build",
+                "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.build",
+                1,
+            )
+            .replace("recover culture for 1 h", "recover culture for 30 min");
+        let checked = compile_module(&source).expect("minute-scale recovery checks");
+        let refined = PortableLairProgram::lower(&checked)
+            .expect("portable LAIR lowers")
+            .refine_standard_methods()
+            .expect("standard methods refine");
+        let problem = refined.planning_problem().expect("problem projects");
+
+        let realization = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.bio.build.realize")
+            .expect("realization is a global method choice");
+        assert_eq!(realization.inputs[0].name.as_str(), "design");
+        assert_eq!(realization.outputs[0].name.as_str(), "product");
+        assert_eq!(realization.candidates.len(), 2);
+        assert!(realization.candidates.iter().any(|candidate| {
+            candidate.method.as_str()
+                == "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
+        }));
+        let automated = realization
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate
+                    .method
+                    .as_str()
+                    .ends_with("#automated-golden-gate")
+            })
+            .expect("automated Golden Gate remains selectable");
+        assert_eq!(automated.tasks.len(), 2);
+        assert!(matches!(
+            automated.tasks[1].inputs[0].source,
+            PlanningValueSource::TaskOutput { ref task, ref output }
+                if task.as_str().ends_with("::setup-reaction") && output.as_str() == "reaction"
+        ));
+
+        let recovery = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.recover")
+            .expect("recovery is a global method choice");
+        assert_eq!(recovery.candidates.len(), 2);
+        for candidate in &recovery.candidates {
+            let constraint = &candidate.tasks[0].requirements[0].constraints[0];
+            assert_eq!(
+                constraint.required.unit.as_ref().unwrap().as_str(),
+                "http://qudt.org/vocab/unit/MIN"
+            );
+            assert!(matches!(
+                &constraint.required.value,
+                ScalarValue::Real(value) if value.to_string() == "30"
+            ));
+        }
+
+        let json = serde_json::to_string_pretty(&problem).expect("problem serializes");
+        let decoded: PlanningProblem = serde_json::from_str(&json).expect("problem deserializes");
+        decoded.validate().expect("decoded problem revalidates");
+        assert_eq!(decoded, problem);
     }
 }

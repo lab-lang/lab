@@ -6,7 +6,7 @@
 use std::collections::BTreeSet;
 
 use lab_capability::MethodId;
-use lab_method::LocalId;
+use lab_method::{IntentOperationId, LocalId};
 use pliron::basic_block::BasicBlock;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{
@@ -98,6 +98,52 @@ impl ChoiceOp {
             .to_owned()
     }
 
+    pub(crate) fn semantic_choice_id(&self, context: &Context) -> LocalId {
+        LocalId::new(self.choice_id(context)).expect("verified method.choice carries a stable ID")
+    }
+
+    pub(crate) fn source_operation(&self, context: &Context) -> IntentOperationId {
+        IntentOperationId::new(
+            self.get_attr_source_operation(context)
+                .expect("verified method.choice carries source_operation")
+                .as_str(),
+        )
+        .expect("verified method.choice carries a stable source operation")
+    }
+
+    pub(crate) fn candidate_ids(&self, context: &Context) -> Vec<MethodId> {
+        self.get_attr_candidates(context)
+            .expect("verified method.choice carries candidates")
+            .0
+            .iter()
+            .map(|candidate| {
+                MethodId::new(
+                    candidate
+                        .downcast_ref::<StringAttr>()
+                        .expect("verified method.choice candidates are strings")
+                        .as_str(),
+                )
+                .expect("verified method.choice candidates are absolute IRIs")
+            })
+            .collect()
+    }
+
+    pub(crate) fn input_names(&self, context: &Context) -> Vec<LocalId> {
+        local_ids(
+            &self
+                .get_attr_choice_input_names(context)
+                .expect("verified method.choice carries input names"),
+        )
+    }
+
+    pub(crate) fn output_names(&self, context: &Context) -> Vec<LocalId> {
+        local_ids(
+            &self
+                .get_attr_choice_output_names(context)
+                .expect("verified method.choice carries output names"),
+        )
+    }
+
     pub(crate) fn append_candidate_operation(
         &self,
         context: &mut Context,
@@ -106,6 +152,22 @@ impl ChoiceOp {
     ) {
         self.append_operation(context, operation, candidate);
     }
+}
+
+fn local_ids(values: &VecAttr) -> Vec<LocalId> {
+    values
+        .0
+        .iter()
+        .map(|value| {
+            LocalId::new(
+                value
+                    .downcast_ref::<StringAttr>()
+                    .expect("verified local IDs are strings")
+                    .as_str(),
+            )
+            .expect("verified local IDs contain no whitespace")
+        })
+        .collect()
 }
 
 impl Verify for ChoiceOp {

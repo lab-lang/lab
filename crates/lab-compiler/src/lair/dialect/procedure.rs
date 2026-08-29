@@ -10,7 +10,7 @@
 use std::collections::BTreeSet;
 
 use lab_capability::{AbsoluteIri, OperationId, PropertyKind, PropertyValue};
-use lab_method::LocalId;
+use lab_method::{LocalId, PortType};
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;
@@ -108,6 +108,35 @@ impl TaskOp {
             .as_str()
             .to_owned()
     }
+
+    pub(crate) fn semantic_node_id(&self, context: &Context) -> LocalId {
+        LocalId::new(self.node_id(context)).expect("verified procedure.task carries a stable ID")
+    }
+
+    pub(crate) fn semantic_operation(&self, context: &Context) -> OperationId {
+        OperationId::new(
+            self.get_attr_operation(context)
+                .expect("verified procedure.task carries operation")
+                .as_str(),
+        )
+        .expect("verified procedure.task operation is an absolute IRI")
+    }
+
+    pub(crate) fn output_names(&self, context: &Context) -> Vec<LocalId> {
+        self.get_attr_task_output_names(context)
+            .expect("verified procedure.task carries output names")
+            .0
+            .iter()
+            .map(|name| {
+                LocalId::new(
+                    name.downcast_ref::<StringAttr>()
+                        .expect("verified procedure.task output names are strings")
+                        .as_str(),
+                )
+                .expect("verified procedure.task output names are stable IDs")
+            })
+            .collect()
+    }
 }
 
 impl Verify for TaskOp {
@@ -188,6 +217,23 @@ fn is_procedure_port_type(context: &Context, handle: TypeHandle) -> bool {
         || ty.downcast_ref::<DataType>().is_some()
 }
 
+pub(crate) fn semantic_port_type(context: &Context, handle: TypeHandle) -> Option<PortType> {
+    let ty = handle.deref(context);
+    if ty.downcast_ref::<DesignType>().is_some() {
+        return Some(PortType::Design);
+    }
+    if let Some(material) = ty.downcast_ref::<MaterialType>() {
+        return Some(PortType::Material {
+            state: AbsoluteIri::new(material.state.as_str())
+                .expect("verified Procedure material state is an absolute IRI"),
+        });
+    }
+    ty.downcast_ref::<DataType>().map(|data| PortType::Data {
+        data_kind: AbsoluteIri::new(data.kind.as_str())
+            .expect("verified Procedure data kind is an absolute IRI"),
+    })
+}
+
 /// One exact semantic parameter attached to a Procedure task by stable identity.
 #[pliron_op(
     name = "procedure.parameter",
@@ -249,6 +295,34 @@ impl ParameterOp {
             .expect("verified procedure.parameter carries procedure_node")
             .as_str()
             .to_owned()
+    }
+
+    pub(crate) fn semantic_parameter(
+        &self,
+        context: &Context,
+    ) -> (LocalId, PropertyKind, PropertyValue) {
+        let id = LocalId::new(self.parameter_id(context))
+            .expect("verified procedure.parameter carries a stable ID");
+        let property = PropertyKind::new(
+            self.get_attr_procedure_parameter_kind(context)
+                .expect("verified procedure.parameter carries a property kind")
+                .as_str(),
+        )
+        .expect("verified procedure.parameter property kind is an absolute IRI");
+        let value_kind = self
+            .get_attr_procedure_parameter_value_kind(context)
+            .expect("verified procedure.parameter carries a value kind");
+        let value = self
+            .get_attr_procedure_parameter_value(context)
+            .expect("verified procedure.parameter carries a value");
+        let unit = self.get_attr_procedure_parameter_unit(context);
+        let value = decode_property_value(
+            value_kind.as_str(),
+            value.as_str(),
+            unit.as_ref().map(|unit| unit.as_str()),
+        )
+        .expect("verified procedure.parameter carries a semantic value");
+        (id, property, value)
     }
 }
 
