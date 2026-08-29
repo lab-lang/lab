@@ -3,6 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use lab_capability::{
+    AbsoluteIri, ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue, ScalarValue,
+    UnitIri,
+};
 use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
     FacilityScalarValue, InventorySnapshot,
@@ -301,7 +305,7 @@ fn allocate_requirement(
     let mut rejected = Vec::new();
     for asset in assets {
         for offering in &asset.offerings {
-            if offering.capability_kind.as_str() != requirement.capability_kind {
+            if offering.capability_kind.as_str() != requirement.capability_kind.as_str() {
                 continue;
             }
             let mut reasons = Vec::new();
@@ -342,7 +346,7 @@ fn allocate_requirement(
     if eligible.is_empty() {
         return Err(FacilityAllocationError::NoEligibleOffering {
             requirement: instance.to_owned(),
-            capability_kind: requirement.capability_kind.clone(),
+            capability_kind: requirement.capability_kind.to_string(),
             candidate_count: rejected.len(),
             rejections: rejected,
         });
@@ -367,7 +371,7 @@ fn allocate_requirement(
     Ok(RequirementAllocation {
         requirement_instance: instance.to_owned(),
         requirement_template: requirement.id.clone(),
-        capability_kind: requirement.capability_kind.clone(),
+        capability_kind: requirement.capability_kind.to_string(),
         minimum_qualification: requirement.minimum_qualification.iri().to_owned(),
         accepted_control_modes,
         offering: offering.identity.as_str().to_owned(),
@@ -387,69 +391,101 @@ fn match_parameter(
     let Some(parameter) = offering
         .parameters
         .iter()
-        .find(|parameter| parameter.property_kind.as_str() == constraint.property_kind)
+        .find(|parameter| parameter.property_kind.as_str() == constraint.property_kind.as_str())
     else {
         return Err(CandidateRejectionReason::MissingParameter {
-            property_kind: constraint.property_kind.clone(),
+            property_kind: constraint.property_kind.to_string(),
         });
     };
     let observed_unit = parameter.unit.as_ref().map(|unit| unit.as_str().to_owned());
-    if constraint.unit != observed_unit {
+    let required_unit = constraint
+        .unit
+        .as_ref()
+        .map(|unit| unit.as_str().to_owned());
+    if required_unit != observed_unit {
         return Err(CandidateRejectionReason::UnitMismatch {
-            property_kind: constraint.property_kind.clone(),
-            required: constraint.unit.clone(),
+            property_kind: constraint.property_kind.to_string(),
+            required: required_unit,
             observed: observed_unit,
         });
     }
-    match values_equal(&constraint.value, &parameter.value) {
-        Some(true) => Ok(MatchedCapabilityParameter {
+    let Some(required_value) = semantic_requirement_value(&constraint.value) else {
+        return Err(CandidateRejectionReason::UnsupportedRequirementValue {
+            property_kind: constraint.property_kind.to_string(),
+        });
+    };
+    let Some(observed_value) = semantic_observed_value(&parameter.value) else {
+        return Err(CandidateRejectionReason::UnsupportedRequirementValue {
+            property_kind: constraint.property_kind.to_string(),
+        });
+    };
+    let required = PropertyValue::new(required_value, constraint.unit.clone())
+        .expect("checked quantity constraints carry units only on numeric values");
+    let observed = PropertyValue::new(
+        observed_value,
+        parameter
+            .unit
+            .as_ref()
+            .map(|unit| UnitIri::new(unit.as_str()).expect("an sbol3 Iri is an absolute IRI")),
+    )
+    .expect("validated SBOLInventory properties carry units only on numeric values");
+    let semantic = PropertyConstraint {
+        property_kind: constraint.property_kind.clone(),
+        relation: constraint.relation,
+        required,
+    };
+    match semantic.is_satisfied_by(&observed) {
+        Ok(true) => Ok(MatchedCapabilityParameter {
             argument: constraint.argument.clone(),
-            property_kind: constraint.property_kind.clone(),
+            property_kind: constraint.property_kind.to_string(),
             relation: constraint.relation,
             required: constraint.value.clone(),
-            required_unit: constraint.unit.clone(),
+            required_unit: constraint.unit.as_ref().map(ToString::to_string),
             offering_parameter: parameter.identity.as_str().to_owned(),
             observed: allocation_value(parameter),
             observed_unit: parameter.unit.as_ref().map(|unit| unit.as_str().to_owned()),
         }),
-        Some(false) => Err(CandidateRejectionReason::ValueMismatch {
-            property_kind: constraint.property_kind.clone(),
+        Ok(false) => Err(CandidateRejectionReason::ValueMismatch {
+            property_kind: constraint.property_kind.to_string(),
             required: render_requirement_value(&constraint.value),
             observed: render_observed_value(&parameter.value),
         }),
-        None => Err(CandidateRejectionReason::UnsupportedRequirementValue {
-            property_kind: constraint.property_kind.clone(),
+        Err(_) => Err(CandidateRejectionReason::UnsupportedRequirementValue {
+            property_kind: constraint.property_kind.to_string(),
         }),
     }
 }
 
-fn values_equal(required: &TypedExpression, observed: &FacilityScalarValue) -> Option<bool> {
-    if let Some(required) = numeric_requirement(required) {
-        let observed = match observed {
-            FacilityScalarValue::Integer(value) | FacilityScalarValue::Real(value) => {
-                value.parse::<f64>().ok()?
-            }
-            FacilityScalarValue::Text(_)
-            | FacilityScalarValue::Boolean(_)
-            | FacilityScalarValue::Iri(_) => return Some(false),
-        };
-        return Some(required == observed);
-    }
-    match (&required.value, observed) {
-        (CheckedExpression::String { value: required }, FacilityScalarValue::Text(observed)) => {
-            Some(required == observed)
+fn semantic_requirement_value(required: &TypedExpression) -> Option<ScalarValue> {
+    match &required.value {
+        CheckedExpression::Integer { value } => ExactInteger::parse(value.to_string())
+            .ok()
+            .map(ScalarValue::Integer),
+        CheckedExpression::Decimal { text }
+        | CheckedExpression::Quantity {
+            magnitude: text, ..
+        } => ExactDecimal::parse(text).ok().map(ScalarValue::Real),
+        CheckedExpression::Unary { operator, operand } if operator == "negate" => {
+            numeric_requirement(operand).map(|value| ScalarValue::Real(value.negated()))
         }
-        _ => None,
+        CheckedExpression::String { value } => Some(ScalarValue::Text(value.clone())),
+        CheckedExpression::Reference { .. }
+        | CheckedExpression::List { .. }
+        | CheckedExpression::Call { .. }
+        | CheckedExpression::Construct { .. }
+        | CheckedExpression::Field { .. }
+        | CheckedExpression::Unary { .. }
+        | CheckedExpression::Binary { .. } => None,
     }
 }
 
-fn numeric_requirement(required: &TypedExpression) -> Option<f64> {
+fn numeric_requirement(required: &TypedExpression) -> Option<ExactDecimal> {
     match &required.value {
-        CheckedExpression::Integer { value } => Some(*value as f64),
-        CheckedExpression::Decimal { text } => text.parse().ok(),
-        CheckedExpression::Quantity { magnitude, .. } => magnitude.parse().ok(),
+        CheckedExpression::Integer { value } => ExactDecimal::parse(value.to_string()).ok(),
+        CheckedExpression::Decimal { text } => ExactDecimal::parse(text).ok(),
+        CheckedExpression::Quantity { magnitude, .. } => ExactDecimal::parse(magnitude).ok(),
         CheckedExpression::Unary { operator, operand } if operator == "negate" => {
-            numeric_requirement(operand).map(|value| -value)
+            numeric_requirement(operand).map(|value| value.negated())
         }
         CheckedExpression::Reference { .. }
         | CheckedExpression::List { .. }
@@ -459,6 +495,20 @@ fn numeric_requirement(required: &TypedExpression) -> Option<f64> {
         | CheckedExpression::Unary { .. }
         | CheckedExpression::Binary { .. }
         | CheckedExpression::String { .. } => None,
+    }
+}
+
+fn semantic_observed_value(observed: &FacilityScalarValue) -> Option<ScalarValue> {
+    match observed {
+        FacilityScalarValue::Text(value) => Some(ScalarValue::Text(value.clone())),
+        FacilityScalarValue::Integer(value) => {
+            ExactInteger::parse(value).ok().map(ScalarValue::Integer)
+        }
+        FacilityScalarValue::Real(value) => ExactDecimal::parse(value).ok().map(ScalarValue::Real),
+        FacilityScalarValue::Boolean(value) => Some(ScalarValue::Boolean(*value)),
+        FacilityScalarValue::Iri(value) => {
+            AbsoluteIri::new(value.as_str()).ok().map(ScalarValue::Iri)
+        }
     }
 }
 
@@ -628,14 +678,20 @@ ex:freezer a sbol:TopLevel, fac:Asset ; sbol:displayId "freezer" ;
     }
 
     fn requirements() -> (CapabilityRequirements, CapabilityRequirementInstances) {
-        let module = compile_module(
+        storage_requirements("-80")
+    }
+
+    fn storage_requirements(
+        temperature: &str,
+    ) -> (CapabilityRequirements, CapabilityRequirementInstances) {
+        let module = compile_module(&format!(
             r#"use std.lab.plasmid
 
 workflow main(plasmid: Material<Plasmid>) -> Material<Plasmid>:
-  stored <- store plasmid at -80 C
+  stored <- store plasmid at {temperature} C
   return stored
-"#,
-        )
+"#
+        ))
         .unwrap();
         let requirements = CapabilityRequirements::extract(&[&module]).unwrap();
         let instances = requirements
@@ -714,6 +770,25 @@ workflow main(culture: Material<Culture>) -> Material<Culture>:
         assert!(matches!(
             rejections[0].reasons.as_slice(),
             [CandidateRejectionReason::ValueMismatch { .. }]
+        ));
+    }
+
+    #[test]
+    fn parameter_matching_never_rounds_through_binary_floating_point() {
+        let contents = INVENTORY.replace("-80.0", "9007199254740992.0");
+        let (_directory, inventory) = inventory(&contents);
+        let (requirements, instances) = storage_requirements("9007199254740993");
+
+        let error =
+            FacilityAllocation::allocate(&requirements, &instances, &inventory, None).unwrap_err();
+
+        let FacilityAllocationError::NoEligibleOffering { rejections, .. } = error else {
+            panic!("expected exact decimals to reject the rounded candidate")
+        };
+        assert!(matches!(
+            rejections[0].reasons.as_slice(),
+            [CandidateRejectionReason::ValueMismatch { required, observed, .. }]
+                if required == "9007199254740993" && observed == "9007199254740992.0"
         ));
     }
 

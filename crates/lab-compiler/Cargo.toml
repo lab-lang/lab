@@ -26,6 +26,7 @@ clap.workspace = true
 # encoding never link libusb (the workspace dependency keeps default
 # features off).
 hamilton-star.workspace = true
+lab-capability.workspace = true
 lab-instruments.workspace = true
 lab-inventory.workspace = true
 lab-runfmt.workspace = true

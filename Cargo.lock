@@ -1707,6 +1707,7 @@ dependencies = [
  "cargo-husky",
  "clap",
  "hamilton-star",
+ "lab-capability",
  "lab-instruments",
  "lab-inventory",
  "lab-language",

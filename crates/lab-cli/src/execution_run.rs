@@ -161,7 +161,8 @@ fn build_simulation_registry(
         }
         if !descriptor
             .capabilities
-            .contains(&requirement.capability_kind)
+            .iter()
+            .any(|kind| kind.as_str() == requirement.capability_kind)
         {
             bail!(
                 "adapter '{}' does not simulate capability '{}'",
@@ -169,7 +170,11 @@ fn build_simulation_registry(
                 requirement.capability_kind
             );
         }
-        if !descriptor.control_modes.contains(&requirement.control_mode) {
+        if !descriptor
+            .control_modes
+            .iter()
+            .any(|mode| mode.iri() == requirement.control_mode)
+        {
             bail!(
                 "adapter '{}' does not accept control mode '{}'",
                 adapter.driver,

@@ -109,6 +109,8 @@ pub fn build_execution_plan(
                         property_kind: parameter.property_kind.clone(),
                         relation: match parameter.relation {
                             ParameterRelation::Exact => "exact".to_owned(),
+                            ParameterRelation::AtLeast => "at_least".to_owned(),
+                            ParameterRelation::AtMost => "at_most".to_owned(),
                         },
                         required: requirement_value(&parameter.required)?,
                         required_unit: parameter.required_unit.clone(),

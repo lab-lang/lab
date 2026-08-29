@@ -67,10 +67,12 @@ impl AdapterBindingSnapshot {
                 .filter(|offering| {
                     descriptor
                         .capabilities
-                        .contains(offering.capability_kind.as_str())
+                        .iter()
+                        .any(|kind| kind.as_str() == offering.capability_kind.as_str())
                         && descriptor
                             .control_modes
-                            .contains(offering.control_mode.iri())
+                            .iter()
+                            .any(|mode| mode.iri() == offering.control_mode.iri())
                 })
                 .map(|offering| BoundCapabilityOffering {
                     offering: offering.identity.as_str().to_owned(),
@@ -231,11 +233,18 @@ pub enum AdapterBindingError {
     },
 }
 
-fn render_set(values: &BTreeSet<String>) -> String {
+fn render_set<T>(values: &BTreeSet<T>) -> String
+where
+    T: std::fmt::Display,
+{
     if values.is_empty() {
         "none".to_owned()
     } else {
-        values.iter().cloned().collect::<Vec<_>>().join(", ")
+        values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 

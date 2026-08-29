@@ -163,11 +163,18 @@ fn render_descriptor(adapter: &AdapterDescriptor) -> String {
     )
 }
 
-fn join(values: &std::collections::BTreeSet<String>) -> String {
+fn join<T>(values: &std::collections::BTreeSet<T>) -> String
+where
+    T: std::fmt::Display,
+{
     if values.is_empty() {
         "none".to_owned()
     } else {
-        values.iter().cloned().collect::<Vec<_>>().join(", ")
+        values
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 

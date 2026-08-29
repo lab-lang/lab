@@ -7,8 +7,9 @@
 
 use std::collections::BTreeSet;
 
+use lab_capability::{CapabilityKind, ControlMode};
 use sbol_inventory::vocabulary::{
-    ABSORBANCE_MEASUREMENT, ControlMode, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
+    ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
@@ -52,11 +53,11 @@ pub struct AdapterDescriptor {
     pub display_name: String,
     pub manufacturer: Option<String>,
     /// Exact SBOLInventory `fac:capabilityKind` IRIs this implementation supports.
-    pub capabilities: BTreeSet<String>,
+    pub capabilities: BTreeSet<CapabilityKind>,
     /// Implementation facts that must never be used as semantic capability kinds.
     pub features: BTreeSet<String>,
     /// Exact closed SBOLInventory control-mode IRIs this implementation supports.
-    pub control_modes: BTreeSet<String>,
+    pub control_modes: BTreeSet<ControlMode>,
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
     pub services: AdapterServices,
@@ -228,12 +229,18 @@ fn descriptor<const C: usize, const F: usize, const M: usize, const A: usize, co
         id: id.to_owned(),
         display_name: display_name.to_owned(),
         manufacturer: manufacturer.map(str::to_owned),
-        capabilities: strings(capabilities),
-        features: strings(features),
-        control_modes: control_modes
+        capabilities: capabilities
             .into_iter()
-            .map(|mode| mode.iri().to_owned())
-            .collect(),
+            .map(|kind| {
+                CapabilityKind::new(kind).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "adapter '{id}' declares invalid capability kind: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        features: strings(features),
+        control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
         services,
@@ -530,10 +537,20 @@ mod tests {
             .iter()
             .find(|adapter| adapter.id == "hamilton.star")
             .unwrap();
-        assert_eq!(star.capabilities, strings([LIQUID_HANDLING]));
+        assert_eq!(
+            star.capabilities,
+            [CapabilityKind::new(LIQUID_HANDLING).unwrap()]
+                .into_iter()
+                .collect()
+        );
         assert!(star.features.contains("eight-channel"));
-        assert!(!star.capabilities.contains("eight-channel"));
-        assert!(star.control_modes.contains(ControlMode::Api.iri()));
+        assert!(
+            !star
+                .capabilities
+                .iter()
+                .any(|kind| kind.as_str() == "eight-channel")
+        );
+        assert!(star.control_modes.contains(&ControlMode::Api));
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
         assert!(star.services.lowering);
         assert!(star.services.runtime);
@@ -553,7 +570,10 @@ mod tests {
         );
         assert_eq!(
             simulator.capabilities,
-            strings([LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT])
+            [LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT]
+                .into_iter()
+                .map(|kind| CapabilityKind::new(kind).unwrap())
+                .collect()
         );
     }
 

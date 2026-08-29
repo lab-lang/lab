@@ -21,12 +21,13 @@ pub use allocation::{
 };
 pub use capability::{
     CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION, CAPABILITY_REQUIREMENTS_SCHEMA_VERSION,
-    CapabilityInstantiationError, CapabilityMaterialInput, CapabilityMaterialOutput,
-    CapabilityParameterConstraint, CapabilityRequirement, CapabilityRequirementError,
-    CapabilityRequirementInstance, CapabilityRequirementInstances, CapabilityRequirementSource,
-    CapabilityRequirements, CapabilityValueInput, CapabilityValueOutput, ParameterRelation,
-    RequirementControlMode, RequirementQualification, StatementBlock, StatementPathSegment,
-    WorkflowCallSite, WorkflowIdentity,
+    CapabilityInstantiationError, CapabilityKind, CapabilityMaterialInput,
+    CapabilityMaterialOutput, CapabilityParameterConstraint, CapabilityRequirement,
+    CapabilityRequirementError, CapabilityRequirementInstance, CapabilityRequirementInstances,
+    CapabilityRequirementSource, CapabilityRequirements, CapabilityValueInput,
+    CapabilityValueOutput, ParameterRelation, PropertyKind, RequirementControlMode,
+    RequirementQualification, StatementBlock, StatementPathSegment, UnitIri, WorkflowCallSite,
+    WorkflowIdentity,
 };
 pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,

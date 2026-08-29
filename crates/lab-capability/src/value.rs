@@ -186,6 +186,15 @@ impl ExactDecimal {
         self.digits == "0"
     }
 
+    /// Returns the exact additive inverse without reparsing or rounding.
+    pub fn negated(&self) -> Self {
+        let mut value = self.clone();
+        if !value.is_zero() {
+            value.negative = !value.negative;
+        }
+        value
+    }
+
     fn unsigned_integer_digits(&self) -> &str {
         if self.digits.len() > self.scale {
             &self.digits[..self.digits.len() - self.scale]

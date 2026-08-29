@@ -1,8 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use lab_capability::{
+    CapabilityKind, ConstraintRelation as ParameterRelation, ControlMode as RequirementControlMode,
+    PropertyKind, QualificationLevel as RequirementQualification, UnitIri,
+};
 use lab_language::{
     CheckedActionArgument, CheckedDeclaration, CheckedExpression, CheckedField, CheckedModule,
-    CheckedStatement, CheckedType, OwnershipMode, ResolvedAction, TypedExpression, is_absolute_iri,
+    CheckedStatement, CheckedType, OwnershipMode, ResolvedAction, TypedExpression,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -142,7 +146,7 @@ pub struct WorkflowCallSite {
 pub struct CapabilityRequirement {
     pub id: String,
     pub source: CapabilityRequirementSource,
-    pub capability_kind: String,
+    pub capability_kind: CapabilityKind,
     pub minimum_qualification: RequirementQualification,
     pub accepted_control_modes: BTreeSet<RequirementControlMode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -197,92 +201,14 @@ impl StatementBlock {
     }
 }
 
-/// The closed SBOLInventory qualification vocabulary, used here as a typed minimum.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum RequirementQualification {
-    #[serde(rename = "https://sbol.io/ns/facility#Discovered")]
-    Discovered,
-    #[serde(rename = "https://sbol.io/ns/facility#Described")]
-    Described,
-    #[serde(rename = "https://sbol.io/ns/facility#Plannable")]
-    Plannable,
-    #[serde(rename = "https://sbol.io/ns/facility#Simulatable")]
-    Simulatable,
-    #[serde(rename = "https://sbol.io/ns/facility#Executable")]
-    Executable,
-    #[serde(rename = "https://sbol.io/ns/facility#Qualified")]
-    Qualified,
-}
-
-impl RequirementQualification {
-    pub const fn iri(self) -> &'static str {
-        match self {
-            Self::Discovered => "https://sbol.io/ns/facility#Discovered",
-            Self::Described => "https://sbol.io/ns/facility#Described",
-            Self::Plannable => "https://sbol.io/ns/facility#Plannable",
-            Self::Simulatable => "https://sbol.io/ns/facility#Simulatable",
-            Self::Executable => "https://sbol.io/ns/facility#Executable",
-            Self::Qualified => "https://sbol.io/ns/facility#Qualified",
-        }
-    }
-}
-
-/// The closed SBOLInventory control-mode vocabulary, used here as a typed accepted set.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum RequirementControlMode {
-    #[serde(rename = "https://sbol.io/ns/facility#UnspecifiedControl")]
-    Unspecified,
-    #[serde(rename = "https://sbol.io/ns/facility#ManualControl")]
-    Manual,
-    #[serde(rename = "https://sbol.io/ns/facility#ReviewedFileControl")]
-    ReviewedFile,
-    #[serde(rename = "https://sbol.io/ns/facility#VendorSessionControl")]
-    VendorSession,
-    #[serde(rename = "https://sbol.io/ns/facility#ApiControl")]
-    Api,
-    #[serde(rename = "https://sbol.io/ns/facility#SiLA2Control")]
-    Sila2,
-    #[serde(rename = "https://sbol.io/ns/facility#OpcUaControl")]
-    OpcUa,
-}
-
-impl RequirementControlMode {
-    const CONCRETE: [Self; 6] = [
-        Self::Manual,
-        Self::ReviewedFile,
-        Self::VendorSession,
-        Self::Api,
-        Self::Sila2,
-        Self::OpcUa,
-    ];
-
-    pub const fn iri(self) -> &'static str {
-        match self {
-            Self::Unspecified => "https://sbol.io/ns/facility#UnspecifiedControl",
-            Self::Manual => "https://sbol.io/ns/facility#ManualControl",
-            Self::ReviewedFile => "https://sbol.io/ns/facility#ReviewedFileControl",
-            Self::VendorSession => "https://sbol.io/ns/facility#VendorSessionControl",
-            Self::Api => "https://sbol.io/ns/facility#ApiControl",
-            Self::Sila2 => "https://sbol.io/ns/facility#SiLA2Control",
-            Self::OpcUa => "https://sbol.io/ns/facility#OpcUaControl",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CapabilityParameterConstraint {
     pub argument: String,
-    pub property_kind: String,
+    pub property_kind: PropertyKind,
     pub relation: ParameterRelation,
     pub value: TypedExpression,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unit: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ParameterRelation {
-    Exact,
+    pub unit: Option<UnitIri>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -448,12 +374,12 @@ fn requirement(
     let Some(capability_kind) = action.capability.as_ref() else {
         return Ok(None);
     };
-    if !is_absolute_iri(capability_kind) {
-        return Err(CapabilityRequirementError::InvalidCapabilityKind {
+    let capability_kind = CapabilityKind::new(capability_kind.clone()).map_err(|_| {
+        CapabilityRequirementError::InvalidCapabilityKind {
             operation: action.operation.clone(),
             capability_kind: capability_kind.clone(),
-        });
-    }
+        }
+    })?;
     let PartitionedArguments {
         materials: material_inputs,
         values: value_inputs,
@@ -484,7 +410,7 @@ fn requirement(
             statement_path: path.to_vec(),
             operation: action.operation.clone(),
         },
-        capability_kind: capability_kind.clone(),
+        capability_kind,
         minimum_qualification: RequirementQualification::Plannable,
         accepted_control_modes: RequirementControlMode::CONCRETE.into_iter().collect(),
         parameter_constraints,
@@ -516,16 +442,16 @@ fn partition_arguments(
                 value: argument.value.clone(),
             });
         } else if let Some(property_kind) = &argument.parameter_kind {
-            if !is_absolute_iri(property_kind) {
-                return Err(CapabilityRequirementError::InvalidParameterKind {
+            let property_kind = PropertyKind::new(property_kind.clone()).map_err(|_| {
+                CapabilityRequirementError::InvalidParameterKind {
                     operation: action.operation.clone(),
                     argument: argument.name.clone(),
                     property_kind: property_kind.clone(),
-                });
-            }
+                }
+            })?;
             parameters.push(CapabilityParameterConstraint {
                 argument: argument.name.clone(),
-                property_kind: property_kind.clone(),
+                property_kind,
                 relation: ParameterRelation::Exact,
                 value: argument.value.clone(),
                 unit: canonical_parameter_unit(action, argument)?,
@@ -563,7 +489,7 @@ fn contains_material(r#type: &CheckedType) -> bool {
 fn canonical_parameter_unit(
     action: &ResolvedAction,
     argument: &CheckedActionArgument,
-) -> Result<Option<String>, CapabilityRequirementError> {
+) -> Result<Option<UnitIri>, CapabilityRequirementError> {
     let CheckedExpression::Quantity { unit, .. } = &argument.value.value else {
         return Ok(None);
     };
@@ -580,7 +506,9 @@ fn canonical_parameter_unit(
             });
         }
     };
-    Ok(Some(iri.to_owned()))
+    Ok(Some(UnitIri::new(iri).expect(
+        "the compiler's QUDT unit constants are absolute IRIs",
+    )))
 }
 
 fn requirement_id(module: &str, workflow: &str, path: &[StatementPathSegment]) -> String {
@@ -854,7 +782,7 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         let requirement = &catalog.requirements[0];
         assert_eq!(requirement.id, "standalone::preserve::body[0]");
         assert_eq!(
-            requirement.capability_kind,
+            requirement.capability_kind.as_str(),
             "https://sbol.io/ns/capability#ColdStorage"
         );
         assert_eq!(
@@ -876,11 +804,14 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         assert_eq!(requirement.parameter_constraints.len(), 1);
         assert_eq!(requirement.parameter_constraints[0].argument, "temperature");
         assert_eq!(
-            requirement.parameter_constraints[0].property_kind,
+            requirement.parameter_constraints[0].property_kind.as_str(),
             "https://sbol.io/ns/capability#Temperature"
         );
         assert_eq!(
-            requirement.parameter_constraints[0].unit.as_deref(),
+            requirement.parameter_constraints[0]
+                .unit
+                .as_ref()
+                .map(UnitIri::as_str),
             Some("http://qudt.org/vocab/unit/DEG_C")
         );
         assert_eq!(
