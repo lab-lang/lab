@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Supersedes [0031: Workcell targets](0031-workcell-targets.md) and is extended by [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md).
+Accepted. Supersedes [0031: Workcell targets](0031-workcell-targets.md) and is extended by [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md) and [0046: Allocated Procedure is the only device-lowering boundary](0046-allocated-procedure-is-the-device-boundary.md).
 
 ## Context
 
@@ -31,9 +31,9 @@ Workflow operations refine through one or more facility-independent method candi
 
 Operational configuration is an overlay keyed by exact Asset IRI. An adapter descriptor states the capability kinds, control modes, document formats, and planning, lowering, simulation, or runtime services its implementation supports. Manufacturer and model never select a driver. The `lab.adapter-profile.v2` schema contains no target, backend, or Asset selector: the manifest's exact Asset-to-driver binding selects the implementation, while the profile supplies only its checked non-secret configuration. Endpoints and credentials remain local runtime configuration rather than facility facts.
 
-The reviewed coordination artifact is `lab.execution-plan.v1`. It freezes inventory, requirement, offering, Asset, MaterialLot, adapter-profile, and reviewed-document hashes in one dependency DAG containing `Execute`, `MoveMaterial`, and `Manual` nodes. Device-specific reviewed formats remain independent child documents.
+The reviewed coordination artifact is `lab.execution-plan.v5`. It freezes inventory, Method, Procedure task, requirement, offering, Asset, MaterialLot, adapter-profile, and reviewed-document hashes in one dependency DAG containing `Execute`, `MoveMaterial`, and `Manual` nodes. Device-specific reviewed formats remain independent child documents.
 
-When an adapter still lowers a whole program rather than one capability requirement at a time, the plan freezes a reviewed adapter-lowering bundle containing the exact triggering requirements and every emitted artifact path, role, format, and digest. Lab does not assign one bundle protocol arbitrarily to one requirement. Runtime preflight verifies the complete bundle, while its Execute nodes remain planning-only until a requirement-aware adapter can attach independently executable child documents.
+Adapter lowering begins only from immutable invocations projected from verifier-valid Allocated Procedure LAIR. Each invocation contains only the tasks and requirements assigned to one exact Asset and adapter, and each independently executable child document names the exact Requirement it realizes. Whole-program device lowering is not a compatibility boundary.
 
 The runtime executes only the frozen bindings through a registry keyed by Asset IRI, adapter ID, and document format. It never re-queries the facility or substitutes an Asset. Its durable ledger is bound to the plan digest, inventory digest, and execution mode. Live and simulation resume state are deliberately incompatible.
 

@@ -69,11 +69,12 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0042: Robotics incubates separately](language/decisions/0042-robotics-incubates-separately.md) | simulation, visualization, embodied robotics, and their compute control plane live in the robotics repository |
 | [0043: Sequences are first-class design values](language/decisions/0043-sequences-are-first-class-design-values.md) | DNA and protein sequences are independent typed values referenced by designs |
 | [0044: Facility graphs replace workcell targets](language/decisions/0044-facility-graphs-replace-workcell-targets.md) | SBOLInventory facilities compose exact capability, Asset, material, plan, and run bindings |
+| [0045: LAIR represents method alternatives before facility allocation](language/decisions/0045-lair-method-refinement-and-facility-allocation.md) | Method, Procedure, and Capability alternatives remain live until one graph-wide facility solution is applied |
+| [0046: Allocated Procedure is the device boundary](language/decisions/0046-allocated-procedure-is-the-device-boundary.md) | immutable exact-task adapter invocations replace fixed Protocol and whole-program device lowering |
 
 ## Implementation and embedding
 
 - [LAIR overview](../crates/lab-compiler/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
-- [Protocol IR](../crates/lab-compiler/src/lair/dialect/protocol/README.md) describes the selected biological-procedure boundary and what deliberately remains for facility allocation and hardware lowering.
 - [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Portable method definitions](../crates/lab-method/README.md) describe the facility-independent Method, Procedure, and Capability contract shared by compiler and Python extensions.

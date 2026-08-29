@@ -1,54 +1,53 @@
-# Lab-native Opentrons build specialization
+# Facility-allocated Opentrons lowering
 
-This tutorial is a narrow lowering from explicit Lab source into one OT-2 use-case specialization. It is not an implementation of another workflow compiler or an adapter to another protocol format.
+This tutorial records the boundary from explicit Lab source to independently reviewable OT-2 work. It is one use-case specialization, not another workflow language, a package target, or a second biological recipe model.
 
 ## Architectural boundary
 
-The source declares plasmid and strain artifacts with checked properties, gives built and bought designs exact `sbol_identity` values, keeps supplier order identifiers separate, then composes typed `realize` and `transform` effects in workflows. Dependencies are `Material<Plasmid>` values flowing into those effects. The dependency planner derives graph roots and build waves from checked workflow IR without biological level names. Generic compiler responsibilities stop at resolving library operations, type checking, ownership checking, and preserving that dataflow.
+The source declares plasmid and strain artifacts with checked properties, assigns built and bought designs exact `sbol_identity` values, keeps supplier order identifiers separate, and composes typed `realize`, `transform`, `recover`, `dilute`, and `plate` effects. Physical dependencies are `Material<T>` values flowing through those effects. The frontend resolves library operations, checks types and ownership, and preserves exact source ancestry without naming an instrument.
 
-`lab-language` does not contain an OT-2 recipe AST or a build-specific parser entry point. Source declarations are lowered into verifier-valid Design and Workflow LAIR before a concrete biological protocol is selected. The OT-2 backend accepts only `ProtocolLairProgram`; it has no API that can consume `CheckedModule` or `PortableLairProgram` directly.
+The production path has six mandatory boundaries:
 
-The implementation has two mandatory facility-independent LAIR boundaries and one explicit robot plan:
+1. Design and Intent LAIR contains declarative artifact identity and method-neutral typed material dataflow.
+2. A validated Method registry refines reachable Intent operations into candidate Procedure graphs. Each generic `procedure.task` carries stable operation semantics, exact parameters and units, typed value edges, material inputs, and one or more first-class Capability requirements.
+3. A read-only LAIR analysis constructs one global planning problem. Facility planning selects Methods, exact active MaterialLots, CapabilityOfferings, Assets, adapter bindings, and dependencies together.
+4. The allocation pass applies the complete solution to the same LAIR identities and produces verifier-valid Allocated Procedure LAIR with no unresolved Method choice.
+5. `lab.adapter-invocations.v5` projects immutable selected Methods and Procedure tasks plus exact requirement, offering, Asset, profile, material, inventory, and allocated-LAIR digests. An adapter receives only the tasks and requirements assigned to its exact invocation.
+6. The OT-2 adapter validates each assigned task against its checked operational profile and emits one standalone reviewed Python protocol, invocation manifest, and operator document per supported requirement.
 
-1. Design LAIR contains declarative artifact identity, sequence, topology, copy, and acceptance intent. It contains no build recipe or procedure fields.
-2. Workflow LAIR preserves source operations as typed material dataflow. `workflow.realize` owns abstract assembly inputs, artifact dependency identities, assembly policy, and reaction chemistry; `workflow.transform` realizes a strain from its chassis and carried plasmids; subsequent operations carry recovery, dilution, and plating intent on explicit use-def edges. Chemistry travels as a named dictionary rather than one attribute per reagent, so a recipe stays inspectable without the dialect growing a key per volume.
-3. Protocol LAIR is produced by a Pliron dialect conversion. It selects synthesis, Golden Gate assembly, provision, transformation, recovery, serial dilution, and selective plating operations, replaces Workflow values with Protocol values, erases Workflow operations, verifies the resulting module, and runs material-linearity analysis.
-4. `Ot2ExecutionPlan` is the adapter-owned, validated, and resource-allocated robot plan, including source wells, reaction wells, DNA-plate wells, transformation mappings, dilution wells, and plating wells. It carries the operational profile frozen for the exact allocated Asset, so every projection reads one deck.
+The fixed Protocol dialect and the pre-facility Golden Gate selector no longer exist. OT-2 lowering cannot accept `CheckedModule`, portable LAIR, refined alternatives, or an entire source program. It therefore cannot select a scientific Method, re-query inventory, substitute an Asset, or reconstruct work that allocation did not assign to it.
 
-The JSON manifest, Markdown instructions, and all three Python protocols are projections of the same `Ot2ExecutionPlan`. This prevents an emitter from independently reconstructing or changing the robot plan. Robot-specific rendering stays under `crates/lab-compiler/src/backend/opentrons/ot2/`.
+## Exact Procedure semantics
 
-Labware, deck slots, modules, pipettes, mounts, API level, and per-stage capacity currently come from the allocated OT-2 adapter's checked operational profile rather than constants. `profile.rs` rejects a slot an OT-2 does not address, a slot the installed thermocycler already occupies, two pieces of labware claiming one slot during a stage, and any key it does not recognize. The profile cannot select the adapter or Asset; those are exact facility-plan bindings.
+The current OT-2 vertical slice supports three open Procedure operation IRIs: setup of a Golden Gate reaction, thermal cycling of that reaction, and serial dilution. Shared typed Procedure views require the exact capability kind, parameter identity, scalar or list type, canonical QUDT unit, material role, and selected material source before OT-2-specific planning begins. Unsupported operations and unpreserved parameters fail explicitly.
 
-Declaring more than one slot for a plate raises the batch size a bench holds. Well addresses are plate-and-well pairs, and allocation fills each declared plate in turn.
+The adapter-owned task plan then assigns wells and validates deck constraints. Labware, slots, modules, pipettes, mounts, API level, and capacity come from the exact Asset's validated `lab.adapter-profile.v2` overlay. The profile cannot select an adapter or Asset; the manifest's exact Asset-to-driver binding and facility solution already made those decisions.
 
-Robot behavior is maintained as a pinned Python project under `backend/opentrons/ot2/python/`. Its protocol modules import the shared `Ot2ExecutionPlan` `TypedDict` unconditionally and pass Ruff, strict mypy, and pytest checks. Rust does not assemble Python operations: it includes those checked source files, replaces the type-module import with the same marked type definitions, and injects the serialized execution plan. This deterministic bundling step produces the standalone Python file required by the robot without sacrificing normal Python tooling in the source tree or emitted package.
+The emitted Python file embeds the complete immutable OT-2 task plan. Rust renders a checked template for the supported operation and injects the canonical plan and API level. Every Python protocol is standalone, and its sibling `invocation_manifest.json` exposes the exact facility, Asset, offering, requirement, Procedure task, parameters, material bindings, deck, and profile digest that produced it.
 
-Artifact graph resolution is a separate compiler planning concern. The package compiler projects dependency edges and material requirements directly from verified Protocol operations; `lab-inventory` loads and validates the package's SBOLInventory graph, then passes the compiler an immutable exact-IRI lot index so RDF and filesystem concerns do not enter portable or wasm compilation. `crates/lab-compiler/src/planning/` joins each requirement's checked Component IRI to active MaterialLots in the selected facility, refuses ambiguity, freezes exact lot bindings plus inventory provenance, and resolves roots, cycles, blockers, and build waves without knowing anything about plasmids, Golden Gate, or robots. The OT-2 planner then specializes only generated nodes by selecting their Protocol artifact identities. It never constructs a parallel OT-2 biological recipe IR.
+## Inventory and dependency boundary
 
-The OT-2 specialization selects the concrete realization used by this tutorial:
+`lab-inventory` loads and validates the package's SBOLInventory graph and exposes an immutable exact-IRI snapshot. Global planning joins each source design's exact SBOL Component identity to active MaterialLots through `sbol:built`; it never matches declaration or display names. Ambiguous lots are rejected unless policy distinguishes them.
 
-- Golden Gate assembly for `realize`;
-- heat-shock transformation for `transform`, which realizes a strain;
-- culture recovery for `recover`;
-- serial dilution for `dilute`; and
-- selective plating for `plate`.
-
-If source omits or misorders a required material transition, Workflow verification fails before Protocol selection. Another facility can bind compatible offerings to different adapters, while those adapters consume the same verified Protocol operations and implement their own device plans.
+Material sources on Allocated Procedure tasks are either exact MaterialLot bindings or exact outputs of previously selected Method choices. Dependency order therefore comes from the same semantic graph adapters consume. The OT-2 implementation does not maintain a parallel build graph, infer assembly levels, or select generated nodes from another IR.
 
 ## Generated package
 
-Lab emits its own deterministic execution-plan manifest, consolidated human instructions, and standalone OT-2 Python protocols. A dependency-driven build adds a machine-readable graph, a human dependency report, and one self-contained directory per planning wave.
+A facility-aware `lab build` writes the compiler evidence under `.lab/build/compiler/`, the exact facility solution and lowering manifest at the build root, one directory per selected Asset under `.lab/build/assets/`, and one directory per allocated task inside that Asset bundle. For an OT-2 the task directory contains:
 
-Artifacts in one wave have no ordering constraint between them, so a wave is a single robot run over a single deck. A wave emits a protocol only for the stages its artifacts reach: a wave that assembles plasmids and transforms none produces no plating protocol, rather than one that would fail on the robot over an empty well list.
+- `automation_protocol.py`, the standalone reviewed Opentrons protocol;
+- `invocation_manifest.json`, the exact immutable task and allocation projection;
+- `manual_protocol.typ` and its rendered `manual_protocol.pdf`; and
+- the shared typesetting support copied into the bundle.
 
-The implementation validates each design's reaction balance against its own stated volume, replicate and dilution bounds, plate capacity across every declared slot, source-rack capacity, and tip capacity. Generated Python is exercised with the official Opentrons simulator.
+`plan.execution.json` references each independently executable protocol by requirement and digest. Runtime preflight validates the inventory, planning evidence, adapter profile, child documents, and dependency DAG before narration or dispatch. An offering's SBOLInventory qualification still determines whether planning, simulation, or live execution is allowed; the presence of generated Python does not promote it.
 
-Run `scripts/check-opentrons-bundle.sh <bundle>` to lint and typecheck the maintained Python adapter and every emitted protocol, followed by `scripts/simulate-opentrons.sh <bundle>` for Opentrons simulation.
+Run `scripts/check-opentrons-bundle.sh <bundle>` to byte-compile every emitted Python protocol. Set `LAB_OPENTRONS_SIMULATOR` and run `scripts/simulate-opentrons.sh <bundle>` to exercise them with the official simulator.
 
 ## Opening a protocol in the Opentrons app
 
-Emitted protocols declare `robotType: "OT-2"`. Opentrons moved OT-2 support into a separate application at version 9, so a 9.x app rejects them with a message pointing at the OT-2 download. Use the 8.4.x app or the `Opentrons-OT2` build to see the deck.
+Emitted protocols declare `robotType: "OT-2"`. Opentrons moved OT-2 support into a separate application at version 9, so a 9.x app rejects them with a message pointing at the OT-2 download. Use the 8.4.x app or the `Opentrons-OT2` build to inspect the deck.
 
 ## Current boundary
 
-This specialization now ingests a packaged SBOLInventory document and freezes unique active MaterialLot bindings by exact `sbol:built` Component identity. It does not query a live inventory service, reserve or allocate among several candidate lots, reason over quantity or expiration, design compatible overhangs, normalize source concentrations, prepare DNA between dependent waves, or attach runtime evidence to acceptance decisions. Generated instructions and robot code require laboratory review and qualification before physical execution.
+The specialization validates exact MaterialLot identity, supported Procedure semantics, reaction balance, replicate and dilution bounds, plate capacity, source-rack capacity, and tip capacity. It does not query a live inventory service, reserve stock, select among equivalent lots without policy, reason over quantity or expiration, design compatible overhangs, normalize concentrations, or upload protocols to hardware. Generated instructions and robot code require facility-specific review and qualification before physical execution.

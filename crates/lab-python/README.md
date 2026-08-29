@@ -113,7 +113,11 @@ import lab
 planned = lab.plan_project("examples/golden-gate")
 print(planned.inventory.facility)
 for invocation in planned.invocations:
-    print(invocation.asset, invocation.adapter.driver, invocation.tasks)
+    print(invocation.asset, invocation.adapter.driver)
+    for task in planned.invocation_tasks(invocation):
+        print(task.operation)
+        for requirement in task.requirements:
+            print(requirement.capability_kind, requirement.offering)
 ```
 
 An in-memory `Program`, including one emitted by the Python object model, can use an existing package as its facility and policy context:
@@ -123,7 +127,24 @@ program = lab.check(designs.module, workflows.module)
 planned = lab.plan(program, project="path/to/facility-package")
 ```
 
-The returned `FacilityPlan` provides typed Method, Procedure task, MaterialLot, capability offering, Asset, adapter, and invocation selections. It also retains the complete planning problem, adapter-binding snapshot, and adapter-invocation document for forward-compatible inspection.
+The returned `FacilityPlan` provides typed Method, Procedure task, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
+
+## Adapter discovery and profile validation
+
+Python reads the same compiler-owned adapter catalog as the CLI. It does not keep another list of devices, capabilities, control modes, schemas, or service claims.
+
+```python
+import lab
+
+adapters = lab.adapter_catalog()
+ot2 = adapters.get("opentrons.ot2")
+print(ot2.capabilities, ot2.services.lowering)
+
+profile = lab.adapters.validate_profile_file("opentrons.ot2", "adapters/ot2.toml")
+print(profile.sha256)
+```
+
+The explicit driver selects the Rust validator. The profile cannot select another adapter or Asset, and manufacturer or model metadata never dispatches implementation code. The returned catalog and profile objects expose typed service, format, capability, feature, configuration, and digest fields while retaining canonical JSON or TOML where exact interoperability is needed.
 
 ## Writing a program
 

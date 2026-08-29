@@ -6,9 +6,9 @@ Accepted. Amends [0004: Portable module compilation boundary](0004-portable-modu
 
 ## Context
 
-Lab already uses LAIR, a family of Pliron dialects, to lower checked biological designs and method-neutral workflow operations into method-selected Protocol operations. The initial vertical slice demonstrates typed SSA material flow, operation verification, dialect conversion, whole-module material-linearity analysis, textual IR, and compiler-owned pass pipelines.
+Lab initially used LAIR, a family of Pliron dialects, to lower checked biological designs and method-neutral workflow operations into one preselected Protocol graph. That vertical slice demonstrated typed SSA material flow, operation verification, dialect conversion, whole-module material-linearity analysis, textual IR, and compiler-owned pass pipelines.
 
-The vertical slice also fixes one plasmid-build conversion in compiler code. A durable action carries one capability kind, `select_protocol` selects the Golden Gate path without consulting a facility, and facility allocation independently traverses checked workflows to reconstruct requirement instances. That arrangement cannot represent several scientifically valid methods for one action, cannot allow available facility resources to determine which unpinned method is feasible, and permits the workflow, LAIR, and planner to disagree about what work is required.
+The vertical slice fixed one plasmid-build conversion in compiler code. A durable action carried one capability kind, `select_protocol` selected the Golden Gate path without consulting a facility, and facility allocation independently traversed checked workflows to reconstruct requirement instances. That arrangement could not represent several scientifically valid methods for one action, could not allow available facility resources to determine which unpinned method was feasible, and permitted the workflow, LAIR, and planner to disagree about what work was required.
 
 The facility model established by 0044 makes this limitation concrete. An experiment describes scientific intent, while an SBOLInventory graph describes the zones, Assets, capability offerings, and MaterialLots available to realize it. Selecting one method before consulting that facility can reject a feasible experiment or silently privilege the compiler's first implementation.
 
@@ -65,4 +65,4 @@ Stage identity is explicit module metadata and a structural verifier contract. D
 - Pliron supplies SSA, regions, verification, analyses, rewriting, and textual tooling without becoming a public data model or plugin ABI.
 - The solver uses a representation suited to global constraint propagation and returns decisions that must be applied back to the exact LAIR identities from which they were derived.
 - Public method and adapter extensions use stable declarative records; they do not require downstream crates or Python packages to depend on Pliron.
-- The existing Design, Workflow, and Protocol vertical slice remains useful implementation evidence, but `MethodSelectedProtocol` is replaced rather than generalized as a pre-facility selection boundary.
+- The Design and Workflow parts of the original vertical slice remain useful implementation evidence. [0046](0046-allocated-procedure-is-the-device-boundary.md) records the completed removal of the fixed Protocol dialect and makes Allocated Procedure the only production device-lowering boundary.

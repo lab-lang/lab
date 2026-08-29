@@ -27,7 +27,7 @@ lab check
 lab build
 ```
 
-`lab build` emits the checked module IR and reachable capability requirements, allocates them against `inventory/facility.ttl`, and derives the OT-2 protocol bundle and PDFs through the adapter bound to the selected Asset. Its output names each build product, Asset bundle, automation protocol, operator document, and reviewed plan path.
+`lab build` emits checked module IR, refined Method alternatives, the global planning problem, the exact facility solution, Allocated Procedure LAIR, and immutable adapter invocations. It then derives OT-2 protocols and PDFs through the adapter bound to the selected Asset. Its output names each biological build product, compiler artifact, Asset bundle, automation protocol, operator document, and reviewed plan path.
 
 ## Facility-derived outputs
 
@@ -37,22 +37,24 @@ The package selects `inventory/facility.ttl`, a conformant SBOLInventory documen
 lab run .lab/build --dry-run
 ```
 
-The facility phase binds every reachable requirement to one exact CapabilityOffering and Asset. Because the allocated OT-2 has an installed lowering adapter, `lab build` emits three OT-2 Python protocols without reading a package target. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
+The facility phase selects 22 Method instances and binds their 24 requirements to exact CapabilityOfferings and Assets. Because the allocated OT-2 has an installed lowering adapter, `lab build` emits independently reviewable Python protocols for the eight supported Procedure tasks without reading a package target. Manual provisioning, transformation, recovery, and plating remain explicit allocated work in the facility-wide plan without being misrepresented as OT-2 code. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
 
 | Path | Contents |
 | --- | --- |
-| `.lab/build/facility_allocation.json` | requirement-to-offering-to-Asset allocation and rejected candidates |
-| `.lab/build/facility_lowering.json` | exact Asset, adapter, profile digest, triggering requirements, emitted artifacts, and artifact digests |
-| `.lab/build/plan.execution.json` | reviewed facility-wide DAG and hash-addressed adapter-lowering child bundle |
-| `.lab/build/assets/opentrons_ot2/dependency_manifest.json` | material graph, exact MaterialLot bindings, waves, and blockers |
-| `.lab/build/assets/opentrons_ot2/dependency_report.pdf` | typeset dependency and blocker summary |
-| `.lab/build/assets/opentrons_ot2/manual_protocol.pdf` | typeset bench instructions in execution order |
-| `.lab/build/assets/opentrons_ot2/wave-001/` | assembly of both plasmids |
-| `.lab/build/assets/opentrons_ot2/wave-002/` | transformation and plating of all four strains |
+| `.lab/build/compiler/refined.lair` | all applicable portable Method, Procedure, and Capability alternatives |
+| `.lab/build/compiler/planning-problem.json` | graph-wide Method and facility constraint problem |
+| `.lab/build/compiler/facility-solution.json` | exact selected Methods, MaterialLots, offerings, Assets, and adapters |
+| `.lab/build/compiler/allocated.lair` | verifier-valid selected Procedure graph with exact allocation bindings |
+| `.lab/build/compiler/adapter-invocations.json` | immutable exact tasks grouped by selected Asset and adapter |
+| `.lab/build/facility_lowering.json` | emitted artifacts, formats, Requirements, profiles, and digests by Asset route |
+| `.lab/build/plan.execution.json` | reviewed facility-wide dependency DAG and child documents |
+| `.lab/build/assets/opentrons_ot2/tasks/001-setup-golden-gate-reaction/` | exact setup task manifest, standalone Python protocol, and operator PDF |
+| `.lab/build/assets/opentrons_ot2/tasks/002-thermal-cycle-golden-gate-reaction/` | exact cycling task manifest, standalone Python protocol, and operator PDF |
+| `.lab/build/assets/opentrons_ot2/tasks/005-serial-dilution/` | one of four independently allocated dilution task bundles |
 
-Artifacts in the same wave have no ordering constraint between them, so a wave is one robot run over one deck. Wave 2 cannot start until wave 1's plasmids physically exist and have been accepted as suitable inputs.
+The Procedure graph preserves explicit typed edges between reaction setup and thermal cycling and from each built plasmid into its dependent strain workflows. The reviewed execution DAG is derived from those same selected values; an adapter does not reconstruct a separate wave or artifact graph.
 
-The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/build --dry-run` verifies every frozen protocol and support-artifact digest before narrating the plan. The Execute nodes remain planning-only because the current OT-2 lowerer emits one whole-program bundle rather than an independently executable document per capability requirement; the example does not claim that this Asset is hardware-qualified for live execution.
+The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/build --dry-run` verifies the inventory, compiler evidence, adapter profile, every exact-task protocol and support-artifact digest, and the complete DAG before narrating the plan. Each generated protocol is tied to one exact allocated Requirement, but the example does not claim that this Asset is hardware-qualified for live execution.
 
 ## Use another instrument
 
@@ -63,7 +65,7 @@ Another facility can run the same experiment by supplying an SBOLInventory docum
 Find the emitted protocols with:
 
 ```bash
-find .lab/build/assets -name '*_protocol.py' -print
+find .lab/build/assets -name automation_protocol.py -print
 ```
 
 Open the Opentrons app, go to **Protocols**, and import one of those files. The app must have OT-2 support; use the 8.4.x app or the `Opentrons-OT2` build because a 9.x app rejects OT-2 protocols.
@@ -73,7 +75,7 @@ To check a protocol without the GUI, run the app's analyzer over the selected fi
 ```bash
 /Applications/Opentrons.app/Contents/Resources/python/bin/python3.10 \
   -m opentrons.cli analyze --json-output /tmp/analysis.json \
-  "$(find .lab/build/assets -name transformation_protocol.py -print -quit)"
+  "$(find .lab/build/assets -name automation_protocol.py -print -quit)"
 ```
 
 To lint, typecheck, and simulate the complete emitted OT-2 package:
