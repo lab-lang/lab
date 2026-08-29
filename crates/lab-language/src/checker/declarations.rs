@@ -12,7 +12,7 @@ use crate::checked::{
     CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
     CheckedSection,
 };
-use crate::iri::is_absolute_iri;
+use crate::is_absolute_iri;
 use crate::semantic_error::SemanticError;
 use crate::source::{Identifier, Span};
 use crate::type_system::{Ty, to_checked_type};

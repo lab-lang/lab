@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 
 use crate::checked::OwnershipMode;
-use crate::iri::is_absolute_iri;
+use crate::is_absolute_iri;
 use crate::type_system::Ty;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

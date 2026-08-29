@@ -1770,6 +1770,7 @@ dependencies = [
 name = "lab-language"
 version = "0.1.2"
 dependencies = [
+ "lab-capability",
  "serde",
  "thiserror",
 ]
