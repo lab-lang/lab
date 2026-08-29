@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use lab_capability::{
-    AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint,
-    QualificationLevel,
+    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId, OperationId,
+    PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,40 @@ pub struct MethodInput {
     pub port_type: PortType,
 }
 
+/// A scalar parameter supplied by the Intent operation and available to requirement constraints.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MethodParameter {
+    pub name: LocalId,
+    pub scalar_type: ScalarType,
+}
+
+/// The closed scalar shape expected from an Intent parameter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ScalarType {
+    Text,
+    Integer,
+    Real,
+    Boolean,
+    Iri,
+}
+
+impl ScalarType {
+    pub fn of(value: &ScalarValue) -> Self {
+        match value {
+            ScalarValue::Text(_) => Self::Text,
+            ScalarValue::Integer(_) => Self::Integer,
+            ScalarValue::Real(_) => Self::Real,
+            ScalarValue::Boolean(_) => Self::Boolean,
+            ScalarValue::Iri(_) => Self::Iri,
+        }
+    }
+
+    pub const fn is_numeric(self) -> bool {
+        matches!(self, Self::Integer | Self::Real)
+    }
+}
+
 /// A reference to a Procedure value available at a task or method output.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -50,6 +84,28 @@ pub struct MethodOutput {
     pub source: ValueReference,
 }
 
+/// A literal value or a reference to a scalar supplied by the refined Intent operation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ConstraintValue {
+    Literal {
+        value: PropertyValue,
+    },
+    IntentParameter {
+        parameter: LocalId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unit: Option<UnitIri>,
+    },
+}
+
+/// One typed offering-property constraint template in a portable method definition.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct CapabilityConstraintDefinition {
+    pub property_kind: PropertyKind,
+    pub relation: ConstraintRelation,
+    pub required: ConstraintValue,
+}
+
 /// One semantic capability requirement owned by its enclosing Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct CapabilityRequirementDefinition {
@@ -58,7 +114,7 @@ pub struct CapabilityRequirementDefinition {
     pub minimum_qualification: QualificationLevel,
     pub accepted_control_modes: BTreeSet<ControlMode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub constraints: Vec<PropertyConstraint>,
+    pub constraints: Vec<CapabilityConstraintDefinition>,
 }
 
 /// One task in topological order within a facility-independent Procedure graph.
@@ -80,6 +136,8 @@ pub struct MethodDefinition {
     pub refines: IntentOperationId,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<MethodInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parameters: Vec<MethodParameter>,
     pub tasks: Vec<ProcedureTaskDefinition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<MethodOutput>,
@@ -89,5 +147,6 @@ pub struct MethodDefinition {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MethodSignature {
     pub inputs: Vec<MethodInput>,
+    pub parameters: Vec<MethodParameter>,
     pub outputs: Vec<TaskOutput>,
 }

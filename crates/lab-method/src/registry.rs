@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_capability::{ControlMode, MethodId};
+use lab_capability::{ConstraintRelation, ControlMode, MethodId};
 use thiserror::Error;
 
 use crate::{
-    IntentOperationId, LocalId, MethodDefinition, MethodSignature, TaskOutput, ValueReference,
+    ConstraintValue, IntentOperationId, LocalId, MethodDefinition, MethodSignature, ScalarType,
+    TaskOutput, ValueReference,
 };
 
 /// A malformed portable method definition.
@@ -12,6 +13,8 @@ use crate::{
 pub enum MethodDefinitionError {
     #[error("method input `{id}` occurs more than once")]
     DuplicateInput { id: LocalId },
+    #[error("method parameter `{id}` occurs more than once")]
+    DuplicateParameter { id: LocalId },
     #[error("Procedure task `{id}` occurs more than once")]
     DuplicateTask { id: LocalId },
     #[error("Procedure task `{task}` output `{output}` occurs more than once")]
@@ -24,6 +27,27 @@ pub enum MethodDefinitionError {
     MissingControlMode { requirement: LocalId },
     #[error("Capability requirement `{requirement}` accepts descriptive UnspecifiedControl")]
     UnspecifiedControlMode { requirement: LocalId },
+    #[error(
+        "Capability requirement `{requirement}` references unavailable Intent parameter `{parameter}`"
+    )]
+    UnavailableConstraintParameter {
+        requirement: LocalId,
+        parameter: LocalId,
+    },
+    #[error(
+        "Capability requirement `{requirement}` applies a unit to non-numeric Intent parameter `{parameter}`"
+    )]
+    UnitOnNonNumericParameter {
+        requirement: LocalId,
+        parameter: LocalId,
+    },
+    #[error(
+        "Capability requirement `{requirement}` uses an ordered relation with non-numeric scalar type `{scalar_type:?}`"
+    )]
+    NonNumericOrderedConstraint {
+        requirement: LocalId,
+        scalar_type: ScalarType,
+    },
     #[error("Procedure task `{task}` references unavailable value `{reference:?}`")]
     UnavailableTaskInput {
         task: LocalId,
@@ -85,6 +109,18 @@ impl MethodDefinition {
             );
         }
 
+        let mut parameter_types = BTreeMap::new();
+        for parameter in &self.parameters {
+            if parameter_types
+                .insert(parameter.name.clone(), parameter.scalar_type)
+                .is_some()
+            {
+                return Err(MethodDefinitionError::DuplicateParameter {
+                    id: parameter.name.clone(),
+                });
+            }
+        }
+
         let mut task_ids = BTreeSet::new();
         let mut requirement_ids = BTreeSet::new();
         for task in &self.tasks {
@@ -124,6 +160,36 @@ impl MethodDefinition {
                     return Err(MethodDefinitionError::UnspecifiedControlMode {
                         requirement: requirement.id.clone(),
                     });
+                }
+                for constraint in &requirement.constraints {
+                    let scalar_type = match &constraint.required {
+                        ConstraintValue::Literal { value } => ScalarType::of(&value.value),
+                        ConstraintValue::IntentParameter { parameter, unit } => {
+                            let Some(scalar_type) = parameter_types.get(parameter).copied() else {
+                                return Err(
+                                    MethodDefinitionError::UnavailableConstraintParameter {
+                                        requirement: requirement.id.clone(),
+                                        parameter: parameter.clone(),
+                                    },
+                                );
+                            };
+                            if unit.is_some() && !scalar_type.is_numeric() {
+                                return Err(MethodDefinitionError::UnitOnNonNumericParameter {
+                                    requirement: requirement.id.clone(),
+                                    parameter: parameter.clone(),
+                                });
+                            }
+                            scalar_type
+                        }
+                    };
+                    if !matches!(constraint.relation, ConstraintRelation::Exact)
+                        && !scalar_type.is_numeric()
+                    {
+                        return Err(MethodDefinitionError::NonNumericOrderedConstraint {
+                            requirement: requirement.id.clone(),
+                            scalar_type,
+                        });
+                    }
                 }
             }
             let mut outputs = BTreeSet::new();
@@ -165,6 +231,7 @@ impl MethodDefinition {
         }
         Ok(MethodSignature {
             inputs: self.inputs.clone(),
+            parameters: self.parameters.clone(),
             outputs,
         })
     }
@@ -238,8 +305,9 @@ mod tests {
     };
 
     use crate::{
-        CapabilityRequirementDefinition, MethodDefinition, MethodInput, MethodOutput, PortType,
-        ProcedureTaskDefinition, TaskOutput, ValueReference,
+        CapabilityConstraintDefinition, CapabilityRequirementDefinition, ConstraintValue,
+        MethodDefinition, MethodInput, MethodOutput, MethodParameter, PortType,
+        ProcedureTaskDefinition, ScalarType, TaskOutput, ValueReference,
     };
 
     use super::*;
@@ -262,6 +330,10 @@ mod tests {
                 name: id("culture"),
                 port_type: material("https://example.org/state/unincubated"),
             }],
+            parameters: vec![MethodParameter {
+                name: id("duration"),
+                scalar_type: ScalarType::Real,
+            }],
             tasks: vec![ProcedureTaskDefinition {
                 id: id("incubate"),
                 operation: OperationId::new("https://example.org/operation/incubate").unwrap(),
@@ -280,7 +352,20 @@ mod tests {
                     .unwrap(),
                     minimum_qualification: QualificationLevel::Plannable,
                     accepted_control_modes: BTreeSet::from([ControlMode::Manual, ControlMode::Api]),
-                    constraints: vec![],
+                    constraints: vec![CapabilityConstraintDefinition {
+                        property_kind: lab_capability::PropertyKind::new(
+                            "https://sbol.io/ns/capability#Duration",
+                        )
+                        .unwrap(),
+                        relation: ConstraintRelation::Exact,
+                        required: ConstraintValue::IntentParameter {
+                            parameter: id("duration"),
+                            unit: Some(
+                                lab_capability::UnitIri::new("http://qudt.org/vocab/unit/HR")
+                                    .unwrap(),
+                            ),
+                        },
+                    }],
                 }],
             }],
             outputs: vec![MethodOutput {
@@ -323,6 +408,35 @@ mod tests {
         assert!(matches!(
             definition.validate(),
             Err(MethodDefinitionError::UnavailableTaskInput { .. })
+        ));
+    }
+
+    #[test]
+    fn constraint_parameters_are_declared_and_type_checked() {
+        let mut definition = definition(
+            "https://example.org/method/static-incubation",
+            "https://example.org/state/incubated",
+        );
+        definition.tasks[0].requirements[0].constraints[0].required =
+            ConstraintValue::IntentParameter {
+                parameter: id("missing"),
+                unit: None,
+            };
+        assert!(matches!(
+            definition.validate(),
+            Err(MethodDefinitionError::UnavailableConstraintParameter { .. })
+        ));
+
+        definition.tasks[0].requirements[0].constraints[0].required =
+            ConstraintValue::IntentParameter {
+                parameter: id("duration"),
+                unit: None,
+            };
+        definition.parameters[0].scalar_type = ScalarType::Text;
+        definition.tasks[0].requirements[0].constraints[0].relation = ConstraintRelation::AtLeast;
+        assert!(matches!(
+            definition.validate(),
+            Err(MethodDefinitionError::NonNumericOrderedConstraint { .. })
         ));
     }
 
