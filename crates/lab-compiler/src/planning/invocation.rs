@@ -14,10 +14,10 @@ use super::model::MaterialLotCandidates;
 use super::{
     FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MaterialLotBuildInventory,
     PlanningProblem, PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput,
-    SelectedCapabilityParameter,
+    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v4";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v5";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -52,6 +52,8 @@ pub struct AllocatedProcedureTask {
     pub outputs: Vec<PlanningTaskOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<PlanningProcedureParameter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<SelectedMaterialBinding>,
     pub requirements: Vec<AllocatedRequirementBinding>,
 }
 
@@ -179,6 +181,7 @@ impl AdapterInvocationPlan {
                     inputs: task.inputs.clone(),
                     outputs: task.outputs.clone(),
                     parameters: task.parameters.clone(),
+                    materials: selected.materials.clone(),
                     requirements,
                 });
             }
@@ -237,8 +240,14 @@ impl AdapterInvocationPlan {
         if self.methods.is_empty() {
             return Err(AdapterInvocationValidationError::EmptyMethods);
         }
+        let known_choices = self
+            .methods
+            .iter()
+            .map(|method| method.choice.clone())
+            .collect::<BTreeSet<_>>();
         let mut choices = BTreeSet::new();
         let mut tasks = BTreeSet::new();
+        let mut materials = BTreeSet::new();
         let mut requirements = BTreeMap::new();
         for method in &self.methods {
             if !choices.insert(method.choice.clone()) {
@@ -261,6 +270,25 @@ impl AdapterInvocationPlan {
                     return Err(AdapterInvocationValidationError::EmptyTask {
                         task: task.id.clone(),
                     });
+                }
+                for material in &task.materials {
+                    if !materials.insert(material.input.clone()) {
+                        return Err(AdapterInvocationValidationError::DuplicateMaterialInput {
+                            input: material.input.clone(),
+                        });
+                    }
+                    if material.symbol.is_empty()
+                        || !valid_material_source(
+                            &material.symbol,
+                            &material.source,
+                            &known_choices,
+                            &self.material_inventory,
+                        )
+                    {
+                        return Err(AdapterInvocationValidationError::InvalidMaterialBinding {
+                            input: material.input.clone(),
+                        });
+                    }
                 }
                 for requirement in &task.requirements {
                     if AbsoluteIri::new(&requirement.offering).is_err()
@@ -419,6 +447,36 @@ fn validate_material_inventory(
     Ok(())
 }
 
+fn valid_material_source(
+    symbol: &str,
+    source: &SelectedMaterialSource,
+    choices: &BTreeSet<LocalId>,
+    inventory: &MaterialLotBuildInventory,
+) -> bool {
+    match source {
+        SelectedMaterialSource::MaterialLot {
+            component,
+            material_lot,
+        } => {
+            let Some(MaterialLotCandidates::Identified {
+                component: expected_component,
+                material_lots,
+            }) = inventory
+                .materials
+                .get(symbol)
+                .or_else(|| inventory.artifacts.get(symbol))
+            else {
+                return false;
+            };
+            AbsoluteIri::new(component).is_ok()
+                && AbsoluteIri::new(material_lot).is_ok()
+                && component == expected_component
+                && material_lots.contains(material_lot)
+        }
+        SelectedMaterialSource::ChoiceOutput { choice } => choices.contains(choice),
+    }
+}
+
 #[derive(Default)]
 struct InvocationMembers {
     tasks: BTreeSet<LocalId>,
@@ -495,6 +553,10 @@ pub enum AdapterInvocationValidationError {
     DuplicateTask { task: LocalId },
     #[error("Procedure task `{task}` contains no capability requirements")]
     EmptyTask { task: LocalId },
+    #[error("adapter invocations repeat Procedure material input `{input}`")]
+    DuplicateMaterialInput { input: LocalId },
+    #[error("Procedure material input `{input}` has an invalid physical source")]
+    InvalidMaterialBinding { input: LocalId },
     #[error("adapter invocations repeat capability requirement `{requirement}`")]
     DuplicateRequirement { requirement: LocalId },
     #[error("capability requirement `{requirement}` has an invalid offering or Asset IRI")]

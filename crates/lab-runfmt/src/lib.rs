@@ -28,7 +28,7 @@ pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v3";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v4";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -112,7 +112,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v3` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v4` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;

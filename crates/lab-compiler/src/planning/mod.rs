@@ -43,11 +43,12 @@ pub use problem::{
 };
 pub use resolution::{DependencyGraphError, resolve_dependency_graph};
 pub use solver::{
-    AdapterRequirement, AlternativeMethod, AlternativeRequirementBinding,
-    FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningError, FacilityPlanningPolicy,
-    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MethodPin,
-    MethodPinSelector, PlanningAlternative, PlanningCandidateRejectionReason,
-    PlanningRejectedOffering, RejectedMethodCandidate, RejectedPlanningRequirement,
-    SelectedAdapter, SelectedCapabilityParameter, SelectedMethod, SelectedProcedureTask,
-    SelectedRequirementBinding,
+    AdapterRequirement, AlternativeMaterialBinding, AlternativeMethod,
+    AlternativeRequirementBinding, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
+    FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
+    FacilityPlanningSolutionValidationError, MethodPin, MethodPinSelector, PlanningAlternative,
+    PlanningCandidateRejectionReason, PlanningMaterialRejectionReason, PlanningRejectedOffering,
+    RejectedMethodCandidate, RejectedPlanningMaterial, RejectedPlanningRequirement,
+    SelectedAdapter, SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    SelectedMethod, SelectedProcedureTask, SelectedRequirementBinding,
 };

@@ -375,15 +375,20 @@ fn write_facility_plan(
         .context("failed to project the verified Method graph into a planning problem")?;
     let adapter_bindings = crate::adapters::resolve_package_bindings(package, &inventory)?;
     let policy = facility_planning_policy(package)?;
-    let solution =
-        FacilityPlanningSolution::solve(&problem, &inventory, adapter_bindings.as_ref(), policy)
-            .context("failed to solve Method and facility choices as one complete plan")?;
+    let material_inventory =
+        crate::facility_lowering::semantic_material_inventory(&modules, &inventory)?;
+    let solution = FacilityPlanningSolution::solve(
+        &problem,
+        &inventory,
+        &material_inventory,
+        adapter_bindings.as_ref(),
+        policy,
+    )
+    .context("failed to solve Method, material, and facility choices as one complete plan")?;
     let allocated = refined
         .allocate(solution.clone())
         .context("failed to apply the facility solution to refined LAIR")?;
     let allocated_ir = allocated.ir();
-    let material_inventory =
-        crate::facility_lowering::semantic_material_inventory(&modules, &inventory)?;
     let invocations = allocated
         .adapter_invocations(material_inventory)
         .context("failed to project allocated LAIR into adapter invocations")?;

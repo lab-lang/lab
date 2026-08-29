@@ -66,6 +66,11 @@ impl BuildInventory {
                 _ => {}
             }
         }
+        for (symbol, material) in &materials {
+            if let Some(artifact) = artifacts.get(symbol) {
+                ensure_compatible(symbol, material, artifact)?;
+            }
+        }
         Ok(Self::MaterialLots(MaterialLotBuildInventory {
             source_sha256: source_sha256.into(),
             facility: facility.into(),

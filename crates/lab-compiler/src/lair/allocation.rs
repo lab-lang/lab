@@ -15,9 +15,10 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use thiserror::Error;
 
-use crate::lair::dialect::allocation::{BindingOp, ContextOp, MethodOp};
+use crate::lair::dialect::allocation::{BindingOp, ContextOp, MaterialBindingOp, MethodOp};
 use crate::lair::dialect::capability::RequirementOp;
 use crate::lair::dialect::method::{ChoiceOp, YieldOp};
+use crate::lair::dialect::procedure::MaterialInputOp;
 use crate::planning::{
     FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem,
 };
@@ -38,6 +39,8 @@ pub enum AllocationApplicationError {
     MissingYield { choice: LocalId },
     #[error("solution does not bind Requirement `{requirement}`")]
     MissingRequirementBinding { requirement: LocalId },
+    #[error("solution does not bind Procedure material input `{input}`")]
+    MissingMaterialBinding { input: LocalId },
     #[error("selected method choice `{choice}` yields a value that was not cloned")]
     MissingYieldMapping { choice: LocalId },
 }
@@ -107,6 +110,15 @@ pub(crate) fn apply_facility_solution(
                     .map(move |binding| (binding.requirement.clone(), (task.task.clone(), binding)))
             })
             .collect::<BTreeMap<_, _>>();
+        let material_bindings = selection
+            .tasks
+            .iter()
+            .flat_map(|task| {
+                task.materials
+                    .iter()
+                    .map(move |binding| (binding.input.clone(), (task.task.clone(), binding)))
+            })
+            .collect::<BTreeMap<_, _>>();
 
         let mut rewriter = IRRewriter::<DummyListener>::default();
         rewriter.set_insertion_point(OpInsertionPoint::BeforeOperation(choice.get_operation()));
@@ -132,8 +144,22 @@ pub(crate) fn apply_facility_solution(
                     LocalId::new(requirement.requirement_id(context))
                         .expect("verified Requirement identity is stable")
                 });
+            let material_input_id =
+                Operation::get_op::<MaterialInputOp>(operation, context).map(|material| {
+                    LocalId::new(material.input_id(context))
+                        .expect("verified material input identity is stable")
+                });
             let cloned = clone_operation(operation, context, &mut rewriter, &mut mapping);
             rewriter.append_operation(context, cloned);
+            if let Some(input) = material_input_id {
+                let (procedure_node, binding) = material_bindings.get(&input).ok_or_else(|| {
+                    AllocationApplicationError::MissingMaterialBinding {
+                        input: input.clone(),
+                    }
+                })?;
+                let binding = MaterialBindingOp::new(context, procedure_node, binding);
+                rewriter.append_operation(context, binding.get_operation());
+            }
             if let Some(requirement_id) = requirement_id {
                 let (procedure_node, binding) = bindings.get(&requirement_id).ok_or_else(|| {
                     AllocationApplicationError::MissingRequirementBinding {

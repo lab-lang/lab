@@ -10,7 +10,9 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use pliron::value::{DefiningEntity, Value};
 
-use crate::lair::dialect::allocation::{BindingOp, ContextOp as AllocationContextOp, MethodOp};
+use crate::lair::dialect::allocation::{
+    BindingOp, ContextOp as AllocationContextOp, MaterialBindingOp, MethodOp,
+};
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::meta::StageOp;
 use crate::lair::dialect::method::{ChoiceOp, YieldOp};
@@ -132,8 +134,10 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     let mut tasks = BTreeSet::new();
     let mut requirements = BTreeMap::new();
     let mut parameters = Vec::new();
+    let mut materials = BTreeMap::new();
     let mut constraints = Vec::new();
     let mut bindings = BTreeMap::new();
+    let mut material_bindings = BTreeMap::new();
     let mut design_operations = 0;
 
     for operation in block.deref(context).iter(context) {
@@ -178,6 +182,15 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             ));
             continue;
         }
+        if let Some(material) = Operation::get_op::<MaterialInputOp>(operation, context) {
+            let input = material.input_id(context);
+            if materials.insert(input.clone(), material).is_some() {
+                return Err(format!(
+                    "duplicate Procedure material input identity '{input}'"
+                ));
+            }
+            continue;
+        }
         if let Some(constraint) = Operation::get_op::<ConstraintOp>(operation, context) {
             constraints.push(constraint.requirement_id(context));
             continue;
@@ -187,6 +200,15 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             if bindings.insert(requirement.clone(), binding).is_some() {
                 return Err(format!(
                     "Requirement '{requirement}' has more than one allocation.binding"
+                ));
+            }
+            continue;
+        }
+        if let Some(binding) = Operation::get_op::<MaterialBindingOp>(operation, context) {
+            let input = binding.input(context);
+            if material_bindings.insert(input.clone(), binding).is_some() {
+                return Err(format!(
+                    "Procedure material input '{input}' has more than one allocation.material"
                 ));
             }
             continue;
@@ -235,6 +257,33 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         if !tasks.contains(&node) {
             return Err(format!(
                 "Procedure parameter '{parameter}' references absent node '{node}'"
+            ));
+        }
+    }
+    if material_bindings.len() != materials.len() {
+        return Err(
+            "every allocated Procedure material input must have exactly one binding".to_owned(),
+        );
+    }
+    for (input, material) in &materials {
+        let stable_id =
+            lab_method::LocalId::new(input).expect("verified material input IDs are stable");
+        let Some(binding) = material_bindings.get(&stable_id) else {
+            return Err(format!(
+                "allocated Procedure material input '{input}' has no binding"
+            ));
+        };
+        if binding.procedure_node(context).as_str() != material.procedure_node(context)
+            || binding.symbol(context) != material.symbol(context)
+        {
+            return Err(format!(
+                "allocation for Procedure material input '{input}' does not match its node and symbol"
+            ));
+        }
+        if !tasks.contains(&material.procedure_node(context)) {
+            return Err(format!(
+                "Procedure material input '{input}' references absent node '{}'",
+                material.procedure_node(context)
             ));
         }
     }

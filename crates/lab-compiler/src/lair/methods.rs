@@ -9,9 +9,10 @@ use lab_capability::{
 };
 use lab_method::{
     CapabilityConstraintDefinition, CapabilityRequirementDefinition, IntentOperationId, LocalId,
-    MethodDefinition, MethodInput, MethodOutput, MethodParameter, MethodRegistry, ParameterType,
-    PortType, ProcedureParameterDefinition, ProcedureTaskDefinition, ProcedureValueExpression,
-    ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
+    MaterialInputDefinition, MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput,
+    MethodParameter, MethodRegistry, ParameterType, PortType, ProcedureParameterDefinition,
+    ProcedureTaskDefinition, ProcedureValueExpression, ScalarType, ScalarValueExpression,
+    TaskOutput, ValueReference,
 };
 
 const METHOD_NS: &str = "https://www.lab-compiler.org/ns/method#";
@@ -62,6 +63,7 @@ fn artifact_realization_service() -> MethodDefinition {
             vec![input_ref("design")],
             vec![output("product", material("PlasmidProduct"))],
             select_parameters(&parameters, &["artifact", "dependencies"]),
+            vec![material_parameter("dependencies", "dependencies")],
             vec![requirement(
                 "artifact-realization",
                 "ArtifactRealization",
@@ -107,6 +109,15 @@ fn automated_golden_gate() -> MethodDefinition {
                 vec![input_ref("design")],
                 vec![output("reaction", material("AssemblyReaction"))],
                 select_parameters(&parameters, &setup_parameters),
+                vec![
+                    material_parameter("backbone", "backbone"),
+                    material_parameter("components", "components"),
+                    material_parameter("dependencies", "dependencies"),
+                    material_parameter("restriction-enzyme", "restriction_enzyme"),
+                    material_literal("ligase", "T4_DNA_ligase"),
+                    material_literal("buffer", "T4_DNA_ligase_buffer"),
+                    material_literal("water", "nuclease_free_water"),
+                ],
                 vec![requirement(
                     "liquid-handling",
                     "LiquidHandling",
@@ -120,6 +131,7 @@ fn automated_golden_gate() -> MethodDefinition {
                 vec![task_ref("setup-reaction", "reaction")],
                 vec![output("product", material("PlasmidProduct"))],
                 select_parameters(&parameters, &cycling_parameters),
+                vec![],
                 vec![requirement(
                     "thermal-cycling",
                     "ThermalCycling",
@@ -145,6 +157,7 @@ fn material_provisioning() -> MethodDefinition {
             vec![],
             vec![output("material", material("CompetentCells"))],
             select_parameters(&parameters, &["item"]),
+            vec![material_parameter("item", "item")],
             vec![requirement(
                 "material-provisioning",
                 "MaterialProvisioning",
@@ -178,6 +191,7 @@ fn chemical_transformation() -> MethodDefinition {
                 .iter()
                 .map(|parameter| procedure_parameter(&parameter.name, parameter, None))
                 .collect(),
+            vec![material_parameter("dependencies", "dependencies")],
             vec![requirement(
                 "chemical-transformation",
                 "ChemicalTransformation",
@@ -236,6 +250,7 @@ fn recovery_method(
                     unit: None,
                 },
             }],
+            vec![material_literal("medium", "recovery_medium")],
             vec![requirement(
                 "incubation",
                 "Incubation",
@@ -264,6 +279,7 @@ fn serial_dilution() -> MethodDefinition {
             vec![input_ref("culture")],
             vec![output("diluted", material("DilutedCulture"))],
             select_parameters(&parameters, &["serial_dilutions"]),
+            vec![],
             vec![requirement(
                 "liquid-handling",
                 "LiquidHandling",
@@ -298,6 +314,7 @@ fn antibiotic_selection() -> MethodDefinition {
                 .iter()
                 .map(|parameter| procedure_parameter(&parameter.name, parameter, None))
                 .collect(),
+            vec![material_parameter("selection", "selection")],
             vec![requirement(
                 "antibiotic-selection",
                 "AntibioticSelection",
@@ -419,6 +436,7 @@ fn task(
     inputs: Vec<ValueReference>,
     outputs: Vec<TaskOutput>,
     parameters: Vec<ProcedureParameterDefinition>,
+    materials: Vec<MaterialInputDefinition>,
     requirements: Vec<CapabilityRequirementDefinition>,
 ) -> ProcedureTaskDefinition {
     ProcedureTaskDefinition {
@@ -427,8 +445,26 @@ fn task(
         inputs,
         outputs,
         parameters,
-        materials: Vec::new(),
+        materials,
         requirements,
+    }
+}
+
+fn material_parameter(id: &str, parameter: &str) -> MaterialInputDefinition {
+    MaterialInputDefinition {
+        id: local(id),
+        source: MaterialSourceExpression::IntentParameter {
+            parameter: local(parameter),
+        },
+    }
+}
+
+fn material_literal(id: &str, symbol: &str) -> MaterialInputDefinition {
+    MaterialInputDefinition {
+        id: local(id),
+        source: MaterialSourceExpression::Literal {
+            symbol: symbol.to_owned(),
+        },
     }
 }
 

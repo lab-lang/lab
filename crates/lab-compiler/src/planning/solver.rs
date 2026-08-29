@@ -17,13 +17,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::model::MaterialLotCandidates;
 use super::{
-    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, PlanningCapabilityRequirement,
+    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, MaterialLotBuildInventory,
+    PlanningCapabilityRequirement, PlanningMaterialInput, PlanningMaterialSource,
     PlanningMethodCandidate, PlanningProblem, PlanningProblemValidationError,
     ResolvedAdapterBinding,
 };
 
-pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v1";
+pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v2";
 
 /// Explicit choices that are allowed to turn an otherwise ambiguous solution space into a plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -81,7 +83,29 @@ pub struct SelectedMethod {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectedProcedureTask {
     pub task: LocalId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<SelectedMaterialBinding>,
     pub requirements: Vec<SelectedRequirementBinding>,
+}
+
+/// One exact physical input selected for a Procedure task.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SelectedMaterialBinding {
+    pub input: LocalId,
+    pub symbol: String,
+    pub source: SelectedMaterialSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SelectedMaterialSource {
+    MaterialLot {
+        component: String,
+        material_lot: String,
+    },
+    ChoiceOutput {
+        choice: LocalId,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -164,7 +188,24 @@ pub enum PlanningCandidateRejectionReason {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RejectedMethodCandidate {
     pub method: MethodId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rejected_materials: Vec<RejectedPlanningMaterial>,
     pub rejected_requirements: Vec<RejectedPlanningRequirement>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RejectedPlanningMaterial {
+    pub input: LocalId,
+    pub symbol: String,
+    pub reason: PlanningMaterialRejectionReason,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "reason", rename_all = "snake_case")]
+pub enum PlanningMaterialRejectionReason {
+    UnknownSymbol,
+    MissingDesignIdentity,
+    NoActiveMaterialLot { component: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -183,7 +224,16 @@ pub struct PlanningAlternative {
 pub struct AlternativeMethod {
     pub choice: LocalId,
     pub method: MethodId,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub materials: Vec<AlternativeMaterialBinding>,
     pub bindings: Vec<AlternativeRequirementBinding>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AlternativeMaterialBinding {
+    pub input: LocalId,
+    pub symbol: String,
+    pub source: SelectedMaterialSource,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -209,6 +259,15 @@ pub enum FacilityPlanningError {
     AdapterInventoryMismatch {
         binding_hash: String,
         binding_facility: String,
+        inventory_hash: String,
+        inventory_facility: String,
+    },
+    #[error(
+        "material inventory freezes inventory `{material_hash}` facility `{material_facility}`, but planning uses inventory `{inventory_hash}` facility `{inventory_facility}`"
+    )]
+    MaterialInventoryMismatch {
+        material_hash: String,
+        material_facility: String,
         inventory_hash: String,
         inventory_facility: String,
     },
@@ -243,11 +302,13 @@ impl FacilityPlanningSolution {
     pub fn solve(
         problem: &PlanningProblem,
         inventory: &InventorySnapshot,
+        material_inventory: &MaterialLotBuildInventory,
         adapters: Option<&AdapterBindingSnapshot>,
         policy: FacilityPlanningPolicy,
     ) -> Result<Self, FacilityPlanningError> {
         problem.validate()?;
         validate_adapter_snapshot(inventory, adapters)?;
+        validate_material_inventory(inventory, material_inventory)?;
         let pins = resolve_method_pins(problem, &policy)?;
         let assets = inventory.facility_assets()?;
         let mut alternatives = vec![Vec::<SelectedMethod>::new()];
@@ -261,14 +322,21 @@ impl FacilityPlanningSolution {
                 {
                     continue;
                 }
-                match allocate_method(candidate, &assets, adapters, policy.adapter_requirement) {
+                match allocate_method(
+                    candidate,
+                    material_inventory,
+                    &assets,
+                    adapters,
+                    policy.adapter_requirement,
+                ) {
                     MethodAllocation::Feasible(mut selections) => {
                         candidate_selections.append(&mut selections)
                     }
                     MethodAllocation::Rejected(rejected) => {
                         rejected_methods.push(RejectedMethodCandidate {
                             method: candidate.method.clone(),
-                            rejected_requirements: rejected,
+                            rejected_materials: rejected.materials,
+                            rejected_requirements: rejected.requirements,
                         })
                     }
                 }
@@ -359,11 +427,35 @@ impl FacilityPlanningSolution {
             }
             for (selected_task, task) in selection.tasks.iter().zip(&candidate.tasks) {
                 if selected_task.task != task.id
+                    || selected_task.materials.len() != task.materials.len()
                     || selected_task.requirements.len() != task.requirements.len()
                 {
                     return Err(FacilityPlanningSolutionValidationError::TaskSet {
                         choice: selection.choice.clone(),
                     });
+                }
+                for (binding, material) in selected_task.materials.iter().zip(&task.materials) {
+                    if binding.input != material.id
+                        || binding.symbol != material.symbol
+                        || !material_source_matches(&binding.source, &material.source)
+                    {
+                        return Err(FacilityPlanningSolutionValidationError::MaterialSet {
+                            task: task.id.clone(),
+                        });
+                    }
+                    if let SelectedMaterialSource::MaterialLot {
+                        component,
+                        material_lot,
+                    } = &binding.source
+                        && (AbsoluteIri::new(component).is_err()
+                            || AbsoluteIri::new(material_lot).is_err())
+                    {
+                        return Err(
+                            FacilityPlanningSolutionValidationError::InvalidMaterialBinding {
+                                input: binding.input.clone(),
+                            },
+                        );
+                    }
                 }
                 for (binding, requirement) in
                     selected_task.requirements.iter().zip(&task.requirements)
@@ -402,6 +494,10 @@ pub enum FacilityPlanningSolutionValidationError {
     TaskSet { choice: LocalId },
     #[error("facility solution does not preserve the exact requirement set for task `{task}`")]
     RequirementSet { task: LocalId },
+    #[error("facility solution does not preserve the exact material-input set for task `{task}`")]
+    MaterialSet { task: LocalId },
+    #[error("facility solution contains an invalid MaterialLot binding for input `{input}`")]
+    InvalidMaterialBinding { input: LocalId },
 }
 
 #[derive(Clone)]
@@ -412,7 +508,13 @@ struct SelectedMethodCandidate {
 
 enum MethodAllocation {
     Feasible(Vec<SelectedMethodCandidate>),
-    Rejected(Vec<RejectedPlanningRequirement>),
+    Rejected(MethodRejections),
+}
+
+#[derive(Default)]
+struct MethodRejections {
+    materials: Vec<RejectedPlanningMaterial>,
+    requirements: Vec<RejectedPlanningRequirement>,
 }
 
 #[derive(Clone)]
@@ -422,19 +524,27 @@ struct RequirementCandidate {
 
 fn allocate_method(
     candidate: &PlanningMethodCandidate,
+    material_inventory: &MaterialLotBuildInventory,
     assets: &[FacilityAsset],
     adapters: Option<&AdapterBindingSnapshot>,
     adapter_requirement: AdapterRequirement,
 ) -> MethodAllocation {
     let mut tasks = Vec::new();
-    let mut rejected = Vec::new();
+    let mut rejected = MethodRejections::default();
     for task in &candidate.tasks {
+        let mut task_materials = Vec::new();
+        for material in &task.materials {
+            match material_candidates(material, material_inventory) {
+                Ok(candidates) => task_materials.push(candidates),
+                Err(rejection) => rejected.materials.push(rejection),
+            }
+        }
         let mut task_requirements = Vec::new();
         for requirement in &task.requirements {
             let (bindings, rejections) =
                 requirement_candidates(requirement, assets, adapters, adapter_requirement);
             if bindings.is_empty() {
-                rejected.push(RejectedPlanningRequirement {
+                rejected.requirements.push(RejectedPlanningRequirement {
                     requirement: requirement.id.clone(),
                     capability_kind: requirement.capability_kind.clone(),
                     candidates: rejections,
@@ -443,14 +553,29 @@ fn allocate_method(
                 task_requirements.push((bindings, rejections));
             }
         }
-        tasks.push((task.id.clone(), task_requirements));
+        tasks.push((task.id.clone(), task_materials, task_requirements));
     }
-    if !rejected.is_empty() {
+    if !rejected.materials.is_empty() || !rejected.requirements.is_empty() {
         return MethodAllocation::Rejected(rejected);
     }
 
     let mut alternatives = vec![Vec::<SelectedProcedureTask>::new()];
-    for (task, requirements) in tasks {
+    for (task, materials, requirements) in tasks {
+        let mut material_alternatives = vec![Vec::<SelectedMaterialBinding>::new()];
+        for candidates in materials {
+            let mut combined = Vec::new();
+            'outer: for prefix in &material_alternatives {
+                for candidate in &candidates {
+                    let mut selection = prefix.clone();
+                    selection.push(candidate.clone());
+                    combined.push(selection);
+                    if combined.len() == 2 {
+                        break 'outer;
+                    }
+                }
+            }
+            material_alternatives = combined;
+        }
         let mut task_alternatives = vec![Vec::<SelectedRequirementBinding>::new()];
         for (bindings, rejections) in requirements {
             let mut combined = Vec::new();
@@ -470,15 +595,18 @@ fn allocate_method(
         }
         let mut combined = Vec::new();
         'outer: for prefix in &alternatives {
-            for requirements in &task_alternatives {
-                let mut selection = prefix.clone();
-                selection.push(SelectedProcedureTask {
-                    task: task.clone(),
-                    requirements: requirements.clone(),
-                });
-                combined.push(selection);
-                if combined.len() == 2 {
-                    break 'outer;
+            for materials in &material_alternatives {
+                for requirements in &task_alternatives {
+                    let mut selection = prefix.clone();
+                    selection.push(SelectedProcedureTask {
+                        task: task.clone(),
+                        materials: materials.clone(),
+                        requirements: requirements.clone(),
+                    });
+                    combined.push(selection);
+                    if combined.len() == 2 {
+                        break 'outer;
+                    }
                 }
             }
         }
@@ -492,6 +620,87 @@ fn allocate_method(
                 tasks,
             })
             .collect(),
+    )
+}
+
+fn material_candidates(
+    material: &PlanningMaterialInput,
+    inventory: &MaterialLotBuildInventory,
+) -> Result<Vec<SelectedMaterialBinding>, RejectedPlanningMaterial> {
+    if let PlanningMaterialSource::ChoiceOutput { choice } = &material.source {
+        return Ok(vec![SelectedMaterialBinding {
+            input: material.id.clone(),
+            symbol: material.symbol.clone(),
+            source: SelectedMaterialSource::ChoiceOutput {
+                choice: choice.clone(),
+            },
+        }]);
+    }
+    let candidates = inventory
+        .materials
+        .get(&material.symbol)
+        .or_else(|| inventory.artifacts.get(&material.symbol))
+        .ok_or_else(|| {
+            rejected_material(material, PlanningMaterialRejectionReason::UnknownSymbol)
+        })?;
+    let MaterialLotCandidates::Identified {
+        component,
+        material_lots,
+    } = candidates
+    else {
+        return Err(rejected_material(
+            material,
+            PlanningMaterialRejectionReason::MissingDesignIdentity,
+        ));
+    };
+    if material_lots.is_empty() {
+        return Err(rejected_material(
+            material,
+            PlanningMaterialRejectionReason::NoActiveMaterialLot {
+                component: component.clone(),
+            },
+        ));
+    }
+    Ok(material_lots
+        .iter()
+        .map(|material_lot| SelectedMaterialBinding {
+            input: material.id.clone(),
+            symbol: material.symbol.clone(),
+            source: SelectedMaterialSource::MaterialLot {
+                component: component.clone(),
+                material_lot: material_lot.clone(),
+            },
+        })
+        .collect())
+}
+
+fn rejected_material(
+    material: &PlanningMaterialInput,
+    reason: PlanningMaterialRejectionReason,
+) -> RejectedPlanningMaterial {
+    RejectedPlanningMaterial {
+        input: material.id.clone(),
+        symbol: material.symbol.clone(),
+        reason,
+    }
+}
+
+fn material_source_matches(
+    selected: &SelectedMaterialSource,
+    planned: &PlanningMaterialSource,
+) -> bool {
+    matches!(
+        (selected, planned),
+        (
+            SelectedMaterialSource::MaterialLot { .. },
+            PlanningMaterialSource::Inventory
+        )
+    ) || matches!(
+        (selected, planned),
+        (
+            SelectedMaterialSource::ChoiceOutput { choice: selected },
+            PlanningMaterialSource::ChoiceOutput { choice: planned }
+        ) if selected == planned
     )
 }
 
@@ -709,6 +918,23 @@ fn validate_adapter_snapshot(
     Ok(())
 }
 
+fn validate_material_inventory(
+    inventory: &InventorySnapshot,
+    material_inventory: &MaterialLotBuildInventory,
+) -> Result<(), FacilityPlanningError> {
+    if material_inventory.source_sha256 != inventory.source_sha256()
+        || material_inventory.facility != inventory.facility().as_str()
+    {
+        return Err(FacilityPlanningError::MaterialInventoryMismatch {
+            material_hash: material_inventory.source_sha256.clone(),
+            material_facility: material_inventory.facility.clone(),
+            inventory_hash: inventory.source_sha256().to_owned(),
+            inventory_facility: inventory.facility().as_str().to_owned(),
+        });
+    }
+    Ok(())
+}
+
 fn resolve_method_pins(
     problem: &PlanningProblem,
     policy: &FacilityPlanningPolicy,
@@ -849,6 +1075,16 @@ fn summarize_alternative(selection: &[SelectedMethod]) -> PlanningAlternative {
             .map(|method| AlternativeMethod {
                 choice: method.choice.clone(),
                 method: method.method.clone(),
+                materials: method
+                    .tasks
+                    .iter()
+                    .flat_map(|task| &task.materials)
+                    .map(|binding| AlternativeMaterialBinding {
+                        input: binding.input.clone(),
+                        symbol: binding.symbol.clone(),
+                        source: binding.source.clone(),
+                    })
+                    .collect(),
                 bindings: method
                     .tasks
                     .iter()
@@ -1056,6 +1292,15 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         (directory, snapshot)
     }
 
+    fn material_inventory(inventory: &InventorySnapshot) -> MaterialLotBuildInventory {
+        MaterialLotBuildInventory {
+            source_sha256: inventory.source_sha256().to_owned(),
+            facility: inventory.facility().as_str().to_owned(),
+            materials: BTreeMap::new(),
+            artifacts: BTreeMap::new(),
+        }
+    }
+
     #[test]
     fn facility_feasibility_selects_one_complete_method_graph() {
         let (_directory, inventory) = inventory(false);
@@ -1064,6 +1309,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         let solution = FacilityPlanningSolution::solve(
             &problem,
             &inventory,
+            &material_inventory(&inventory),
             None,
             FacilityPlanningPolicy::default(),
         )
@@ -1090,6 +1336,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         let error = FacilityPlanningSolution::solve(
             &problem,
             &inventory,
+            &material_inventory(&inventory),
             None,
             FacilityPlanningPolicy::default(),
         )
@@ -1112,7 +1359,14 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             }],
             adapter_requirement: AdapterRequirement::Optional,
         };
-        let selected = FacilityPlanningSolution::solve(&problem, &inventory, None, policy).unwrap();
+        let selected = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            None,
+            policy,
+        )
+        .unwrap();
         assert_eq!(selected.selections[0].method, method("automated"));
     }
 
@@ -1122,6 +1376,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         let error = FacilityPlanningSolution::solve(
             &problem(),
             &inventory,
+            &material_inventory(&inventory),
             None,
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
@@ -1141,5 +1396,55 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                 })
             })
         }));
+    }
+
+    #[test]
+    fn material_lot_ambiguity_is_a_global_plan_ambiguity() {
+        let (_directory, inventory) = inventory(false);
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        problem.choices[0].candidates[0].tasks[0]
+            .materials
+            .push(PlanningMaterialInput {
+                id: id("build-0::automated::handle::material::sample"),
+                symbol: "sample".to_owned(),
+                source: PlanningMaterialSource::Inventory,
+            });
+        let mut materials = material_inventory(&inventory);
+        materials.materials.insert(
+            "sample".to_owned(),
+            MaterialLotCandidates::Identified {
+                component: "https://example.org/material/sample".to_owned(),
+                material_lots: vec![
+                    "https://example.org/material/sample-lot-a".to_owned(),
+                    "https://example.org/material/sample-lot-b".to_owned(),
+                ],
+            },
+        );
+
+        let error = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &materials,
+            None,
+            FacilityPlanningPolicy::default(),
+        )
+        .unwrap_err();
+        let FacilityPlanningError::AmbiguousPlan { alternatives } = error else {
+            panic!("expected exact MaterialLot ambiguity")
+        };
+        assert_eq!(alternatives.len(), 2);
+        let lots = alternatives
+            .iter()
+            .map(
+                |alternative| match &alternative.methods[0].materials[0].source {
+                    SelectedMaterialSource::MaterialLot { material_lot, .. } => material_lot,
+                    SelectedMaterialSource::ChoiceOutput { .. } => panic!("expected external lot"),
+                },
+            )
+            .collect::<BTreeSet<_>>();
+        assert_eq!(lots.len(), 2);
     }
 }

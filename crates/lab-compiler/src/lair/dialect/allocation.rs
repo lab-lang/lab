@@ -14,7 +14,9 @@ use pliron::verify_err;
 
 use crate::lair::dialect::attributes::string_vec;
 use crate::lair::dialect::procedure::is_stable_local_id;
-use crate::planning::{SelectedMethod, SelectedRequirementBinding};
+use crate::planning::{
+    SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod, SelectedRequirementBinding,
+};
 
 /// Binds allocated LAIR to the exact immutable planning and facility inputs.
 #[pliron_op(
@@ -206,6 +208,153 @@ impl Verify for MethodOp {
             }
         }
         Ok(())
+    }
+}
+
+/// Freezes the physical source selected for one Procedure material input.
+#[pliron_op(
+    name = "allocation.material",
+    format,
+    attributes = (
+        bound_material_input: StringAttr,
+        material_procedure_node: StringAttr,
+        bound_material_symbol: StringAttr,
+        material_source_kind: StringAttr,
+        bound_component: StringAttr,
+        bound_material_lot: StringAttr,
+        bound_choice: StringAttr
+    ),
+    interfaces = [NOpdsInterface<0>, NResultsInterface<0>]
+)]
+pub(crate) struct MaterialBindingOp;
+
+impl MaterialBindingOp {
+    pub(crate) fn new(
+        context: &mut Context,
+        procedure_node: &LocalId,
+        binding: &SelectedMaterialBinding,
+    ) -> Self {
+        let raw = Operation::new(
+            context,
+            Self::get_concrete_op_info(),
+            vec![],
+            vec![],
+            vec![],
+            0,
+        );
+        let result = Self { op: raw };
+        result.set_attr_bound_material_input(context, StringAttr::new(binding.input.to_string()));
+        result
+            .set_attr_material_procedure_node(context, StringAttr::new(procedure_node.to_string()));
+        result.set_attr_bound_material_symbol(context, StringAttr::new(binding.symbol.clone()));
+        match &binding.source {
+            SelectedMaterialSource::MaterialLot {
+                component,
+                material_lot,
+            } => {
+                result.set_attr_material_source_kind(
+                    context,
+                    StringAttr::new("material_lot".to_owned()),
+                );
+                result.set_attr_bound_component(context, StringAttr::new(component.clone()));
+                result.set_attr_bound_material_lot(context, StringAttr::new(material_lot.clone()));
+            }
+            SelectedMaterialSource::ChoiceOutput { choice } => {
+                result.set_attr_material_source_kind(
+                    context,
+                    StringAttr::new("choice_output".to_owned()),
+                );
+                result.set_attr_bound_choice(context, StringAttr::new(choice.to_string()));
+            }
+        }
+        result
+    }
+
+    pub(crate) fn input(&self, context: &Context) -> LocalId {
+        LocalId::new(
+            self.get_attr_bound_material_input(context)
+                .expect("verified allocation.material carries an input")
+                .as_str(),
+        )
+        .expect("verified allocation.material input is stable")
+    }
+
+    pub(crate) fn procedure_node(&self, context: &Context) -> LocalId {
+        LocalId::new(
+            self.get_attr_material_procedure_node(context)
+                .expect("verified allocation.material carries a Procedure node")
+                .as_str(),
+        )
+        .expect("verified allocation.material Procedure node is stable")
+    }
+
+    pub(crate) fn symbol(&self, context: &Context) -> String {
+        self.get_attr_bound_material_symbol(context)
+            .expect("verified allocation.material carries a symbol")
+            .as_str()
+            .to_owned()
+    }
+}
+
+impl Verify for MaterialBindingOp {
+    fn verify(&self, context: &Context) -> Result<()> {
+        for (name, value) in [
+            (
+                "bound_material_input",
+                self.get_attr_bound_material_input(context),
+            ),
+            (
+                "material_procedure_node",
+                self.get_attr_material_procedure_node(context),
+            ),
+        ] {
+            if value.is_none_or(|value| LocalId::new(value.as_str()).is_err()) {
+                return verify_err!(
+                    self.loc(context),
+                    "allocation.material {name} must be a stable local ID"
+                );
+            }
+        }
+        if self
+            .get_attr_bound_material_symbol(context)
+            .is_none_or(|value| value.as_str().is_empty())
+        {
+            return verify_err!(
+                self.loc(context),
+                "allocation.material symbol must be non-empty"
+            );
+        }
+        let component = self.get_attr_bound_component(context);
+        let material_lot = self.get_attr_bound_material_lot(context);
+        let choice = self.get_attr_bound_choice(context);
+        match self
+            .get_attr_material_source_kind(context)
+            .as_deref()
+            .map(StringAttr::as_str)
+        {
+            Some("material_lot")
+                if component
+                    .as_ref()
+                    .is_some_and(|value| AbsoluteIri::new(value.as_str()).is_ok())
+                    && material_lot
+                        .as_ref()
+                        .is_some_and(|value| AbsoluteIri::new(value.as_str()).is_ok())
+                    && choice.is_none() =>
+            {
+                Ok(())
+            }
+            Some("choice_output")
+                if component.is_none()
+                    && material_lot.is_none()
+                    && choice.is_some_and(|value| LocalId::new(value.as_str()).is_ok()) =>
+            {
+                Ok(())
+            }
+            _ => verify_err!(
+                self.loc(context),
+                "allocation.material must carry exactly one valid material_lot or choice_output source"
+            ),
+        }
     }
 }
 

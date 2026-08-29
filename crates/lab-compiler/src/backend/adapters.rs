@@ -797,6 +797,7 @@ mod tests {
                             inputs: Vec::new(),
                             outputs: Vec::new(),
                             parameters: Vec::new(),
+                            materials: Vec::new(),
                             requirements: vec![requirement],
                         }],
                     },

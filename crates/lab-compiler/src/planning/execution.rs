@@ -15,7 +15,8 @@ use thiserror::Error;
 
 use super::{
     AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
-    PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningValueSource,
+    PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem,
+    PlanningValueSource, SelectedMaterialSource,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +103,31 @@ pub fn build_execution_plan_from_invocations(
     if planned_methods != expected_methods {
         return Err(ExecutionPlanBuildError::PlanningReferenceMismatch);
     }
+
+    options.materials.extend(
+        invocations
+            .methods
+            .iter()
+            .flat_map(|method| &method.tasks)
+            .flat_map(|task| &task.materials)
+            .filter_map(|material| {
+                let SelectedMaterialSource::MaterialLot {
+                    component,
+                    material_lot,
+                } = &material.source
+                else {
+                    return None;
+                };
+                Some(ExecutionMaterialBinding {
+                    id: material.input.to_string(),
+                    component: component.clone(),
+                    material_lot: material_lot.clone(),
+                })
+            }),
+    );
+    options
+        .materials
+        .sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut requirements = Vec::new();
     let mut nodes = Vec::new();
@@ -269,9 +295,22 @@ fn execution_task_dependencies(
         let (choice, candidate) = selected
             .get(&method.choice)
             .expect("every invocation Method was matched to its planning candidate");
+        let task_material_producers = candidate
+            .tasks
+            .iter()
+            .flat_map(|task| &task.materials)
+            .filter_map(|material| match &material.source {
+                PlanningMaterialSource::ChoiceOutput { choice } => Some(choice.clone()),
+                PlanningMaterialSource::Inventory => None,
+            })
+            .collect::<BTreeSet<_>>();
         for task in &candidate.tasks {
             let mut nodes = BTreeSet::new();
-            for producer in &choice.after {
+            for producer in choice
+                .after
+                .iter()
+                .filter(|producer| !task_material_producers.contains(*producer))
+            {
                 let (_, producer_candidate) = selected.get(producer).ok_or_else(|| {
                     ExecutionPlanBuildError::InvalidExecutionDataflow {
                         message: format!(
@@ -300,6 +339,30 @@ fn execution_task_dependencies(
                     &mut BTreeSet::new(),
                 )?);
             }
+            for material in &task.materials {
+                let PlanningMaterialSource::ChoiceOutput { choice: producer } = &material.source
+                else {
+                    continue;
+                };
+                let (_, producer_candidate) = selected.get(producer).ok_or_else(|| {
+                    ExecutionPlanBuildError::InvalidExecutionDataflow {
+                        message: format!(
+                            "Procedure material input '{}' depends on unselected choice '{}'",
+                            material.id, producer
+                        ),
+                    }
+                })?;
+                for producer_task in &producer_candidate.tasks {
+                    nodes.extend(task_nodes.get(&producer_task.id).cloned().ok_or_else(|| {
+                        ExecutionPlanBuildError::InvalidExecutionDataflow {
+                            message: format!(
+                                "Procedure material input '{}' depends on unknown task '{}'",
+                                material.id, producer_task.id
+                            ),
+                        }
+                    })?);
+                }
+            }
             dependencies.insert(task.id.clone(), nodes.into_iter().collect());
         }
     }
@@ -321,6 +384,14 @@ fn allocated_method_matches_candidate(
                     && allocated.inputs == planned.inputs
                     && allocated.outputs == planned.outputs
                     && allocated.parameters == planned.parameters
+                    && allocated.materials.len() == planned.materials.len()
+                    && allocated.materials.iter().zip(&planned.materials).all(
+                        |(binding, material)| {
+                            binding.input == material.id
+                                && binding.symbol == material.symbol
+                                && allocated_material_matches(&binding.source, &material.source)
+                        },
+                    )
                     && allocated.requirements.len() == planned.requirements.len()
                     && allocated
                         .requirements
@@ -335,6 +406,20 @@ fn allocated_method_matches_candidate(
                                     == requirement.accepted_control_modes
                         })
             })
+}
+
+fn allocated_material_matches(
+    allocated: &SelectedMaterialSource,
+    planned: &PlanningMaterialSource,
+) -> bool {
+    match (allocated, planned) {
+        (SelectedMaterialSource::MaterialLot { .. }, PlanningMaterialSource::Inventory) => true,
+        (
+            SelectedMaterialSource::ChoiceOutput { choice: allocated },
+            PlanningMaterialSource::ChoiceOutput { choice: planned },
+        ) => allocated == planned,
+        _ => false,
+    }
 }
 
 fn source_execution_nodes(

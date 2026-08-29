@@ -51,6 +51,21 @@ fn solution_requirements(solution: &Value) -> Vec<&Value> {
         .collect()
 }
 
+fn solution_materials(solution: &Value) -> Vec<&Value> {
+    solution["selections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|selection| selection["tasks"].as_array().unwrap())
+        .flat_map(|task| {
+            task.get("materials")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .collect()
+}
+
 #[test]
 fn new_check_build_and_metadata_form_one_project_loop() {
     let project = temporary_project();
@@ -214,7 +229,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     let solution = read_json(project.join(".lab/plan/compiler/facility-solution.json"));
     assert_eq!(
         solution["schema_version"],
-        "lab.facility-planning-solution.v1"
+        "lab.facility-planning-solution.v2"
     );
     assert_eq!(
         solution["selections"][0]["method"],
@@ -232,7 +247,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v3");
+    assert_eq!(plan["format"], "lab.execution-plan.v4");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -627,7 +642,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v4");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v5");
     assert_eq!(
         invocations["material_inventory"]["facility"],
         "https://example.org/golden-gate/facility"
@@ -815,6 +830,14 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#automated-golden-gate::cycle-reaction",
     );
     let cell_provision = node_id("std-lab-plasmid-provision-0::");
+    let provision = execution_nodes
+        .iter()
+        .find(|node| node["id"] == cell_provision)
+        .expect("the competent-cell provisioning task is executable");
+    assert!(
+        provision["after"].as_array().is_none_or(Vec::is_empty),
+        "cell provisioning is independent of plasmid assembly"
+    );
     let transform = execution_nodes
         .iter()
         .find(|node| {
@@ -1104,6 +1127,23 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
 
     let solution = read_json(plan_dir.join("compiler/facility-solution.json"));
     assert_eq!(solution["selections"].as_array().unwrap().len(), 23);
+    let materials = solution_materials(&solution);
+    let reference_input = materials
+        .iter()
+        .copied()
+        .find(|binding| binding["symbol"] == "reference_gfp")
+        .expect("the global facility solution allocates the external reference plasmid");
+    assert_eq!(
+        reference_input["source"]["component"],
+        "https://example.org/golden-gate/materials/reference_gfp"
+    );
+    assert_eq!(
+        reference_input["source"]["material_lot"],
+        "https://example.org/golden-gate/lots/reference_gfp_lot"
+    );
+    assert!(materials.iter().any(|binding| {
+        binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
+    }));
     let requirements = solution_requirements(&solution);
     assert_eq!(requirements.len(), 25);
     let liquid_handling = requirements
@@ -1118,6 +1158,20 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
     }));
+
+    let execution = read_json(plan_dir.join("plan.execution.json"));
+    assert_eq!(execution["format"], "lab.execution-plan.v4");
+    assert!(
+        execution["materials"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|binding| {
+                binding["component"] == "https://example.org/golden-gate/materials/reference_gfp"
+                    && binding["material_lot"]
+                        == "https://example.org/golden-gate/lots/reference_gfp_lot"
+            })
+    );
 
     let dry_run = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args(["run", plan_dir.to_str().unwrap(), "--dry-run"])

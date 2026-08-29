@@ -600,14 +600,30 @@ mod tests {
     const DESIGNS: &str = r#"use std.bio.designs
 use std.bio.golden_gate
 
-buy part J23101
-buy part B0034
-buy part GFP
-buy part B0015
-buy backbone pSB1C3
-buy restriction_enzyme BsaI
-buy chassis DH5alpha
-buy antibiotic chloramphenicol
+buy part J23101:
+  sbol_identity = "https://synbiohub.org/public/igem/J23101"
+buy part B0034:
+  sbol_identity = "https://synbiohub.org/public/igem/B0034"
+buy part GFP:
+  sbol_identity = "https://synbiohub.org/public/igem/GFP"
+buy part B0015:
+  sbol_identity = "https://synbiohub.org/public/igem/B0015"
+buy backbone pSB1C3:
+  sbol_identity = "https://example.org/golden-gate/materials/pSB1C3"
+buy restriction_enzyme BsaI:
+  sbol_identity = "https://example.org/golden-gate/materials/BsaI"
+buy chassis DH5alpha:
+  sbol_identity = "https://example.org/golden-gate/materials/DH5alpha"
+buy antibiotic chloramphenicol:
+  sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"
+buy part T4_DNA_ligase:
+  sbol_identity = "https://example.org/golden-gate/materials/T4_DNA_ligase"
+buy part T4_DNA_ligase_buffer:
+  sbol_identity = "https://example.org/golden-gate/materials/T4_DNA_ligase_buffer"
+buy part nuclease_free_water:
+  sbol_identity = "https://example.org/golden-gate/materials/nuclease_free_water"
+buy part recovery_medium:
+  sbol_identity = "https://example.org/golden-gate/materials/recovery_medium"
 
 gfp_sequence: DNA = dna("ACGT")
 
@@ -948,6 +964,13 @@ workflow main() -> Material<Plasmid>:
             &dependencies.value,
             ProcedureValue::List { element_type: ScalarType::Text, values } if values.is_empty()
         ));
+        assert_eq!(automated.tasks[0].materials.len(), 9);
+        assert!(automated.tasks[0].materials.iter().all(|material| {
+            matches!(
+                material.source,
+                crate::planning::PlanningMaterialSource::Inventory
+            )
+        }));
         assert!(matches!(
             automated.tasks[1].inputs[0].source,
             PlanningValueSource::TaskOutput { ref task, ref output }
@@ -971,6 +994,15 @@ workflow main() -> Material<Plasmid>:
                 ScalarValue::Real(value) if value.to_string() == "30"
             ));
         }
+        let transformation = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.transform")
+            .expect("transformation is a global method choice");
+        assert!(matches!(
+            transformation.candidates[0].tasks[0].materials[0].source,
+            crate::planning::PlanningMaterialSource::ChoiceOutput { .. }
+        ));
 
         let json = serde_json::to_string_pretty(&problem).expect("problem serializes");
         let decoded: PlanningProblem = serde_json::from_str(&json).expect("problem deserializes");
@@ -1026,8 +1058,33 @@ workflow main() -> Material<Plasmid>:
             }],
         )
         .unwrap();
-        let solution =
-            FacilityPlanningSolution::solve(&problem, &inventory, Some(&adapters), policy).unwrap();
+        let active_lots = inventory.active_material_lots().unwrap();
+        let lots_by_component = active_lots
+            .components()
+            .map(|(component, lots)| {
+                (
+                    component.as_str().to_owned(),
+                    lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
+                )
+            })
+            .collect();
+        let BuildInventory::MaterialLots(material_inventory) = BuildInventory::from_material_lots(
+            &[&checked],
+            inventory.source_sha256(),
+            inventory.facility().as_str(),
+            &lots_by_component,
+        )
+        .unwrap() else {
+            unreachable!()
+        };
+        let solution = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &material_inventory,
+            Some(&adapters),
+            policy,
+        )
+        .unwrap();
         let allocated = refined.allocate(solution).expect("solution applies");
         let ir = allocated.ir();
 
@@ -1057,25 +1114,6 @@ workflow main() -> Material<Plasmid>:
         assert!(!protocol_ir.contains("procedure."), "{protocol_ir}");
         assert!(!protocol_ir.contains("allocation."), "{protocol_ir}");
 
-        let active_lots = inventory.active_material_lots().unwrap();
-        let lots_by_component = active_lots
-            .components()
-            .map(|(component, lots)| {
-                (
-                    component.as_str().to_owned(),
-                    lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
-                )
-            })
-            .collect();
-        let BuildInventory::MaterialLots(material_inventory) = BuildInventory::from_material_lots(
-            &[&checked],
-            inventory.source_sha256(),
-            inventory.facility().as_str(),
-            &lots_by_component,
-        )
-        .unwrap() else {
-            unreachable!()
-        };
         let invocations = allocated.adapter_invocations(material_inventory).unwrap();
         assert_eq!(invocations.invocations.len(), 1);
         assert_eq!(
