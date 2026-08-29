@@ -2,21 +2,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_capability::MethodId;
 use lab_compiler::planning::{
-    AdapterRequirement, ExecutionPlanOptions, FacilityPlanningPolicy, FacilityPlanningSolution,
-    MethodPin, MethodPinSelector, build_execution_plan_from_invocations, reviewed_lowering_bundles,
+    ExecutionPlanOptions, build_execution_plan_from_invocations, reviewed_lowering_bundles,
 };
 use lab_compiler::{
     CheckedDeclaration, DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module,
     render_diagnostic,
 };
 use lab_inventory::InventorySnapshot;
-use lab_method::{IntentOperationId, LocalId};
-use lab_package::{
-    LabPackage, PackageManifest, PlanningAdapterRequirement as ManifestAdapterRequirement,
+use lab_package::{LabPackage, PackageManifest};
+use lab_project::{
+    CompiledModule, CompiledProject, LOCK_FILE, LabProject, load_package_inventory,
+    resolve_package_adapter_bindings,
 };
-use lab_project::{CompiledModule, CompiledProject, LOCK_FILE, LabProject};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, ExecutionMethodSelection, ExecutionPlanDocument,
     ExecutionPlanningArtifact, ExecutionPlanningReference,
@@ -156,8 +154,8 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         .map(|module| &module.module)
         .collect::<Vec<_>>();
 
-    let adapter_bindings_artifact = if let Some(snapshot) = package_inventory_snapshot(package)? {
-        if let Some(bindings) = crate::adapters::resolve_package_bindings(package, &snapshot)? {
+    let adapter_bindings_artifact = if let Some(snapshot) = load_package_inventory(package)? {
+        if let Some(bindings) = resolve_package_adapter_bindings(package, &snapshot)? {
             let artifact = PathBuf::from("adapter_bindings.json");
             let path = output_root.join(&artifact);
             let mut json = serde_json::to_string_pretty(&bindings)?;
@@ -345,53 +343,15 @@ fn write_facility_plan(
     output_root: &Path,
 ) -> Result<PlanCompleted> {
     let package = project.default_package();
-    package.entry_source().with_context(|| {
-        format!(
-            "package '{}' is a library with no build.entry; a facility plan needs an exact main workflow",
-            package.manifest.package.name
-        )
-    })?;
-    let inventory = package_inventory_snapshot(package)?.with_context(|| {
-        format!(
-            "package '{}' has no inventory.document; facility planning consumes a validated SBOLInventory document",
-            package.manifest.package.name
-        )
-    })?;
-    let program_packages = project.program_packages();
-    let modules = compiled
-        .modules
-        .iter()
-        .filter(|module| program_packages.contains(&module.package))
-        .map(|module| &module.module)
-        .collect::<Vec<_>>();
-    let portable = PortableLairProgram::lower_program(&modules)
-        .context("failed to lower the checked program into Design and Intent LAIR")?;
-    let refined = portable
-        .refine_standard_methods()
-        .context("failed to refine workflow intent into Method alternatives")?;
-    let refined_ir = refined.ir();
-    let problem = refined
-        .planning_problem()
-        .context("failed to project the verified Method graph into a planning problem")?;
-    let adapter_bindings = crate::adapters::resolve_package_bindings(package, &inventory)?;
-    let policy = facility_planning_policy(package)?;
-    let material_inventory =
-        crate::facility_lowering::semantic_material_inventory(&modules, &inventory)?;
-    let solution = FacilityPlanningSolution::solve(
-        &problem,
-        &inventory,
-        &material_inventory,
-        adapter_bindings.as_ref(),
-        policy,
-    )
-    .context("failed to solve Method, material, and facility choices as one complete plan")?;
-    let allocated = refined
-        .allocate(solution.clone())
-        .context("failed to apply the facility solution to refined LAIR")?;
+    let facility = project.plan_facility_with_standard_methods(compiled)?;
+    let inventory = &facility.inventory;
+    let adapter_bindings = facility.adapter_bindings.as_ref();
+    let allocated = &facility.allocated;
+    let invocations = &facility.adapter_invocations;
+    let problem = facility.problem();
+    let solution = facility.solution();
+    let refined_ir = &facility.refined_lair;
     let allocated_ir = allocated.ir();
-    let invocations = allocated
-        .adapter_invocations(material_inventory)
-        .context("failed to project allocated LAIR into adapter invocations")?;
     fs::create_dir_all(output_root)
         .with_context(|| format!("failed to create {}", output_root.display()))?;
     reset_facility_bundle_directories(output_root)?;
@@ -405,12 +365,12 @@ fn write_facility_plan(
     let planning_problem_reference = write_frozen_artifact(
         output_root,
         &planning_problem_artifact,
-        &pretty_json_bytes(&problem)?,
+        &pretty_json_bytes(problem)?,
     )?;
     let facility_solution_reference = write_frozen_artifact(
         output_root,
         &facility_solution_artifact,
-        &pretty_json_bytes(&solution)?,
+        &pretty_json_bytes(solution)?,
     )?;
     let allocated_lair_reference = write_frozen_artifact(
         output_root,
@@ -428,12 +388,12 @@ fn write_facility_plan(
 
     let lowered = crate::facility_lowering::lower_adapter_invocations(
         package,
-        &inventory,
-        &allocated,
-        &invocations,
+        inventory,
+        allocated,
+        invocations,
         output_root,
     )?;
-    let inventory_document = staged_inventory_name(&inventory)?;
+    let inventory_document = staged_inventory_name(inventory)?;
     let reviewed_lowerings = reviewed_lowering_bundles(&lowered.manifest)
         .context("failed to freeze allocated adapter lowerings into the reviewed plan")?;
     let planning_reference = ExecutionPlanningReference {
@@ -459,8 +419,8 @@ fn write_facility_plan(
             .collect(),
     };
     let mut execution_plan = build_execution_plan_from_invocations(
-        &invocations,
-        &problem,
+        invocations,
+        problem,
         ExecutionPlanOptions {
             inventory_document: inventory_document.clone(),
             planning: Some(planning_reference),
@@ -469,7 +429,7 @@ fn write_facility_plan(
         },
     )
     .context("failed to construct the reviewed execution plan")?;
-    stage_execution_inputs(package, &inventory, &mut execution_plan, output_root)?;
+    stage_execution_inputs(package, inventory, &mut execution_plan, output_root)?;
     execution_plan.lowerings = reviewed_lowerings;
     execution_plan
         .validate()
@@ -478,7 +438,7 @@ fn write_facility_plan(
     let execution_plan_path = output_root.join(EXECUTION_PLAN_FILE);
     write_pretty_json(&lowering_path, &lowered.manifest)?;
     write_pretty_json(&execution_plan_path, &execution_plan)?;
-    let adapter_bindings_path = if let Some(bindings) = adapter_bindings.as_ref() {
+    let adapter_bindings_path = if let Some(bindings) = adapter_bindings {
         let path = output_root.join("adapter_bindings.json");
         write_pretty_json(&path, bindings)?;
         Some(path)
@@ -538,37 +498,6 @@ fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {
             human.push_str(&format!("\n  {}", human_path(document)));
         }
     }
-}
-
-fn facility_planning_policy(package: &LabPackage) -> Result<FacilityPlanningPolicy> {
-    let method_pins = package
-        .manifest
-        .planning
-        .methods
-        .iter()
-        .map(|pin| {
-            let selector = match (&pin.source_operation, &pin.choice) {
-                (Some(source_operation), None) => MethodPinSelector::SourceOperation {
-                    source_operation: IntentOperationId::new(source_operation.clone())?,
-                },
-                (None, Some(choice)) => MethodPinSelector::Choice {
-                    choice: LocalId::new(choice.clone())?,
-                },
-                _ => unreachable!("package validation requires exactly one method selector"),
-            };
-            Ok(MethodPin {
-                selector,
-                method: MethodId::new(pin.method.clone())?,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(FacilityPlanningPolicy {
-        method_pins,
-        adapter_requirement: match package.manifest.planning.adapter_requirement {
-            ManifestAdapterRequirement::Optional => AdapterRequirement::Optional,
-            ManifestAdapterRequirement::NonManual => AdapterRequirement::NonManual,
-        },
-    })
 }
 
 fn human_path(path: &Path) -> String {
@@ -737,27 +666,12 @@ fn load_package(path: &Path) -> Result<LabPackage> {
 
 fn validate_project_inventories(project: &LabProject) -> Result<()> {
     for package in project.member_packages() {
-        let Some(snapshot) = package_inventory_snapshot(package)? else {
+        let Some(snapshot) = load_package_inventory(package)? else {
             continue;
         };
-        crate::adapters::resolve_package_bindings(package, &snapshot)?;
+        resolve_package_adapter_bindings(package, &snapshot)?;
     }
     Ok(())
-}
-
-fn package_inventory_snapshot(package: &LabPackage) -> Result<Option<InventorySnapshot>> {
-    let inventory = &package.manifest.inventory;
-    let Some(document) = inventory.document.as_ref() else {
-        return Ok(None);
-    };
-    InventorySnapshot::load(&package.root, document, inventory.facility.as_deref())
-        .map(Some)
-        .with_context(|| {
-            format!(
-                "failed to load inventory for package '{}'",
-                package.manifest.package.name
-            )
-        })
 }
 
 fn staged_inventory_name(inventory: &InventorySnapshot) -> Result<String> {

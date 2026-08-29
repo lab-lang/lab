@@ -3,6 +3,8 @@
 //! This crate owns filesystem resolution and compilation order. The language
 //! crate remains I/O-free and accepts only explicit semantic environments.
 
+mod facility;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +23,11 @@ use sbol3::{Document, RdfFormat};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use facility::{
+    FacilityPlanningResult, FacilityProjectError, load_package_inventory,
+    resolve_package_adapter_bindings,
+};
 
 pub const LOCK_FILE: &str = "lab.lock";
 pub const LOCK_SCHEMA_VERSION: u32 = 2;
@@ -809,5 +816,42 @@ workflow main() -> Material<Plasmid>:
         let compiled = LabProject::discover(root).unwrap().compile().unwrap();
         assert_eq!(compiled.modules.len(), 1);
         assert_eq!(compiled.modules[0].source.module, "ebef_reference.facility");
+    }
+
+    #[test]
+    fn plans_a_project_through_exact_facility_and_material_allocations() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/golden-gate");
+        let project = LabProject::discover(root).unwrap();
+        let compiled = project.compile().unwrap();
+        let planned = project
+            .plan_facility_with_standard_methods(&compiled)
+            .unwrap();
+
+        assert_eq!(
+            planned.inventory.facility().as_str(),
+            "https://example.org/golden-gate/facility"
+        );
+        assert!(planned.refined_lair.contains("method.choice"));
+        assert_eq!(
+            planned.problem().sha256(),
+            planned.solution().problem_sha256
+        );
+        assert!(
+            planned
+                .adapter_invocations
+                .invocations
+                .iter()
+                .any(|invocation| invocation.adapter.driver == "opentrons.ot2")
+        );
+        assert!(planned.solution().selections.iter().any(|method| {
+            method.tasks.iter().any(|task| {
+                task.materials.iter().any(|material| {
+                    matches!(
+                        material.source,
+                        lab_compiler::planning::SelectedMaterialSource::MaterialLot { .. }
+                    )
+                })
+            })
+        }));
     }
 }

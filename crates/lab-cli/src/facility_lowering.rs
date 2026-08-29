@@ -13,9 +13,8 @@ use lab_compiler::planning::{
     AdapterInvocation, AdapterInvocationPlan, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
     FacilityLoweringManifest, FacilityLoweringRoute, FacilityLoweringScope,
-    MaterialLotBuildInventory,
 };
-use lab_compiler::{AllocatedLairProgram, ArtifactBundle, CheckedModule};
+use lab_compiler::{AllocatedLairProgram, ArtifactBundle};
 use lab_inventory::InventorySnapshot;
 use lab_package::LabPackage;
 use lab_runfmt::ReviewedRunDocument;
@@ -289,35 +288,6 @@ pub(crate) fn lower_adapter_invocations(
         documents,
         reviewed_documents,
     })
-}
-
-pub(crate) fn semantic_material_inventory(
-    modules: &[&CheckedModule],
-    snapshot: &InventorySnapshot,
-) -> Result<MaterialLotBuildInventory> {
-    let material_lots = snapshot
-        .active_material_lots()
-        .context("failed to index active SBOLInventory MaterialLots")?;
-    let lots_by_component = material_lots
-        .components()
-        .map(|(component, lots)| {
-            (
-                component.as_str().to_owned(),
-                lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let inventory = BuildInventory::from_material_lots(
-        modules,
-        snapshot.source_sha256(),
-        snapshot.facility().as_str(),
-        &lots_by_component,
-    )
-    .context("failed to bind checked designs to SBOLInventory MaterialLots")?;
-    let BuildInventory::MaterialLots(inventory) = inventory else {
-        unreachable!("SBOLInventory material binding always creates semantic inventory")
-    };
-    Ok(inventory)
 }
 
 fn facility_lowering_directories<'a>(

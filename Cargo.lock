@@ -1817,7 +1817,11 @@ dependencies = [
 name = "lab-project"
 version = "0.1.2"
 dependencies = [
+ "lab-capability",
+ "lab-compiler",
+ "lab-inventory",
  "lab-language",
+ "lab-method",
  "lab-package",
  "lab-sbol",
  "sbol3",
