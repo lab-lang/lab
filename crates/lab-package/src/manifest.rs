@@ -57,6 +57,8 @@ pub struct PackageManifest {
     #[serde(default)]
     pub build: BuildMetadata,
     #[serde(default)]
+    pub planning: PlanningMetadata,
+    #[serde(default)]
     pub inventory: InventoryMetadata,
     #[serde(default)]
     pub execution: ExecutionMetadata,
@@ -77,6 +79,42 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
+}
+
+/// Explicit policy for resolving method and facility choices.
+///
+/// Methods remain compiler-owned semantic definitions. A package may only pin a stable source
+/// operation or one concrete choice to an exact method IRI; it cannot redefine the method here.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanningMetadata {
+    #[serde(default, rename = "adapter-requirement")]
+    pub adapter_requirement: PlanningAdapterRequirement,
+    #[serde(default)]
+    pub methods: Vec<MethodPinMetadata>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanningAdapterRequirement {
+    /// Freeze a compatible configured adapter when one exists.
+    #[default]
+    Optional,
+    /// Require a configured planning adapter for every non-manual offering.
+    NonManual,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MethodPinMetadata {
+    /// Pin every reachable occurrence of this exact frontend Intent operation.
+    #[serde(default, rename = "source-operation")]
+    pub source_operation: Option<String>,
+    /// Pin one exact choice ID from the emitted planning problem.
+    #[serde(default)]
+    pub choice: Option<String>,
+    /// Exact method identity selected for the matching choice or choices.
+    pub method: String,
 }
 
 /// The facility catalog a package may plan against.
@@ -191,6 +229,7 @@ impl PackageManifest {
                 self.package.edition.clone(),
             ));
         }
+        self.planning.validate()?;
         self.inventory.validate()?;
         self.execution.validate(&self.inventory)?;
         for (name, dependency) in &self.dependencies {
@@ -235,6 +274,44 @@ impl PackageManifest {
                         })?;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl PlanningMetadata {
+    fn validate(&self) -> Result<(), PackageError> {
+        let mut selectors = BTreeSet::new();
+        for pin in &self.methods {
+            let selector = match (&pin.source_operation, &pin.choice) {
+                (Some(source_operation), None) if valid_local_id(source_operation) => {
+                    format!("source-operation:{source_operation}")
+                }
+                (None, Some(choice)) if valid_local_id(choice) => format!("choice:{choice}"),
+                (Some(_), Some(_)) => {
+                    return Err(PackageError::InvalidPlanning(
+                        "a method pin must declare exactly one of 'source-operation' or 'choice'"
+                            .to_owned(),
+                    ));
+                }
+                _ => {
+                    return Err(PackageError::InvalidPlanning(
+                        "a method pin needs one non-empty 'source-operation' or 'choice' without whitespace"
+                            .to_owned(),
+                    ));
+                }
+            };
+            if !valid_absolute_iri(&pin.method) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "method '{}' must be an absolute IRI",
+                    pin.method
+                )));
+            }
+            if !selectors.insert(selector.clone()) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "method selector '{selector}' is declared more than once"
+                )));
             }
         }
         Ok(())
@@ -328,6 +405,13 @@ fn valid_adapter_id(value: &str) -> bool {
                     character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
                 })
         })
+}
+
+fn valid_local_id(value: &str) -> bool {
+    !value.is_empty()
+        && !value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
 }
 
 fn valid_absolute_iri(value: &str) -> bool {
@@ -515,6 +599,99 @@ facility = "https://example.org/ebef/facility"
             Some("https://example.org/ebef/facility")
         );
         manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn reads_exact_method_pins_and_adapter_policy() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "golden-gate"
+version = "0.1.0"
+
+[planning]
+adapter-requirement = "non-manual"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+
+[[planning.methods]]
+choice = "choice-17"
+method = "https://www.lab-compiler.org/ns/method#controlled-recovery"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.planning.adapter_requirement,
+            PlanningAdapterRequirement::NonManual
+        );
+        assert_eq!(manifest.planning.methods.len(), 2);
+        assert_eq!(
+            manifest.planning.methods[0].source_operation.as_deref(),
+            Some("std.bio.build.realize")
+        );
+        assert_eq!(
+            manifest.planning.methods[1].choice.as_deref(),
+            Some("choice-17")
+        );
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_ambiguous_duplicate_or_non_iri_method_pins() {
+        let both = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+choice = "choice-17"
+method = "https://example.org/method"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            both.validate(),
+            Err(PackageError::InvalidPlanning(_))
+        ));
+
+        let duplicate = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://example.org/manual"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://example.org/automated"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            duplicate.validate(),
+            Err(PackageError::InvalidPlanning(_))
+        ));
+
+        let relative = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[planning.methods]]
+choice = "choice-17"
+method = "automated-golden-gate"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            relative.validate(),
+            Err(PackageError::InvalidPlanning(_))
+        ));
     }
 
     #[test]
