@@ -6,9 +6,9 @@ use lab_capability::{ControlMode, ScalarValue};
 use lab_method::ProcedureValue;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
-    ExecutionLoweringBundle, ExecutionMaterialBinding, ExecutionParameterBinding,
-    ExecutionParameterValue, ExecutionPlanAction, ExecutionPlanDocument, ExecutionPlanNode,
-    ExecutionPlanningReference, ExecutionRequirementBinding, ReviewedRunDocument,
+    ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,
+    ExecutionPlanAction, ExecutionPlanDocument, ExecutionPlanNode, ExecutionPlanningReference,
+    ExecutionRequirementBinding, ReviewedRunDocument,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -29,8 +29,6 @@ pub struct ExecutionPlanOptions {
     pub outputs: Vec<lab_runfmt::ExecutionMaterialOutput>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub lowerings: Vec<ExecutionLoweringBundle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planning: Option<ExecutionPlanningReference>,
 }
@@ -42,7 +40,6 @@ impl Default for ExecutionPlanOptions {
             materials: Vec::new(),
             outputs: Vec::new(),
             reviewed_documents: BTreeMap::new(),
-            lowerings: Vec::new(),
             planning: None,
         }
     }
@@ -249,7 +246,6 @@ pub fn build_execution_plan_from_invocations(
         requirements,
         materials: options.materials,
         outputs: options.outputs,
-        lowerings: options.lowerings,
         nodes,
     };
     plan.validate()

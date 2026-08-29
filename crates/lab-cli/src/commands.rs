@@ -2,9 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::planning::{
-    ExecutionPlanOptions, build_execution_plan_from_invocations, reviewed_lowering_bundles,
-};
+use lab_compiler::planning::{ExecutionPlanOptions, build_execution_plan_from_invocations};
 use lab_compiler::{
     CheckedDeclaration, DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module,
     render_diagnostic,
@@ -389,13 +387,10 @@ fn write_facility_plan(
     let lowered = crate::facility_lowering::lower_adapter_invocations(
         package,
         inventory,
-        allocated,
         invocations,
         output_root,
     )?;
     let inventory_document = staged_inventory_name(inventory)?;
-    let reviewed_lowerings = reviewed_lowering_bundles(&lowered.manifest)
-        .context("failed to freeze allocated adapter lowerings into the reviewed plan")?;
     let planning_reference = ExecutionPlanningReference {
         problem_sha256: problem.sha256(),
         allocated_lair_sha256: invocations.allocated_lair_sha256.clone(),
@@ -430,7 +425,6 @@ fn write_facility_plan(
     )
     .context("failed to construct the reviewed execution plan")?;
     stage_execution_inputs(package, inventory, &mut execution_plan, output_root)?;
-    execution_plan.lowerings = reviewed_lowerings;
     execution_plan
         .validate()
         .map_err(|message| anyhow::anyhow!("reviewed execution plan is invalid: {message}"))?;

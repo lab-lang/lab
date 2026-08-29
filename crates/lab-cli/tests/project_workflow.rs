@@ -260,7 +260,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v4");
+    assert_eq!(plan["format"], "lab.execution-plan.v5");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -541,7 +541,7 @@ fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
         serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
             .unwrap();
     let target_root = out_dir.join(lowering["routes"][0]["output"].as_str().unwrap());
-    assert_eq!(lowering["routes"][0]["scope"], "invocation");
+    assert!(lowering["routes"][0].get("scope").is_none());
     assert!(
         target_root
             .join("tasks/001-setup-golden-gate-reaction/automation_protocol.py")
@@ -813,7 +813,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     }));
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v3");
     assert_eq!(lowering["inventory_sha256"], solution["inventory_sha256"]);
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
@@ -822,7 +822,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "https://example.org/golden-gate/opentrons_ot2"
     );
     assert_eq!(route["driver"], "opentrons.ot2");
-    assert_eq!(route["scope"], "invocation");
+    assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
     assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
@@ -911,12 +911,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         ]),
         "transformation must wait for both its realized plasmid and provisioned cells"
     );
-    assert!(
-        execution_plan["lowerings"]
-            .as_array()
-            .is_none_or(Vec::is_empty),
-        "an exact requirement document belongs on its Execute node, not in a whole-program lowering"
-    );
+    assert!(execution_plan.get("lowerings").is_none());
     let reviewed_protocols = execution_nodes
         .iter()
         .filter_map(|node| node.get("document"))
@@ -1050,10 +1045,10 @@ ex:thermal_simulator
     );
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v3");
     let routes = lowering["routes"].as_array().unwrap();
     assert_eq!(routes.len(), 2);
-    assert!(routes.iter().all(|route| route["scope"] == "invocation"));
+    assert!(routes.iter().all(|route| route.get("scope").is_none()));
     let drivers = routes
         .iter()
         .map(|route| route["driver"].as_str().unwrap())
@@ -1091,7 +1086,7 @@ ex:thermal_simulator
     }));
 
     let plan = read_json(out_dir.join("plan.execution.json"));
-    assert!(plan["lowerings"].as_array().is_none_or(Vec::is_empty));
+    assert!(plan.get("lowerings").is_none());
     let reviewed_documents = plan["nodes"]
         .as_array()
         .unwrap()
@@ -1198,7 +1193,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
             .unwrap();
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
-    assert_eq!(route["scope"], "invocation");
+    assert!(route.get("scope").is_none());
     let invocations = read_json(plan_dir.join("compiler/adapter-invocations.json"));
     assert_eq!(
         invocations["facility"],
@@ -1269,7 +1264,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     }));
 
     let execution = read_json(plan_dir.join("plan.execution.json"));
-    assert_eq!(execution["format"], "lab.execution-plan.v4");
+    assert_eq!(execution["format"], "lab.execution-plan.v5");
     assert!(
         execution["materials"]
             .as_array()
@@ -1360,7 +1355,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         "https://example.org/golden-gate/opentrons_flex"
     );
     assert_eq!(route["driver"], "opentrons.flex");
-    assert_eq!(route["scope"], "invocation");
+    assert!(route.get("scope").is_none());
     assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
@@ -1412,7 +1407,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     assert!(!protocol["commands"].as_array().unwrap().is_empty());
 
     let execution = read_json(out_dir.join("plan.execution.json"));
-    assert!(execution["lowerings"].as_array().is_none_or(Vec::is_empty));
+    assert!(execution.get("lowerings").is_none());
     let flex_documents = execution["nodes"]
         .as_array()
         .unwrap()

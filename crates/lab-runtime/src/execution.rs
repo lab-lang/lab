@@ -17,8 +17,8 @@ use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
     ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding,
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT,
-    PlateReadDocument, ReviewedLoweringArtifactRole, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
-    SimulationRunDocument, StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
+    PlateReadDocument, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument,
+    StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
 };
 use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
@@ -303,33 +303,6 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
         let _ = writeln!(text, "planning-only bindings:");
         for issue in issues {
             let _ = writeln!(text, "  - {issue}");
-        }
-    }
-    if !loaded.plan.lowerings.is_empty() {
-        let _ = writeln!(text, "reviewed adapter lowerings:");
-        for lowering in &loaded.plan.lowerings {
-            let protocols = lowering
-                .artifacts
-                .iter()
-                .filter(|artifact| artifact.role == ReviewedLoweringArtifactRole::DeviceProtocol)
-                .collect::<Vec<_>>();
-            let _ = writeln!(
-                text,
-                "  - {}: {} device protocol(s) jointly cover {} requirement(s) on {} through {}",
-                lowering.id,
-                protocols.len(),
-                lowering.requirements.len(),
-                lowering.asset,
-                lowering.adapter.driver
-            );
-            for protocol in protocols {
-                let _ = writeln!(
-                    text,
-                    "    {} ({})",
-                    protocol.path,
-                    protocol.format.as_deref().unwrap_or("unknown format")
-                );
-            }
         }
     }
     for (index, node) in loaded.nodes.iter().enumerate() {
@@ -710,20 +683,6 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
             )?;
         }
     }
-    for lowering in &plan.lowerings {
-        for artifact in &lowering.artifacts {
-            read_frozen_input(
-                &directory,
-                &artifact.path,
-                &artifact.sha256,
-                &format!(
-                    "reviewed artifact '{}' for adapter lowering '{}'",
-                    artifact.path, lowering.id
-                ),
-            )?;
-        }
-    }
-
     let requirements = plan
         .requirements
         .iter()
@@ -1559,7 +1518,6 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 position: None,
                 derived_from: vec!["input".to_owned()],
             }],
-            lowerings: Vec::new(),
             // Serialized order is intentionally not dependency order.
             nodes: vec![
                 ExecutionPlanNode {

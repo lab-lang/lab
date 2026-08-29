@@ -27,8 +27,7 @@ pub use invocation::{
 };
 pub use lowering::{
     FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
-    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringProjectionError,
-    FacilityLoweringRoute, FacilityLoweringScope, reviewed_lowering_bundles,
+    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
 };
 pub use model::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,

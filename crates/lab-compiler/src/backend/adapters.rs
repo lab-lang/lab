@@ -20,14 +20,14 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::{AdapterInvocation, AdapterInvocationPlan, BuildInventory};
-use crate::{AllocatedLairProgram, ArtifactBundle, ProtocolLairProgram};
+use crate::{ArtifactBundle, ProtocolLairProgram};
 use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
     STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
 };
 
-pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v2";
+pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v3";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
 
 const KNOWN_ADAPTERS: [&str; 6] = [
@@ -42,20 +42,10 @@ const KNOWN_ADAPTERS: [&str; 6] = [
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterServices {
     pub planning: bool,
-    /// How this adapter consumes allocated Procedure work, when it provides lowering.
-    pub lowering: Option<AdapterLoweringScope>,
+    /// Whether this adapter can lower exact allocated Procedure invocations.
+    pub lowering: bool,
     pub simulation: bool,
     pub runtime: bool,
-}
-
-/// The semantic unit accepted by an adapter lowerer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AdapterLoweringScope {
-    /// Transitional built-ins that still consume the complete allocated dependency build.
-    WholeProgram,
-    /// The adapter consumes only the tasks and requirements in one exact invocation.
-    Invocation,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -128,7 +118,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::Invocation),
+                    lowering: true,
                     simulation: false,
                     runtime: false,
                 },
@@ -145,7 +135,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::Invocation),
+                    lowering: true,
                     simulation: false,
                     runtime: false,
                 },
@@ -162,7 +152,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [STAR_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::Invocation),
+                    lowering: true,
                     simulation: true,
                     runtime: true,
                 },
@@ -179,7 +169,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [THERMOCYCLE_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: None,
+                    lowering: false,
                     simulation: true,
                     runtime: true,
                 },
@@ -196,7 +186,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [],
                 AdapterServices {
                     planning: false,
-                    lowering: None,
+                    lowering: false,
                     simulation: false,
                     runtime: false,
                 },
@@ -218,7 +208,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [SIMULATION_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: Some(AdapterLoweringScope::Invocation),
+                    lowering: true,
                     simulation: true,
                     runtime: false,
                 },
@@ -310,7 +300,7 @@ pub fn validate_adapter_profile(
     }
 }
 
-/// Lowers one complete checked program through an explicitly selected adapter.
+/// Lowers one complete checked Protocol build through an explicitly selected legacy adapter API.
 ///
 /// Selection has already happened through facility allocation. This function cannot infer a
 /// driver from an Asset's manufacturer or model and cannot select a different adapter. The
@@ -369,27 +359,6 @@ pub fn lower_dependency_build_with_adapter(
             driver: driver.to_owned(),
         }),
     }
-}
-
-/// Lowers one exact allocated Procedure program through its already selected adapter.
-///
-/// The compatibility Protocol IR is derived from selected Procedure tasks and their exact values.
-/// It does not revisit Workflow Intent or perform method selection.
-pub fn lower_allocated_dependency_build_with_adapter(
-    driver: &str,
-    name: &str,
-    contents: &str,
-    allocated: &AllocatedLairProgram,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, AdapterLoweringError> {
-    let protocol =
-        allocated
-            .dependency_build_protocol()
-            .map_err(|error| AdapterLoweringError::Lowering {
-                driver: driver.to_owned(),
-                message: error.to_string(),
-            })?;
-    lower_dependency_build_with_adapter(driver, name, contents, &protocol, inventory)
 }
 
 /// One reviewed run document emitted for an exact allocated requirement.
@@ -591,7 +560,7 @@ fn lab_compiler_star(
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AdapterLoweringError {
-    #[error("adapter '{driver}' does not provide whole-program lowering")]
+    #[error("adapter '{driver}' does not provide legacy dependency-build lowering")]
     Unsupported { driver: String },
     #[error("adapter '{driver}' does not provide requirement-scoped lowering")]
     UnsupportedInvocation { driver: String },
@@ -768,10 +737,7 @@ mod tests {
         );
         assert!(star.control_modes.contains(&ControlMode::Api));
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
-        assert_eq!(
-            star.services.lowering,
-            Some(AdapterLoweringScope::Invocation)
-        );
+        assert!(star.services.lowering);
         assert!(star.services.runtime);
 
         let ot2 = catalog
@@ -779,10 +745,7 @@ mod tests {
             .iter()
             .find(|adapter| adapter.id == "opentrons.ot2")
             .unwrap();
-        assert_eq!(
-            ot2.services.lowering,
-            Some(AdapterLoweringScope::Invocation)
-        );
+        assert!(ot2.services.lowering);
         assert!(!ot2.services.runtime);
 
         let flex = catalog
@@ -790,10 +753,7 @@ mod tests {
             .iter()
             .find(|adapter| adapter.id == "opentrons.flex")
             .unwrap();
-        assert_eq!(
-            flex.services.lowering,
-            Some(AdapterLoweringScope::Invocation)
-        );
+        assert!(flex.services.lowering);
         assert!(
             flex.emitted_run_formats
                 .contains(OPENTRONS_PROTOCOL_DESIGNER_FORMAT)
@@ -806,10 +766,7 @@ mod tests {
             .find(|adapter| adapter.id == "lab.simulator")
             .unwrap();
         assert!(simulator.services.simulation);
-        assert_eq!(
-            simulator.services.lowering,
-            Some(AdapterLoweringScope::Invocation)
-        );
+        assert!(simulator.services.lowering);
         assert!(!simulator.services.runtime);
         assert!(
             simulator

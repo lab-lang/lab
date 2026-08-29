@@ -340,35 +340,6 @@ impl AllocatedLairProgram {
             material_inventory,
         )
     }
-
-    /// Project this exact selected Procedure graph into the mature dependency-build adapter IR.
-    ///
-    /// This compatibility IR is downstream of allocation: it cannot select a Method, Asset,
-    /// offering, or adapter, and it never consults checked source or unresolved Workflow Intent.
-    pub(crate) fn dependency_build_protocol(
-        &self,
-    ) -> Result<ProtocolLairProgram, ProtocolLairError> {
-        let (context, module) = crate::lair::allocated_protocol::project_dependency_build_protocol(
-            &self.context,
-            self.module,
-        )
-        .map_err(ProtocolLairError::Conversion)?;
-        verify_operation(module.get_operation(), &context)
-            .map_err(|error| ProtocolLairError::Verification(error.disp(&context).to_string()))?;
-        crate::lair::analysis::MaterialLinearityAnalysis::compute(
-            module.get_operation(),
-            &context,
-            &mut AnalysisManager::default(),
-        )
-        .map_err(|error| ProtocolLairError::MaterialLinearity(error.disp(&context).to_string()))?;
-        let stage = detect_stage(&context, module).map_err(ProtocolLairError::Stage)?;
-        if stage != IrStage::MethodSelectedProtocol {
-            return Err(ProtocolLairError::Stage(format!(
-                "expected method-selected-protocol, found {stage}"
-            )));
-        }
-        Ok(ProtocolLairProgram { context, module })
-    }
 }
 
 /// Owned, verifier-valid Protocol LAIR. Robot planners consume this boundary
@@ -1101,20 +1072,6 @@ workflow main() -> Material<Plasmid>:
         assert!(ir.contains("#manual-recovery"), "{ir}");
         assert!(!ir.contains("method.choice"), "{ir}");
         assert!(!ir.contains("method.yield"), "{ir}");
-
-        let protocol = allocated
-            .dependency_build_protocol()
-            .expect("allocated Procedure projects into the mature adapter IR");
-        let protocol_ir = protocol.ir();
-        assert!(
-            protocol_ir.contains("method-selected-protocol"),
-            "{protocol_ir}"
-        );
-        assert!(protocol_ir.contains("protocol.assemble"), "{protocol_ir}");
-        assert!(protocol_ir.contains("protocol.transform"), "{protocol_ir}");
-        assert!(!protocol_ir.contains("workflow."), "{protocol_ir}");
-        assert!(!protocol_ir.contains("procedure."), "{protocol_ir}");
-        assert!(!protocol_ir.contains("allocation."), "{protocol_ir}");
 
         let invocations = allocated.adapter_invocations(material_inventory).unwrap();
         assert_eq!(invocations.invocations.len(), 1);

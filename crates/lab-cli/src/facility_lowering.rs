@@ -5,16 +5,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::{
-    AdapterLoweringScope, adapter_catalog, lower_adapter_invocation_with_adapter,
-    lower_allocated_dependency_build_with_adapter,
-};
+use lab_compiler::ArtifactBundle;
+use lab_compiler::backend::{adapter_catalog, lower_adapter_invocation_with_adapter};
 use lab_compiler::planning::{
-    AdapterInvocation, AdapterInvocationPlan, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION,
+    AdapterInvocation, AdapterInvocationPlan, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
-    FacilityLoweringManifest, FacilityLoweringRoute, FacilityLoweringScope,
+    FacilityLoweringManifest, FacilityLoweringRoute,
 };
-use lab_compiler::{AllocatedLairProgram, ArtifactBundle};
 use lab_inventory::InventorySnapshot;
 use lab_package::LabPackage;
 use lab_runfmt::ReviewedRunDocument;
@@ -29,9 +26,7 @@ pub(crate) struct FacilityLoweringOutput {
 
 struct LowerableInvocation {
     invocation: AdapterInvocation,
-    scope: AdapterLoweringScope,
     requirements: Vec<FacilityLoweredRequirement>,
-    whole_program_format: Option<String>,
 }
 
 struct WrittenFacilityArtifacts {
@@ -49,7 +44,6 @@ struct WrittenFacilityArtifacts {
 pub(crate) fn lower_adapter_invocations(
     package: &LabPackage,
     inventory: &InventorySnapshot,
-    allocated: &AllocatedLairProgram,
     invocation_plan: &AdapterInvocationPlan,
     output_root: &Path,
 ) -> Result<FacilityLoweringOutput> {
@@ -85,27 +79,9 @@ pub(crate) fn lower_adapter_invocations(
                     invocation.adapter.driver
                 )
             })?;
-        let Some(scope) = descriptor.services.lowering else {
+        if !descriptor.services.lowering {
             continue;
-        };
-        let whole_program_format = if scope == AdapterLoweringScope::WholeProgram {
-            let mut emitted_formats = descriptor.emitted_run_formats.iter();
-            let format = emitted_formats.next().cloned().with_context(|| {
-                format!(
-                    "adapter '{}' provides whole-program lowering but declares no emitted run-document format",
-                    descriptor.id
-                )
-            })?;
-            if emitted_formats.next().is_some() {
-                bail!(
-                    "adapter '{}' provides whole-program lowering with several emitted run-document formats; the compatibility API cannot identify each artifact format",
-                    descriptor.id
-                );
-            }
-            Some(format)
-        } else {
-            None
-        };
+        }
         let mut lowered_requirements = invocation
             .requirements
             .iter()
@@ -124,29 +100,8 @@ pub(crate) fn lower_adapter_invocations(
             .sort_by(|left, right| left.requirement_instance.cmp(&right.requirement_instance));
         lowerable.push(LowerableInvocation {
             invocation: invocation.clone(),
-            scope,
             requirements: lowered_requirements,
-            whole_program_format,
         });
-    }
-    let whole_program_count = lowerable
-        .iter()
-        .filter(|lowering| lowering.scope == AdapterLoweringScope::WholeProgram)
-        .count();
-    if whole_program_count > 1 || (whole_program_count == 1 && lowerable.len() > 1) {
-        let routes = lowerable
-            .iter()
-            .map(|lowering| {
-                format!(
-                    "{} through {} ({:?})",
-                    lowering.invocation.asset, lowering.invocation.adapter.driver, lowering.scope
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        bail!(
-            "facility allocation mixes a transitional whole-program lowerer with another route ({routes}); migrate that backend to invocation-scoped lowering before composing it with another Asset"
-        );
     }
     let mut lowering_directories =
         facility_lowering_directories(lowerable.iter().map(|lowering| {
@@ -161,20 +116,6 @@ pub(crate) fn lower_adapter_invocations(
     let mut documents = Vec::new();
     let mut reviewed_documents = BTreeMap::new();
     if !lowerable.is_empty() {
-        if whole_program_count == 1
-            && invocation_plan.methods.iter().any(|method| {
-                method.source_operation.as_str() == "std.bio.build.realize"
-                    && method.method.as_str()
-                        != "https://www.lab-compiler.org/ns/method#automated-golden-gate"
-            })
-        {
-            bail!(
-                "the selected realization Method is not supported by the current dependency-build adapter bridge"
-            );
-        }
-        let build_inventory =
-            BuildInventory::MaterialLots(invocation_plan.material_inventory.clone());
-
         for lowering in lowerable {
             let invocation = lowering.invocation;
             let asset = invocation.asset.clone();
@@ -196,56 +137,31 @@ pub(crate) fn lower_adapter_invocations(
                     asset
                 );
             }
-            let (bundle, invocation_documents) = match lowering.scope {
-                AdapterLoweringScope::WholeProgram => (
-                    lower_allocated_dependency_build_with_adapter(
-                        &driver,
-                        &profile.name,
-                        &profile.canonical_toml,
-                        allocated,
-                        &build_inventory,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "failed to lower the allocated program for Asset '{}' through adapter '{}'",
-                            asset, driver
-                        )
-                    })?,
-                    BTreeMap::new(),
-                ),
-                AdapterLoweringScope::Invocation => {
-                    let lowered = lower_adapter_invocation_with_adapter(
-                        &profile,
-                        invocation_plan,
-                        &invocation,
-                    )
+            let lowered =
+                lower_adapter_invocation_with_adapter(&profile, invocation_plan, &invocation)
                     .with_context(|| {
                         format!(
                             "failed to lower invocation '{}' for Asset '{}' through adapter '{}'",
                             invocation.id, asset, driver
                         )
                     })?;
-                    let documents = lowered
-                        .documents
-                        .into_iter()
-                        .map(|document| {
-                            (
-                                document.path,
-                                (document.requirement.to_string(), document.format),
-                            )
-                        })
-                        .collect();
-                    (lowered.artifacts, documents)
-                }
-            };
+            let invocation_documents = lowered
+                .documents
+                .into_iter()
+                .map(|document| {
+                    (
+                        document.path,
+                        (document.requirement.to_string(), document.format),
+                    )
+                })
+                .collect();
             let relative_output = lowering_directories
                 .remove(&(asset.clone(), driver.clone()))
                 .expect("every lowerable Asset and adapter has an output directory");
             let written = write_facility_artifacts(
-                &bundle,
+                &lowered.artifacts,
                 output_root,
                 &relative_output,
-                lowering.whole_program_format.as_deref(),
                 &invocation_documents,
             )?;
             protocols.extend(written.protocols);
@@ -264,10 +180,6 @@ pub(crate) fn lower_adapter_invocations(
                 driver: driver.clone(),
                 profile_path: staged_adapter_profile_path(&driver, &profile_sha256),
                 profile_sha256,
-                scope: match lowering.scope {
-                    AdapterLoweringScope::WholeProgram => FacilityLoweringScope::WholeProgram,
-                    AdapterLoweringScope::Invocation => FacilityLoweringScope::Invocation,
-                },
                 requirements: lowering.requirements,
                 output: relative_output,
                 artifacts: written.artifacts,
@@ -350,7 +262,6 @@ fn write_facility_artifacts(
     bundle: &ArtifactBundle,
     output_root: &Path,
     relative_output: &Path,
-    whole_program_format: Option<&str>,
     invocation_documents: &BTreeMap<String, (String, String)>,
 ) -> Result<WrittenFacilityArtifacts> {
     let route_root = output_root.join(relative_output);
@@ -375,9 +286,7 @@ fn write_facility_artifacts(
         fs::write(&path, artifact.contents())
             .with_context(|| format!("failed to write {}", path.display()))?;
         let invocation_document = invocation_documents.get(artifact.path());
-        let role = if invocation_document.is_some()
-            || (whole_program_format.is_some() && is_automation_protocol(&path))
-        {
+        let role = if invocation_document.is_some() {
             protocols.push(path);
             FacilityLoweredArtifactRole::AutomationProtocol
         } else {
@@ -387,15 +296,7 @@ fn write_facility_artifacts(
             typst_sources.push(relative_path.clone());
         }
         let sha256 = sha256_hex(artifact.contents());
-        let format = invocation_document
-            .map(|(_, format)| format.clone())
-            .or_else(|| {
-                if role == FacilityLoweredArtifactRole::AutomationProtocol {
-                    whole_program_format.map(str::to_owned)
-                } else {
-                    None
-                }
-            });
+        let format = invocation_document.map(|(_, format)| format.clone());
         if let Some((requirement, format)) = invocation_document {
             let reviewed = ReviewedRunDocument {
                 path: relative_output
@@ -455,18 +356,6 @@ fn write_facility_artifacts(
 
 pub(crate) fn staged_adapter_profile_path(driver: &str, profile_sha256: &str) -> PathBuf {
     PathBuf::from("adapters").join(format!("{driver}-{}.toml", &profile_sha256[..12]))
-}
-
-fn is_automation_protocol(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            name.ends_with("_protocol.py")
-                || name.ends_with("_protocol.json")
-                || name.ends_with(".star.json")
-                || name.ends_with(".odtc.json")
-                || name.ends_with(".read.json")
-        })
 }
 
 fn is_typeset_document(path: &str) -> bool {
