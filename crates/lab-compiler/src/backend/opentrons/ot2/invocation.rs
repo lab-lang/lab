@@ -1,14 +1,16 @@
 //! Requirement-scoped lowering from exact facility allocations to standalone OT-2 protocols.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use lab_capability::ScalarValue;
-use lab_method::{LocalId, ProcedureValue};
+use lab_method::LocalId;
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
 use serde::Serialize;
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
+use crate::backend::invocation::{
+    DEGREE_CELSIUS, MICROLITRE, MINUTE, ProcedureTaskView, exact_invocation_tasks, material_symbols,
+};
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::emit::python_string_expression;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
@@ -27,9 +29,6 @@ const CYCLE_GOLDEN_GATE: &str =
 const SERIAL_DILUTION: &str = "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture";
 const LIQUID_HANDLING: &str = "https://sbol.io/ns/capability#LiquidHandling";
 const THERMAL_CYCLING: &str = "https://sbol.io/ns/capability#ThermalCycling";
-const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
-const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
-const MINUTE: &str = "http://qudt.org/vocab/unit/MIN";
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v1";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
@@ -127,18 +126,13 @@ struct MaterialAddition {
     volume_ul: u32,
 }
 
-struct InvocationTask<'a> {
-    task: &'a AllocatedProcedureTask,
-    requirement: &'a AllocatedRequirementBinding,
-}
-
 /// Lower only the Procedure tasks and requirements allocated to this exact invocation.
 pub(in crate::backend) fn lower_invocation(
     profile: &Ot2AdapterProfile,
     invocation_plan: &AdapterInvocationPlan,
     invocation: &AdapterInvocation,
 ) -> Result<AdapterInvocationLowering, String> {
-    let tasks = invocation_tasks(invocation_plan, invocation)?;
+    let tasks = exact_invocation_tasks("OT-2", invocation_plan, invocation)?;
     let mut artifacts = ArtifactBundle::new();
     let mut documents = Vec::new();
 
@@ -220,65 +214,26 @@ pub(in crate::backend) fn lower_invocation(
     })
 }
 
-fn invocation_tasks<'a>(
-    plan: &'a AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-) -> Result<Vec<InvocationTask<'a>>, String> {
-    let task_ids = invocation.tasks.iter().collect::<BTreeSet<_>>();
-    let requirement_ids = invocation.requirements.iter().collect::<BTreeSet<_>>();
-    let mut members = Vec::new();
-    for task in plan
-        .methods
-        .iter()
-        .flat_map(|method| method.tasks.iter())
-        .filter(|task| task_ids.contains(&task.id))
-    {
-        let selected = task
-            .requirements
-            .iter()
-            .filter(|requirement| requirement_ids.contains(&requirement.id))
-            .collect::<Vec<_>>();
-        if task.requirements.len() != 1 || selected.len() != 1 {
-            return Err(format!(
-                "OT-2 Procedure task '{}' must be owned by exactly one allocated requirement; found {} task requirements and {} in this invocation",
-                task.id,
-                task.requirements.len(),
-                selected.len()
-            ));
-        }
-        members.push(InvocationTask {
-            task,
-            requirement: selected[0],
-        });
-    }
-    if members.len() != invocation.tasks.len() || members.len() != invocation.requirements.len() {
-        return Err(format!(
-            "OT-2 invocation '{}' does not map one exact requirement to every Procedure task",
-            invocation.id
-        ));
-    }
-    Ok(members)
-}
-
 fn plan_task(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
     requirement: &AllocatedRequirementBinding,
 ) -> Result<(&'static str, Ot2TaskExecution), String> {
+    let view = ProcedureTaskView::new("OT-2", task);
     match task.operation.as_str() {
         SETUP_GOLDEN_GATE => {
-            require_capability(task, requirement, LIQUID_HANDLING)?;
+            view.require_capability(requirement, LIQUID_HANDLING)?;
             Ok(("setup-golden-gate-reaction", plan_setup(profile, task)?))
         }
         CYCLE_GOLDEN_GATE => {
-            require_capability(task, requirement, THERMAL_CYCLING)?;
+            view.require_capability(requirement, THERMAL_CYCLING)?;
             Ok((
                 "thermal-cycle-golden-gate-reaction",
                 plan_cycle(profile, task)?,
             ))
         }
         SERIAL_DILUTION => {
-            require_capability(task, requirement, LIQUID_HANDLING)?;
+            view.require_capability(requirement, LIQUID_HANDLING)?;
             Ok(("serial-dilution", plan_dilution(profile, task)?))
         }
         operation => Err(format!(
@@ -288,50 +243,34 @@ fn plan_task(
     }
 }
 
-fn require_capability(
-    task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
-    expected: &str,
-) -> Result<(), String> {
-    if requirement.capability_kind.as_str() != expected {
-        return Err(format!(
-            "OT-2 Procedure task '{}' operation '{}' requires capability '{}', but its exact allocation supplies '{}'",
-            task.id, task.operation, expected, requirement.capability_kind
-        ));
-    }
-    Ok(())
-}
-
 fn plan_setup(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
 ) -> Result<Ot2TaskExecution, String> {
-    require_material_roles(
-        task,
-        &[
-            "backbone",
-            "components",
-            "dependencies",
-            "restriction-enzyme",
-            "ligase",
-            "buffer",
-            "water",
-        ],
-    )?;
-    let artifact = text_parameter(task, "artifact")?;
-    let backbone = text_parameter(task, "backbone")?;
-    let components = text_list_parameter(task, "components")?;
-    let dependencies = text_list_parameter(task, "dependencies")?;
-    let restriction_enzyme = text_parameter(task, "restriction_enzyme")?;
-    let replicates = usize_parameter(task, "assembly_replicates", None)?;
-    require_nonzero(task, "assembly_replicates", replicates as u32)?;
-    let reaction_volume_ul = integer_parameter(task, "reaction_volume_ul", Some(MICROLITRE))?;
-    let part_volume_ul = integer_parameter(task, "part_volume_ul", Some(MICROLITRE))?;
-    let enzyme_volume_ul = integer_parameter(task, "enzyme_volume_ul", Some(MICROLITRE))?;
-    let ligase_volume_ul = integer_parameter(task, "ligase_volume_ul", Some(MICROLITRE))?;
-    let buffer_volume_ul = integer_parameter(task, "buffer_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = integer_parameter(task, "mix_cycles", None)?;
-    let mix_volume_ul = integer_parameter(task, "mix_volume_ul", Some(MICROLITRE))?;
+    let view = ProcedureTaskView::new("OT-2", task);
+    view.require_material_roles(&[
+        "backbone",
+        "components",
+        "dependencies",
+        "restriction-enzyme",
+        "ligase",
+        "buffer",
+        "water",
+    ])?;
+    let artifact = view.text_parameter("artifact")?;
+    let backbone = view.text_parameter("backbone")?;
+    let components = view.text_list_parameter("components")?;
+    let dependencies = view.text_list_parameter("dependencies")?;
+    let restriction_enzyme = view.text_parameter("restriction_enzyme")?;
+    let replicates = view.usize_parameter("assembly_replicates", None)?;
+    view.require_nonzero("assembly_replicates", replicates as u32)?;
+    let reaction_volume_ul = view.integer_parameter("reaction_volume_ul", Some(MICROLITRE))?;
+    let part_volume_ul = view.integer_parameter("part_volume_ul", Some(MICROLITRE))?;
+    let enzyme_volume_ul = view.integer_parameter("enzyme_volume_ul", Some(MICROLITRE))?;
+    let ligase_volume_ul = view.integer_parameter("ligase_volume_ul", Some(MICROLITRE))?;
+    let buffer_volume_ul = view.integer_parameter("buffer_volume_ul", Some(MICROLITRE))?;
+    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
+    let mix_volume_ul = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
     for (name, value) in [
         ("reaction_volume_ul", reaction_volume_ul),
         ("part_volume_ul", part_volume_ul),
@@ -341,7 +280,7 @@ fn plan_setup(
         ("mix_cycles", mix_cycles),
         ("mix_volume_ul", mix_volume_ul),
     ] {
-        require_nonzero(task, name, value)?;
+        view.require_nonzero(name, value)?;
     }
     if mix_volume_ul > reaction_volume_ul {
         return Err(format!(
@@ -350,25 +289,25 @@ fn plan_setup(
         ));
     }
 
-    let backbone_material = one_material(task, "backbone")?;
+    let backbone_material = view.one_material("backbone")?;
     if backbone_material.symbol != backbone {
-        return Err(material_parameter_mismatch(task, "backbone"));
+        return Err(view.material_parameter_mismatch("backbone"));
     }
-    let component_materials = materials(task, "components");
+    let component_materials = view.materials("components");
     if material_symbols(&component_materials) != components {
-        return Err(material_parameter_mismatch(task, "components"));
+        return Err(view.material_parameter_mismatch("components"));
     }
-    let dependency_materials = materials(task, "dependencies");
+    let dependency_materials = view.materials("dependencies");
     if material_symbols(&dependency_materials) != dependencies {
-        return Err(material_parameter_mismatch(task, "dependencies"));
+        return Err(view.material_parameter_mismatch("dependencies"));
     }
-    let enzyme_material = one_material(task, "restriction-enzyme")?;
+    let enzyme_material = view.one_material("restriction-enzyme")?;
     if enzyme_material.symbol != restriction_enzyme {
-        return Err(material_parameter_mismatch(task, "restriction_enzyme"));
+        return Err(view.material_parameter_mismatch("restriction_enzyme"));
     }
-    let ligase_material = one_material(task, "ligase")?;
-    let buffer_material = one_material(task, "buffer")?;
-    let water_material = one_material(task, "water")?;
+    let ligase_material = view.one_material("ligase")?;
+    let buffer_material = view.one_material("buffer")?;
+    let water_material = view.one_material("water")?;
 
     let dna_piece_count = u32::try_from(component_materials.len() + 1)
         .map_err(|_| format!("OT-2 Procedure task '{}' has too many DNA pieces", task.id))?;
@@ -437,12 +376,7 @@ fn plan_setup(
 
     let reaction_plate = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
     if replicates > reaction_plate.len() {
-        return Err(capacity_error(
-            task,
-            "reaction plate",
-            replicates,
-            reaction_plate.len(),
-        ));
+        return Err(view.capacity_error("reaction plate", replicates, reaction_plate.len()));
     }
     let tips_per_reaction = additions
         .iter()
@@ -454,12 +388,7 @@ fn plan_setup(
         .ok_or_else(|| format!("OT-2 Procedure task '{}' tip count overflows", task.id))?;
     let tip_capacity = profile.stages.assembly.small_tips.total_capacity();
     if required_tips > tip_capacity {
-        return Err(capacity_error(
-            task,
-            "assembly small-tip racks",
-            required_tips,
-            tip_capacity,
-        ));
+        return Err(view.capacity_error("assembly small-tip racks", required_tips, tip_capacity));
     }
 
     Ok(Ot2TaskExecution::SetupGoldenGateReaction {
@@ -476,39 +405,32 @@ fn plan_cycle(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
 ) -> Result<Ot2TaskExecution, String> {
-    require_material_roles(task, &[])?;
-    let artifact = text_parameter(task, "artifact")?;
-    let replicates = usize_parameter(task, "assembly_replicates", None)?;
-    require_nonzero(task, "assembly_replicates", replicates as u32)?;
+    let view = ProcedureTaskView::new("OT-2", task);
+    view.require_material_roles(&[])?;
+    let artifact = view.text_parameter("artifact")?;
+    let replicates = view.usize_parameter("assembly_replicates", None)?;
+    view.require_nonzero("assembly_replicates", replicates as u32)?;
     let reaction_wells = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
     if replicates > reaction_wells.len() {
-        return Err(capacity_error(
-            task,
-            "reaction plate",
-            replicates,
-            reaction_wells.len(),
-        ));
+        return Err(view.capacity_error("reaction plate", replicates, reaction_wells.len()));
     }
-    let reaction_volume_ul = integer_parameter(task, "reaction_volume_ul", Some(MICROLITRE))?;
-    let cycles = integer_parameter(task, "cycles", None)?;
+    let reaction_volume_ul = view.integer_parameter("reaction_volume_ul", Some(MICROLITRE))?;
+    let cycles = view.integer_parameter("cycles", None)?;
     let digest_temperature_c =
-        integer_parameter(task, "digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let digest_minutes = integer_parameter(task, "digest_minutes", Some(MINUTE))?;
+        view.integer_parameter("digest_temperature_c", Some(DEGREE_CELSIUS))?;
+    let digest_minutes = view.integer_parameter("digest_minutes", Some(MINUTE))?;
     let ligate_temperature_c =
-        integer_parameter(task, "ligate_temperature_c", Some(DEGREE_CELSIUS))?;
-    let ligate_minutes = integer_parameter(task, "ligate_minutes", Some(MINUTE))?;
-    let lid_temperature_c = integer_parameter(task, "lid_temperature_c", Some(DEGREE_CELSIUS))?;
+        view.integer_parameter("ligate_temperature_c", Some(DEGREE_CELSIUS))?;
+    let ligate_minutes = view.integer_parameter("ligate_minutes", Some(MINUTE))?;
+    let lid_temperature_c = view.integer_parameter("lid_temperature_c", Some(DEGREE_CELSIUS))?;
     let final_digest_temperature_c =
-        integer_parameter(task, "final_digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let final_digest_minutes = integer_parameter(task, "final_digest_minutes", Some(MINUTE))?;
-    let heat_inactivation_temperature_c = integer_parameter(
-        task,
-        "heat_inactivation_temperature_c",
-        Some(DEGREE_CELSIUS),
-    )?;
+        view.integer_parameter("final_digest_temperature_c", Some(DEGREE_CELSIUS))?;
+    let final_digest_minutes = view.integer_parameter("final_digest_minutes", Some(MINUTE))?;
+    let heat_inactivation_temperature_c =
+        view.integer_parameter("heat_inactivation_temperature_c", Some(DEGREE_CELSIUS))?;
     let heat_inactivation_minutes =
-        integer_parameter(task, "heat_inactivation_minutes", Some(MINUTE))?;
-    let hold_temperature_c = integer_parameter(task, "hold_temperature_c", Some(DEGREE_CELSIUS))?;
+        view.integer_parameter("heat_inactivation_minutes", Some(MINUTE))?;
+    let hold_temperature_c = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
     for (name, value) in [
         ("reaction_volume_ul", reaction_volume_ul),
         ("cycles", cycles),
@@ -518,7 +440,7 @@ fn plan_cycle(
         ("final_digest_minutes", final_digest_minutes),
         ("heat_inactivation_minutes", heat_inactivation_minutes),
     ] {
-        require_nonzero(task, name, value)?;
+        view.require_nonzero(name, value)?;
     }
     for (name, value) in [
         ("digest_temperature_c", digest_temperature_c),
@@ -561,26 +483,27 @@ fn plan_dilution(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
 ) -> Result<Ot2TaskExecution, String> {
-    require_material_roles(task, &["medium"])?;
+    let view = ProcedureTaskView::new("OT-2", task);
+    view.require_material_roles(&["medium"])?;
     if task.inputs.len() != 1 {
         return Err(format!(
             "OT-2 serial-dilution task '{}' must have exactly one culture input",
             task.id
         ));
     }
-    let serial_dilutions = usize_parameter(task, "serial_dilutions", None)?;
-    require_nonzero(task, "serial_dilutions", serial_dilutions as u32)?;
-    let medium_volume_ul = integer_parameter(task, "medium_volume_ul", Some(MICROLITRE))?;
-    let culture_volume_ul = integer_parameter(task, "culture_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = integer_parameter(task, "mix_cycles", None)?;
-    let mix_volume_ul = integer_parameter(task, "mix_volume_ul", Some(MICROLITRE))?;
+    let serial_dilutions = view.usize_parameter("serial_dilutions", None)?;
+    view.require_nonzero("serial_dilutions", serial_dilutions as u32)?;
+    let medium_volume_ul = view.integer_parameter("medium_volume_ul", Some(MICROLITRE))?;
+    let culture_volume_ul = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
+    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
+    let mix_volume_ul = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
     for (name, value) in [
         ("medium_volume_ul", medium_volume_ul),
         ("culture_volume_ul", culture_volume_ul),
         ("mix_cycles", mix_cycles),
         ("mix_volume_ul", mix_volume_ul),
     ] {
-        require_nonzero(task, name, value)?;
+        view.require_nonzero(name, value)?;
     }
     let diluted_volume = medium_volume_ul
         .checked_add(culture_volume_ul)
@@ -597,7 +520,7 @@ fn plan_dilution(
         ));
     }
 
-    let medium = one_material(task, "medium")?;
+    let medium = view.one_material("medium")?;
     let mut allocator = PlateAllocator::new(
         BACKEND,
         "serial-dilution",
@@ -613,15 +536,14 @@ fn plan_dilution(
         profile.deck.thermocycler.capacity,
     )?;
     if serial_dilutions > profile.stages.plating.small_tips.total_capacity() {
-        return Err(capacity_error(
-            task,
+        return Err(view.capacity_error(
             "dilution small-tip racks",
             serial_dilutions,
             profile.stages.plating.small_tips.total_capacity(),
         ));
     }
     if profile.stages.plating.large_tips.total_capacity() == 0 {
-        return Err(capacity_error(task, "dilution large-tip racks", 1, 0));
+        return Err(view.capacity_error("dilution large-tip racks", 1, 0));
     }
 
     Ok(Ot2TaskExecution::SerialDilution {
@@ -920,191 +842,6 @@ fn value_source(source: &PlanningValueSource) -> String {
     }
 }
 
-fn require_material_roles(task: &AllocatedProcedureTask, allowed: &[&str]) -> Result<(), String> {
-    if let Some((material, role)) = task
-        .materials
-        .iter()
-        .filter_map(|material| material_role(material).map(|role| (material, role)))
-        .find(|(_, role)| !allowed.contains(role))
-    {
-        return Err(format!(
-            "OT-2 Procedure task '{}' has unsupported material role '{}' at '{}'",
-            task.id, role, material.input
-        ));
-    }
-    if let Some(material) = task
-        .materials
-        .iter()
-        .find(|material| material_role(material).is_none())
-    {
-        return Err(format!(
-            "OT-2 Procedure task '{}' has malformed material input '{}'",
-            task.id, material.input
-        ));
-    }
-    Ok(())
-}
-
-fn material_role(material: &SelectedMaterialBinding) -> Option<&str> {
-    material
-        .input
-        .as_str()
-        .rsplit_once("::material::")
-        .map(|(_, role)| role.split("::").next().unwrap_or(role))
-}
-
-fn materials<'a>(task: &'a AllocatedProcedureTask, role: &str) -> Vec<&'a SelectedMaterialBinding> {
-    task.materials
-        .iter()
-        .filter(|material| material_role(material) == Some(role))
-        .collect()
-}
-
-fn one_material<'a>(
-    task: &'a AllocatedProcedureTask,
-    role: &str,
-) -> Result<&'a SelectedMaterialBinding, String> {
-    let materials = materials(task, role);
-    if materials.len() != 1 {
-        return Err(format!(
-            "OT-2 Procedure task '{}' requires exactly one '{role}' material, found {}",
-            task.id,
-            materials.len()
-        ));
-    }
-    Ok(materials[0])
-}
-
-fn material_symbols(materials: &[&SelectedMaterialBinding]) -> Vec<String> {
-    materials
-        .iter()
-        .map(|material| material.symbol.clone())
-        .collect()
-}
-
-fn material_parameter_mismatch(task: &AllocatedProcedureTask, parameter: &str) -> String {
-    format!(
-        "OT-2 Procedure task '{}' parameter '{parameter}' does not match its exact material bindings",
-        task.id
-    )
-}
-
-fn parameter<'a>(
-    task: &'a AllocatedProcedureTask,
-    name: &str,
-) -> Result<&'a PlanningProcedureParameter, String> {
-    let suffix = format!("::parameter::{name}");
-    let matches = task
-        .parameters
-        .iter()
-        .filter(|parameter| parameter.id.as_str().ends_with(&suffix))
-        .collect::<Vec<_>>();
-    if matches.len() != 1 {
-        return Err(format!(
-            "OT-2 Procedure task '{}' requires exactly one parameter '{name}', found {}",
-            task.id,
-            matches.len()
-        ));
-    }
-    Ok(matches[0])
-}
-
-fn integer_parameter(
-    task: &AllocatedProcedureTask,
-    name: &str,
-    expected_unit: Option<&str>,
-) -> Result<u32, String> {
-    let parameter = parameter(task, name)?;
-    let ProcedureValue::Scalar { value } = &parameter.value else {
-        return Err(parameter_type_error(task, name, "an integer scalar"));
-    };
-    let ScalarValue::Integer(integer) = &value.value else {
-        return Err(parameter_type_error(task, name, "an integer scalar"));
-    };
-    if value.unit.as_ref().map(|unit| unit.as_str()) != expected_unit {
-        return Err(format!(
-            "OT-2 Procedure task '{}' parameter '{name}' must use unit {:?}, found {:?}",
-            task.id,
-            expected_unit,
-            value.unit.as_ref().map(|unit| unit.as_str())
-        ));
-    }
-    integer.as_str().parse::<u32>().map_err(|_| {
-        format!(
-            "OT-2 Procedure task '{}' parameter '{name}' must fit the unsigned 32-bit range",
-            task.id
-        )
-    })
-}
-
-fn usize_parameter(
-    task: &AllocatedProcedureTask,
-    name: &str,
-    expected_unit: Option<&str>,
-) -> Result<usize, String> {
-    usize::try_from(integer_parameter(task, name, expected_unit)?).map_err(|_| {
-        format!(
-            "OT-2 Procedure task '{}' parameter '{name}' does not fit this platform's address space",
-            task.id
-        )
-    })
-}
-
-fn text_parameter(task: &AllocatedProcedureTask, name: &str) -> Result<String, String> {
-    let parameter = parameter(task, name)?;
-    let ProcedureValue::Scalar { value: property } = &parameter.value else {
-        return Err(parameter_type_error(task, name, "a text scalar"));
-    };
-    let ScalarValue::Text(value) = &property.value else {
-        return Err(parameter_type_error(task, name, "a text scalar"));
-    };
-    if value.is_empty() || property.unit.is_some() {
-        return Err(parameter_type_error(task, name, "unitless non-empty text"));
-    }
-    Ok(value.clone())
-}
-
-fn text_list_parameter(task: &AllocatedProcedureTask, name: &str) -> Result<Vec<String>, String> {
-    let parameter = parameter(task, name)?;
-    let ProcedureValue::List { values, .. } = &parameter.value else {
-        return Err(parameter_type_error(task, name, "a text list"));
-    };
-    values
-        .iter()
-        .map(|value| {
-            let ScalarValue::Text(value) = &value.value else {
-                return Err(parameter_type_error(task, name, "a text list"));
-            };
-            if value.is_empty() {
-                return Err(parameter_type_error(task, name, "non-empty text values"));
-            }
-            Ok(value.clone())
-        })
-        .collect()
-}
-
-fn parameter_type_error(task: &AllocatedProcedureTask, name: &str, expected: &str) -> String {
-    format!(
-        "OT-2 Procedure task '{}' parameter '{name}' must be {expected}",
-        task.id
-    )
-}
-
-fn require_nonzero(
-    task: &AllocatedProcedureTask,
-    parameter: &str,
-    value: u32,
-) -> Result<(), String> {
-    if value == 0 {
-        Err(format!(
-            "OT-2 Procedure task '{}' parameter '{parameter}' must be greater than zero",
-            task.id
-        ))
-    } else {
-        Ok(())
-    }
-}
-
 fn known_wells(
     task: &AllocatedProcedureTask,
     resource: &str,
@@ -1119,16 +856,4 @@ fn known_wells(
     } else {
         Ok(wells)
     }
-}
-
-fn capacity_error(
-    task: &AllocatedProcedureTask,
-    resource: &str,
-    required: usize,
-    capacity: usize,
-) -> String {
-    format!(
-        "OT-2 Procedure task '{}' requires {required} {resource} positions, but the exact adapter profile provides {capacity}",
-        task.id
-    )
 }

@@ -10,6 +10,7 @@ mod document;
 mod error;
 mod graph;
 pub mod hamilton;
+mod invocation;
 mod markdown;
 pub mod opentrons;
 mod package;
