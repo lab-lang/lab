@@ -30,6 +30,8 @@ design-intent
 
 Design and generalized Intent operations preserve reachable source semantics and typed material flow. Method candidate regions contain Procedure tasks and first-class Capability requirements but no facility binding. A read-only analysis extracts a purpose-built global constraint problem; the solver selects unpinned methods together with exact offerings, Assets, adapters, MaterialLots, movements, and scheduling. An allocation pass applies that complete solution to the same LAIR identities, erases unselected candidates, and produces Allocated Procedure LAIR.
 
+The structural vocabulary and verifier for `refined-alternatives` are implemented. `method.choice` owns one single-block region per candidate Method IRI, `procedure.task` uses open operation and state IRIs with typed SSA ports, and `capability.requirement` plus `capability.constraint` preserve qualification, control policy, and exact scalar constraints. The source-to-method refinement pass, global solver extraction, solution application, and `allocated-procedure` stage remain subsequent implementation steps; current `lab build` still follows the transitional fixed Protocol conversion.
+
 Pliron remains internal to `lab-compiler`. Immutable procedure, adapter-invocation, execution-plan, and run-document records are projections from verified stages rather than aliases for Pliron objects. External adapters consume versioned invocation records; a built-in adapter may use its own device dialect internally, but Pliron is not part of the adapter ABI.
 
 ## Physical-resource rule

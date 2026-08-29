@@ -45,6 +45,8 @@ These v2 records describe the implemented transition state. A workflow call does
 
 Method candidate regions contain first-class capability requirements. Each requirement identifies its Procedure task, exact capability kind, qualification floor, control policy, typed constraint expression, material and value ports, and source-to-method refinement trace. Requirements inside an unselected method candidate are inactive and cannot be allocated.
 
+The compiler now has the first structural slice of this IR: verifier-valid `method.choice` candidate regions containing generic `procedure.task`, `capability.requirement`, and exact `capability.constraint` operations. It round-trips as the named `refined-alternatives` LAIR stage and rejects cross-candidate references, duplicate stable identities, and Procedure tasks without requirements. Source refinement, global solver extraction, solution application, and `allocated-procedure` are not yet connected, so current `lab build` continues to emit the v2 transitional records described above.
+
 Planning extracts a constraint problem from the verified refined-alternatives LAIR stage. It selects method candidates, offerings, Assets, adapters, MaterialLots, locations, and scheduling together. The solution is applied back to the same stable LAIR identities, producing an allocated-procedure stage with no unresolved method choice. Requirement extraction never walks the checked workflow independently.
 
 ## Matching rules
