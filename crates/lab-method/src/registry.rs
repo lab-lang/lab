@@ -230,7 +230,6 @@ impl MethodDefinition {
         }
         Ok(MethodSignature {
             inputs: self.inputs.clone(),
-            parameters: self.parameters.clone(),
             outputs,
         })
     }
@@ -492,6 +491,30 @@ mod tests {
             MethodRegistry::new([first, second]),
             Err(MethodRegistryError::IncompatibleSignature { .. })
         ));
+    }
+
+    #[test]
+    fn candidates_may_require_different_intent_parameters() {
+        let first = definition(
+            "https://example.org/method/ambient-incubation",
+            "https://example.org/state/incubated",
+        );
+        let mut second = definition(
+            "https://example.org/method/instrument-incubation",
+            "https://example.org/state/incubated",
+        );
+        second.parameters.push(MethodParameter {
+            name: id("shaking_speed"),
+            scalar_type: ScalarType::Integer,
+        });
+
+        let registry = MethodRegistry::new([first, second]).unwrap();
+        assert_eq!(
+            registry
+                .methods_for(&IntentOperationId::new("std.lab.incubate").unwrap())
+                .len(),
+            2
+        );
     }
 
     #[test]

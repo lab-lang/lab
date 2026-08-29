@@ -146,7 +146,11 @@ pub(crate) struct PlasmidArtifactIntent {
     pub name: String,
     pub sequence: DnaSequenceIntent,
     pub dependencies: Vec<String>,
-    pub recipe: AssemblyRecipeIntent,
+    /// Golden Gate-specific facts, when the design states a complete recipe.
+    ///
+    /// A plasmid defined by an exact sequence is still a valid realization Intent. It can be
+    /// refined by methods that do not require Golden Gate inputs.
+    pub recipe: Option<AssemblyRecipeIntent>,
     pub actions: Vec<WorkflowActionIntent>,
 }
 
@@ -351,40 +355,48 @@ fn lower_artifact(
             // they are all named items to pipette. This list has to track the
             // schema, and reading the kinds' grounding instead of naming them
             // is what would stop it drifting.
-            let components = symbols(
-                "components",
-                &["Part", "Plasmid", "Promoter", "CDS", "Backbone"],
-            )?;
-            let chemistry = AssemblyChemistryIntent {
-                reaction_volume_ul: quantity("reaction_volume", "uL", 20)?,
-                part_volume_ul: quantity("part_volume", "uL", 2)?,
-                enzyme_volume_ul: quantity("enzyme_volume", "uL", 2)?,
-                ligase_volume_ul: quantity("ligase_volume", "uL", 4)?,
-                buffer_volume_ul: quantity("buffer_volume", "uL", 2)?,
-                cycles: whole("assembly_cycles", 75)?,
-                digest_temperature_c: quantity("digest_temperature", "C", 37)?,
-                digest_minutes: quantity("digest_duration", "min", 2)?,
-                ligate_temperature_c: quantity("ligate_temperature", "C", 16)?,
-                ligate_minutes: quantity("ligate_duration", "min", 5)?,
-            };
-            // The backbone joins the reaction alongside every component.
-            if chemistry.water_volume_ul(1 + components.len()).is_none() {
-                return Err(SourceLoweringError::UnbalancedReaction {
-                    artifact: name.to_owned(),
-                    reaction_volume_ul: chemistry.reaction_volume_ul,
-                });
-            }
-            Ok(BuildArtifactIntent::Plasmid(PlasmidArtifactIntent {
-                name: name.to_owned(),
-                sequence: checked_dna(module, name, find("sequence")?, bindings)?,
-                dependencies: flow.dependencies.clone(),
-                recipe: AssemblyRecipeIntent {
+            let has_complete_recipe = ["backbone", "components", "restriction_enzyme"]
+                .iter()
+                .all(|field| properties.iter().any(|property| property.name == *field));
+            let recipe = if has_complete_recipe {
+                let components = symbols(
+                    "components",
+                    &["Part", "Plasmid", "Promoter", "CDS", "Backbone"],
+                )?;
+                let chemistry = AssemblyChemistryIntent {
+                    reaction_volume_ul: quantity("reaction_volume", "uL", 20)?,
+                    part_volume_ul: quantity("part_volume", "uL", 2)?,
+                    enzyme_volume_ul: quantity("enzyme_volume", "uL", 2)?,
+                    ligase_volume_ul: quantity("ligase_volume", "uL", 4)?,
+                    buffer_volume_ul: quantity("buffer_volume", "uL", 2)?,
+                    cycles: whole("assembly_cycles", 75)?,
+                    digest_temperature_c: quantity("digest_temperature", "C", 37)?,
+                    digest_minutes: quantity("digest_duration", "min", 2)?,
+                    ligate_temperature_c: quantity("ligate_temperature", "C", 16)?,
+                    ligate_minutes: quantity("ligate_duration", "min", 5)?,
+                };
+                // The backbone joins the reaction alongside every component.
+                if chemistry.water_volume_ul(1 + components.len()).is_none() {
+                    return Err(SourceLoweringError::UnbalancedReaction {
+                        artifact: name.to_owned(),
+                        reaction_volume_ul: chemistry.reaction_volume_ul,
+                    });
+                }
+                Some(AssemblyRecipeIntent {
                     backbone: symbol("backbone", &["Backbone"])?,
                     components,
                     restriction_enzyme: symbol("restriction_enzyme", &["RestrictionEnzyme"])?,
                     assembly_replicates: count("assembly_replicates", 1)?,
                     chemistry,
-                },
+                })
+            } else {
+                None
+            };
+            Ok(BuildArtifactIntent::Plasmid(PlasmidArtifactIntent {
+                name: name.to_owned(),
+                sequence: checked_dna(module, name, find("sequence")?, bindings)?,
+                dependencies: flow.dependencies.clone(),
+                recipe,
                 actions: flow.actions.clone(),
             }))
         }

@@ -61,17 +61,12 @@ impl MaterialType {
 pub struct RealizeOp;
 
 impl RealizeOp {
-    #[allow(clippy::too_many_arguments)]
+    /// Construct an artifact-realization Intent without assuming a laboratory method.
     pub fn new(
         ctx: &mut Context,
         design: Value,
         artifact_name: impl Into<String>,
-        backbone: impl Into<String>,
-        components: Vec<String>,
         dependencies: Vec<String>,
-        restriction_enzyme: impl Into<String>,
-        assembly_replicates: u8,
-        chemistry: DictAttr,
     ) -> Self {
         let result = Self {
             op: Operation::new(
@@ -84,9 +79,26 @@ impl RealizeOp {
             ),
         };
         result.set_attr_realize_artifact(ctx, StringAttr::new(artifact_name.into()));
+        result.set_attr_realize_dependencies(ctx, string_vec(dependencies));
+        result
+    }
+
+    /// Construct an artifact-realization Intent carrying a complete Golden Gate recipe.
+    #[allow(clippy::too_many_arguments)]
+    pub fn golden_gate(
+        ctx: &mut Context,
+        design: Value,
+        artifact_name: impl Into<String>,
+        backbone: impl Into<String>,
+        components: Vec<String>,
+        dependencies: Vec<String>,
+        restriction_enzyme: impl Into<String>,
+        assembly_replicates: u8,
+        chemistry: DictAttr,
+    ) -> Self {
+        let result = Self::new(ctx, design, artifact_name, dependencies);
         result.set_attr_realize_backbone(ctx, StringAttr::new(backbone.into()));
         result.set_attr_realize_components(ctx, string_vec(components));
-        result.set_attr_realize_dependencies(ctx, string_vec(dependencies));
         result.set_attr_realize_restriction_enzyme(ctx, StringAttr::new(restriction_enzyme.into()));
         result.set_attr_realize_assembly_replicates(ctx, u32_attr(ctx, assembly_replicates.into()));
         result.set_attr_realize_chemistry(ctx, chemistry);
@@ -101,38 +113,54 @@ impl Verify for RealizeOp {
             "realize_artifact",
             self.loc(ctx),
         )?;
-        require_string(
-            self.get_attr_realize_backbone(ctx).as_deref(),
-            "realize_backbone",
-            self.loc(ctx),
-        )?;
-        require_string_vec(
-            self.get_attr_realize_components(ctx).as_deref(),
-            "realize_components",
-            self.loc(ctx),
-        )?;
         require_string_vec(
             self.get_attr_realize_dependencies(ctx).as_deref(),
             "realize_dependencies",
             self.loc(ctx),
         )?;
-        require_string(
-            self.get_attr_realize_restriction_enzyme(ctx).as_deref(),
-            "realize_restriction_enzyme",
-            self.loc(ctx),
-        )?;
-        require_count(
-            self.get_attr_realize_assembly_replicates(ctx).as_deref(),
-            "realize_assembly_replicates",
-            self.loc(ctx),
-            ctx,
-        )?;
-        require_quantity_dict(
-            self.get_attr_realize_chemistry(ctx).as_deref(),
-            "realize_chemistry",
-            ASSEMBLY_CHEMISTRY_KEYS,
-            self.loc(ctx),
-        )?;
+        let recipe_attributes = [
+            self.get_attr_realize_backbone(ctx).is_some(),
+            self.get_attr_realize_components(ctx).is_some(),
+            self.get_attr_realize_restriction_enzyme(ctx).is_some(),
+            self.get_attr_realize_assembly_replicates(ctx).is_some(),
+            self.get_attr_realize_chemistry(ctx).is_some(),
+        ];
+        let present = recipe_attributes.iter().filter(|present| **present).count();
+        if present != 0 && present != recipe_attributes.len() {
+            return verify_err!(
+                self.loc(ctx),
+                "workflow.realize must carry either every Golden Gate recipe attribute or none"
+            );
+        }
+        if present == recipe_attributes.len() {
+            require_string(
+                self.get_attr_realize_backbone(ctx).as_deref(),
+                "realize_backbone",
+                self.loc(ctx),
+            )?;
+            require_string_vec(
+                self.get_attr_realize_components(ctx).as_deref(),
+                "realize_components",
+                self.loc(ctx),
+            )?;
+            require_string(
+                self.get_attr_realize_restriction_enzyme(ctx).as_deref(),
+                "realize_restriction_enzyme",
+                self.loc(ctx),
+            )?;
+            require_count(
+                self.get_attr_realize_assembly_replicates(ctx).as_deref(),
+                "realize_assembly_replicates",
+                self.loc(ctx),
+                ctx,
+            )?;
+            require_quantity_dict(
+                self.get_attr_realize_chemistry(ctx).as_deref(),
+                "realize_chemistry",
+                ASSEMBLY_CHEMISTRY_KEYS,
+                self.loc(ctx),
+            )?;
+        }
         require_material(
             self.get_result_product(ctx),
             MaterialType::PlasmidProduct,

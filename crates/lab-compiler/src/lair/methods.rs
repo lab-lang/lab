@@ -43,21 +43,17 @@ fn standard_methods() -> Vec<MethodDefinition> {
 }
 
 fn artifact_realization_service() -> MethodDefinition {
-    let parameters = realization_parameters();
     MethodDefinition {
         id: method("manual-artifact-realization"),
         refines: intent("std.bio.build.realize"),
         inputs: vec![input("design", PortType::Design)],
-        parameters: parameters.clone(),
+        parameters: vec![],
         tasks: vec![task(
             "realize",
             "RealizeArtifact",
             vec![input_ref("design")],
             vec![output("product", material("PlasmidProduct"))],
-            parameters
-                .iter()
-                .map(|parameter| procedure_parameter(&parameter.name, parameter, None))
-                .collect(),
+            vec![],
             vec![requirement(
                 "artifact-realization",
                 "ArtifactRealization",

@@ -378,17 +378,21 @@ fn append_workflow(
                 let BuildArtifactIntent::Plasmid(intent) = &artifact else {
                     return Err(unsupported_realization(&name, "realize", "plasmid"));
                 };
-                let operation = RealizeOp::new(
-                    context,
-                    design,
-                    name.clone(),
-                    intent.recipe.backbone.clone(),
-                    intent.recipe.components.clone(),
-                    dependencies.clone(),
-                    intent.recipe.restriction_enzyme.clone(),
-                    intent.recipe.assembly_replicates,
-                    assembly_chemistry(&intent.recipe.chemistry, context),
-                );
+                let operation = if let Some(recipe) = &intent.recipe {
+                    RealizeOp::golden_gate(
+                        context,
+                        design,
+                        name.clone(),
+                        recipe.backbone.clone(),
+                        recipe.components.clone(),
+                        dependencies.clone(),
+                        recipe.restriction_enzyme.clone(),
+                        recipe.assembly_replicates,
+                        assembly_chemistry(&recipe.chemistry, context),
+                    )
+                } else {
+                    RealizeOp::new(context, design, name.clone(), dependencies.clone())
+                };
                 values.insert(product.clone(), operation.get_result_product(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
@@ -729,6 +733,47 @@ workflow build_second() -> Material<Plasmid>:
             ir.matches("sequence_name: builtin.string \"shared_sequence\"")
                 .count(),
             1
+        );
+    }
+
+    #[test]
+    fn sequence_defined_plasmids_only_offer_applicable_realization_methods() {
+        let checked = compile_module(
+            r#"use std.bio.build
+use std.bio.designs
+
+plasmid starter:
+  sequence = dna("ATGC")
+  require topology == circular
+  accept sequence == design.sequence
+
+workflow main() -> Material<Plasmid>:
+  product <- realize starter
+  return product
+"#,
+        )
+        .expect("generic realization checks");
+        let portable = PortableLairProgram::lower(&checked).expect("generic realization lowers");
+        let portable_ir = portable.ir();
+        assert!(portable_ir.contains("workflow.realize"), "{portable_ir}");
+        assert!(
+            !portable_ir.contains("realize_restriction_enzyme"),
+            "{portable_ir}"
+        );
+
+        let refined = portable
+            .refine_standard_methods()
+            .expect("an applicable manual realization method exists");
+        let problem = refined.planning_problem().expect("problem projects");
+        let realization = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.bio.build.realize")
+            .expect("realization choice exists");
+        assert_eq!(realization.candidates.len(), 1);
+        assert_eq!(
+            realization.candidates[0].method.as_str(),
+            "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
         );
     }
 

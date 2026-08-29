@@ -87,26 +87,31 @@ impl DialectConversion for MethodRefinement<'_> {
         _operands_info: &OperandsInfo,
     ) -> Result<()> {
         let instance = intent_instance(context, operation)?;
-        let candidates = self.registry.methods_for(&instance.operation);
-        if candidates.is_empty() {
+        let declared_candidates = self.registry.methods_for(&instance.operation);
+        if declared_candidates.is_empty() {
             return input_err!(
                 operation.deref(context).loc(),
                 "no method definition refines Intent operation '{}'",
                 instance.operation
             );
         }
-        let signature = candidates[0]
+        let signature = declared_candidates[0]
             .validate()
             .expect("MethodRegistry contains only validated definitions");
         let operands = operation.deref(context).operands().collect::<Vec<_>>();
         verify_inputs(context, operation, &signature.inputs, &operands)?;
-        verify_parameters(
-            operation,
-            context,
-            &signature.parameters,
-            &instance.parameters,
-        )?;
         verify_results(context, operation, &signature.outputs)?;
+        let candidates = declared_candidates
+            .iter()
+            .filter(|candidate| method_is_applicable(candidate, &instance.parameters))
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return input_err!(
+                operation.deref(context).loc(),
+                "no Method refining '{}' is applicable to the Intent parameters supplied by this operation",
+                instance.operation
+            );
+        }
 
         let ordinal = self
             .next_choice
@@ -199,22 +204,26 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
         .expect("dialect conversion only queues supported Workflow operations");
     let mut parameters = BTreeMap::new();
     if let Some(realize) = Operation::get_op::<RealizeOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "restriction_enzyme",
-            required_string(realize.get_attr_realize_restriction_enzyme(context)),
-        );
-        insert_integer(
-            &mut parameters,
-            "assembly_replicates",
-            u32_value(
-                &realize
-                    .get_attr_realize_assembly_replicates(context)
-                    .unwrap(),
-            ),
-        );
-        let chemistry = realize.get_attr_realize_chemistry(context).unwrap();
-        insert_chemistry(&mut parameters, &chemistry, ASSEMBLY_CHEMISTRY_KEYS);
+        if let Some(restriction_enzyme) = realize.get_attr_realize_restriction_enzyme(context) {
+            insert_text(
+                &mut parameters,
+                "restriction_enzyme",
+                restriction_enzyme.as_str().to_owned(),
+            );
+            insert_integer(
+                &mut parameters,
+                "assembly_replicates",
+                u32_value(
+                    &realize
+                        .get_attr_realize_assembly_replicates(context)
+                        .expect("verified Golden Gate recipe is complete"),
+                ),
+            );
+            let chemistry = realize
+                .get_attr_realize_chemistry(context)
+                .expect("verified Golden Gate recipe is complete");
+            insert_chemistry(&mut parameters, &chemistry, ASSEMBLY_CHEMISTRY_KEYS);
+        }
     } else if let Some(provision) = Operation::get_op::<ProvisionOp>(operation, context) {
         insert_text(
             &mut parameters,
@@ -448,37 +457,15 @@ fn verify_inputs(
     Ok(())
 }
 
-fn verify_parameters(
-    operation: Ptr<Operation>,
-    context: &Context,
-    expected: &[lab_method::MethodParameter],
+fn method_is_applicable(
+    method: &MethodDefinition,
     actual: &BTreeMap<LocalId, PropertyValue>,
-) -> Result<()> {
-    if expected.len() != actual.len() {
-        return input_err!(
-            operation.deref(context).loc(),
-            "method signature expects {} parameters, but Intent operation provides {}",
-            expected.len(),
-            actual.len()
-        );
-    }
-    for parameter in expected {
-        let Some(value) = actual.get(&parameter.name) else {
-            return input_err!(
-                operation.deref(context).loc(),
-                "Intent parameter '{}' required by the method signature is unavailable",
-                parameter.name
-            );
-        };
-        if ScalarType::of(&value.value) != parameter.scalar_type {
-            return input_err!(
-                operation.deref(context).loc(),
-                "Intent parameter '{}' does not match its method scalar type",
-                parameter.name
-            );
-        }
-    }
-    Ok(())
+) -> bool {
+    method.parameters.iter().all(|parameter| {
+        actual
+            .get(&parameter.name)
+            .is_some_and(|value| ScalarType::of(&value.value) == parameter.scalar_type)
+    })
 }
 
 fn verify_results(

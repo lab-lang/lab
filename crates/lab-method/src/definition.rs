@@ -28,7 +28,11 @@ pub struct MethodInput {
     pub port_type: PortType,
 }
 
-/// A scalar parameter supplied by the Intent operation and available to requirement constraints.
+/// A scalar Intent parameter required by this Method candidate.
+///
+/// Candidates refining the same Intent operation may require different parameters. The operation's
+/// typed value inputs and outputs form the common interface; a candidate is applicable only when
+/// every parameter it declares is present with the declared scalar type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MethodParameter {
     pub name: LocalId,
@@ -153,10 +157,12 @@ pub struct MethodDefinition {
     pub outputs: Vec<MethodOutput>,
 }
 
-/// The common typed boundary all methods refining one Intent operation must implement.
+/// The common typed value boundary all methods refining one Intent operation must implement.
+///
+/// Method parameters are deliberately absent. They are candidate-specific applicability
+/// requirements, not part of the common value interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MethodSignature {
     pub inputs: Vec<MethodInput>,
-    pub parameters: Vec<MethodParameter>,
     pub outputs: Vec<TaskOutput>,
 }
