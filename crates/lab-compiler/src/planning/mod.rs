@@ -1,8 +1,6 @@
 //! Target-neutral planning shared by compiler backends.
 
 mod adapters;
-mod allocation;
-mod capability;
 mod execution;
 mod inventory;
 mod invocation;
@@ -17,24 +15,8 @@ pub use adapters::{
     AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
     BoundCapabilityParameterValue, ResolvedAdapterBinding,
 };
-pub use allocation::{
-    AllocatedAdapter, AllocationScalarValue, CandidateRejectionReason, EligibleCapabilityCandidate,
-    FACILITY_ALLOCATION_SCHEMA_VERSION, FacilityAllocation, FacilityAllocationError,
-    MatchedCapabilityParameter, RejectedCapabilityCandidate, RequirementAllocation,
-};
-pub use capability::{
-    CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION, CAPABILITY_REQUIREMENTS_SCHEMA_VERSION,
-    CapabilityInstantiationError, CapabilityKind, CapabilityMaterialInput,
-    CapabilityMaterialOutput, CapabilityParameterConstraint, CapabilityRequirement,
-    CapabilityRequirementError, CapabilityRequirementInstance, CapabilityRequirementInstances,
-    CapabilityRequirementSource, CapabilityRequirements, CapabilityValueInput,
-    CapabilityValueOutput, ParameterRelation, PropertyKind, RequirementControlMode,
-    RequirementQualification, StatementBlock, StatementPathSegment, UnitIri, WorkflowCallSite,
-    WorkflowIdentity,
-};
 pub use execution::{
-    ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,
-    build_execution_plan_from_invocations,
+    ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
 };
 pub use inventory::BuildInventoryError;
 pub(crate) use invocation::hex_sha256;
