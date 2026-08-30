@@ -128,9 +128,10 @@ pub fn build_execution_plan_from_invocations(
         .sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut requirements = Vec::new();
-    let mut nodes = Vec::new();
-    let mut node_tasks = Vec::new();
+    let mut nodes = Vec::<ExecutionPlanNode>::new();
+    let mut node_tasks = Vec::<BTreeSet<lab_method::LocalId>>::new();
     let mut task_nodes = BTreeMap::<lab_method::LocalId, Vec<String>>::new();
+    let mut document_nodes = BTreeMap::<(String, String, String), usize>::new();
     for method in &invocations.methods {
         for task in &method.tasks {
             let binding_scope =
@@ -241,6 +242,31 @@ pub fn build_execution_plan_from_invocations(
                             .to_owned(),
                     });
                 }
+                if let Some(document) = &document {
+                    let key = (
+                        document.path.clone(),
+                        document.format.clone(),
+                        document.sha256.clone(),
+                    );
+                    if let Some(index) = document_nodes.get(&key).copied() {
+                        let ExecutionPlanAction::Execute { requirements, .. } =
+                            &mut nodes[index].action
+                        else {
+                            unreachable!("reviewed documents index only execute nodes")
+                        };
+                        requirements.extend(
+                            task_requirements
+                                .iter()
+                                .map(|(requirement, _, _, _)| requirement.clone()),
+                        );
+                        node_tasks[index].insert(task.id.clone());
+                        task_nodes
+                            .entry(task.id.clone())
+                            .or_default()
+                            .push(nodes[index].id.clone());
+                        continue;
+                    }
+                }
                 let id = format!("execute-{:04}", nodes.len() + 1);
                 nodes.push(ExecutionPlanNode {
                     id: id.clone(),
@@ -253,12 +279,50 @@ pub fn build_execution_plan_from_invocations(
                         document,
                     },
                 });
-                node_tasks.push(task.id.clone());
+                node_tasks.push(BTreeSet::from([task.id.clone()]));
+                if let ExecutionPlanAction::Execute {
+                    document: Some(document),
+                    ..
+                } = &nodes
+                    .last()
+                    .expect("the execute node was just pushed")
+                    .action
+                {
+                    document_nodes.insert(
+                        (
+                            document.path.clone(),
+                            document.format.clone(),
+                            document.sha256.clone(),
+                        ),
+                        nodes.len() - 1,
+                    );
+                }
                 task_nodes.entry(task.id.clone()).or_default().push(id);
                 continue;
             }
 
             for (requirement, binding, is_manual, document) in task_requirements {
+                if !is_manual && let Some(document) = &document {
+                    let key = (
+                        document.path.clone(),
+                        document.format.clone(),
+                        document.sha256.clone(),
+                    );
+                    if let Some(index) = document_nodes.get(&key).copied() {
+                        let ExecutionPlanAction::Execute { requirements, .. } =
+                            &mut nodes[index].action
+                        else {
+                            unreachable!("reviewed documents index only execute nodes")
+                        };
+                        requirements.push(requirement);
+                        node_tasks[index].insert(task.id.clone());
+                        task_nodes
+                            .entry(task.id.clone())
+                            .or_default()
+                            .push(nodes[index].id.clone());
+                        continue;
+                    }
+                }
                 let (id, action) = if is_manual {
                     (
                         format!("manual-{:04}", nodes.len() + 1),
@@ -282,7 +346,24 @@ pub fn build_execution_plan_from_invocations(
                     after: Vec::new(),
                     action,
                 });
-                node_tasks.push(task.id.clone());
+                node_tasks.push(BTreeSet::from([task.id.clone()]));
+                if let ExecutionPlanAction::Execute {
+                    document: Some(document),
+                    ..
+                } = &nodes
+                    .last()
+                    .expect("the execution node was just pushed")
+                    .action
+                {
+                    document_nodes.insert(
+                        (
+                            document.path.clone(),
+                            document.format.clone(),
+                            document.sha256.clone(),
+                        ),
+                        nodes.len() - 1,
+                    );
+                }
                 task_nodes.entry(task.id.clone()).or_default().push(id);
             }
         }
@@ -293,8 +374,14 @@ pub fn build_execution_plan_from_invocations(
         });
     }
     let dependencies = execution_task_dependencies(invocations, problem, &task_nodes)?;
-    for (node, task) in nodes.iter_mut().zip(node_tasks) {
-        node.after = dependencies.get(&task).cloned().unwrap_or_default();
+    for (node, tasks) in nodes.iter_mut().zip(node_tasks) {
+        node.after = tasks
+            .iter()
+            .flat_map(|task| dependencies.get(task).into_iter().flatten().cloned())
+            .filter(|dependency| dependency != &node.id)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
     }
     let plan = ExecutionPlanDocument {
         format: EXECUTION_PLAN_FORMAT.to_owned(),

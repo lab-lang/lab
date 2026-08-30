@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Extends [0044: Facility graphs and capability binding replace workcell targets](0044-facility-graphs-replace-workcell-targets.md) and [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md), and is extended by [0048: Canonical Procedure programs derive atomic capability formulas](0048-canonical-procedures-derive-capabilities.md). Retires the fixed Protocol dialect and whole-program adapter compatibility path.
+Accepted. Extends [0044: Facility graphs and capability binding replace workcell targets](0044-facility-graphs-replace-workcell-targets.md) and [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md), and is extended by [0048: Canonical Procedure programs derive atomic capability formulas](0048-canonical-procedures-derive-capabilities.md) and [0050: Allocated Procedure schedules make device batching explicit](0050-allocated-procedure-schedules.md). Retires the fixed Protocol dialect and whole-program adapter compatibility path.
 
 ## Context
 
@@ -26,7 +26,7 @@ The compiler projects one immutable `AdapterInvocationPlan` from Allocated Proce
 
 Invocations group tasks and requirements only by one exact Asset and one exact adapter binding. A backend receives its invocation plus the immutable plan so it can resolve stable references, but it may read and lower only the tasks and requirements named by that invocation. It may not inspect checked source, unresolved Method candidates, the facility RDF graph, or another Asset's tasks.
 
-Each independently executable child document realizes one exact allocated Procedure task and names a non-empty set of requirements owned by its invocation. A task with a canonical Procedure program may carry a derived multi-capability formula whose clauses are bound atomically to one Asset, adapter, and Procedure implementation. The document names every clause it jointly realizes; this explicit task-local coordination does not permit whole-program visibility.
+Each independently executable child document realizes one or more complete allocated Procedure tasks and names every requirement it implements. A task with a canonical Procedure program may carry a derived multi-capability formula whose clauses are bound atomically to one Asset, adapter, and Procedure implementation. A validated allocated Procedure schedule may fuse complete tasks already owned by the same invocation while preserving their exact value edges, locations, requirements, and provenance identities; this explicit device scheduling does not permit whole-program visibility or facility reallocation.
 
 Shared Procedure views validate semantic operation IRIs, capability kinds, parameter identities and types, canonical units, material roles, selected material sources, and exact allocation ownership before a concrete adapter performs device-specific resource planning. An adapter rejects any semantic value it cannot preserve.
 
@@ -38,7 +38,7 @@ Manual tasks and requirements assigned to offerings without a lowering service r
 
 - There is one semantic path from source and Python frontends to device work.
 - Method choice and facility allocation are complete and verifier-checked before a backend runs.
-- Every generated device document is attributable to one exact Procedure task and its complete set of Requirement, offering, Asset, adapter-profile, material, and source-inventory bindings.
+- Every generated device document is attributable to an exact validated group of complete Procedure tasks and their Requirement, offering, Asset, adapter-profile, material, and source-inventory bindings.
 - OT-2, Flex, and STAR share one public invocation architecture while retaining their real device-specific constraints and formats.
 - Backends cannot silently recover a biological recipe from another representation or select resources outside the reviewed solution.
 - Multi-device composition is the composition of facility-allocated Procedure tasks and explicit material dependencies, not a workcell target or a whole-program backend.

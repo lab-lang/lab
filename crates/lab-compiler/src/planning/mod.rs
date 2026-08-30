@@ -8,6 +8,7 @@ mod lowering;
 mod model;
 mod problem;
 mod resolution;
+mod schedule;
 mod solver;
 
 pub use adapters::{
@@ -41,6 +42,11 @@ pub use problem::{
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
 pub use resolution::{DependencyGraphError, resolve_dependency_graph};
+pub use schedule::{
+    ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION, AllocatedExecutionGroup,
+    AllocatedProcedureSchedule, AllocatedProcedureScheduleError, ScheduledPhysicalLocation,
+    ScheduledValueRef,
+};
 pub use solver::{
     AdapterRequirement, AlternativeMaterialBinding, AlternativeMethod,
     AlternativeRequirementBinding, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,

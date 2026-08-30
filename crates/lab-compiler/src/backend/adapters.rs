@@ -1185,6 +1185,10 @@ mod tests {
                         .unwrap(),
                         method: MethodId::new(format!("https://example.org/method/{choice}"))
                             .unwrap(),
+                        after: Vec::new(),
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
+                        yields: Vec::new(),
                         tasks: vec![AllocatedProcedureTask {
                             id: task_id.clone(),
                             operation: OperationId::new(operation).unwrap(),

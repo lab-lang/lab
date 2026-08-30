@@ -17,11 +17,12 @@ use thiserror::Error;
 use super::model::MaterialLotCandidates;
 use super::{
     FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MaterialLotBuildInventory,
-    PlanningProblem, PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput,
-    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    PlanningMethodYield, PlanningPort, PlanningProblem, PlanningProcedureParameter,
+    PlanningTaskInput, PlanningTaskOutput, SelectedCapabilityParameter, SelectedMaterialBinding,
+    SelectedMaterialSource,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v7";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v8";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -43,6 +44,18 @@ pub struct AllocatedMethod {
     pub choice: LocalId,
     pub source_operation: IntentOperationId,
     pub method: MethodId,
+    /// Explicit completion dependencies retained from the selected Method choice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub after: Vec<LocalId>,
+    /// Exact selected-Method input bindings, including cross-choice value edges.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<PlanningPort>,
+    /// Exact selected-Method output ports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<PlanningPort>,
+    /// The selected Procedure value that realizes each Method output.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub yields: Vec<PlanningMethodYield>,
     pub tasks: Vec<AllocatedProcedureTask>,
 }
 
@@ -111,6 +124,13 @@ pub struct AdapterInvocation {
 }
 
 impl AdapterInvocationPlan {
+    /// Digest the canonical serde representation consumed by execution scheduling and adapters.
+    pub fn sha256(&self) -> String {
+        let bytes = serde_json::to_vec(self)
+            .expect("AdapterInvocationPlan contains only infallibly serializable semantic values");
+        hex_sha256(&bytes)
+    }
+
     pub(crate) fn project(
         problem: &PlanningProblem,
         solution: &FacilityPlanningSolution,
@@ -205,6 +225,10 @@ impl AdapterInvocationPlan {
                 choice: choice.id.clone(),
                 source_operation: choice.source_operation.clone(),
                 method: selection.method.clone(),
+                after: choice.after.clone(),
+                inputs: choice.inputs.clone(),
+                outputs: choice.outputs.clone(),
+                yields: candidate.yields.clone(),
                 tasks,
             });
         }
@@ -261,6 +285,11 @@ impl AdapterInvocationPlan {
             .iter()
             .map(|method| method.choice.clone())
             .collect::<BTreeSet<_>>();
+        let known_methods = self
+            .methods
+            .iter()
+            .map(|method| (method.choice.clone(), method))
+            .collect::<BTreeMap<_, _>>();
         let mut choices = BTreeSet::new();
         let mut tasks = BTreeSet::new();
         let mut materials = BTreeSet::new();
@@ -276,6 +305,7 @@ impl AdapterInvocationPlan {
                     choice: method.choice.clone(),
                 });
             }
+            validate_allocated_method_graph(method, &known_methods)?;
             for task in &method.tasks {
                 if !tasks.insert(task.id.clone()) {
                     return Err(AdapterInvocationValidationError::DuplicateTask {
@@ -364,6 +394,7 @@ impl AdapterInvocationPlan {
                 }
             }
         }
+        validate_allocated_method_dependencies(&self.methods)?;
 
         let mut invocation_ids = BTreeSet::new();
         let mut invoked_requirements = BTreeSet::new();
@@ -581,6 +612,253 @@ fn validate_program_bindings(
     Ok(())
 }
 
+fn validate_allocated_method_graph(
+    method: &AllocatedMethod,
+    known_methods: &BTreeMap<LocalId, &AllocatedMethod>,
+) -> Result<(), AdapterInvocationValidationError> {
+    let invalid = |message: String| AdapterInvocationValidationError::InvalidMethodGraph {
+        choice: method.choice.clone(),
+        message,
+    };
+    let mut dependencies = BTreeSet::new();
+    for dependency in &method.after {
+        if dependency == &method.choice
+            || !known_methods.contains_key(dependency)
+            || !dependencies.insert(dependency)
+        {
+            return Err(invalid(format!(
+                "completion dependency '{dependency}' is unknown, repeated, or self-referential"
+            )));
+        }
+    }
+
+    let mut inputs = BTreeMap::new();
+    for input in &method.inputs {
+        if inputs.insert(input.name.clone(), input).is_some() {
+            return Err(invalid(format!("input '{}' is repeated", input.name)));
+        }
+        if let Some(source) = &input.source {
+            let super::PlanningValueSource::ChoiceOutput { choice, output } = source else {
+                return Err(invalid(format!(
+                    "input '{}' has a non-choice output source",
+                    input.name
+                )));
+            };
+            let Some(producer) = known_methods.get(choice) else {
+                return Err(invalid(format!(
+                    "input '{}' references unknown choice '{choice}'",
+                    input.name
+                )));
+            };
+            if choice == &method.choice
+                || !producer.outputs.iter().any(|candidate| {
+                    &candidate.name == output && candidate.port_type == input.port_type
+                })
+            {
+                return Err(invalid(format!(
+                    "input '{}' references a missing or type-incompatible output '{choice}::{output}'",
+                    input.name
+                )));
+            }
+        }
+    }
+    let mut outputs = BTreeMap::new();
+    for output in &method.outputs {
+        if output.source.is_some() || outputs.insert(output.name.clone(), output).is_some() {
+            return Err(invalid(format!(
+                "output '{}' is repeated or carries an input-only source",
+                output.name
+            )));
+        }
+    }
+
+    let tasks = method
+        .tasks
+        .iter()
+        .map(|task| (task.id.clone(), task))
+        .collect::<BTreeMap<_, _>>();
+    for task in &method.tasks {
+        for task_input in &task.inputs {
+            match &task_input.source {
+                super::PlanningValueSource::ChoiceInput {
+                    input: method_input,
+                } => {
+                    if !inputs
+                        .get(method_input)
+                        .is_some_and(|port| port.port_type == task_input.port_type)
+                    {
+                        return Err(invalid(format!(
+                            "task '{}' references an unknown or type-incompatible Method input '{method_input}'",
+                            task.id
+                        )));
+                    }
+                }
+                super::PlanningValueSource::TaskOutput {
+                    task: producer,
+                    output,
+                } => {
+                    let Some(producer) = tasks.get(producer) else {
+                        return Err(invalid(format!(
+                            "task '{}' references unknown producer task '{producer}'",
+                            task.id
+                        )));
+                    };
+                    if !producer.outputs.iter().any(|candidate| {
+                        &candidate.name == output && candidate.port_type == task_input.port_type
+                    }) {
+                        return Err(invalid(format!(
+                            "task '{}' references unknown producer output '{output}'",
+                            task.id
+                        )));
+                    }
+                }
+                super::PlanningValueSource::ChoiceOutput { choice, output } => {
+                    if !known_methods.get(choice).is_some_and(|producer| {
+                        producer.outputs.iter().any(|candidate| {
+                            &candidate.name == output && candidate.port_type == task_input.port_type
+                        })
+                    }) {
+                        return Err(invalid(format!(
+                            "task '{}' references unknown or type-incompatible choice output '{choice}::{output}'",
+                            task.id
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut yields = BTreeSet::new();
+    for method_yield in &method.yields {
+        if !outputs.contains_key(&method_yield.output)
+            || !yields.insert(method_yield.output.clone())
+        {
+            return Err(invalid(format!(
+                "yield '{}' is unknown or repeated",
+                method_yield.output
+            )));
+        }
+        match &method_yield.source {
+            super::PlanningValueSource::ChoiceInput { input } => {
+                if !inputs.get(input).is_some_and(|source| {
+                    outputs[&method_yield.output].port_type == source.port_type
+                }) {
+                    return Err(invalid(format!(
+                        "yield '{}' references unknown Method input '{input}'",
+                        method_yield.output
+                    )));
+                }
+            }
+            super::PlanningValueSource::TaskOutput { task, output } => {
+                let Some(task) = tasks.get(task) else {
+                    return Err(invalid(format!(
+                        "yield '{}' references an unknown task",
+                        method_yield.output
+                    )));
+                };
+                if !task.outputs.iter().any(|candidate| {
+                    &candidate.name == output
+                        && candidate.port_type == outputs[&method_yield.output].port_type
+                }) {
+                    return Err(invalid(format!(
+                        "yield '{}' references unknown task output '{output}'",
+                        method_yield.output
+                    )));
+                }
+            }
+            super::PlanningValueSource::ChoiceOutput { choice, output } => {
+                if !known_methods.get(choice).is_some_and(|producer| {
+                    producer.outputs.iter().any(|candidate| {
+                        &candidate.name == output
+                            && candidate.port_type == outputs[&method_yield.output].port_type
+                    })
+                }) {
+                    return Err(invalid(format!(
+                        "yield '{}' references unknown choice '{choice}'",
+                        method_yield.output
+                    )));
+                }
+            }
+        }
+    }
+    if yields != outputs.into_keys().collect() {
+        return Err(invalid(
+            "selected Method yields do not cover every output exactly once".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_allocated_method_dependencies(
+    methods: &[AllocatedMethod],
+) -> Result<(), AdapterInvocationValidationError> {
+    let mut dependencies = methods
+        .iter()
+        .map(|method| {
+            let mut dependencies = method.after.iter().collect::<BTreeSet<_>>();
+            dependencies.extend(
+                method
+                    .inputs
+                    .iter()
+                    .filter_map(|input| match &input.source {
+                        Some(super::PlanningValueSource::ChoiceOutput { choice, .. }) => {
+                            Some(choice)
+                        }
+                        _ => None,
+                    }),
+            );
+            dependencies.extend(method.yields.iter().filter_map(|method_yield| {
+                match &method_yield.source {
+                    super::PlanningValueSource::ChoiceOutput { choice, .. } => Some(choice),
+                    _ => None,
+                }
+            }));
+            dependencies.extend(method.tasks.iter().flat_map(|task| {
+                task.materials
+                    .iter()
+                    .filter_map(|material| match &material.source {
+                        SelectedMaterialSource::ChoiceOutput { choice } => Some(choice),
+                        SelectedMaterialSource::MaterialLot { .. } => None,
+                    })
+            }));
+            (method.choice.as_str(), dependencies)
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut dependents = BTreeMap::<&str, Vec<&str>>::new();
+    let mut indegree = BTreeMap::new();
+    for (choice, choices) in &dependencies {
+        indegree.insert(*choice, choices.len());
+        for dependency in choices {
+            dependents
+                .entry(dependency.as_str())
+                .or_default()
+                .push(choice);
+        }
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(choice, degree)| (*degree == 0).then_some(*choice))
+        .collect::<Vec<_>>();
+    let mut visited = 0;
+    while let Some(choice) = ready.pop() {
+        visited += 1;
+        for dependent in dependents.get(choice).into_iter().flatten() {
+            let degree = indegree
+                .get_mut(dependent)
+                .expect("allocated Method dependencies were validated before cycle checking");
+            *degree -= 1;
+            if *degree == 0 {
+                ready.push(dependent);
+            }
+        }
+    }
+    dependencies.clear();
+    if visited != methods.len() {
+        return Err(AdapterInvocationValidationError::MethodDependencyCycle);
+    }
+    Ok(())
+}
+
 fn validate_material_inventory(
     plan: &AdapterInvocationPlan,
 ) -> Result<(), AdapterInvocationValidationError> {
@@ -726,6 +1004,10 @@ pub enum AdapterInvocationValidationError {
     DuplicateChoice { choice: LocalId },
     #[error("selected Method choice `{choice}` contains no Procedure tasks")]
     EmptyMethod { choice: LocalId },
+    #[error("selected Method choice `{choice}` has an invalid value graph: {message}")]
+    InvalidMethodGraph { choice: LocalId, message: String },
+    #[error("selected Method choices contain a cyclic value or completion dependency")]
+    MethodDependencyCycle,
     #[error("adapter invocations repeat Procedure task `{task}`")]
     DuplicateTask { task: LocalId },
     #[error("Procedure task `{task}` contains no capability requirements")]

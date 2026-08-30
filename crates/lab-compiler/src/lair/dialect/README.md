@@ -44,7 +44,7 @@ SBOLInventory is not imported into LAIR. Facility, Zone, Asset, CapabilityOfferi
 
 ## Adapter and runtime boundary
 
-`lab.adapter-invocations.v7` is projected only from verifier-valid Allocated Procedure LAIR. It freezes selected Method graphs, typed tasks and normalized programs, exact Procedure implementation identities, parameters, exact requirement-to-offering-to-Asset bindings, exact material sources, adapter/profile bindings, and the inventory, planning-problem, and allocated-LAIR digests. External code consumes these owned serializable records, never the Pliron module.
+`lab.adapter-invocations.v8` is projected only from verifier-valid Allocated Procedure LAIR. It freezes selected Method graphs including exact input/output/yield edges, typed tasks and normalized programs, exact Procedure implementation identities, parameters, exact requirement-to-offering-to-Asset bindings, exact material sources, adapter/profile bindings, and the inventory, planning-problem, and allocated-LAIR digests. External code consumes these owned serializable records, never the Pliron module.
 
 The built-in OT-2, Flex, and STAR adapters lower exact assigned Procedure tasks. Device-specific planning may introduce private typed plans or dialects, but it cannot revisit Method selection or facility allocation. Versioned execution plans and child run documents are runtime ABIs derived from those invocations, not later LAIR stages.
 
