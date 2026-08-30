@@ -30,8 +30,16 @@ pub struct MaterialOutput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VesselRole {
-    MaterialSource { material: ProcedureLocalId },
-    Product { output: ProcedureLocalId },
+    /// A liquid value arriving through the enclosing Procedure task's zero-based input list.
+    ProcedureInput {
+        input: u32,
+    },
+    MaterialSource {
+        material: ProcedureLocalId,
+    },
+    Product {
+        output: ProcedureLocalId,
+    },
     Intermediate,
 }
 

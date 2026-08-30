@@ -520,6 +520,17 @@ fn validate_program_bindings(
 ) -> Result<(), PlanningProblemValidationError> {
     match program {
         ValidatedProcedureProgram::PipettingV1(program) => {
+            if program.as_program().vessels.iter().any(|vessel| {
+                matches!(
+                    &vessel.role,
+                    lab_procedure::VesselRole::ProcedureInput { input }
+                        if usize::try_from(*input).map_or(true, |input| input >= task.inputs.len())
+                )
+            }) {
+                return Err(PlanningProblemValidationError::ProcedureInputBindings {
+                    task: task.id.clone(),
+                });
+            }
             let task_materials = task
                 .materials
                 .iter()
@@ -664,6 +675,8 @@ pub enum PlanningProblemValidationError {
     InvalidProcedureProgram { task: LocalId, message: String },
     #[error("Procedure task `{task}` normalized program references an undeclared material input")]
     ProcedureMaterialBindings { task: LocalId },
+    #[error("Procedure task `{task}` normalized program references an unavailable task input")]
+    ProcedureInputBindings { task: LocalId },
     #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
     ProcedureOutputBindings { task: LocalId },
     #[error(

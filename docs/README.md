@@ -72,6 +72,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0045: LAIR represents method alternatives before facility allocation](language/decisions/0045-lair-method-refinement-and-facility-allocation.md) | Method, Procedure, and Capability alternatives remain live until one graph-wide facility solution is applied |
 | [0046: Allocated Procedure is the device boundary](language/decisions/0046-allocated-procedure-is-the-device-boundary.md) | immutable exact-task adapter invocations replace fixed Protocol and whole-program device lowering |
 | [0047: Packages contribute versioned Method catalogs](language/decisions/0047-packages-contribute-versioned-method-catalogs.md) | portable packages extend Method, Procedure, and Capability semantics through one shared validated document contract |
+| [0048: Canonical Procedure programs derive atomic capability formulas](language/decisions/0048-canonical-procedures-derive-capabilities.md) | device-neutral operational programs derive fine-grained requirements that one Asset and implementation realize atomically |
 
 ## Implementation and embedding
 

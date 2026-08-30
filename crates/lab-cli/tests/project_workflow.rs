@@ -79,6 +79,66 @@ fn solution_materials(solution: &Value) -> Vec<&Value> {
         .collect()
 }
 
+fn assert_serial_dilutions_use_pipetting(
+    invocations: &Value,
+    expected_asset: &str,
+    expected_driver: &str,
+    expected_implementation: &str,
+) {
+    let tasks = invocations["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|method| method["tasks"].as_array().unwrap())
+        .filter(|task| {
+            task["operation"] == "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tasks.len(), 4);
+    for task in tasks {
+        assert_eq!(
+            task["program"]["contract"],
+            "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1"
+        );
+        assert!(
+            task["program"]["body"]["vessels"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|vessel| {
+                    vessel["role"]["kind"] == "procedure_input" && vessel["role"]["input"] == 0
+                })
+        );
+        let step_kinds = task["program"]["body"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|step| step["kind"].as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            step_kinds,
+            std::collections::BTreeSet::from(["distribute", "mix", "transfer"])
+        );
+        let requirements = task["requirements"].as_array().unwrap();
+        assert_eq!(requirements.len(), 2);
+        assert_eq!(
+            requirements
+                .iter()
+                .map(|requirement| requirement["capability_kind"].as_str().unwrap())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                "https://sbol.io/ns/capability#InWellMixing",
+                "https://sbol.io/ns/capability#MeteredLiquidTransfer",
+            ])
+        );
+        assert!(requirements.iter().all(|requirement| {
+            requirement["asset"] == expected_asset
+                && requirement["adapter"]["driver"] == expected_driver
+                && requirement["procedure_implementation"] == expected_implementation
+        }));
+    }
+}
+
 #[test]
 fn new_check_build_and_metadata_form_one_project_loop() {
     let project = temporary_project();
@@ -819,7 +879,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
 }
 
 #[test]
-fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
+fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
@@ -856,20 +916,9 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     );
     assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 26);
-    let liquid_handling = requirements
-        .iter()
-        .copied()
-        .filter(|binding| {
-            binding["capability_kind"] == "https://sbol.io/ns/capability#LiquidHandling"
-        })
-        .collect::<Vec<_>>();
-    assert!(!liquid_handling.is_empty());
-    assert!(liquid_handling.iter().all(|binding| {
-        binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
-            && binding["offering"]
-                == "https://example.org/golden-gate/opentrons_ot2_liquid_handling"
-            && binding["adapter"]["driver"] == "opentrons.ot2"
+    assert_eq!(requirements.len(), 30);
+    assert!(requirements.iter().all(|binding| {
+        binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
     let pipetting = requirements
         .iter()
@@ -882,13 +931,20 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(pipetting.len(), 4);
+    assert_eq!(pipetting.len(), 12);
     assert!(pipetting.iter().all(|binding| {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
             && binding["adapter"]["procedure_implementation"]
                 == "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
     }));
+    let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
+    assert_serial_dilutions_use_pipetting(
+        &invocations,
+        "https://example.org/golden-gate/opentrons_ot2",
+        "opentrons.ot2",
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
+    );
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
     assert_eq!(lowering["schema_version"], "lab.facility-lowering.v4");
@@ -907,7 +963,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 10);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 14);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
@@ -1018,7 +1074,8 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         String::from_utf8_lossy(&dry_run.stderr)
     );
     assert!(
-        String::from_utf8_lossy(&dry_run.stdout).contains("Opentrons OT-2 LiquidHandling protocol")
+        String::from_utf8_lossy(&dry_run.stdout)
+            .contains("Opentrons OT-2 MeteredLiquidTransfer protocol")
     );
 
     let allocated_lair_path = out_dir.join("compiler/allocated.lair");
@@ -1094,13 +1151,11 @@ profile = "adapters/simulator.toml""#;
             "Hamilton STAR liquid handler",
         )
         .replace("OT-2 with Thermocycler Module Gen2", "STAR");
-    let combined_offerings = r#"    fac:capability ex:hamilton_star_liquid_handling,
-        ex:hamilton_star_metered_liquid_transfer,
+    let combined_offerings = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing,
         ex:hamilton_star_thermal_cycling ."#;
     assert!(inventory.contains(combined_offerings));
-    let split_assets = r#"    fac:capability ex:hamilton_star_liquid_handling,
-        ex:hamilton_star_metered_liquid_transfer,
+    let split_assets = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing .
 
 ex:thermal_simulator
@@ -1166,7 +1221,7 @@ ex:thermal_simulator
         .flat_map(|route| route["artifacts"].as_array().unwrap())
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(lowered_requirements, 10);
+    assert_eq!(lowered_requirements, 14);
     assert_eq!(automation_artifacts.len(), 8);
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
@@ -1216,6 +1271,14 @@ ex:thermal_simulator
     }
     assert!(star_documents > 0);
     assert!(simulation_documents > 0);
+
+    let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
+    assert_serial_dilutions_use_pipetting(
+        &invocations,
+        "https://example.org/golden-gate/hamilton_star",
+        "hamilton.star",
+        "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
+    );
 
     let star_route = routes
         .iter()
@@ -1349,18 +1412,9 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 27);
-    let liquid_handling = requirements
-        .iter()
-        .copied()
-        .filter(|binding| {
-            binding["capability_kind"] == "https://sbol.io/ns/capability#LiquidHandling"
-        })
-        .collect::<Vec<_>>();
-    assert!(!liquid_handling.is_empty());
-    assert!(liquid_handling.iter().all(|binding| {
-        binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
-            && binding["adapter"]["driver"] == "opentrons.ot2"
+    assert_eq!(requirements.len(), 31);
+    assert!(requirements.iter().all(|binding| {
+        binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
     let pipetting = requirements
         .iter()
@@ -1373,7 +1427,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(pipetting.len(), 4);
+    assert_eq!(pipetting.len(), 12);
     assert!(pipetting.iter().all(|binding| {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
@@ -1546,7 +1600,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
     assert_eq!(route["driver"], "opentrons.flex");
     assert!(route.get("scope").is_none());
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 10);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 14);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root
@@ -1583,6 +1637,14 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
         serde_json::json!(["B2", "B3"]),
         "the emitted plan carries the allocated adapter's deck configuration"
+    );
+
+    let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
+    assert_serial_dilutions_use_pipetting(
+        &invocations,
+        "https://example.org/golden-gate/opentrons_flex",
+        "opentrons.flex",
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
     );
 
     let protocol: Value = serde_json::from_str(

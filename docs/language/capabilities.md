@@ -12,16 +12,22 @@ The compiler's validated standard Method registry currently covers the Intent op
 
 | Intent operation | Built-in Method alternatives | Procedure requirements |
 | --- | --- | --- |
-| `std.bio.build.realize` | manual artifact-realization service; automated Golden Gate | `ArtifactRealization`, or `LiquidHandling` followed by `ThermalCycling` |
+| `std.bio.build.realize` | manual artifact-realization service; automated Golden Gate | `ArtifactRealization`, or atomic `MeteredLiquidTransfer` + `InWellMixing` followed by `ThermalCycling` |
 | `std.lab.plasmid.provision` | manual material provisioning | `MaterialProvisioning` |
 | `std.lab.plasmid.transform` | manual chemical transformation | `ChemicalTransformation` |
 | `std.lab.plasmid.recover` | manual recovery; controlled recovery | `Incubation` with an exact duration constraint |
-| `std.lab.plasmid.dilute` | serial dilution | `LiquidHandling` |
+| `std.lab.plasmid.dilute` | serial dilution | atomic `MeteredLiquidTransfer` + `InWellMixing` |
 | `std.lab.plasmid.plate` | manual antibiotic selection | `AntibioticSelection` |
 
 The automated Golden Gate Method is deliberately composite. Reaction setup and thermal cycling are separate Procedure tasks with a typed material edge between them, so a facility may allocate them to different Assets. The source action does not pretend that assembly is one device capability.
 
-Terms such as `ArtifactRealization`, `MaterialProvisioning`, `ChemicalTransformation`, and `AntibioticSelection` are open capability-namespace extensions where Profile 0.2 does not yet provide an exact normative term. `LiquidHandling`, `ThermalCycling`, and `Incubation` are Profile 0.2 vocabulary terms. The compiler preserves exact IRIs either way.
+Terms such as `ArtifactRealization`, `MaterialProvisioning`, `ChemicalTransformation`, and `AntibioticSelection` are open capability-namespace extensions where Profile 0.2 does not yet provide an exact normative term. `LiquidHandling`, `MeteredLiquidTransfer`, `InWellMixing`, `ThermalCycling`, and `Incubation` are SBOLInventory vocabulary terms. The compiler preserves exact IRIs either way. `LiquidHandling` remains useful as a taxonomy parent but is not the dispatch contract for normalized pipetting work.
+
+## Canonical Procedure programs
+
+Method tasks with supported operational semantics normalize into versioned programs from `lab-procedure` before planning. `PipettingProgramV1` stores logical vessels, references to enclosing task inputs, exact material sources and products, ordered liquid operations, volumes, contamination-path policies, and environmental constraints without naming a device or facility. Golden Gate setup and serial dilution both use this contract.
+
+A validated program derives its capability formula. The current pipetting formula requests `MeteredLiquidTransfer` with exact minimum and maximum volume bounds, `InWellMixing` with an exact maximum-volume bound, and `TemperatureControlledStaging` when the program constrains source temperature. The formula has `AtomicAssetAssembly` scope, so every clause must bind to offerings on one Asset through one adapter and one exact Procedure implementation. This decision and its compiler invariants are recorded by [0048](decisions/0048-canonical-procedures-derive-capabilities.md).
 
 ## Portable Method contract
 
@@ -95,9 +101,9 @@ Qualification belongs to the offering, not the Asset or adapter. A runtime imple
 
 `lab.adapter-invocations.v7` is projected from Allocated Procedure LAIR and retains selected Methods, tasks, normalized programs, Procedure implementation identities, requirements, parameters, materials, offerings, Assets, adapters, profile digests, and compiler-evidence digests. Each allocated requirement freezes its Procedure implementation while an invocation groups the tasks assigned to one exact Asset, adapter, and profile; one physical adapter invocation may therefore realize several explicit Procedure contracts without fragmenting the Asset's output bundle.
 
-Shared typed Procedure views validate operation semantics, capability kind, parameter identity and type, canonical QUDT unit, material role, and allocation ownership before device-specific code runs. OT-2, Flex, and STAR use this boundary today. Unsupported Procedure operations or values fail explicitly instead of being ignored.
+Shared typed Procedure views validate operation semantics, canonical program structure, derived capability clauses, parameter identity and type, canonical QUDT units, material roles, and allocation ownership before device-specific code runs. OT-2, Flex, and STAR use this boundary today. Unsupported Procedure operations or values fail explicitly instead of being ignored.
 
-The current independently executable adapter contract requires one exact allocated requirement per lowered task. A future atomic multi-capability device contract must model that coordination explicitly and version its invocation record; it cannot regain whole-program compiler access.
+One independently executable child document realizes one exact Procedure task and names its complete non-empty requirement set. For an atomic formula, invocation validation requires those requirements to share one Asset, adapter binding, and Procedure implementation. Runtime preserves that set on one `Execute` node and dispatches the reviewed document once.
 
 ## Python uptake
 

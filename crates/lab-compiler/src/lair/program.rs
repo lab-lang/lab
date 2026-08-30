@@ -906,6 +906,34 @@ workflow main() -> Material<Plasmid>:
                 if task.as_str().ends_with("::setup-reaction") && output.as_str() == "reaction"
         ));
 
+        let dilution = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.dilute")
+            .expect("serial dilution is a global method choice");
+        let dilution_task = &dilution.candidates[0].tasks[0];
+        let dilution_program = dilution_task
+            .program
+            .as_ref()
+            .expect("serial dilution is normalized before facility planning")
+            .validate()
+            .expect("normalized serial-dilution program validates");
+        let ValidatedProcedureProgram::PipettingV1(dilution_program) = dilution_program;
+        assert!(dilution_program.as_program().vessels.iter().any(|vessel| {
+            matches!(
+                &vessel.role,
+                lab_procedure::VesselRole::ProcedureInput { input: 0 }
+            )
+        }));
+        assert_eq!(dilution_program.as_program().steps.len(), 5);
+        assert_eq!(dilution_task.requirements.len(), 2);
+        assert!(dilution_task.requirements.iter().all(|requirement| {
+            matches!(
+                requirement.capability_kind.as_str(),
+                vocabulary::METERED_LIQUID_TRANSFER | vocabulary::IN_WELL_MIXING
+            )
+        }));
+
         let recovery = problem
             .choices
             .iter()
@@ -1040,7 +1068,19 @@ workflow main() -> Material<Plasmid>:
             invocations.invocations[0]
                 .requirements
                 .iter()
-                .any(|requirement| requirement.as_str().ends_with("::liquid-handling"))
+                .any(|requirement| requirement.as_str().ends_with("::transfer"))
+        );
+        assert!(
+            invocations.invocations[0]
+                .requirements
+                .iter()
+                .any(|requirement| requirement.as_str().ends_with("::mix"))
+        );
+        assert!(
+            invocations.invocations[0]
+                .requirements
+                .iter()
+                .all(|requirement| !requirement.as_str().ends_with("::liquid-handling"))
         );
         assert!(
             invocations

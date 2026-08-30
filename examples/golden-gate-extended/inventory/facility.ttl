@@ -55,18 +55,9 @@ ex:opentrons_ot2
     fac:manufacturer "Opentrons" ;
     fac:model "OT-2 with Thermocycler Module Gen2" ;
     fac:isActive true ;
-    fac:capability ex:opentrons_ot2_liquid_handling,
-        ex:opentrons_ot2_metered_liquid_transfer,
+    fac:capability ex:opentrons_ot2_metered_liquid_transfer,
         ex:opentrons_ot2_in_well_mixing,
         ex:opentrons_ot2_thermal_cycling .
-
-ex:opentrons_ot2_liquid_handling
-    a sbol:Identified, fac:CapabilityOffering ;
-    sbol:displayId "liquid_handling" ;
-    fac:capabilityKind cap:LiquidHandling ;
-    fac:qualification fac:Plannable ;
-    fac:controlMode fac:ReviewedFileControl ;
-    fac:isActive true .
 
 ex:opentrons_ot2_metered_liquid_transfer
     a sbol:Identified, fac:CapabilityOffering ;

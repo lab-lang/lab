@@ -62,7 +62,7 @@ profile = "adapters/star-1.toml"
 
 Each adapter declaration binds an implementation to one exact catalog Asset. Facility facts remain in RDF, driver selection is never inferred from product metadata, and endpoints and credentials remain local runtime configuration. The old symbolic `materials` and `artifacts` arrays are accepted only as a mutually exclusive migration form.
 
-The facility is the lowering surface. The facility phase shared by `lab build` and `lab plan` resolves exact MaterialLots, selects Methods, allocates requirements to CapabilityOfferings and their owning Assets, and invokes only the adapters attached to those selected Assets. The reviewed plan freezes the inventory, compiler evidence, staged adapter profiles, and every emitted device and support artifact by SHA-256. Each independently executable child document is projected from one exact allocated Procedure task and names the Requirement it realizes.
+The facility is the lowering surface. The facility phase shared by `lab build` and `lab plan` resolves exact MaterialLots, selects Methods, allocates requirements to CapabilityOfferings and their owning Assets, and invokes only the adapters attached to those selected Assets. The reviewed plan freezes the inventory, compiler evidence, staged adapter profiles, and every emitted device and support artifact by SHA-256. Each independently executable child document is projected from one exact allocated Procedure task and names the complete non-empty Requirement set it realizes.
 
 ```sh
 lab build

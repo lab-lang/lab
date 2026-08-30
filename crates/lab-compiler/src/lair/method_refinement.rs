@@ -490,6 +490,7 @@ fn append_candidate(
         let normalized_program = normalize_task(&ProcedureTaskInstance {
             id: &semantic_node_id,
             operation: &task.operation,
+            input_count: task.inputs.len(),
             outputs: &output_names,
             parameters: &resolved_parameters,
             materials: &resolved_materials,

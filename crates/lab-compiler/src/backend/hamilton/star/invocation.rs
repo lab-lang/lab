@@ -14,9 +14,9 @@ use crate::backend::hamilton::star::plan::{
     SetupAddition, SourceFill, plan_dilution_invocation, plan_setup_invocation,
 };
 use crate::backend::hamilton::star::profile::StarAdapterProfile;
-use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks, one_requirement};
+use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::procedure::{
-    SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup, serial_dilution,
+    SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup, normalized_serial_dilution,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -221,9 +221,7 @@ fn plan_task(
 > {
     match task.operation.as_str() {
         SETUP_GOLDEN_GATE => plan_setup(profile, task, requirements),
-        SERIAL_DILUTION => {
-            plan_dilution(profile, task, one_requirement("STAR", task, requirements)?)
-        }
+        SERIAL_DILUTION => plan_dilution(profile, task, requirements),
         operation => Err(format!(
             "STAR invocation contains unsupported Procedure operation '{operation}' in task '{}'; the STAR adapter implements liquid-handling tasks only",
             task.id
@@ -316,7 +314,7 @@ fn plan_setup(
 fn plan_dilution(
     profile: &StarAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<
     (
         &'static str,
@@ -325,7 +323,7 @@ fn plan_dilution(
     ),
     String,
 > {
-    let procedure = serial_dilution("STAR", task, requirement)?;
+    let procedure = normalized_serial_dilution("STAR", task, requirements)?;
     let view = ProcedureTaskView::new("STAR", task);
     let mut allocator = PlateAllocator::new(
         BACKEND,

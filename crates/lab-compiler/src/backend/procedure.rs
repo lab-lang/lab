@@ -7,7 +7,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_procedure::{PipettingStep, ValidatedProcedureProgram, VesselRole, Volume};
+use lab_procedure::{
+    FluidPathPolicy, Location, PipettingStep, ValidatedProcedureProgram, VesselRole, Volume,
+};
 
 use crate::backend::invocation::{MICROLITRE, ProcedureTaskView, material_role};
 use crate::planning::{
@@ -15,14 +17,10 @@ use crate::planning::{
     SelectedMaterialBinding,
 };
 
-pub(crate) const SETUP_GOLDEN_GATE: &str =
-    "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction";
+pub(crate) use crate::procedure::{SERIAL_DILUTION, SETUP_GOLDEN_GATE};
 pub(crate) const CYCLE_GOLDEN_GATE: &str =
     "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction";
-pub(crate) const SERIAL_DILUTION: &str =
-    "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture";
 
-pub(crate) const LIQUID_HANDLING: &str = "https://sbol.io/ns/capability#LiquidHandling";
 pub(crate) const THERMAL_CYCLING: &str = "https://sbol.io/ns/capability#ThermalCycling";
 
 pub(crate) struct MaterialVolume<'a> {
@@ -397,13 +395,38 @@ pub(crate) fn thermal_cycle_golden_gate(
     })
 }
 
-pub(crate) fn serial_dilution<'a>(
+/// Project a canonical serial dilution through the shared pipetting contract.
+///
+/// The projection recognizes the exact logical liquid graph produced by Method refinement. It
+/// recovers the compact values expected by the current device-specific planners without reading
+/// the original Method parameters as an independent source of liquid-handling semantics.
+pub(crate) fn normalized_serial_dilution<'a>(
     adapter: &str,
     task: &'a AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<SerialDilution<'a>, String> {
+    if task.operation.as_str() != SERIAL_DILUTION {
+        return Err(format!(
+            "{adapter} expected normalized serial dilution, found operation '{}' in task '{}'",
+            task.operation, task.id
+        ));
+    }
+    let document = task.program.as_ref().ok_or_else(|| {
+        format!(
+            "{adapter} Procedure task '{}' is missing its normalized pipetting program",
+            task.id
+        )
+    })?;
+    let validated = document.validate().map_err(|error| {
+        format!(
+            "{adapter} Procedure task '{}' has an invalid normalized program: {error}",
+            task.id
+        )
+    })?;
+    validate_normalized_requirements(adapter, task, requirements, &validated)?;
+    let ValidatedProcedureProgram::PipettingV1(program) = validated;
+    let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
-    view.require_capability(requirement, LIQUID_HANDLING)?;
     view.require_material_roles(&["medium"])?;
     if task.inputs.len() != 1 {
         return Err(format!(
@@ -411,38 +434,187 @@ pub(crate) fn serial_dilution<'a>(
             task.id
         ));
     }
-    let serial_dilutions = view.usize_parameter("serial_dilutions", None)?;
-    view.require_nonzero("serial_dilutions", serial_dilutions as u32)?;
-    let medium_volume_ul = view.integer_parameter("medium_volume_ul", Some(MICROLITRE))?;
-    let culture_volume_ul = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
-    let mix_volume_ul = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
-    for (name, value) in [
-        ("medium_volume_ul", medium_volume_ul),
-        ("culture_volume_ul", culture_volume_ul),
-        ("mix_cycles", mix_cycles),
-        ("mix_volume_ul", mix_volume_ul),
-    ] {
-        view.require_nonzero(name, value)?;
+    let [material] = program.materials.as_slice() else {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' must declare exactly one normalized medium",
+            task.id
+        ));
+    };
+    let medium = view.one_material("medium")?;
+    if medium.input.as_str() != material.id.as_str() {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' normalized medium '{}' does not match its exact material allocation '{}'",
+            task.id, material.id, medium.input
+        ));
     }
-    let diluted_volume = medium_volume_ul
-        .checked_add(culture_volume_ul)
+    let [output] = program.outputs.as_slice() else {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' must declare exactly one normalized output",
+            task.id
+        ));
+    };
+    let culture_vessels = program
+        .vessels
+        .iter()
+        .filter(|vessel| matches!(vessel.role, VesselRole::ProcedureInput { input: 0 }))
+        .collect::<Vec<_>>();
+    let medium_vessels = program
+        .vessels
+        .iter()
+        .filter(|vessel| {
+            matches!(&vessel.role, VesselRole::MaterialSource { material: candidate } if candidate == &material.id)
+        })
+        .collect::<Vec<_>>();
+    let product_vessels = program
+        .vessels
+        .iter()
+        .filter(|vessel| {
+            matches!(&vessel.role, VesselRole::Product { output: candidate } if candidate == &output.id)
+        })
+        .collect::<Vec<_>>();
+    let ([culture_vessel], [medium_vessel], [product_vessel]) = (
+        culture_vessels.as_slice(),
+        medium_vessels.as_slice(),
+        product_vessels.as_slice(),
+    ) else {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' must map its culture, medium, and product to exactly one logical vessel each",
+            task.id
+        ));
+    };
+    if program.vessels.len() != 3 || culture_vessel.positions != 1 || medium_vessel.positions != 1 {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' has a non-canonical logical vessel layout",
+            task.id
+        ));
+    }
+    let serial_dilutions = usize::try_from(product_vessel.positions).map_err(|_| {
+        format!(
+            "{adapter} serial-dilution task '{}' destination count does not fit this platform",
+            task.id
+        )
+    })?;
+    let destinations = (0..product_vessel.positions)
+        .map(|position| Location {
+            vessel: product_vessel.id.clone(),
+            position,
+        })
+        .collect::<Vec<_>>();
+    let expected_steps = serial_dilutions
+        .checked_mul(2)
+        .and_then(|steps| steps.checked_add(1))
         .ok_or_else(|| {
             format!(
-                "{adapter} Procedure task '{}' dilution volume overflows",
+                "{adapter} serial-dilution task '{}' step count overflows",
                 task.id
             )
         })?;
-    if mix_volume_ul > diluted_volume {
+    if program.steps.len() != expected_steps {
         return Err(format!(
-            "{adapter} Procedure task '{}' mix volume {} uL exceeds its {} uL dilution",
-            task.id, mix_volume_ul, diluted_volume
+            "{adapter} serial-dilution task '{}' must contain one medium distribution followed by one transfer and mix per dilution",
+            task.id
         ));
     }
+    let PipettingStep::Distribute {
+        source,
+        destinations: medium_destinations,
+        volume_each,
+        fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+        ..
+    } = &program.steps[0]
+    else {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' must begin with a contamination-safe medium distribution",
+            task.id
+        ));
+    };
+    if source
+        != &(Location {
+            vessel: medium_vessel.id.clone(),
+            position: 0,
+        })
+        || medium_destinations != &destinations
+    {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' medium distribution does not address every dilution position in order",
+            task.id
+        ));
+    }
+    let medium_volume_ul = whole_microlitres(adapter, task, "medium transfer", volume_each)?;
+    let mut culture_volume_ul = None;
+    let mut mixing = None;
+    for (position, pair) in program.steps[1..].chunks_exact(2).enumerate() {
+        let destination = &destinations[position];
+        let expected_source = if position == 0 {
+            Location {
+                vessel: culture_vessel.id.clone(),
+                position: 0,
+            }
+        } else {
+            destinations[position - 1].clone()
+        };
+        let PipettingStep::Transfer {
+            source,
+            destination: step_destination,
+            volume,
+            fluid_path: FluidPathPolicy::IsolatedDestinations,
+            ..
+        } = &pair[0]
+        else {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' position {position} has no isolated culture transfer",
+                task.id
+            ));
+        };
+        if source != &expected_source || step_destination != destination {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' position {position} does not continue the dilution chain",
+                task.id
+            ));
+        }
+        let transfer_volume = whole_microlitres(adapter, task, "culture transfer", volume)?;
+        if culture_volume_ul
+            .replace(transfer_volume)
+            .is_some_and(|first| first != transfer_volume)
+        {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' uses inconsistent culture-transfer volumes",
+                task.id
+            ));
+        }
+        let PipettingStep::Mix {
+            targets,
+            cycles,
+            volume,
+            fluid_path: FluidPathPolicy::IsolatedDestinations,
+            ..
+        } = &pair[1]
+        else {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' position {position} has no isolated mix",
+                task.id
+            ));
+        };
+        if targets.as_slice() != std::slice::from_ref(destination) {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' position {position} mixes the wrong logical vessel",
+                task.id
+            ));
+        }
+        let mix = (*cycles, whole_microlitres(adapter, task, "mix", volume)?);
+        if mixing.replace(mix).is_some_and(|first| first != mix) {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' uses inconsistent mixing parameters",
+                task.id
+            ));
+        }
+    }
+    let culture_volume_ul = culture_volume_ul.expect("a validated product vessel is non-empty");
+    let (mix_cycles, mix_volume_ul) = mixing.expect("a validated product vessel is non-empty");
 
     Ok(SerialDilution {
         culture_source: &task.inputs[0].source,
-        medium: view.one_material("medium")?,
+        medium,
         serial_dilutions,
         medium_volume_ul,
         culture_volume_ul,

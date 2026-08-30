@@ -33,7 +33,7 @@ Operational configuration is an overlay keyed by exact Asset IRI. An adapter des
 
 The reviewed coordination artifact is `lab.execution-plan.v6`. It freezes inventory, Method, Procedure task, requirement, offering, Asset, MaterialLot, adapter-profile, and reviewed-document hashes in one dependency DAG containing `Execute`, `MoveMaterial`, and `Manual` nodes. One `Execute` node can satisfy a non-empty set of atomic requirements through one reviewed device document. Device-specific reviewed formats remain independent child documents.
 
-Adapter lowering begins only from immutable invocations projected from verifier-valid Allocated Procedure LAIR. Each invocation contains only the tasks and requirements assigned to one exact Asset and adapter, and each independently executable child document names the exact Requirement it realizes. Whole-program device lowering is not a compatibility boundary.
+Adapter lowering begins only from immutable invocations projected from verifier-valid Allocated Procedure LAIR. Each invocation contains only the tasks and requirements assigned to one exact Asset and adapter, and each independently executable child document names the complete non-empty Requirement set it realizes for one Procedure task. Whole-program device lowering is not a compatibility boundary.
 
 The runtime executes only the frozen bindings through a registry keyed by Asset IRI, adapter ID, and document format. It never re-queries the facility or substitutes an Asset. Its durable ledger is bound to the plan digest, inventory digest, and execution mode. Live and simulation resume state are deliberately incompatible.
 

@@ -13,7 +13,7 @@ use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    serial_dilution, thermal_cycle_golden_gate,
+    normalized_serial_dilution, thermal_cycle_golden_gate,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -236,7 +236,7 @@ fn plan_task(
         )),
         SERIAL_DILUTION => Ok((
             "serial-dilution",
-            plan_dilution(profile, task, one_requirement("OT-2", task, requirements)?)?,
+            plan_dilution(profile, task, requirements)?,
         )),
         operation => Err(format!(
             "OT-2 invocation contains unsupported Procedure operation '{operation}' in task '{}'",
@@ -369,9 +369,9 @@ fn plan_cycle(
 fn plan_dilution(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<Ot2TaskExecution, String> {
-    let procedure = serial_dilution("OT-2", task, requirement)?;
+    let procedure = normalized_serial_dilution("OT-2", task, requirements)?;
     let view = ProcedureTaskView::new("OT-2", task);
     let mut allocator = PlateAllocator::new(
         BACKEND,

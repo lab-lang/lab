@@ -18,7 +18,7 @@ use crate::backend::opentrons::flex::BACKEND;
 use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, Pipette, TipRacks};
 use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    serial_dilution, thermal_cycle_golden_gate,
+    normalized_serial_dilution, thermal_cycle_golden_gate,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -227,7 +227,7 @@ fn plan_task(
         )),
         SERIAL_DILUTION => Ok((
             "serial-dilution",
-            plan_dilution(profile, task, one_requirement("Flex", task, requirements)?)?,
+            plan_dilution(profile, task, requirements)?,
         )),
         operation => Err(format!(
             "Flex invocation contains unsupported Procedure operation '{operation}' in task '{}'",
@@ -379,9 +379,9 @@ fn plan_cycle(
 fn plan_dilution(
     profile: &FlexAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<FlexTaskExecution, String> {
-    let procedure = serial_dilution("Flex", task, requirement)?;
+    let procedure = normalized_serial_dilution("Flex", task, requirements)?;
     let view = ProcedureTaskView::new("Flex", task);
     known_wells(
         task,

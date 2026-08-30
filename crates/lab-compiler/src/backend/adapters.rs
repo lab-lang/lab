@@ -24,7 +24,7 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
-use crate::procedure::SETUP_GOLDEN_GATE;
+use crate::procedure::{SERIAL_DILUTION, SETUP_GOLDEN_GATE};
 use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
@@ -147,7 +147,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![pipetting_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
-                    [SETUP_GOLDEN_GATE],
+                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
                     [ControlMode::ReviewedFile],
                     [],
                     [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
@@ -177,7 +177,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![pipetting_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
-                    [SETUP_GOLDEN_GATE],
+                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
                     [ControlMode::ReviewedFile],
                     [],
                     [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
@@ -207,7 +207,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![pipetting_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
-                    [SETUP_GOLDEN_GATE],
+                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
                     [ControlMode::ReviewedFile, ControlMode::Api],
                     [STAR_RUN_FORMAT],
                     [STAR_RUN_FORMAT],
@@ -278,7 +278,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![pipetting_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
-                    [SETUP_GOLDEN_GATE],
+                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
                     [ControlMode::ReviewedFile],
                     [SIMULATION_RUN_FORMAT],
                     [SIMULATION_RUN_FORMAT],
@@ -855,6 +855,11 @@ mod tests {
             star_pipetting
                 .operations
                 .contains(&OperationId::new(SETUP_GOLDEN_GATE).unwrap())
+        );
+        assert!(
+            star_pipetting
+                .operations
+                .contains(&OperationId::new(SERIAL_DILUTION).unwrap())
         );
         assert_eq!(
             star_pipetting.capability_kinds,

@@ -19,6 +19,7 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
     pipetting = ot2.procedure_implementations[0]
     assert pipetting.contract.endswith("#PipettingProgramV1")
     assert pipetting.operations == (
+        "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture",
         "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction",
     )
     assert "https://sbol.io/ns/capability#MeteredLiquidTransfer" in pipetting.capability_kinds
