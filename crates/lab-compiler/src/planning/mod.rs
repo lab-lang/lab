@@ -13,7 +13,7 @@ mod solver;
 pub use adapters::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
     AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
-    BoundCapabilityParameterValue, ResolvedAdapterBinding,
+    BoundCapabilityParameterValue, BoundProcedureImplementation, ResolvedAdapterBinding,
 };
 pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,

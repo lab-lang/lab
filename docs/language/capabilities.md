@@ -75,7 +75,7 @@ The resulting `refined-alternatives` LAIR graph is the only authoritative requir
 
 The graph-wide solver combines Method choices with one validated immutable SBOLInventory snapshot, exact active MaterialLot evidence, configured adapter bindings, and manifest policy. It selects exact Methods, CapabilityOfferings, Assets, adapters, material sources, and dependencies together. Zero eligible solutions is an explained failure. Several semantically equal solutions remain an explained ambiguity unless explicit policy distinguishes them.
 
-The allocation pass validates the complete `lab.facility-planning-solution.v2` against the exact problem and applies it back to the same LAIR identities. The resulting `allocated-procedure` module has no unresolved Method choice and carries one exact binding for every Capability requirement and material input. Whole-module affine material analysis runs before adapter projection.
+The allocation pass validates the complete `lab.facility-planning-solution.v3` against the exact problem and applies it back to the same LAIR identities. The resulting `allocated-procedure` module has no unresolved Method choice and carries one exact binding for every Capability requirement and material input. When a task has a normalized Procedure program, each non-manual adapter selection also freezes the exact operation-aware Procedure implementation IRI. Whole-module affine material analysis runs before adapter projection.
 
 ## Matching rules
 
@@ -93,7 +93,7 @@ Qualification belongs to the offering, not the Asset or adapter. A runtime imple
 
 ## Adapter uptake
 
-`lab.adapter-invocations.v6` is projected from Allocated Procedure LAIR and retains selected Methods, tasks, normalized programs, requirements, parameters, materials, offerings, Assets, adapters, profile digests, and compiler-evidence digests. Invocations group only the tasks and requirements allocated to one exact Asset and adapter.
+`lab.adapter-invocations.v7` is projected from Allocated Procedure LAIR and retains selected Methods, tasks, normalized programs, Procedure implementation identities, requirements, parameters, materials, offerings, Assets, adapters, profile digests, and compiler-evidence digests. Each allocated requirement freezes its Procedure implementation while an invocation groups the tasks assigned to one exact Asset, adapter, and profile; one physical adapter invocation may therefore realize several explicit Procedure contracts without fragmenting the Asset's output bundle.
 
 Shared typed Procedure views validate operation semantics, capability kind, parameter identity and type, canonical QUDT unit, material role, and allocation ownership before device-specific code runs. OT-2, Flex, and STAR use this boundary today. Unsupported Procedure operations or values fail explicitly instead of being ignored.
 

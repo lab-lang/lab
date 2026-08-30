@@ -92,8 +92,26 @@ fn render_catalog(catalog: &AdapterCatalog) -> String {
 }
 
 fn render_descriptor(adapter: &AdapterDescriptor) -> String {
+    let implementations = if adapter.procedure_implementations.is_empty() {
+        "none".to_owned()
+    } else {
+        adapter
+            .procedure_implementations
+            .iter()
+            .map(|implementation| {
+                format!(
+                    "{}\n      contract: {}\n      operations: {}\n      capabilities: {}",
+                    implementation.id,
+                    implementation.contract,
+                    join(&implementation.operations),
+                    join(&implementation.capability_kinds)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n    ")
+    };
     format!(
-        "{}\n  driver: {}\n  capabilities: {}\n  features: {}\n  control modes: {}\n  accepts: {}\n  emits: {}\n\n{}",
+        "{}\n  driver: {}\n  legacy capabilities: {}\n  features: {}\n  control modes: {}\n  accepts: {}\n  emits: {}\n  Procedure implementations:\n    {}\n\n{}",
         adapter.display_name,
         adapter.id,
         join(&adapter.capabilities),
@@ -101,6 +119,7 @@ fn render_descriptor(adapter: &AdapterDescriptor) -> String {
         join(&adapter.control_modes),
         join(&adapter.accepted_run_formats),
         join(&adapter.emitted_run_formats),
+        implementations,
         adapter.default_profile.canonical_toml
     )
 }

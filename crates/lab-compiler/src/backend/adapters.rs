@@ -7,7 +7,10 @@
 
 use std::collections::BTreeSet;
 
-use lab_capability::{CapabilityKind, ControlMode};
+use lab_capability::{
+    CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
+};
+use lab_procedure::vocabulary::{IN_WELL_MIXING, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1};
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
 };
@@ -21,13 +24,14 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
+use crate::procedure::SETUP_GOLDEN_GATE;
 use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
     STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
 };
 
-pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v3";
+pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v4";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
 
 const KNOWN_ADAPTERS: [&str; 6] = [
@@ -62,8 +66,27 @@ pub struct AdapterDescriptor {
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
     pub services: AdapterServices,
+    /// Versioned operational contracts implemented by this adapter.
+    ///
+    /// Unlike the broad `capabilities` compatibility surface retained for unnormalized tasks,
+    /// each entry identifies the exact Procedure contract and operations whose programs the
+    /// adapter can plan and lower.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub procedure_implementations: Vec<ProcedureImplementationDescriptor>,
     pub profile_schema: Value,
     pub default_profile: ValidatedAdapterProfile,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcedureImplementationDescriptor {
+    pub id: ProcedureImplementationId,
+    pub contract: ProcedureContractId,
+    pub operations: BTreeSet<OperationId>,
+    pub capability_kinds: BTreeSet<CapabilityKind>,
+    pub control_modes: BTreeSet<ControlMode>,
+    pub accepted_run_formats: BTreeSet<String>,
+    pub emitted_run_formats: BTreeSet<String>,
+    pub services: AdapterServices,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -122,6 +145,19 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
+                vec![pipetting_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
+                    [SETUP_GOLDEN_GATE],
+                    [ControlMode::ReviewedFile],
+                    [],
+                    [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: false,
+                        runtime: false,
+                    },
+                )?],
                 schema_value::<Ot2AdapterProfile>()?,
             )?,
             descriptor(
@@ -139,6 +175,19 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
+                vec![pipetting_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
+                    [SETUP_GOLDEN_GATE],
+                    [ControlMode::ReviewedFile],
+                    [],
+                    [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: false,
+                        runtime: false,
+                    },
+                )?],
                 schema_value::<FlexAdapterProfile>()?,
             )?,
             descriptor(
@@ -156,6 +205,19 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: true,
                     runtime: true,
                 },
+                vec![pipetting_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
+                    [SETUP_GOLDEN_GATE],
+                    [ControlMode::ReviewedFile, ControlMode::Api],
+                    [STAR_RUN_FORMAT],
+                    [STAR_RUN_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: true,
+                        runtime: true,
+                    },
+                )?],
                 schema_value::<StarAdapterProfile>()?,
             )?,
             descriptor(
@@ -173,6 +235,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: true,
                     runtime: true,
                 },
+                Vec::new(),
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
             descriptor(
@@ -190,6 +253,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
+                Vec::new(),
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
             descriptor(
@@ -212,6 +276,19 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: true,
                     runtime: false,
                 },
+                vec![pipetting_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
+                    [SETUP_GOLDEN_GATE],
+                    [ControlMode::ReviewedFile],
+                    [SIMULATION_RUN_FORMAT],
+                    [SIMULATION_RUN_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: true,
+                        runtime: false,
+                    },
+                )?],
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
         ],
@@ -229,6 +306,7 @@ fn descriptor<const C: usize, const F: usize, const M: usize, const A: usize, co
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
     services: AdapterServices,
+    procedure_implementations: Vec<ProcedureImplementationDescriptor>,
     profile_schema: Value,
 ) -> Result<AdapterDescriptor, AdapterProfileContractError> {
     Ok(AdapterDescriptor {
@@ -250,8 +328,53 @@ fn descriptor<const C: usize, const F: usize, const M: usize, const A: usize, co
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
         services,
+        procedure_implementations,
         profile_schema,
         default_profile: default_adapter_profile(id, id)?,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pipetting_implementation<const O: usize, const M: usize, const A: usize, const E: usize>(
+    id: &'static str,
+    operations: [&'static str; O],
+    control_modes: [ControlMode; M],
+    accepted_run_formats: [&'static str; A],
+    emitted_run_formats: [&'static str; E],
+    services: AdapterServices,
+) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
+    Ok(ProcedureImplementationDescriptor {
+        id: ProcedureImplementationId::new(id).map_err(|error| {
+            AdapterProfileContractError::Contract(format!(
+                "Procedure implementation '{id}' has an invalid identity: {error}"
+            ))
+        })?,
+        contract: ProcedureContractId::new(PIPETTING_PROGRAM_V1)
+            .expect("built-in Procedure contract is an absolute IRI"),
+        operations: operations
+            .into_iter()
+            .map(|operation| {
+                OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        capability_kinds: [METERED_LIQUID_TRANSFER, IN_WELL_MIXING]
+            .into_iter()
+            .map(|kind| {
+                CapabilityKind::new(kind).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid capability: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        control_modes: control_modes.into_iter().collect(),
+        accepted_run_formats: strings(accepted_run_formats),
+        emitted_run_formats: strings(emitted_run_formats),
+        services,
     })
 }
 
@@ -352,6 +475,12 @@ pub fn lower_adapter_invocation_with_adapter(
             message: "the invocation is not an exact member of its validated plan".to_owned(),
         });
     }
+    validate_invocation_implementation(invocation_plan, invocation).map_err(|message| {
+        AdapterLoweringError::InvalidInvocation {
+            driver: driver.to_owned(),
+            message,
+        }
+    })?;
     match driver {
         "opentrons.ot2" => {
             let parsed = Ot2AdapterProfile::parse(&profile.name, &profile.canonical_toml).map_err(
@@ -395,6 +524,76 @@ pub fn lower_adapter_invocation_with_adapter(
             driver: driver.to_owned(),
         }),
     }
+}
+
+fn validate_invocation_implementation(
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+) -> Result<(), String> {
+    let catalog = adapter_catalog().map_err(|error| error.to_string())?;
+    let descriptor = catalog
+        .adapters
+        .iter()
+        .find(|descriptor| descriptor.id == invocation.adapter.driver)
+        .ok_or_else(|| {
+            format!(
+                "adapter '{}' is not present in this compiler build",
+                invocation.adapter.driver
+            )
+        })?;
+    let invocation_tasks = invocation.tasks.iter().collect::<BTreeSet<_>>();
+    let invocation_requirements = invocation.requirements.iter().collect::<BTreeSet<_>>();
+    for task in invocation_plan
+        .methods
+        .iter()
+        .flat_map(|method| &method.tasks)
+        .filter(|task| invocation_tasks.contains(&task.id))
+    {
+        let selected_requirements = task
+            .requirements
+            .iter()
+            .filter(|requirement| invocation_requirements.contains(&requirement.id))
+            .collect::<Vec<_>>();
+        let Some(program) = &task.program else {
+            if !descriptor.services.lowering {
+                return Err(format!(
+                    "adapter '{}' does not provide legacy lowering for task '{}'",
+                    invocation.adapter.driver, task.id
+                ));
+            }
+            continue;
+        };
+        for requirement in selected_requirements {
+            let implementation_id = requirement.procedure_implementation.as_ref().expect(
+                "invocation validation requires normalized adapter work to name an implementation",
+            );
+            let implementation = descriptor
+                .procedure_implementations
+                .iter()
+                .find(|implementation| &implementation.id == implementation_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Procedure implementation '{}' is not provided by adapter '{}' in this compiler build",
+                        implementation_id, invocation.adapter.driver
+                    )
+                })?;
+            if !implementation.services.lowering {
+                return Err(format!(
+                    "Procedure implementation '{}' does not provide lowering",
+                    implementation.id
+                ));
+            }
+            if implementation.contract != program.contract
+                || !implementation.operations.contains(&task.operation)
+            {
+                return Err(format!(
+                    "Procedure implementation '{}' does not implement task '{}' contract '{}' operation '{}'",
+                    implementation.id, task.id, program.contract, task.operation
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn lower_simulator_invocation(
@@ -646,6 +845,21 @@ mod tests {
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
         assert!(star.services.lowering);
         assert!(star.services.runtime);
+        assert_eq!(star.procedure_implementations.len(), 1);
+        let star_pipetting = &star.procedure_implementations[0];
+        assert_eq!(star_pipetting.contract.as_str(), PIPETTING_PROGRAM_V1);
+        assert!(
+            star_pipetting
+                .operations
+                .contains(&OperationId::new(SETUP_GOLDEN_GATE).unwrap())
+        );
+        assert_eq!(
+            star_pipetting.capability_kinds,
+            [METERED_LIQUID_TRANSFER, IN_WELL_MIXING]
+                .into_iter()
+                .map(|kind| CapabilityKind::new(kind).unwrap())
+                .collect()
+        );
 
         let ot2 = catalog
             .adapters
@@ -720,6 +934,7 @@ mod tests {
                     observed_qualification: QualificationLevel::Simulatable.to_string(),
                     control_mode: ControlMode::ReviewedFile.to_string(),
                     parameters: Vec::new(),
+                    procedure_implementation: None,
                     adapter: Some(adapter.clone()),
                 };
                 (

@@ -25,6 +25,20 @@ class AdapterServices:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcedureImplementation:
+    """One exact versioned Procedure contract implemented by an adapter."""
+
+    id: str
+    contract: str
+    operations: tuple[str, ...]
+    capability_kinds: tuple[str, ...]
+    control_modes: tuple[str, ...]
+    accepted_run_formats: tuple[str, ...]
+    emitted_run_formats: tuple[str, ...]
+    services: AdapterServices
+
+
+@dataclass(frozen=True, slots=True)
 class ValidatedAdapterProfile:
     """Canonical non-secret operational configuration for one adapter binding."""
 
@@ -51,6 +65,7 @@ class AdapterDescriptor:
     accepted_run_formats: tuple[str, ...]
     emitted_run_formats: tuple[str, ...]
     services: AdapterServices
+    procedure_implementations: tuple[ProcedureImplementation, ...]
     profile_schema: dict[str, Any]
     default_profile: ValidatedAdapterProfile
 
@@ -91,6 +106,34 @@ def catalog() -> AdapterCatalog:
     descriptors = []
     for item in cast(list[dict[str, Any]], raw["adapters"]):
         services = cast(dict[str, Any], item["services"])
+        implementations = []
+        for implementation in cast(
+            list[dict[str, Any]], item.get("procedure_implementations", [])
+        ):
+            implementation_services = cast(dict[str, Any], implementation["services"])
+            implementations.append(
+                ProcedureImplementation(
+                    id=cast(str, implementation["id"]),
+                    contract=cast(str, implementation["contract"]),
+                    operations=tuple(cast(list[str], implementation["operations"])),
+                    capability_kinds=tuple(
+                        cast(list[str], implementation["capability_kinds"])
+                    ),
+                    control_modes=tuple(cast(list[str], implementation["control_modes"])),
+                    accepted_run_formats=tuple(
+                        cast(list[str], implementation["accepted_run_formats"])
+                    ),
+                    emitted_run_formats=tuple(
+                        cast(list[str], implementation["emitted_run_formats"])
+                    ),
+                    services=AdapterServices(
+                        planning=cast(bool, implementation_services["planning"]),
+                        lowering=cast(bool, implementation_services["lowering"]),
+                        simulation=cast(bool, implementation_services["simulation"]),
+                        runtime=cast(bool, implementation_services["runtime"]),
+                    ),
+                )
+            )
         descriptors.append(
             AdapterDescriptor(
                 id=cast(str, item["id"]),
@@ -107,6 +150,7 @@ def catalog() -> AdapterCatalog:
                     simulation=cast(bool, services["simulation"]),
                     runtime=cast(bool, services["runtime"]),
                 ),
+                procedure_implementations=tuple(implementations),
                 profile_schema=cast(dict[str, Any], item["profile_schema"]),
                 default_profile=_profile(cast(dict[str, Any], item["default_profile"])),
             )
@@ -146,6 +190,7 @@ __all__ = [
     "AdapterCatalog",
     "AdapterDescriptor",
     "AdapterServices",
+    "ProcedureImplementation",
     "ValidatedAdapterProfile",
     "catalog",
     "validate_profile",

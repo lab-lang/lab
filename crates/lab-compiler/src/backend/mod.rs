@@ -17,7 +17,8 @@ mod typst;
 pub use adapters::{
     ADAPTER_CATALOG_FORMAT, ADAPTER_PROFILE_SCHEMA_VERSION, AdapterCatalog, AdapterDescriptor,
     AdapterInvocationDocument, AdapterInvocationLowering, AdapterLoweringError,
-    AdapterProfileContractError, AdapterServices, ValidatedAdapterProfile, adapter_catalog,
-    default_adapter_profile, lower_adapter_invocation_with_adapter, validate_adapter_profile,
+    AdapterProfileContractError, AdapterServices, ProcedureImplementationDescriptor,
+    ValidatedAdapterProfile, adapter_catalog, default_adapter_profile,
+    lower_adapter_invocation_with_adapter, validate_adapter_profile,
 };
 pub use constraints::AdapterConstraintError;

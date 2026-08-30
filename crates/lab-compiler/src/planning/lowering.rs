@@ -1,10 +1,12 @@
 //! Exact record of the adapter lowerings derived from one facility allocation.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use lab_capability::ProcedureImplementationId;
 use serde::{Deserialize, Serialize};
 
-pub const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v3";
+pub const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v4";
 
 /// Device artifacts emitted only after capability requirements have been allocated to a facility.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,6 +23,8 @@ pub struct FacilityLoweringRoute {
     pub id: String,
     pub asset: String,
     pub driver: String,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub procedure_implementations: BTreeSet<ProcedureImplementationId>,
     pub profile_path: PathBuf,
     pub profile_sha256: String,
     pub requirements: Vec<FacilityLoweredRequirement>,

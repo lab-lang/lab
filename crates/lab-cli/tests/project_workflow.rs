@@ -242,7 +242,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     let solution = read_json(project.join(".lab/plan/compiler/facility-solution.json"));
     assert_eq!(
         solution["schema_version"],
-        "lab.facility-planning-solution.v2"
+        "lab.facility-planning-solution.v3"
     );
     assert_eq!(
         solution["selections"][0]["method"],
@@ -442,7 +442,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         "https://example.org/sbolinventory/facility"
     );
     let bindings = read_json(project.join(".lab/build/adapter_bindings.json"));
-    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v2");
+    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v3");
     assert_eq!(
         bindings["facility"],
         "https://example.org/sbolinventory/facility"
@@ -692,7 +692,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v6");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v7");
     assert_eq!(
         invocations["material_inventory"]["facility"],
         "https://example.org/golden-gate/facility"
@@ -711,6 +711,19 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .unwrap()
             .len(),
         1
+    );
+    let normalized_setup = invocations["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|method| method["tasks"].as_array().unwrap())
+        .find(|task| {
+            task["operation"] == "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
+        })
+        .unwrap();
+    assert_eq!(
+        normalized_setup["requirements"][0]["procedure_implementation"],
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
     );
 
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -813,7 +826,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     }));
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v3");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v4");
     assert_eq!(lowering["inventory_sha256"], solution["inventory_sha256"]);
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
@@ -822,6 +835,10 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
         "https://example.org/golden-gate/opentrons_ot2"
     );
     assert_eq!(route["driver"], "opentrons.ot2");
+    assert_eq!(
+        route["procedure_implementations"][0],
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
+    );
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
@@ -1045,7 +1062,7 @@ ex:thermal_simulator
     );
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v3");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v4");
     let routes = lowering["routes"].as_array().unwrap();
     assert_eq!(routes.len(), 2);
     assert!(routes.iter().all(|route| route.get("scope").is_none()));

@@ -3,7 +3,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
-use lab_capability::{AbsoluteIri, CapabilityKind, ControlMode, MethodId, QualificationLevel};
+use lab_capability::{
+    AbsoluteIri, CapabilityKind, ControlMode, MethodId, ProcedureImplementationId,
+    QualificationLevel,
+};
 use lab_method::{IntentOperationId, LocalId};
 use lab_procedure::{ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
@@ -18,7 +21,7 @@ use super::{
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v6";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v7";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -74,10 +77,15 @@ pub struct AllocatedRequirementBinding {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<SelectedCapabilityParameter>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedure_implementation: Option<ProcedureImplementationId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter: Option<InvocationAdapter>,
 }
 
-/// Operational implementation frozen into both requirement bindings and grouped invocations.
+/// One exact driver and profile used to group work for a physical Asset.
+///
+/// Versioned Procedure implementation identities remain on individual requirement bindings so a
+/// single adapter invocation can realize several explicit contracts without splitting the Asset.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct InvocationAdapter {
     pub driver: String,
@@ -174,6 +182,10 @@ impl AdapterInvocationPlan {
                             observed_qualification: selected.observed_qualification.clone(),
                             control_mode: selected.control_mode.clone(),
                             parameters: selected.parameters.clone(),
+                            procedure_implementation: selected
+                                .adapter
+                                .as_ref()
+                                .and_then(|adapter| adapter.procedure_implementation.clone()),
                             adapter,
                         }
                     })
@@ -330,6 +342,16 @@ impl AdapterInvocationPlan {
                         return Err(AdapterInvocationValidationError::InvalidBinding {
                             requirement: requirement.id.clone(),
                         });
+                    }
+                    let needs_implementation =
+                        task.program.is_some() && requirement.adapter.is_some();
+                    if requirement.procedure_implementation.is_some() != needs_implementation {
+                        return Err(
+                            AdapterInvocationValidationError::ProcedureImplementationBinding {
+                                task: task.id.clone(),
+                                requirement: requirement.id.clone(),
+                            },
+                        );
                     }
                     if requirements
                         .insert(requirement.id.clone(), (task.id.clone(), requirement))
@@ -617,6 +639,10 @@ pub enum AdapterInvocationValidationError {
     ProcedureMaterialBindings { task: LocalId },
     #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
     ProcedureOutputBindings { task: LocalId },
+    #[error(
+        "Procedure task `{task}` requirement `{requirement}` has an inconsistent Procedure implementation binding"
+    )]
+    ProcedureImplementationBinding { task: LocalId, requirement: LocalId },
     #[error("adapter invocations repeat Procedure material input `{input}`")]
     DuplicateMaterialInput { input: LocalId },
     #[error("Procedure material input `{input}` has an invalid physical source")]

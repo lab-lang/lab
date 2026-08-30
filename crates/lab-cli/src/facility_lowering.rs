@@ -1,6 +1,6 @@
 //! Facility-derived adapter lowering and immutable artifact staging.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -26,6 +26,7 @@ pub(crate) struct FacilityLoweringOutput {
 
 struct LowerableInvocation {
     invocation: AdapterInvocation,
+    procedure_implementations: BTreeSet<lab_capability::ProcedureImplementationId>,
     requirements: Vec<FacilityLoweredRequirement>,
 }
 
@@ -79,7 +80,30 @@ pub(crate) fn lower_adapter_invocations(
                     invocation.adapter.driver
                 )
             })?;
-        if !descriptor.services.lowering {
+        let mut procedure_implementations = BTreeSet::new();
+        let mut supports_lowering = true;
+        for requirement_id in &invocation.requirements {
+            let requirement = requirements
+                .get(requirement_id)
+                .expect("validated invocation Requirement exists");
+            if let Some(implementation_id) = &requirement.procedure_implementation {
+                procedure_implementations.insert(implementation_id.clone());
+                let implementation = descriptor
+                    .procedure_implementations
+                    .iter()
+                    .find(|implementation| &implementation.id == implementation_id)
+                    .with_context(|| {
+                        format!(
+                            "allocated Procedure implementation '{}' is not provided by adapter '{}' in this compiler build",
+                            implementation_id, invocation.adapter.driver
+                        )
+                    })?;
+                supports_lowering &= implementation.services.lowering;
+            } else {
+                supports_lowering &= descriptor.services.lowering;
+            }
+        }
+        if !supports_lowering {
             continue;
         }
         let mut lowered_requirements = invocation
@@ -100,6 +124,7 @@ pub(crate) fn lower_adapter_invocations(
             .sort_by(|left, right| left.requirement_instance.cmp(&right.requirement_instance));
         lowerable.push(LowerableInvocation {
             invocation: invocation.clone(),
+            procedure_implementations,
             requirements: lowered_requirements,
         });
     }
@@ -178,6 +203,7 @@ pub(crate) fn lower_adapter_invocations(
                 id: facility_lowering_id(&asset, &driver),
                 asset,
                 driver: driver.clone(),
+                procedure_implementations: lowering.procedure_implementations,
                 profile_path: staged_adapter_profile_path(&driver, &profile_sha256),
                 profile_sha256,
                 requirements: lowering.requirements,
@@ -383,7 +409,7 @@ mod tests {
         assert_eq!(
             directories[&(
                 "https://example.org/facility/Opentrons_OT2".to_owned(),
-                "opentrons.ot2".to_owned()
+                "opentrons.ot2".to_owned(),
             )],
             PathBuf::from("assets/opentrons_ot2")
         );

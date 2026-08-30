@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use lab_capability::{
-    AbsoluteIri, ConstraintRelation, ControlMode, MethodId, PropertyConstraint, PropertyKind,
-    PropertyValue, QualificationLevel, ScalarValue, UnitIri,
+    AbsoluteIri, ConstraintRelation, ControlMode, MethodId, ProcedureImplementationId,
+    PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
 };
 use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
@@ -22,10 +22,10 @@ use super::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, MaterialLotBuildInventory,
     PlanningCapabilityRequirement, PlanningMaterialInput, PlanningMaterialSource,
     PlanningMethodCandidate, PlanningProblem, PlanningProblemValidationError,
-    ResolvedAdapterBinding,
+    PlanningProcedureTask, ResolvedAdapterBinding,
 };
 
-pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v2";
+pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v3";
 
 /// Explicit choices that are allowed to turn an otherwise ambiguous solution space into a plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -138,6 +138,8 @@ pub struct SelectedCapabilityParameter {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SelectedAdapter {
     pub driver: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedure_implementation: Option<ProcedureImplementationId>,
     pub profile_path: PathBuf,
     pub profile_sha256: String,
     pub features: BTreeSet<String>,
@@ -469,6 +471,15 @@ impl FacilityPlanningSolution {
                             task: task.id.clone(),
                         });
                     }
+                    if binding.adapter.as_ref().is_some_and(|adapter| {
+                        adapter.procedure_implementation.is_some() != task.program.is_some()
+                    }) {
+                        return Err(
+                            FacilityPlanningSolutionValidationError::ProcedureImplementation {
+                                task: task.id.clone(),
+                            },
+                        );
+                    }
                 }
             }
         }
@@ -494,6 +505,10 @@ pub enum FacilityPlanningSolutionValidationError {
     TaskSet { choice: LocalId },
     #[error("facility solution does not preserve the exact requirement set for task `{task}`")]
     RequirementSet { task: LocalId },
+    #[error(
+        "facility solution does not bind a Procedure implementation exactly when normalized task `{task}` requires one"
+    )]
+    ProcedureImplementation { task: LocalId },
     #[error("facility solution does not preserve the exact material-input set for task `{task}`")]
     MaterialSet { task: LocalId },
     #[error("facility solution contains an invalid MaterialLot binding for input `{input}`")]
@@ -542,7 +557,7 @@ fn allocate_method(
         let mut task_requirements = Vec::new();
         for requirement in &task.requirements {
             let (bindings, rejections) =
-                requirement_candidates(requirement, assets, adapters, adapter_requirement);
+                requirement_candidates(task, requirement, assets, adapters, adapter_requirement);
             if bindings.is_empty() {
                 rejected.requirements.push(RejectedPlanningRequirement {
                     requirement: requirement.id.clone(),
@@ -705,6 +720,7 @@ fn material_source_matches(
 }
 
 fn requirement_candidates(
+    task: &PlanningProcedureTask,
     requirement: &PlanningCapabilityRequirement,
     assets: &[FacilityAsset],
     adapters: Option<&AdapterBindingSnapshot>,
@@ -748,7 +764,7 @@ fn requirement_candidates(
                     Err(reason) => reasons.push(reason),
                 }
             }
-            let adapter_candidates = matching_adapters(adapters, asset, offering);
+            let adapter_candidates = matching_adapters(adapters, task, asset, offering);
             if adapter_requirement == AdapterRequirement::NonManual
                 && offering.control_mode.iri() != ControlMode::Manual.iri()
                 && adapter_candidates.is_empty()
@@ -856,6 +872,7 @@ fn property_value(parameter: &FacilityCapabilityParameter) -> Option<PropertyVal
 
 fn matching_adapters(
     adapters: Option<&AdapterBindingSnapshot>,
+    task: &PlanningProcedureTask,
     asset: &FacilityAsset,
     offering: &FacilityCapabilityOffering,
 ) -> Vec<SelectedAdapter> {
@@ -867,10 +884,19 @@ fn matching_adapters(
         .iter()
         .filter(|binding| binding.asset == asset.identity.as_str())
         .filter(|binding| adapter_supports(binding, offering.identity.as_str()))
-        .map(selected_adapter)
+        .flat_map(|binding| selected_adapters(binding, task, offering.control_mode.iri()))
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
-        (&left.driver, &left.profile_path).cmp(&(&right.driver, &right.profile_path))
+        (
+            &left.driver,
+            &left.procedure_implementation,
+            &left.profile_path,
+        )
+            .cmp(&(
+                &right.driver,
+                &right.procedure_implementation,
+                &right.profile_path,
+            ))
     });
     candidates
 }
@@ -882,14 +908,48 @@ fn adapter_supports(binding: &ResolvedAdapterBinding, offering: &str) -> bool {
         .any(|candidate| candidate.offering == offering && candidate.planning_eligible)
 }
 
-fn selected_adapter(binding: &ResolvedAdapterBinding) -> SelectedAdapter {
+fn selected_adapters(
+    binding: &ResolvedAdapterBinding,
+    task: &PlanningProcedureTask,
+    control_mode: &str,
+) -> Vec<SelectedAdapter> {
+    let Some(program) = &task.program else {
+        return vec![selected_adapter(binding, None)];
+    };
+    binding
+        .procedure_implementations
+        .iter()
+        .filter(|implementation| implementation.contract == program.contract)
+        .filter(|implementation| implementation.operations.contains(&task.operation))
+        .filter(|implementation| implementation.services.planning)
+        .filter(|implementation| {
+            implementation
+                .control_modes
+                .iter()
+                .any(|mode| mode.iri() == control_mode)
+        })
+        .map(|implementation| selected_adapter(binding, Some(implementation)))
+        .collect()
+}
+
+fn selected_adapter(
+    binding: &ResolvedAdapterBinding,
+    implementation: Option<&super::BoundProcedureImplementation>,
+) -> SelectedAdapter {
     SelectedAdapter {
         driver: binding.driver.clone(),
+        procedure_implementation: implementation.map(|value| value.id.clone()),
         profile_path: binding.profile_path.clone(),
         profile_sha256: binding.profile_sha256.clone(),
         features: binding.features.clone(),
-        accepted_run_formats: binding.accepted_run_formats.clone(),
-        emitted_run_formats: binding.emitted_run_formats.clone(),
+        accepted_run_formats: implementation.map_or_else(
+            || binding.accepted_run_formats.clone(),
+            |value| value.accepted_run_formats.clone(),
+        ),
+        emitted_run_formats: implementation.map_or_else(
+            || binding.emitted_run_formats.clone(),
+            |value| value.emitted_run_formats.clone(),
+        ),
     }
 }
 
@@ -1039,7 +1099,13 @@ fn rejected_offering(
 
 fn binding_key(
     binding: &SelectedRequirementBinding,
-) -> (&str, &str, Option<&str>, Option<&PathBuf>) {
+) -> (
+    &str,
+    &str,
+    Option<&str>,
+    Option<&ProcedureImplementationId>,
+    Option<&PathBuf>,
+) {
     (
         &binding.asset,
         &binding.offering,
@@ -1047,6 +1113,10 @@ fn binding_key(
             .adapter
             .as_ref()
             .map(|adapter| adapter.driver.as_str()),
+        binding
+            .adapter
+            .as_ref()
+            .and_then(|adapter| adapter.procedure_implementation.as_ref()),
         binding
             .adapter
             .as_ref()
@@ -1110,12 +1180,18 @@ mod tests {
 
     use lab_capability::{CapabilityKind, ExactInteger, OperationId, ScalarValue};
     use lab_method::PortType;
+    use lab_procedure::{
+        FluidPathPolicy, Location, MaterialOutput, PipettingConstraints, PipettingProgramV1,
+        PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole, Volume,
+    };
     use tempfile::TempDir;
 
     use crate::planning::{
-        PLANNING_PROBLEM_SCHEMA_VERSION, PlanningMethodChoice, PlanningMethodYield, PlanningPort,
-        PlanningProcedureTask, PlanningTaskOutput, PlanningValueSource,
+        AdapterBindingRequest, PLANNING_PROBLEM_SCHEMA_VERSION, PlanningMethodChoice,
+        PlanningMethodYield, PlanningPort, PlanningProcedureTask, PlanningTaskOutput,
+        PlanningValueSource,
     };
+    use crate::{backend::validate_adapter_profile, procedure::SETUP_GOLDEN_GATE};
 
     use super::*;
 
@@ -1302,6 +1378,60 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         }
     }
 
+    fn pipetting_program() -> ProcedureProgram {
+        let local = |value| ProcedureLocalId::new(value).unwrap();
+        let program = PipettingProgramV1::new(
+            Vec::new(),
+            vec![MaterialOutput {
+                id: local("result"),
+            }],
+            vec![
+                Vessel {
+                    id: local("source"),
+                    role: VesselRole::Intermediate,
+                    positions: 1,
+                },
+                Vessel {
+                    id: local("destination"),
+                    role: VesselRole::Product {
+                        output: local("result"),
+                    },
+                    positions: 1,
+                },
+            ],
+            vec![PipettingStep::Transfer {
+                id: local("transfer"),
+                source: Location {
+                    vessel: local("source"),
+                    position: 0,
+                },
+                destination: Location {
+                    vessel: local("destination"),
+                    position: 0,
+                },
+                volume: Volume::parse_microlitres("1").unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+            }],
+            PipettingConstraints::default(),
+        )
+        .validate()
+        .unwrap();
+        ProcedureProgram::from_pipetting(&program)
+    }
+
+    fn ot2_bindings(inventory: &InventorySnapshot) -> AdapterBindingSnapshot {
+        AdapterBindingSnapshot::resolve(
+            inventory,
+            vec![AdapterBindingRequest {
+                asset: "https://example.org/facility/robot".to_owned(),
+                driver: "opentrons.ot2".to_owned(),
+                profile_path: PathBuf::from("adapters/ot2.toml"),
+                profile: validate_adapter_profile("opentrons.ot2", "ot2", "").unwrap(),
+            }],
+        )
+        .unwrap()
+    }
+
     #[test]
     fn facility_feasibility_selects_one_complete_method_graph() {
         let (_directory, inventory) = inventory(false);
@@ -1385,6 +1515,78 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             },
         )
         .unwrap_err();
+        let FacilityPlanningError::NoFeasibleMethod { candidates, .. } = error else {
+            panic!("expected method infeasibility")
+        };
+        assert!(candidates.iter().any(|candidate| {
+            candidate.rejected_requirements.iter().any(|requirement| {
+                requirement.candidates.iter().any(|offering| {
+                    offering
+                        .reasons
+                        .contains(&PlanningCandidateRejectionReason::MissingPlanningAdapter)
+                })
+            })
+        }));
+    }
+
+    #[test]
+    fn normalized_tasks_freeze_an_exact_operation_aware_procedure_implementation() {
+        let (_directory, inventory) = inventory(false);
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        problem.choices[0].candidates[0].tasks[0].operation =
+            OperationId::new(SETUP_GOLDEN_GATE).unwrap();
+        problem.choices[0].candidates[0].tasks[0].program = Some(pipetting_program());
+        problem.validate().unwrap();
+        let adapters = ot2_bindings(&inventory);
+
+        let solution = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            Some(&adapters),
+            FacilityPlanningPolicy {
+                method_pins: Vec::new(),
+                adapter_requirement: AdapterRequirement::NonManual,
+            },
+        )
+        .unwrap();
+
+        let selected = solution.selections[0].tasks[0].requirements[0]
+            .adapter
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            selected.procedure_implementation.as_ref().unwrap().as_str(),
+            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
+        );
+    }
+
+    #[test]
+    fn broad_adapter_support_does_not_claim_an_unimplemented_normalized_operation() {
+        let (_directory, inventory) = inventory(false);
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        problem.choices[0].candidates[0].tasks[0].program = Some(pipetting_program());
+        problem.validate().unwrap();
+        let adapters = ot2_bindings(&inventory);
+
+        let error = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            Some(&adapters),
+            FacilityPlanningPolicy {
+                method_pins: Vec::new(),
+                adapter_requirement: AdapterRequirement::NonManual,
+            },
+        )
+        .unwrap_err();
+
         let FacilityPlanningError::NoFeasibleMethod { candidates, .. } = error else {
             panic!("expected method infeasibility")
         };

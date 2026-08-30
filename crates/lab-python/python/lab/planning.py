@@ -91,6 +91,7 @@ class AdapterSelection:
     """The exact implementation and profile frozen for one Asset binding."""
 
     driver: str
+    procedure_implementation: str | None
     profile_path: Path
     profile_sha256: str
     features: tuple[str, ...]
@@ -214,6 +215,7 @@ class AllocatedRequirement:
     observed_qualification: str
     control_mode: str
     parameters: tuple[CapabilityParameterMatch, ...]
+    procedure_implementation: str | None
     adapter: AdapterSelection | None
 
 
@@ -340,6 +342,7 @@ class FacilityPlan:
 def _adapter(raw: dict[str, Any]) -> AdapterSelection:
     return AdapterSelection(
         driver=cast(str, raw["driver"]),
+        procedure_implementation=cast(str | None, raw.get("procedure_implementation")),
         profile_path=Path(cast(str, raw["profile_path"])),
         profile_sha256=cast(str, raw["profile_sha256"]),
         features=tuple(cast(list[str], raw.get("features", []))),
@@ -505,6 +508,7 @@ def _allocated_requirement(raw: dict[str, Any]) -> AllocatedRequirement:
             _parameter_match(parameter)
             for parameter in cast(list[dict[str, Any]], raw.get("parameters", []))
         ),
+        procedure_implementation=cast(str | None, raw.get("procedure_implementation")),
         adapter=_adapter(cast(dict[str, Any], adapter)) if adapter is not None else None,
     )
 

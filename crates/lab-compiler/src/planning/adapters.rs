@@ -3,14 +3,20 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
+use lab_capability::{
+    CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
+};
 use lab_inventory::{FacilityAssetError, FacilityScalarValue, InventorySnapshot};
 use sbol_inventory::vocabulary::Qualification;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::backend::{AdapterServices, ValidatedAdapterProfile, adapter_catalog};
+use crate::backend::{
+    AdapterDescriptor, AdapterServices, ProcedureImplementationDescriptor, ValidatedAdapterProfile,
+    adapter_catalog,
+};
 
-pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v2";
+pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v3";
 
 #[derive(Clone, Debug)]
 pub struct AdapterBindingRequest {
@@ -65,14 +71,11 @@ impl AdapterBindingSnapshot {
                 .offerings
                 .iter()
                 .filter(|offering| {
-                    descriptor
-                        .capabilities
-                        .iter()
-                        .any(|kind| kind.as_str() == offering.capability_kind.as_str())
-                        && descriptor
-                            .control_modes
-                            .iter()
-                            .any(|mode| mode.iri() == offering.control_mode.iri())
+                    adapter_supports_capability(
+                        descriptor,
+                        offering.capability_kind.as_str(),
+                        offering.control_mode.iri(),
+                    )
                 })
                 .map(|offering| BoundCapabilityOffering {
                     offering: offering.identity.as_str().to_owned(),
@@ -115,13 +118,28 @@ impl AdapterBindingSnapshot {
                         .collect(),
                     effectively_active: offering.effectively_active,
                     planning_eligible: offering.effectively_active
-                        && descriptor.services.planning
+                        && supports_service(
+                            descriptor,
+                            offering.capability_kind.as_str(),
+                            offering.control_mode.iri(),
+                            |services| services.planning,
+                        )
                         && offering.qualification >= Qualification::Plannable,
                     simulation_eligible: offering.effectively_active
-                        && descriptor.services.simulation
+                        && supports_service(
+                            descriptor,
+                            offering.capability_kind.as_str(),
+                            offering.control_mode.iri(),
+                            |services| services.simulation,
+                        )
                         && offering.qualification >= Qualification::Simulatable,
                     execution_eligible: offering.effectively_active
-                        && descriptor.services.runtime
+                        && supports_service(
+                            descriptor,
+                            offering.capability_kind.as_str(),
+                            offering.control_mode.iri(),
+                            |services| services.runtime,
+                        )
                         && offering.qualification >= Qualification::Executable,
                 })
                 .collect::<Vec<_>>();
@@ -143,6 +161,11 @@ impl AdapterBindingSnapshot {
                 accepted_run_formats: descriptor.accepted_run_formats.clone(),
                 emitted_run_formats: descriptor.emitted_run_formats.clone(),
                 services: descriptor.services.clone(),
+                procedure_implementations: descriptor
+                    .procedure_implementations
+                    .iter()
+                    .map(BoundProcedureImplementation::from)
+                    .collect(),
                 offerings,
             });
         }
@@ -167,7 +190,96 @@ pub struct ResolvedAdapterBinding {
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
     pub services: AdapterServices,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub procedure_implementations: Vec<BoundProcedureImplementation>,
     pub offerings: Vec<BoundCapabilityOffering>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoundProcedureImplementation {
+    pub id: ProcedureImplementationId,
+    pub contract: ProcedureContractId,
+    pub operations: BTreeSet<OperationId>,
+    pub capability_kinds: BTreeSet<CapabilityKind>,
+    pub control_modes: BTreeSet<ControlMode>,
+    pub accepted_run_formats: BTreeSet<String>,
+    pub emitted_run_formats: BTreeSet<String>,
+    pub services: AdapterServices,
+}
+
+impl From<&ProcedureImplementationDescriptor> for BoundProcedureImplementation {
+    fn from(value: &ProcedureImplementationDescriptor) -> Self {
+        Self {
+            id: value.id.clone(),
+            contract: value.contract.clone(),
+            operations: value.operations.clone(),
+            capability_kinds: value.capability_kinds.clone(),
+            control_modes: value.control_modes.clone(),
+            accepted_run_formats: value.accepted_run_formats.clone(),
+            emitted_run_formats: value.emitted_run_formats.clone(),
+            services: value.services.clone(),
+        }
+    }
+}
+
+fn adapter_supports_capability(
+    descriptor: &AdapterDescriptor,
+    capability_kind: &str,
+    control_mode: &str,
+) -> bool {
+    legacy_supports(descriptor, capability_kind, control_mode)
+        || descriptor
+            .procedure_implementations
+            .iter()
+            .any(|implementation| {
+                implementation_supports(implementation, capability_kind, control_mode)
+            })
+}
+
+fn supports_service(
+    descriptor: &AdapterDescriptor,
+    capability_kind: &str,
+    control_mode: &str,
+    service: impl Fn(&AdapterServices) -> bool,
+) -> bool {
+    (legacy_supports(descriptor, capability_kind, control_mode) && service(&descriptor.services))
+        || descriptor
+            .procedure_implementations
+            .iter()
+            .any(|implementation| {
+                implementation_supports(implementation, capability_kind, control_mode)
+                    && service(&implementation.services)
+            })
+}
+
+fn legacy_supports(
+    descriptor: &AdapterDescriptor,
+    capability_kind: &str,
+    control_mode: &str,
+) -> bool {
+    descriptor
+        .capabilities
+        .iter()
+        .any(|kind| kind.as_str() == capability_kind)
+        && descriptor
+            .control_modes
+            .iter()
+            .any(|mode| mode.iri() == control_mode)
+}
+
+fn implementation_supports(
+    implementation: &ProcedureImplementationDescriptor,
+    capability_kind: &str,
+    control_mode: &str,
+) -> bool {
+    implementation
+        .capability_kinds
+        .iter()
+        .any(|kind| kind.as_str() == capability_kind)
+        && implementation
+            .control_modes
+            .iter()
+            .any(|mode| mode.iri() == control_mode)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,6 +424,11 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         assert_eq!(binding.asset, "https://example.org/facility/star");
         assert_eq!(binding.driver, "hamilton.star");
         assert_eq!(binding.profile_sha256.len(), 64);
+        assert_eq!(binding.procedure_implementations.len(), 1);
+        assert_eq!(
+            binding.procedure_implementations[0].contract.as_str(),
+            lab_procedure::vocabulary::PIPETTING_PROGRAM_V1
+        );
         assert_eq!(binding.offerings.len(), 1);
         let offering = &binding.offerings[0];
         assert_eq!(
