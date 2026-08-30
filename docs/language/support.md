@@ -56,7 +56,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Explicit durable workflow `state` | yes | yes | yes | yes | no |
 | Built-in durable operations with `<-` | yes | yes | yes | yes | no |
 | Structured typed expression IR | n/a | yes | yes | yes | no |
-| Action ownership and Method refinement contracts | n/a | built-ins plus package-contributed `lab.method-catalog.v1` documents and Python authoring through one validated portable Method registry | ownership modes, exact Intent identities, typed Procedure graphs, absolute capability and property-kind IRIs, and canonical unit IRIs | `refined-alternatives`, `lab.planning-problem.v5`, and `allocated-procedure` | exact facility allocation and adapter invocation |
+| Action ownership and Method refinement contracts | n/a | built-ins plus package-contributed `lab.method-catalog.v1` documents and Python authoring through one validated portable Method registry | ownership modes, exact Intent identities, typed Procedure graphs, absolute capability and property-kind IRIs, and canonical unit IRIs | `refined-alternatives`, `lab.planning-problem.v6`, and `allocated-procedure` | exact facility allocation and adapter invocation |
 | Direct `return value, ...` and result checking | yes | yes | arity and per-result type | named result fields | no |
 | `match` / `case` with continuing-branch bindings | yes | yes | yes | yes | no |
 | `if` / `else` and `for` / `in` | yes | yes | yes | yes | no |
@@ -64,7 +64,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Event emission | yes | yes | yes | yes | no |
 | Affine material-flow checking in portable workflows | n/a | action ownership modes | yes | yes | no |
 | Dependencies from `Material<Plasmid>` dataflow | yes | resolved `realize` and `transform` operands | yes | Procedure value edges plus exact MaterialLot or Method-output bindings | reviewed facility plans and exact-task adapter documents |
-| OT-2 Procedure specialization | n/a | exact allocated task operation | exact parameters, units, materials, capability, and profile | `lab.opentrons-ot2-task.v1` plus standalone protocol | generated reviewed protocols only |
+| OT-2 Procedure specialization | n/a | exact allocated task operation | canonical Procedure program, exact parameters, units, materials, capability bindings, and profile | `lab.opentrons-ot2-task.v2` plus standalone protocol | generated reviewed protocols only |
 | Multi-plate allocation across declared slots | n/a | n/a | n/a | plate-and-well addresses | generated protocols |
 | Human instruction package | n/a | n/a | adapter-validated | Typst/PDF plus manifest | operator review required |
 | Durable workflow runtime | no | no | no | no | no |

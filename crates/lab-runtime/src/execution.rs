@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use hamilton_star::RawCommand;
+use lab_capability::{
+    AbsoluteIri, ExactDecimal, ExactInteger, PropertyConstraint, PropertyKind, PropertyValue,
+    ScalarValue, UnitIri,
+};
 use lab_inventory::{FacilityScalarValue, InventorySnapshot};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
@@ -59,16 +63,21 @@ impl LoadedExecutionPlan {
         for node in &self.nodes {
             match &node.action {
                 LoadedExecutionAction::Execute {
-                    requirement,
+                    requirements,
                     document,
                 } => {
-                    check_execution_qualification(
-                        &mut issues,
-                        &node.id,
-                        requirement,
-                        minimum,
-                        mode,
-                    );
+                    for requirement in requirements {
+                        check_execution_qualification(
+                            &mut issues,
+                            &node.id,
+                            requirement,
+                            minimum,
+                            mode,
+                        );
+                    }
+                    let requirement = requirements
+                        .first()
+                        .expect("execution-plan validation requires a non-empty binding set");
                     if requirement.adapter.is_none() {
                         issues.push(format!("node '{}' has no frozen runtime adapter", node.id));
                     }
@@ -127,7 +136,7 @@ pub struct LoadedExecutionNode {
 #[derive(Debug)]
 pub enum LoadedExecutionAction {
     Execute {
-        requirement: Box<ExecutionRequirementBinding>,
+        requirements: Vec<ExecutionRequirementBinding>,
         document: Option<LoadedReviewedDocument>,
     },
     MoveMaterial {
@@ -308,13 +317,21 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
     for (index, node) in loaded.nodes.iter().enumerate() {
         match &node.action {
             LoadedExecutionAction::Execute {
-                requirement,
+                requirements,
                 document,
             } => {
+                let requirement = requirements
+                    .first()
+                    .expect("execution-plan validation requires a non-empty binding set");
                 let description = document.as_ref().map_or_else(
                     || "no reviewed run document".to_owned(),
                     |document| format!("{} ({})", document.title(), document.format()),
                 );
+                let capabilities = requirements
+                    .iter()
+                    .map(|binding| binding.capability_kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let adapter = requirement
                     .adapter
                     .as_ref()
@@ -324,7 +341,7 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
                     "\n[{}] {} - {} on {} through {}: {}",
                     index + 1,
                     node.id,
-                    requirement.capability_kind,
+                    capabilities,
                     requirement.asset,
                     adapter,
                     description
@@ -381,12 +398,15 @@ pub fn run_execution_plan(
     let mut readiness = loaded.readiness_issues(config.mode);
     for node in &loaded.nodes {
         let LoadedExecutionAction::Execute {
-            requirement,
+            requirements,
             document: Some(document),
         } = &node.action
         else {
             continue;
         };
+        let requirement = requirements
+            .first()
+            .expect("execution-plan validation requires a non-empty binding set");
         let Some(adapter) = &requirement.adapter else {
             continue;
         };
@@ -528,9 +548,12 @@ fn execute_execution_node(
 ) -> Result<NodeExecution> {
     match &node.action {
         LoadedExecutionAction::Execute {
-            requirement,
+            requirements,
             document: Some(document),
         } => {
+            let requirement = requirements
+                .first()
+                .expect("execution-plan validation requires a non-empty binding set");
             let adapter = requirement
                 .adapter
                 .as_ref()
@@ -693,12 +716,21 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
     for node in ordered {
         let action = match &node.action {
             ExecutionPlanAction::Execute {
-                requirement,
+                requirements: node_requirements,
                 document,
             } => {
-                let binding = requirements
-                    .get(requirement.as_str())
-                    .expect("execution-plan validation resolved every requirement");
+                let bindings = node_requirements
+                    .iter()
+                    .map(|requirement| {
+                        (*requirements
+                            .get(requirement.as_str())
+                            .expect("execution-plan validation resolved every requirement"))
+                        .clone()
+                    })
+                    .collect::<Vec<_>>();
+                let binding = bindings
+                    .first()
+                    .expect("execution-plan validation requires a non-empty binding set");
                 let loaded = match document {
                     Some(document) => {
                         let adapter = binding.adapter.as_ref().with_context(|| {
@@ -724,7 +756,7 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                     None => None,
                 };
                 LoadedExecutionAction::Execute {
-                    requirement: Box::new((*binding).clone()),
+                    requirements: bindings,
                     document: loaded,
                 }
             }
@@ -854,11 +886,41 @@ fn validate_catalog_bindings(
                         binding.requirement_instance, parameter.offering_parameter
                     )
                 })?;
-            if parameter.relation != "exact"
-                || observed.property_kind.as_str() != parameter.property_kind
-                || !scalar_equal(&parameter.observed, &observed.value)
-                || observed.unit.as_ref().map(|unit| unit.as_str())
-                    != parameter.observed_unit.as_deref()
+            let frozen_observed =
+                execution_property_value(&parameter.observed, parameter.observed_unit.as_deref())
+                    .with_context(|| {
+                    format!(
+                        "requirement '{}' records an invalid observed parameter value",
+                        binding.requirement_instance
+                    )
+                })?;
+            let catalog_observed = facility_property_value(
+                &observed.value,
+                observed.unit.as_ref().map(|unit| unit.as_str()),
+            )
+            .with_context(|| {
+                format!(
+                    "offering parameter '{}' has a value outside the execution type system",
+                    observed.identity
+                )
+            })?;
+            let constraint = PropertyConstraint {
+                property_kind: PropertyKind::new(parameter.property_kind.clone())?,
+                relation: parameter.relation,
+                required: execution_property_value(
+                    &parameter.required,
+                    parameter.required_unit.as_deref(),
+                )
+                .with_context(|| {
+                    format!(
+                        "requirement '{}' records an invalid required parameter value",
+                        binding.requirement_instance
+                    )
+                })?,
+            };
+            if observed.property_kind.as_str() != parameter.property_kind
+                || !frozen_observed.semantically_equals(&catalog_observed)
+                || !constraint.is_satisfied_by(&catalog_observed)?
             {
                 bail!(
                     "requirement '{}' has a parameter binding inconsistent with '{}'",
@@ -1049,19 +1111,38 @@ fn validate_output_bindings(
     Ok(())
 }
 
-fn scalar_equal(expected: &ExecutionParameterValue, observed: &FacilityScalarValue) -> bool {
-    match (expected, observed) {
-        (ExecutionParameterValue::Text(left), FacilityScalarValue::Text(right))
-        | (ExecutionParameterValue::Integer(left), FacilityScalarValue::Integer(right))
-        | (ExecutionParameterValue::Real(left), FacilityScalarValue::Real(right)) => left == right,
-        (ExecutionParameterValue::Boolean(left), FacilityScalarValue::Boolean(right)) => {
-            left == right
+fn execution_property_value(
+    value: &ExecutionParameterValue,
+    unit: Option<&str>,
+) -> Result<PropertyValue> {
+    let value = match value {
+        ExecutionParameterValue::Text(value) => ScalarValue::Text(value.clone()),
+        ExecutionParameterValue::Integer(value) => {
+            ScalarValue::Integer(ExactInteger::parse(value)?)
         }
-        (ExecutionParameterValue::Iri(left), FacilityScalarValue::Iri(right)) => {
-            left == right.as_str()
+        ExecutionParameterValue::Real(value) => ScalarValue::Real(ExactDecimal::parse(value)?),
+        ExecutionParameterValue::Boolean(value) => ScalarValue::Boolean(*value),
+        ExecutionParameterValue::Iri(value) => ScalarValue::Iri(AbsoluteIri::new(value.clone())?),
+    };
+    let unit = unit.map(UnitIri::new).transpose()?;
+    Ok(PropertyValue::new(value, unit)?)
+}
+
+fn facility_property_value(
+    value: &FacilityScalarValue,
+    unit: Option<&str>,
+) -> Result<PropertyValue> {
+    let value = match value {
+        FacilityScalarValue::Text(value) => ScalarValue::Text(value.clone()),
+        FacilityScalarValue::Integer(value) => ScalarValue::Integer(ExactInteger::parse(value)?),
+        FacilityScalarValue::Real(value) => ScalarValue::Real(ExactDecimal::parse(value)?),
+        FacilityScalarValue::Boolean(value) => ScalarValue::Boolean(*value),
+        FacilityScalarValue::Iri(value) => {
+            ScalarValue::Iri(AbsoluteIri::new(value.as_str().to_owned())?)
         }
-        _ => false,
-    }
+    };
+    let unit = unit.map(UnitIri::new).transpose()?;
+    Ok(PropertyValue::new(value, unit)?)
 }
 
 fn read_frozen_input(
@@ -1479,6 +1560,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                     observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                     control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
+                    procedure_implementation: None,
                     parameters: Vec::new(),
                     adapter: Some(ExecutionAdapterBinding {
                         driver: "hamilton.star".to_owned(),
@@ -1498,6 +1580,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                     observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                     control_mode: "https://sbol.io/ns/facility#ManualControl".to_owned(),
+                    procedure_implementation: None,
                     parameters: Vec::new(),
                     adapter: None,
                 },
@@ -1524,7 +1607,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     id: "execute-0001".to_owned(),
                     after: vec!["prepare".to_owned()],
                     action: ExecutionPlanAction::Execute {
-                        requirement: "workflow/main/liquid".to_owned(),
+                        requirements: vec!["workflow/main/liquid".to_owned()],
                         document: Some(ReviewedRunDocument {
                             path: "runs/transfer.star.json".to_owned(),
                             format: STAR_RUN_FORMAT.to_owned(),

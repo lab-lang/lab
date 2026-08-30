@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Component, Path};
 
+use lab_capability::ConstraintRelation;
 use serde::{Deserialize, Serialize};
 
 /// The format string every `lab.star-run.v0` document declares.
@@ -34,7 +35,7 @@ pub const OPENTRONS_PYTHON_PROTOCOL_FORMAT: &str = "opentrons.python-protocol";
 pub const OPENTRONS_PROTOCOL_DESIGNER_FORMAT: &str = "opentrons.protocol-designer-json";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v5";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v6";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -118,7 +119,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v5` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v6` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
@@ -260,26 +261,50 @@ impl ExecutionPlanDocument {
             }
             match &node.action {
                 ExecutionPlanAction::Execute {
-                    requirement,
+                    requirements: node_requirements,
                     document,
                 } => {
-                    let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
-                        format!(
-                            "execute node '{}' references unknown requirement '{}'",
-                            node.id, requirement
-                        )
-                    })?;
-                    if binding.control_mode == lab_capability::ControlMode::Manual.iri() {
+                    if node_requirements.is_empty() {
                         return Err(format!(
-                            "execute node '{}' represents manual-control requirement '{}'; use a manual node",
-                            node.id, requirement
+                            "execute node '{}' does not satisfy any requirements",
+                            node.id
                         ));
                     }
-                    if !scheduled_requirements.insert(requirement.as_str()) {
-                        return Err(format!(
-                            "requirement '{}' is scheduled by more than one execution node",
-                            requirement
-                        ));
+                    let mut execution_key = None;
+                    for requirement in node_requirements {
+                        let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
+                            format!(
+                                "execute node '{}' references unknown requirement '{}'",
+                                node.id, requirement
+                            )
+                        })?;
+                        if binding.control_mode == lab_capability::ControlMode::Manual.iri() {
+                            return Err(format!(
+                                "execute node '{}' represents manual-control requirement '{}'; use a manual node",
+                                node.id, requirement
+                            ));
+                        }
+                        if !scheduled_requirements.insert(requirement.as_str()) {
+                            return Err(format!(
+                                "requirement '{}' is scheduled by more than one execution node",
+                                requirement
+                            ));
+                        }
+                        let key = (
+                            &binding.asset,
+                            &binding.adapter,
+                            &binding.procedure_implementation,
+                        );
+                        if let Some(expected) = &execution_key {
+                            if expected != &key {
+                                return Err(format!(
+                                    "execute node '{}' combines requirements with different Asset, adapter, or Procedure implementation bindings",
+                                    node.id
+                                ));
+                            }
+                        } else {
+                            execution_key = Some(key);
+                        }
                     }
                     if let Some(document) = document {
                         require_relative_path("reviewed run document", &document.path)?;
@@ -443,6 +468,8 @@ pub struct ExecutionRequirementBinding {
     pub minimum_qualification: String,
     pub observed_qualification: String,
     pub control_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedure_implementation: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ExecutionParameterBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,7 +480,7 @@ pub struct ExecutionRequirementBinding {
 pub struct ExecutionParameterBinding {
     pub argument: String,
     pub property_kind: String,
-    pub relation: String,
+    pub relation: ConstraintRelation,
     #[serde(flatten)]
     pub required: ExecutionParameterValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -518,7 +545,7 @@ pub struct ExecutionPlanNode {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ExecutionPlanAction {
     Execute {
-        requirement: String,
+        requirements: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         document: Option<ReviewedRunDocument>,
     },
@@ -724,6 +751,7 @@ mod tests {
                 minimum_qualification: "https://sbol.io/ns/facility#Plannable".to_owned(),
                 observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                 control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
+                procedure_implementation: None,
                 parameters: Vec::new(),
                 adapter: Some(ExecutionAdapterBinding {
                     driver: "example.incubator".to_owned(),
@@ -737,7 +765,7 @@ mod tests {
                 id: "execute-0001".to_owned(),
                 after: Vec::new(),
                 action: ExecutionPlanAction::Execute {
-                    requirement: "example::main/body[0]".to_owned(),
+                    requirements: vec!["example::main/body[0]".to_owned()],
                     document: None,
                 },
             }],
@@ -839,15 +867,55 @@ mod tests {
     #[test]
     fn execution_plan_validation_checks_exact_references_and_digests() {
         let mut plan = execution_plan();
-        let ExecutionPlanAction::Execute { requirement, .. } = &mut plan.nodes[0].action else {
+        let ExecutionPlanAction::Execute { requirements, .. } = &mut plan.nodes[0].action else {
             unreachable!()
         };
-        *requirement = "missing".to_owned();
+        requirements[0] = "missing".to_owned();
         assert!(plan.validate().unwrap_err().contains("unknown requirement"));
 
         let mut plan = execution_plan();
         plan.inventory.source_sha256 = "not-a-digest".to_owned();
         assert!(plan.validate().unwrap_err().contains("SHA-256"));
+    }
+
+    #[test]
+    fn one_execute_node_can_satisfy_an_atomic_requirement_set() {
+        let mut plan = execution_plan();
+        plan.requirements[0].procedure_implementation =
+            Some("https://example.org/implementation/pipetting-v1".to_owned());
+        let mut mixing = plan.requirements[0].clone();
+        mixing.requirement_instance = "example::main/body[0]::mixing".to_owned();
+        mixing.requirement_template = "example::main::body[0]::mixing".to_owned();
+        mixing.capability_kind = "https://sbol.io/ns/capability#InWellMixing".to_owned();
+        plan.requirements.push(mixing);
+        let ExecutionPlanAction::Execute { requirements, .. } = &mut plan.nodes[0].action else {
+            unreachable!()
+        };
+        requirements.push("example::main/body[0]::mixing".to_owned());
+
+        plan.validate().unwrap();
+
+        plan.requirements[1].procedure_implementation =
+            Some("https://example.org/implementation/other".to_owned());
+        assert!(
+            plan.validate()
+                .unwrap_err()
+                .contains("different Asset, adapter, or Procedure implementation bindings")
+        );
+    }
+
+    #[test]
+    fn execute_nodes_require_at_least_one_requirement() {
+        let mut plan = execution_plan();
+        let ExecutionPlanAction::Execute { requirements, .. } = &mut plan.nodes[0].action else {
+            unreachable!()
+        };
+        requirements.clear();
+        assert!(
+            plan.validate()
+                .unwrap_err()
+                .contains("does not satisfy any requirements")
+        );
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_capability::{ControlMode, ScalarValue};
 use lab_method::ProcedureValue;
+use lab_procedure::BindingScope;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,
@@ -132,6 +133,17 @@ pub fn build_execution_plan_from_invocations(
     let mut task_nodes = BTreeMap::<lab_method::LocalId, Vec<String>>::new();
     for method in &invocations.methods {
         for task in &method.tasks {
+            let binding_scope =
+                task.program
+                    .as_ref()
+                    .map_or(BindingScope::Independent, |program| {
+                        program
+                            .validate()
+                            .expect("adapter invocation validation checked the Procedure program")
+                            .capability_formula()
+                            .binding_scope
+                    });
+            let mut task_requirements = Vec::new();
             for binding in &task.requirements {
                 let requirement = binding.id.to_string();
                 let document = options.reviewed_documents.remove(&requirement);
@@ -166,13 +178,17 @@ pub fn build_execution_plan_from_invocations(
                     minimum_qualification: binding.minimum_qualification.iri().to_owned(),
                     observed_qualification: binding.observed_qualification.clone(),
                     control_mode: binding.control_mode.clone(),
+                    procedure_implementation: binding
+                        .procedure_implementation
+                        .as_ref()
+                        .map(ToString::to_string),
                     parameters: binding
                         .parameters
                         .iter()
                         .map(|parameter| ExecutionParameterBinding {
                             argument: parameter.property_kind.to_string(),
                             property_kind: parameter.property_kind.to_string(),
-                            relation: parameter.relation.to_string(),
+                            relation: parameter.relation,
                             required: semantic_value(&parameter.required.value),
                             required_unit: parameter
                                 .required
@@ -198,6 +214,51 @@ pub fn build_execution_plan_from_invocations(
                         }),
                 };
                 requirements.push(execution_binding);
+                task_requirements.push((requirement, binding, is_manual, document));
+            }
+
+            if binding_scope == BindingScope::AtomicAssetAssembly {
+                if task_requirements
+                    .iter()
+                    .any(|(_, _, is_manual, _)| *is_manual)
+                {
+                    return Err(ExecutionPlanBuildError::UnsupportedAtomicExecution {
+                        task: task.id.to_string(),
+                        message: "atomic manual-control requirement sets are not yet representable"
+                            .to_owned(),
+                    });
+                }
+                let document = task_requirements
+                    .first()
+                    .and_then(|(_, _, _, document)| document.clone());
+                if task_requirements
+                    .iter()
+                    .any(|(_, _, _, candidate)| candidate != &document)
+                {
+                    return Err(ExecutionPlanBuildError::UnsupportedAtomicExecution {
+                        task: task.id.to_string(),
+                        message: "every requirement must reference the same reviewed run document"
+                            .to_owned(),
+                    });
+                }
+                let id = format!("execute-{:04}", nodes.len() + 1);
+                nodes.push(ExecutionPlanNode {
+                    id: id.clone(),
+                    after: Vec::new(),
+                    action: ExecutionPlanAction::Execute {
+                        requirements: task_requirements
+                            .iter()
+                            .map(|(requirement, _, _, _)| requirement.clone())
+                            .collect(),
+                        document,
+                    },
+                });
+                node_tasks.push(task.id.clone());
+                task_nodes.entry(task.id.clone()).or_default().push(id);
+                continue;
+            }
+
+            for (requirement, binding, is_manual, document) in task_requirements {
                 let (id, action) = if is_manual {
                     (
                         format!("manual-{:04}", nodes.len() + 1),
@@ -211,7 +272,7 @@ pub fn build_execution_plan_from_invocations(
                     (
                         format!("execute-{:04}", nodes.len() + 1),
                         ExecutionPlanAction::Execute {
-                            requirement,
+                            requirements: vec![requirement],
                             document,
                         },
                     )
@@ -518,6 +579,8 @@ pub enum ExecutionPlanBuildError {
     },
     #[error("reviewed run document references unknown requirement `{requirement}`")]
     UnknownDocumentRequirement { requirement: String },
+    #[error("atomic Procedure task `{task}` cannot be projected into an execution node: {message}")]
+    UnsupportedAtomicExecution { task: String, message: String },
     #[error("constructed execution plan is invalid: {0}")]
     InvalidPlan(String),
 }

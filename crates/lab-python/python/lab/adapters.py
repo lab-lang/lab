@@ -107,18 +107,14 @@ def catalog() -> AdapterCatalog:
     for item in cast(list[dict[str, Any]], raw["adapters"]):
         services = cast(dict[str, Any], item["services"])
         implementations = []
-        for implementation in cast(
-            list[dict[str, Any]], item.get("procedure_implementations", [])
-        ):
+        for implementation in cast(list[dict[str, Any]], item.get("procedure_implementations", [])):
             implementation_services = cast(dict[str, Any], implementation["services"])
             implementations.append(
                 ProcedureImplementation(
                     id=cast(str, implementation["id"]),
                     contract=cast(str, implementation["contract"]),
                     operations=tuple(cast(list[str], implementation["operations"])),
-                    capability_kinds=tuple(
-                        cast(list[str], implementation["capability_kinds"])
-                    ),
+                    capability_kinds=tuple(cast(list[str], implementation["capability_kinds"])),
                     control_modes=tuple(cast(list[str], implementation["control_modes"])),
                     accepted_run_formats=tuple(
                         cast(list[str], implementation["accepted_run_formats"])

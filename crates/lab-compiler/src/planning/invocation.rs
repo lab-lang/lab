@@ -8,7 +8,7 @@ use lab_capability::{
     QualificationLevel,
 };
 use lab_method::{IntentOperationId, LocalId};
-use lab_procedure::{ProcedureProgram, ValidatedProcedureProgram};
+use lab_procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -481,6 +481,60 @@ fn validate_program_bindings(
             }
         }
     }
+    let formula = program.capability_formula();
+    if task.requirements.len() != formula.all_of.len() {
+        return Err(
+            AdapterInvocationValidationError::ProcedureCapabilityBindings {
+                task: task.id.clone(),
+            },
+        );
+    }
+    for clause in &formula.all_of {
+        let expected_id = format!("{}::requirement::{}", task.id, clause.role);
+        let Some(requirement) = task
+            .requirements
+            .iter()
+            .find(|requirement| requirement.id.as_str() == expected_id)
+        else {
+            return Err(
+                AdapterInvocationValidationError::ProcedureCapabilityBindings {
+                    task: task.id.clone(),
+                },
+            );
+        };
+        if requirement.capability_kind != clause.capability_kind
+            || requirement.parameters.len() != clause.constraints.len()
+            || !clause.constraints.iter().all(|constraint| {
+                requirement.parameters.iter().any(|parameter| {
+                    parameter.property_kind == constraint.property_kind
+                        && parameter.relation == constraint.relation
+                        && parameter.required == constraint.required
+                })
+            })
+        {
+            return Err(
+                AdapterInvocationValidationError::ProcedureCapabilityBindings {
+                    task: task.id.clone(),
+                },
+            );
+        }
+    }
+    if formula.binding_scope == BindingScope::AtomicAssetAssembly {
+        let Some(first) = task.requirements.first() else {
+            unreachable!("the formula and requirement cardinalities were checked")
+        };
+        if task.requirements.iter().any(|requirement| {
+            requirement.asset != first.asset
+                || requirement.adapter != first.adapter
+                || requirement.procedure_implementation != first.procedure_implementation
+        }) {
+            return Err(
+                AdapterInvocationValidationError::ProcedureCapabilityBindings {
+                    task: task.id.clone(),
+                },
+            );
+        }
+    }
     Ok(())
 }
 
@@ -639,6 +693,10 @@ pub enum AdapterInvocationValidationError {
     ProcedureMaterialBindings { task: LocalId },
     #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
     ProcedureOutputBindings { task: LocalId },
+    #[error(
+        "Procedure task `{task}` does not preserve its normalized capability formula and atomic bindings"
+    )]
+    ProcedureCapabilityBindings { task: LocalId },
     #[error(
         "Procedure task `{task}` requirement `{requirement}` has an inconsistent Procedure implementation binding"
     )]

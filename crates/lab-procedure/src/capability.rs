@@ -5,10 +5,11 @@ use serde::{Deserialize, Serialize};
 use crate::ProcedureLocalId;
 
 /// How every clause in one derived capability formula must be bound.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BindingScope {
     /// Clauses may be implemented by independent facility resources.
+    #[default]
     Independent,
     /// Clauses form one operation and must be implemented by one exact Asset or a declared
     /// `fac:partOf` Asset assembly under one adapter invocation.

@@ -7,13 +7,13 @@ use lab_capability::{
     QualificationLevel,
 };
 use lab_method::{IntentOperationId, LocalId, PortType, ProcedureValue};
-use lab_procedure::{ProcedureProgram, ValidatedProcedureProgram};
+use lab_procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v5";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v6";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///
@@ -67,6 +67,9 @@ pub struct PlanningProcedureTask {
     /// registered normalization contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub program: Option<ProcedureProgram>,
+    /// How the capability clauses derived for this task may be allocated.
+    #[serde(default)]
+    pub binding_scope: BindingScope,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<PlanningTaskInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -451,6 +454,11 @@ fn validate_candidate(
                 }
             })?;
             validate_program_bindings(task, &validated)?;
+            validate_program_requirements(task, &validated)?;
+        } else if task.binding_scope != BindingScope::Independent {
+            return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
+                task: task.id.clone(),
+            });
         }
         if task.requirements.is_empty() {
             return Err(PlanningProblemValidationError::MissingRequirement {
@@ -549,6 +557,42 @@ fn validate_program_bindings(
     Ok(())
 }
 
+fn validate_program_requirements(
+    task: &PlanningProcedureTask,
+    program: &ValidatedProcedureProgram,
+) -> Result<(), PlanningProblemValidationError> {
+    let formula = program.capability_formula();
+    if task.binding_scope != formula.binding_scope
+        || task.requirements.len() != formula.all_of.len()
+    {
+        return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
+            task: task.id.clone(),
+        });
+    }
+    let policy = task.requirements.first().map(|requirement| {
+        (
+            requirement.minimum_qualification,
+            &requirement.accepted_control_modes,
+        )
+    });
+    for (requirement, clause) in task.requirements.iter().zip(formula.all_of) {
+        let expected_id = format!("{}::requirement::{}", task.id, clause.role);
+        if requirement.id.as_str() != expected_id
+            || requirement.capability_kind != clause.capability_kind
+            || requirement.constraints != clause.constraints
+            || policy.is_some_and(|(qualification, modes)| {
+                requirement.minimum_qualification != qualification
+                    || &requirement.accepted_control_modes != modes
+            })
+        {
+            return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
+                task: task.id.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PlanningProblemValidationError {
     #[error(
@@ -622,6 +666,10 @@ pub enum PlanningProblemValidationError {
     ProcedureMaterialBindings { task: LocalId },
     #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
     ProcedureOutputBindings { task: LocalId },
+    #[error(
+        "Procedure task `{task}` does not carry the exact capability formula derived from its normalized program"
+    )]
+    ProcedureCapabilityFormula { task: LocalId },
     #[error("Procedure task `{task}` has no Capability requirement")]
     MissingRequirement { task: LocalId },
     #[error("Capability requirement `{requirement}` occurs more than once")]

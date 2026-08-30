@@ -264,10 +264,22 @@ fn extract_candidate(
                 })
                 .collect::<Result<Vec<_>, PlanningProblemExtractionError>>()?;
             task_indexes.insert(task_id.clone(), tasks.len());
+            let program = task.semantic_program(context);
+            let binding_scope = program
+                .as_ref()
+                .map(|program| {
+                    program
+                        .validate()
+                        .expect("verified Procedure program revalidates during planning projection")
+                        .capability_formula()
+                        .binding_scope
+                })
+                .unwrap_or_default();
             tasks.push(PlanningProcedureTask {
                 id: task_id,
                 operation: task.semantic_operation(context),
-                program: task.semantic_program(context),
+                program,
+                binding_scope,
                 inputs,
                 outputs,
                 parameters: Vec::new(),

@@ -12,6 +12,7 @@ use lab_inventory::{
     FacilityScalarValue, InventorySnapshot,
 };
 use lab_method::{IntentOperationId, LocalId};
+use lab_procedure::BindingScope;
 use sbol_inventory::vocabulary::Qualification;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -135,7 +136,7 @@ pub struct SelectedCapabilityParameter {
     pub observed: PropertyValue,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 pub struct SelectedAdapter {
     pub driver: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -183,6 +184,9 @@ pub enum PlanningCandidateRejectionReason {
     },
     IncomparableValue {
         property_kind: String,
+    },
+    AtomicBindingConflict {
+        binding_scope: BindingScope,
     },
     MissingPlanningAdapter,
 }
@@ -481,6 +485,19 @@ impl FacilityPlanningSolution {
                         );
                     }
                 }
+                if task.binding_scope == BindingScope::AtomicAssetAssembly {
+                    let first = selected_task
+                        .requirements
+                        .first()
+                        .expect("validated tasks have capability requirements");
+                    if selected_task.requirements.iter().any(|requirement| {
+                        requirement.asset != first.asset || requirement.adapter != first.adapter
+                    }) {
+                        return Err(FacilityPlanningSolutionValidationError::AtomicBinding {
+                            task: task.id.clone(),
+                        });
+                    }
+                }
             }
         }
         Ok(())
@@ -509,6 +526,8 @@ pub enum FacilityPlanningSolutionValidationError {
         "facility solution does not bind a Procedure implementation exactly when normalized task `{task}` requires one"
     )]
     ProcedureImplementation { task: LocalId },
+    #[error("facility solution splits atomic Procedure task `{task}` across several bindings")]
+    AtomicBinding { task: LocalId },
     #[error("facility solution does not preserve the exact material-input set for task `{task}`")]
     MaterialSet { task: LocalId },
     #[error("facility solution contains an invalid MaterialLot binding for input `{input}`")]
@@ -565,17 +584,22 @@ fn allocate_method(
                     candidates: rejections,
                 });
             } else {
-                task_requirements.push((bindings, rejections));
+                task_requirements.push((requirement.clone(), bindings, rejections));
             }
         }
-        tasks.push((task.id.clone(), task_materials, task_requirements));
+        tasks.push((
+            task.id.clone(),
+            task.binding_scope,
+            task_materials,
+            task_requirements,
+        ));
     }
     if !rejected.materials.is_empty() || !rejected.requirements.is_empty() {
         return MethodAllocation::Rejected(rejected);
     }
 
     let mut alternatives = vec![Vec::<SelectedProcedureTask>::new()];
-    for (task, materials, requirements) in tasks {
+    for (task, binding_scope, materials, requirements) in tasks {
         let mut material_alternatives = vec![Vec::<SelectedMaterialBinding>::new()];
         for candidates in materials {
             let mut combined = Vec::new();
@@ -591,22 +615,12 @@ fn allocate_method(
             }
             material_alternatives = combined;
         }
-        let mut task_alternatives = vec![Vec::<SelectedRequirementBinding>::new()];
-        for (bindings, rejections) in requirements {
-            let mut combined = Vec::new();
-            'outer: for prefix in &task_alternatives {
-                for candidate in &bindings {
-                    let mut binding = candidate.binding.clone();
-                    binding.rejected_candidates = rejections.clone();
-                    let mut selection = prefix.clone();
-                    selection.push(binding);
-                    combined.push(selection);
-                    if combined.len() == 2 {
-                        break 'outer;
-                    }
-                }
-            }
-            task_alternatives = combined;
+        let task_alternatives = requirement_alternatives(binding_scope, &requirements);
+        if task_alternatives.is_empty() {
+            rejected
+                .requirements
+                .extend(atomic_binding_rejections(binding_scope, &requirements));
+            return MethodAllocation::Rejected(rejected);
         }
         let mut combined = Vec::new();
         'outer: for prefix in &alternatives {
@@ -636,6 +650,110 @@ fn allocate_method(
             })
             .collect(),
     )
+}
+
+type RequirementCandidates = (
+    PlanningCapabilityRequirement,
+    Vec<RequirementCandidate>,
+    Vec<PlanningRejectedOffering>,
+);
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct AtomicBindingKey {
+    asset: String,
+    adapter: Option<SelectedAdapter>,
+}
+
+fn requirement_alternatives(
+    binding_scope: BindingScope,
+    requirements: &[RequirementCandidates],
+) -> Vec<Vec<SelectedRequirementBinding>> {
+    match binding_scope {
+        BindingScope::Independent => combine_requirement_candidates(requirements, None),
+        BindingScope::AtomicAssetAssembly => {
+            let Some((_, first, _)) = requirements.first() else {
+                return Vec::new();
+            };
+            let keys = first
+                .iter()
+                .map(|candidate| atomic_binding_key(&candidate.binding))
+                .collect::<BTreeSet<_>>();
+            let mut alternatives = Vec::new();
+            for key in keys {
+                alternatives.extend(combine_requirement_candidates(requirements, Some(&key)));
+                if alternatives.len() >= 2 {
+                    alternatives.truncate(2);
+                    break;
+                }
+            }
+            alternatives
+        }
+    }
+}
+
+fn combine_requirement_candidates(
+    requirements: &[RequirementCandidates],
+    atomic_key: Option<&AtomicBindingKey>,
+) -> Vec<Vec<SelectedRequirementBinding>> {
+    let mut alternatives = vec![Vec::new()];
+    for (_, candidates, rejections) in requirements {
+        let mut combined = Vec::new();
+        'outer: for prefix in &alternatives {
+            for candidate in candidates.iter().filter(|candidate| {
+                atomic_key.is_none_or(|key| atomic_binding_key(&candidate.binding) == *key)
+            }) {
+                let mut binding = candidate.binding.clone();
+                binding.rejected_candidates = rejections.clone();
+                let mut selection = prefix.clone();
+                selection.push(binding);
+                combined.push(selection);
+                if combined.len() == 2 {
+                    break 'outer;
+                }
+            }
+        }
+        alternatives = combined;
+        if alternatives.is_empty() {
+            break;
+        }
+    }
+    alternatives
+}
+
+fn atomic_binding_key(binding: &SelectedRequirementBinding) -> AtomicBindingKey {
+    AtomicBindingKey {
+        asset: binding.asset.clone(),
+        adapter: binding.adapter.clone(),
+    }
+}
+
+fn atomic_binding_rejections(
+    binding_scope: BindingScope,
+    requirements: &[RequirementCandidates],
+) -> Vec<RejectedPlanningRequirement> {
+    requirements
+        .iter()
+        .map(|(requirement, eligible, rejected)| {
+            let mut candidates = rejected.clone();
+            candidates.extend(eligible.iter().map(|candidate| PlanningRejectedOffering {
+                offering: candidate.binding.offering.clone(),
+                asset: candidate.binding.asset.clone(),
+                observed_qualification: candidate.binding.observed_qualification.clone(),
+                control_mode: candidate.binding.control_mode.clone(),
+                reasons: vec![PlanningCandidateRejectionReason::AtomicBindingConflict {
+                    binding_scope,
+                }],
+            }));
+            candidates.sort_by(|left, right| {
+                (&left.asset, &left.offering).cmp(&(&right.asset, &right.offering))
+            });
+            RejectedPlanningRequirement {
+                requirement: requirement.id.clone(),
+                capability_kind: requirement.capability_kind.clone(),
+                candidates,
+            }
+        })
+        .collect()
 }
 
 fn material_candidates(
@@ -764,7 +882,13 @@ fn requirement_candidates(
                     Err(reason) => reasons.push(reason),
                 }
             }
-            let adapter_candidates = matching_adapters(adapters, task, asset, offering);
+            let adapter_candidates = matching_adapters(
+                adapters,
+                task,
+                &requirement.capability_kind,
+                asset,
+                offering,
+            );
             if adapter_requirement == AdapterRequirement::NonManual
                 && offering.control_mode.iri() != ControlMode::Manual.iri()
                 && adapter_candidates.is_empty()
@@ -873,6 +997,7 @@ fn property_value(parameter: &FacilityCapabilityParameter) -> Option<PropertyVal
 fn matching_adapters(
     adapters: Option<&AdapterBindingSnapshot>,
     task: &PlanningProcedureTask,
+    capability_kind: &lab_capability::CapabilityKind,
     asset: &FacilityAsset,
     offering: &FacilityCapabilityOffering,
 ) -> Vec<SelectedAdapter> {
@@ -884,7 +1009,9 @@ fn matching_adapters(
         .iter()
         .filter(|binding| binding.asset == asset.identity.as_str())
         .filter(|binding| adapter_supports(binding, offering.identity.as_str()))
-        .flat_map(|binding| selected_adapters(binding, task, offering.control_mode.iri()))
+        .flat_map(|binding| {
+            selected_adapters(binding, task, capability_kind, offering.control_mode.iri())
+        })
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| {
         (
@@ -911,6 +1038,7 @@ fn adapter_supports(binding: &ResolvedAdapterBinding, offering: &str) -> bool {
 fn selected_adapters(
     binding: &ResolvedAdapterBinding,
     task: &PlanningProcedureTask,
+    capability_kind: &lab_capability::CapabilityKind,
     control_mode: &str,
 ) -> Vec<SelectedAdapter> {
     let Some(program) = &task.program else {
@@ -921,6 +1049,7 @@ fn selected_adapters(
         .iter()
         .filter(|implementation| implementation.contract == program.contract)
         .filter(|implementation| implementation.operations.contains(&task.operation))
+        .filter(|implementation| implementation.capability_kinds.contains(capability_kind))
         .filter(|implementation| implementation.services.planning)
         .filter(|implementation| {
             implementation
@@ -1231,6 +1360,7 @@ mod tests {
             operation: OperationId::new(format!("https://example.org/procedure/{operation}"))
                 .unwrap(),
             program: None,
+            binding_scope: lab_procedure::BindingScope::Independent,
             inputs: Vec::new(),
             outputs: vec![PlanningTaskOutput {
                 name: id("result"),
@@ -1343,6 +1473,7 @@ ex:manual_realization a sbol:Identified, fac:CapabilityOffering ;
 @prefix ex: <https://example.org/facility/> .
 @prefix fac: <https://sbol.io/ns/facility#> .
 @prefix sbol: <http://sbols.org/v3#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 ex:facility a sbol:TopLevel, fac:Facility ; sbol:displayId "facility" ;
     sbol:hasNamespace <https://example.org/facility> .
@@ -1352,10 +1483,27 @@ ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
 ex:robot a sbol:TopLevel, fac:Asset ; sbol:displayId "robot" ;
     sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
     fac:assetKind fac:Instrument ; fac:locatedIn ex:room ; fac:isActive true ;
-    fac:capability ex:liquid, ex:thermal .
+    fac:capability ex:liquid, ex:metered, ex:mixing, ex:thermal .
 ex:liquid a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid" ;
     fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
+ex:metered a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "metered" ;
+    fac:capabilityKind cap:MeteredLiquidTransfer ; fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ; fac:isActive true ;
+    fac:parameter ex:minimum_transfer, ex:maximum_transfer .
+ex:minimum_transfer a sbol:Identified, fac:PropertyValue ; sbol:displayId "minimum_transfer" ;
+    fac:propertyKind cap:MinimumTransferVolume ; fac:realValue "1"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+ex:maximum_transfer a sbol:Identified, fac:PropertyValue ; sbol:displayId "maximum_transfer" ;
+    fac:propertyKind cap:MaximumTransferVolume ; fac:realValue "300"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+ex:mixing a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "mixing" ;
+    fac:capabilityKind cap:InWellMixing ; fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ; fac:isActive true ;
+    fac:parameter ex:maximum_mix .
+ex:maximum_mix a sbol:Identified, fac:PropertyValue ; sbol:displayId "maximum_mix" ;
+    fac:propertyKind cap:MaximumMixVolume ; fac:realValue "300"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
 ex:thermal a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "thermal" ;
     fac:capabilityKind cap:ThermalCycling ; fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true ; fac:parameter ex:cycles .
@@ -1399,19 +1547,31 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     positions: 1,
                 },
             ],
-            vec![PipettingStep::Transfer {
-                id: local("transfer"),
-                source: Location {
-                    vessel: local("source"),
-                    position: 0,
+            vec![
+                PipettingStep::Transfer {
+                    id: local("transfer"),
+                    source: Location {
+                        vessel: local("source"),
+                        position: 0,
+                    },
+                    destination: Location {
+                        vessel: local("destination"),
+                        position: 0,
+                    },
+                    volume: Volume::parse_microlitres("1").unwrap(),
+                    fluid_path: FluidPathPolicy::IsolatedDestinations,
                 },
-                destination: Location {
-                    vessel: local("destination"),
-                    position: 0,
+                PipettingStep::Mix {
+                    id: local("mix"),
+                    targets: vec![Location {
+                        vessel: local("destination"),
+                        position: 0,
+                    }],
+                    cycles: 3,
+                    volume: Volume::parse_microlitres("1").unwrap(),
+                    fluid_path: FluidPathPolicy::IsolatedDestinations,
                 },
-                volume: Volume::parse_microlitres("1").unwrap(),
-                fluid_path: FluidPathPolicy::IsolatedDestinations,
-            }],
+            ],
             PipettingConstraints::default(),
         )
         .validate()
@@ -1430,6 +1590,26 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             }],
         )
         .unwrap()
+    }
+
+    fn normalize_test_task(task: &mut PlanningProcedureTask, operation: &str) {
+        let program = pipetting_program();
+        let formula = program.validate().unwrap().capability_formula();
+        let policy = task.requirements[0].clone();
+        task.operation = OperationId::new(operation).unwrap();
+        task.requirements = formula
+            .all_of
+            .into_iter()
+            .map(|clause| PlanningCapabilityRequirement {
+                id: id(&format!("{}::requirement::{}", task.id, clause.role)),
+                capability_kind: clause.capability_kind,
+                minimum_qualification: policy.minimum_qualification,
+                accepted_control_modes: policy.accepted_control_modes.clone(),
+                constraints: clause.constraints,
+            })
+            .collect();
+        task.binding_scope = formula.binding_scope;
+        task.program = Some(program);
     }
 
     #[test]
@@ -1536,9 +1716,10 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         problem.choices[0].candidates.retain(|candidate| {
             candidate.method.as_str() == "https://example.org/method/automated"
         });
-        problem.choices[0].candidates[0].tasks[0].operation =
-            OperationId::new(SETUP_GOLDEN_GATE).unwrap();
-        problem.choices[0].candidates[0].tasks[0].program = Some(pipetting_program());
+        normalize_test_task(
+            &mut problem.choices[0].candidates[0].tasks[0],
+            SETUP_GOLDEN_GATE,
+        );
         problem.validate().unwrap();
         let adapters = ot2_bindings(&inventory);
 
@@ -1554,14 +1735,30 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         )
         .unwrap();
 
-        let selected = solution.selections[0].tasks[0].requirements[0]
-            .adapter
-            .as_ref()
-            .unwrap();
+        let requirements = &solution.selections[0].tasks[0].requirements;
+        assert_eq!(requirements.len(), 2);
         assert_eq!(
-            selected.procedure_implementation.as_ref().unwrap().as_str(),
-            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
+            requirements
+                .iter()
+                .map(|requirement| requirement.capability_kind.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "https://sbol.io/ns/capability#InWellMixing",
+                "https://sbol.io/ns/capability#MeteredLiquidTransfer",
+            ])
         );
+        assert!(requirements.iter().all(|requirement| {
+            requirement.asset == "https://example.org/facility/robot"
+                && requirement.adapter.as_ref().is_some_and(|selected| {
+                    selected
+                        .procedure_implementation
+                        .as_ref()
+                        .is_some_and(|implementation| {
+                            implementation.as_str()
+                                == "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
+                        })
+                })
+        }));
     }
 
     #[test]
@@ -1571,7 +1768,10 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         problem.choices[0].candidates.retain(|candidate| {
             candidate.method.as_str() == "https://example.org/method/automated"
         });
-        problem.choices[0].candidates[0].tasks[0].program = Some(pipetting_program());
+        normalize_test_task(
+            &mut problem.choices[0].candidates[0].tasks[0],
+            "https://example.org/procedure/handle-liquid",
+        );
         problem.validate().unwrap();
         let adapters = ot2_bindings(&inventory);
 

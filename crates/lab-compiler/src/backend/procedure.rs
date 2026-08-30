@@ -5,12 +5,14 @@
 //! into the typed values shared by concrete adapters. They contain no deck addresses, labware
 //! allocation, device commands, or facility selection.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::backend::invocation::{MICROLITRE, ProcedureTaskView, material_symbols};
+use lab_procedure::{PipettingStep, ValidatedProcedureProgram, VesselRole, Volume};
+
+use crate::backend::invocation::{MICROLITRE, ProcedureTaskView, material_role};
 use crate::planning::{
     AllocatedProcedureTask, AllocatedRequirementBinding, PlanningValueSource,
-    SelectedMaterialBinding, SelectedMaterialSource,
+    SelectedMaterialBinding,
 };
 
 pub(crate) const SETUP_GOLDEN_GATE: &str =
@@ -24,7 +26,7 @@ pub(crate) const LIQUID_HANDLING: &str = "https://sbol.io/ns/capability#LiquidHa
 pub(crate) const THERMAL_CYCLING: &str = "https://sbol.io/ns/capability#ThermalCycling";
 
 pub(crate) struct MaterialVolume<'a> {
-    pub(crate) role: &'static str,
+    pub(crate) role: String,
     pub(crate) material: &'a SelectedMaterialBinding,
     pub(crate) volume_ul: u32,
 }
@@ -65,165 +67,274 @@ pub(crate) struct SerialDilution<'a> {
     pub(crate) mix_volume_ul: u32,
 }
 
-pub(crate) fn setup_golden_gate<'a>(
+/// Project the normalized Golden Gate setup through the shared pipetting contract.
+///
+/// Device adapters consume the canonical material operations here. The original Method
+/// parameters remain available only for human-facing labels such as the artifact name; they no
+/// longer define transfer volumes, destination multiplicity, mixing, or contamination behavior.
+pub(crate) fn normalized_golden_gate_setup<'a>(
     adapter: &str,
     task: &'a AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<SetupGoldenGate<'a>, String> {
-    let view = ProcedureTaskView::new(adapter, task);
-    view.require_capability(requirement, LIQUID_HANDLING)?;
-    view.require_material_roles(&[
-        "backbone",
-        "components",
-        "dependencies",
-        "restriction-enzyme",
-        "ligase",
-        "buffer",
-        "water",
-    ])?;
-    let artifact = view.text_parameter("artifact")?;
-    let backbone = view.text_parameter("backbone")?;
-    let components = view.text_list_parameter("components")?;
-    let dependencies = view.text_list_parameter("dependencies")?;
-    let restriction_enzyme = view.text_parameter("restriction_enzyme")?;
-    let replicates = view.usize_parameter("assembly_replicates", None)?;
-    view.require_nonzero("assembly_replicates", replicates as u32)?;
-    let reaction_volume_ul = view.integer_parameter("reaction_volume_ul", Some(MICROLITRE))?;
-    let part_volume_ul = view.integer_parameter("part_volume_ul", Some(MICROLITRE))?;
-    let enzyme_volume_ul = view.integer_parameter("enzyme_volume_ul", Some(MICROLITRE))?;
-    let ligase_volume_ul = view.integer_parameter("ligase_volume_ul", Some(MICROLITRE))?;
-    let buffer_volume_ul = view.integer_parameter("buffer_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
-    let mix_volume_ul = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
-    for (name, value) in [
-        ("reaction_volume_ul", reaction_volume_ul),
-        ("part_volume_ul", part_volume_ul),
-        ("enzyme_volume_ul", enzyme_volume_ul),
-        ("ligase_volume_ul", ligase_volume_ul),
-        ("buffer_volume_ul", buffer_volume_ul),
-        ("mix_cycles", mix_cycles),
-        ("mix_volume_ul", mix_volume_ul),
-    ] {
-        view.require_nonzero(name, value)?;
-    }
-    if mix_volume_ul > reaction_volume_ul {
+    if task.operation.as_str() != SETUP_GOLDEN_GATE {
         return Err(format!(
-            "{adapter} Procedure task '{}' mix volume {} uL exceeds its {} uL reaction",
-            task.id, mix_volume_ul, reaction_volume_ul
+            "{adapter} expected normalized Golden Gate setup, found operation '{}' in task '{}'",
+            task.operation, task.id
         ));
     }
-
-    let backbone_material = view.one_material("backbone")?;
-    if backbone_material.symbol != backbone {
-        return Err(view.material_parameter_mismatch("backbone"));
-    }
-    let component_materials = view.materials("components");
-    if material_symbols(&component_materials) != components {
-        return Err(view.material_parameter_mismatch("components"));
-    }
-    let dependency_materials = view.materials("dependencies");
-    if material_symbols(&dependency_materials) != dependencies {
-        return Err(view.material_parameter_mismatch("dependencies"));
-    }
-    let enzyme_material = view.one_material("restriction-enzyme")?;
-    if enzyme_material.symbol != restriction_enzyme {
-        return Err(view.material_parameter_mismatch("restriction_enzyme"));
-    }
-    let ligase_material = view.one_material("ligase")?;
-    let buffer_material = view.one_material("buffer")?;
-    let water_material = view.one_material("water")?;
-
-    let dna_piece_count = u32::try_from(component_materials.len() + dependency_materials.len() + 1)
-        .map_err(|_| {
-            format!(
-                "{adapter} Procedure task '{}' has too many DNA pieces",
-                task.id
-            )
-        })?;
-    let consumed = buffer_volume_ul
-        .checked_add(ligase_volume_ul)
-        .and_then(|value| value.checked_add(enzyme_volume_ul))
-        .and_then(|value| value.checked_add(part_volume_ul.checked_mul(dna_piece_count)?))
-        .ok_or_else(|| {
-            format!(
-                "{adapter} Procedure task '{}' reaction volume overflows",
-                task.id
-            )
-        })?;
-    let water_volume_ul = reaction_volume_ul.checked_sub(consumed).ok_or_else(|| {
+    let document = task.program.as_ref().ok_or_else(|| {
         format!(
-            "{adapter} Procedure task '{}' requires {consumed} uL before water in a {reaction_volume_ul} uL reaction",
+            "{adapter} Procedure task '{}' is missing its normalized pipetting program",
             task.id
         )
     })?;
-
-    let mut additions = vec![
-        MaterialVolume {
-            role: "water",
-            material: water_material,
-            volume_ul: water_volume_ul,
-        },
-        MaterialVolume {
-            role: "buffer",
-            material: buffer_material,
-            volume_ul: buffer_volume_ul,
-        },
-        MaterialVolume {
-            role: "ligase",
-            material: ligase_material,
-            volume_ul: ligase_volume_ul,
-        },
-        MaterialVolume {
-            role: "restriction-enzyme",
-            material: enzyme_material,
-            volume_ul: enzyme_volume_ul,
-        },
-        MaterialVolume {
-            role: "backbone",
-            material: backbone_material,
-            volume_ul: part_volume_ul,
-        },
-    ];
-    additions.extend(
-        component_materials
-            .into_iter()
-            .map(|material| MaterialVolume {
-                role: "component",
-                material,
-                volume_ul: part_volume_ul,
-            }),
-    );
-    additions.extend(
-        dependency_materials
-            .into_iter()
-            .map(|material| MaterialVolume {
-                role: "dependency",
-                material,
-                volume_ul: part_volume_ul,
-            }),
-    );
-
-    let mut sources = BTreeMap::<String, &SelectedMaterialSource>::new();
-    for addition in &additions {
-        if let Some(previous) =
-            sources.insert(addition.material.symbol.clone(), &addition.material.source)
-            && previous != &addition.material.source
-        {
-            return Err(format!(
-                "{adapter} Procedure task '{}' assigns material '{}' to several physical sources",
-                task.id, addition.material.symbol
-            ));
+    let validated = document.validate().map_err(|error| {
+        format!(
+            "{adapter} Procedure task '{}' has an invalid normalized program: {error}",
+            task.id
+        )
+    })?;
+    validate_normalized_requirements(adapter, task, requirements, &validated)?;
+    let ValidatedProcedureProgram::PipettingV1(program) = validated;
+    let program = program.as_program();
+    let view = ProcedureTaskView::new(adapter, task);
+    let artifact = view.text_parameter("artifact")?;
+    let [output] = program.outputs.as_slice() else {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' must produce exactly one normalized material output",
+            task.id
+        ));
+    };
+    let destination_vessels = program
+        .vessels
+        .iter()
+        .filter(|vessel| {
+            matches!(&vessel.role, VesselRole::Product { output: candidate } if candidate == &output.id)
+        })
+        .collect::<Vec<_>>();
+    let [destination_vessel] = destination_vessels.as_slice() else {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' must map its product to exactly one logical vessel",
+            task.id
+        ));
+    };
+    let destinations = (0..destination_vessel.positions)
+        .map(|position| lab_procedure::Location {
+            vessel: destination_vessel.id.clone(),
+            position,
+        })
+        .collect::<Vec<_>>();
+    let materials = task
+        .materials
+        .iter()
+        .map(|material| (material.input.as_str(), material))
+        .collect::<BTreeMap<_, _>>();
+    let vessels = program
+        .vessels
+        .iter()
+        .map(|vessel| (&vessel.id, vessel))
+        .collect::<BTreeMap<_, _>>();
+    let mut additions = Vec::new();
+    let mut reaction_volume_ul = 0_u32;
+    let mut mixing = None;
+    for step in &program.steps {
+        match step {
+            PipettingStep::Distribute {
+                source,
+                destinations: step_destinations,
+                volume_each,
+                ..
+            } => {
+                if step_destinations != &destinations {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' distribute steps must address every product position in order",
+                        task.id
+                    ));
+                }
+                let source_vessel = vessels
+                    .get(&source.vessel)
+                    .expect("validated pipetting source vessel exists");
+                let VesselRole::MaterialSource { material } = &source_vessel.role else {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' distribute source '{}' is not a material source",
+                        task.id, source.vessel
+                    ));
+                };
+                let material_binding = materials.get(material.as_str()).ok_or_else(|| {
+                    format!(
+                        "{adapter} Golden Gate task '{}' normalized material '{}' has no exact allocation",
+                        task.id, material
+                    )
+                })?;
+                let volume_ul = whole_microlitres(adapter, task, "transfer", volume_each)?;
+                reaction_volume_ul =
+                    reaction_volume_ul.checked_add(volume_ul).ok_or_else(|| {
+                        format!(
+                            "{adapter} Golden Gate task '{}' reaction volume overflows",
+                            task.id
+                        )
+                    })?;
+                let role = material_role(material_binding)
+                    .map(normalized_material_role)
+                    .ok_or_else(|| {
+                        format!(
+                            "{adapter} Golden Gate task '{}' material '{}' has no stable role",
+                            task.id, material_binding.input
+                        )
+                    })?;
+                additions.push(MaterialVolume {
+                    role,
+                    material: material_binding,
+                    volume_ul,
+                });
+            }
+            PipettingStep::Mix {
+                targets,
+                cycles,
+                volume,
+                ..
+            } => {
+                if targets != &destinations || mixing.is_some() {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' must contain one final mix over every product position",
+                        task.id
+                    ));
+                }
+                mixing = Some((*cycles, whole_microlitres(adapter, task, "mix", volume)?));
+            }
+            PipettingStep::Transfer { .. } | PipettingStep::Barrier { .. } => {
+                return Err(format!(
+                    "{adapter} Golden Gate task '{}' contains a pipetting step outside its normalized setup shape",
+                    task.id
+                ));
+            }
         }
     }
-
+    let (mix_cycles, mix_volume_ul) = mixing.ok_or_else(|| {
+        format!(
+            "{adapter} Golden Gate task '{}' has no normalized final mix",
+            task.id
+        )
+    })?;
+    if additions.is_empty() {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' has no normalized reagent additions",
+            task.id
+        ));
+    }
+    let used_materials = additions
+        .iter()
+        .map(|addition| addition.material.input.as_str())
+        .collect::<BTreeSet<_>>();
+    let declared_materials = program
+        .materials
+        .iter()
+        .map(|material| material.id.as_str())
+        .collect::<BTreeSet<_>>();
+    if additions.len() != declared_materials.len() || used_materials != declared_materials {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' does not consume each normalized material exactly once",
+            task.id
+        ));
+    }
     Ok(SetupGoldenGate {
         artifact,
-        replicates,
+        replicates: usize::try_from(destination_vessel.positions).map_err(|_| {
+            format!(
+                "{adapter} Golden Gate task '{}' destination count does not fit this platform",
+                task.id
+            )
+        })?,
         additions,
         reaction_volume_ul,
         mix_cycles,
         mix_volume_ul,
     })
+}
+
+fn validate_normalized_requirements(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+    program: &ValidatedProcedureProgram,
+) -> Result<(), String> {
+    let formula = program.capability_formula();
+    if requirements.len() != formula.all_of.len() {
+        return Err(format!(
+            "{adapter} Procedure task '{}' requires {} derived capability bindings, found {}",
+            task.id,
+            formula.all_of.len(),
+            requirements.len()
+        ));
+    }
+    let mut implementation = None;
+    for clause in formula.all_of {
+        let expected_id = format!("{}::requirement::{}", task.id, clause.role);
+        let requirement = requirements
+            .iter()
+            .find(|requirement| requirement.id.as_str() == expected_id)
+            .ok_or_else(|| {
+                format!(
+                    "{adapter} Procedure task '{}' is missing derived capability role '{}'",
+                    task.id, clause.role
+                )
+            })?;
+        if requirement.capability_kind != clause.capability_kind
+            || requirement.parameters.len() != clause.constraints.len()
+            || !clause.constraints.iter().all(|constraint| {
+                requirement.parameters.iter().any(|parameter| {
+                    parameter.property_kind == constraint.property_kind
+                        && parameter.relation == constraint.relation
+                        && parameter.required == constraint.required
+                })
+            })
+        {
+            return Err(format!(
+                "{adapter} Procedure task '{}' capability role '{}' does not preserve its derived constraints",
+                task.id, clause.role
+            ));
+        }
+        let selected = requirement.procedure_implementation.as_ref().ok_or_else(|| {
+            format!(
+                "{adapter} Procedure task '{}' capability role '{}' has no Procedure implementation",
+                task.id, clause.role
+            )
+        })?;
+        if implementation
+            .replace(selected)
+            .is_some_and(|first| first != selected)
+        {
+            return Err(format!(
+                "{adapter} Procedure task '{}' capability clauses use different Procedure implementations",
+                task.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn whole_microlitres(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    operation: &str,
+    volume: &Volume,
+) -> Result<u32, String> {
+    volume.value().to_string().parse::<u32>().map_err(|_| {
+        format!(
+            "{adapter} Procedure task '{}' {operation} volume {} uL is not supported by this integer-volume device planner",
+            task.id,
+            volume.value()
+        )
+    })
+}
+
+fn normalized_material_role(role: &str) -> String {
+    match role {
+        "components" => "component".to_owned(),
+        "dependencies" => "dependency".to_owned(),
+        role => role.to_owned(),
+    }
 }
 
 pub(crate) fn thermal_cycle_golden_gate(

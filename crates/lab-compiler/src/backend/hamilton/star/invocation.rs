@@ -14,9 +14,9 @@ use crate::backend::hamilton::star::plan::{
     SetupAddition, SourceFill, plan_dilution_invocation, plan_setup_invocation,
 };
 use crate::backend::hamilton::star::profile::StarAdapterProfile;
-use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
+use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks, one_requirement};
 use crate::backend::procedure::{
-    SERIAL_DILUTION, SETUP_GOLDEN_GATE, serial_dilution, setup_golden_gate,
+    SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup, serial_dilution,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -27,7 +27,7 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v1";
+const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v2";
 
 #[derive(Serialize)]
 struct StarTaskPlan {
@@ -37,7 +37,7 @@ struct StarTaskPlan {
     adapter: String,
     adapter_profile: String,
     adapter_profile_sha256: String,
-    requirement: RequirementReview,
+    requirements: Vec<RequirementReview>,
     task: TaskReview,
     execution: StarTaskExecution,
     source_fills: Vec<SourceFill>,
@@ -52,6 +52,20 @@ struct RequirementReview {
     observed_qualification: String,
     control_mode: String,
     parameters: Vec<SelectedCapabilityParameter>,
+}
+
+fn requirement_reviews(requirements: &[&AllocatedRequirementBinding]) -> Vec<RequirementReview> {
+    requirements
+        .iter()
+        .map(|requirement| RequirementReview {
+            id: requirement.id.clone(),
+            capability_kind: requirement.capability_kind.to_string(),
+            offering: requirement.offering.clone(),
+            observed_qualification: requirement.observed_qualification.clone(),
+            control_mode: requirement.control_mode.clone(),
+            parameters: requirement.parameters.clone(),
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -114,7 +128,7 @@ pub(in crate::backend) fn lower_invocation(
     let mut documents = Vec::new();
 
     for (ordinal, member) in tasks.into_iter().enumerate() {
-        let (slug, execution, device_plan) = plan_task(profile, member.task, member.requirement)?;
+        let (slug, execution, device_plan) = plan_task(profile, member.task, &member.requirements)?;
         let run = device_plan
             .runs
             .first()
@@ -136,14 +150,7 @@ pub(in crate::backend) fn lower_invocation(
             adapter: BACKEND.to_owned(),
             adapter_profile: profile.name.clone(),
             adapter_profile_sha256: invocation.adapter.profile_sha256.clone(),
-            requirement: RequirementReview {
-                id: member.requirement.id.clone(),
-                capability_kind: member.requirement.capability_kind.to_string(),
-                offering: member.requirement.offering.clone(),
-                observed_qualification: member.requirement.observed_qualification.clone(),
-                control_mode: member.requirement.control_mode.clone(),
-                parameters: member.requirement.parameters.clone(),
-            },
+            requirements: requirement_reviews(&member.requirements),
             task: TaskReview {
                 id: member.task.id.clone(),
                 operation: member.task.operation.to_string(),
@@ -184,7 +191,11 @@ pub(in crate::backend) fn lower_invocation(
             )
             .map_err(|error| error.to_string())?;
         documents.push(AdapterInvocationDocument {
-            requirement: member.requirement.id.clone(),
+            requirements: member
+                .requirements
+                .iter()
+                .map(|requirement| requirement.id.clone())
+                .collect(),
             path: run_path,
             format: STAR_RUN_FORMAT.to_owned(),
         });
@@ -199,7 +210,7 @@ pub(in crate::backend) fn lower_invocation(
 fn plan_task(
     profile: &StarAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<
     (
         &'static str,
@@ -209,8 +220,10 @@ fn plan_task(
     String,
 > {
     match task.operation.as_str() {
-        SETUP_GOLDEN_GATE => plan_setup(profile, task, requirement),
-        SERIAL_DILUTION => plan_dilution(profile, task, requirement),
+        SETUP_GOLDEN_GATE => plan_setup(profile, task, requirements),
+        SERIAL_DILUTION => {
+            plan_dilution(profile, task, one_requirement("STAR", task, requirements)?)
+        }
         operation => Err(format!(
             "STAR invocation contains unsupported Procedure operation '{operation}' in task '{}'; the STAR adapter implements liquid-handling tasks only",
             task.id
@@ -221,7 +234,7 @@ fn plan_task(
 fn plan_setup(
     profile: &StarAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<
     (
         &'static str,
@@ -230,7 +243,7 @@ fn plan_setup(
     ),
     String,
 > {
-    let procedure = setup_golden_gate("STAR", task, requirement)?;
+    let procedure = normalized_golden_gate_setup("STAR", task, requirements)?;
     let view = ProcedureTaskView::new("STAR", task);
     let source_keys = procedure
         .additions
@@ -368,14 +381,16 @@ fn render_manual(plan: &StarTaskPlan) -> Doc {
     };
     let mut doc = Doc::new(DocMeta::new(
         title,
-        "Operator instructions for one facility-allocated Procedure requirement",
+        "Operator instructions for one facility-allocated Procedure task",
         &plan.adapter_profile,
         "Hamilton STAR/STARlet",
     ));
     doc.notice([
         bold("Allocation boundary. "),
-        text("This reviewed STAR run implements only requirement "),
-        code(plan.requirement.id.as_str()),
+        text("This reviewed STAR run atomically implements requirements "),
+        code(join_requirements(&plan.requirements, |requirement| {
+            requirement.id.as_str()
+        })),
         text(" on the exact Asset below. Adjacent Procedure work remains in separate plan nodes."),
     ]);
     doc.heading(1, [text("Reviewed allocation")]);
@@ -384,12 +399,16 @@ fn render_manual(plan: &StarTaskPlan) -> Doc {
         [
             vec![vec![text("Asset")], vec![code(&plan.asset)]],
             vec![
-                vec![text("Capability offering")],
-                vec![code(&plan.requirement.offering)],
+                vec![text("Capability offerings")],
+                vec![code(join_requirements(&plan.requirements, |requirement| {
+                    &requirement.offering
+                }))],
             ],
             vec![
-                vec![text("Capability kind")],
-                vec![code(&plan.requirement.capability_kind)],
+                vec![text("Capability kinds")],
+                vec![code(join_requirements(&plan.requirements, |requirement| {
+                    &requirement.capability_kind
+                }))],
             ],
             vec![
                 vec![text("Procedure task")],
@@ -472,6 +491,17 @@ fn render_manual(plan: &StarTaskPlan) -> Doc {
         }
     }
     doc
+}
+
+fn join_requirements<'a>(
+    requirements: &'a [RequirementReview],
+    value: impl Fn(&'a RequirementReview) -> &'a str,
+) -> String {
+    requirements
+        .iter()
+        .map(value)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn pretty_json(value: &impl Serialize) -> Result<String, String> {

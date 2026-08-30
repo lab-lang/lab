@@ -55,7 +55,10 @@ ex:opentrons_ot2
     fac:manufacturer "Opentrons" ;
     fac:model "OT-2 with Thermocycler Module Gen2" ;
     fac:isActive true ;
-    fac:capability ex:opentrons_ot2_liquid_handling, ex:opentrons_ot2_thermal_cycling .
+    fac:capability ex:opentrons_ot2_liquid_handling,
+        ex:opentrons_ot2_metered_liquid_transfer,
+        ex:opentrons_ot2_in_well_mixing,
+        ex:opentrons_ot2_thermal_cycling .
 
 ex:opentrons_ot2_liquid_handling
     a sbol:Identified, fac:CapabilityOffering ;
@@ -64,6 +67,46 @@ ex:opentrons_ot2_liquid_handling
     fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ;
     fac:isActive true .
+
+ex:opentrons_ot2_metered_liquid_transfer
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "metered_liquid_transfer" ;
+    fac:capabilityKind cap:MeteredLiquidTransfer ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_transfer_volume,
+        ex:opentrons_ot2_maximum_transfer_volume .
+
+ex:opentrons_ot2_minimum_transfer_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_transfer_volume" ;
+    fac:propertyKind cap:MinimumTransferVolume ;
+    fac:realValue "1"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_maximum_transfer_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_transfer_volume" ;
+    fac:propertyKind cap:MaximumTransferVolume ;
+    fac:realValue "300"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_in_well_mixing
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "in_well_mixing" ;
+    fac:capabilityKind cap:InWellMixing ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_maximum_mix_volume .
+
+ex:opentrons_ot2_maximum_mix_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_mix_volume" ;
+    fac:propertyKind cap:MaximumMixVolume ;
+    fac:realValue "300"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
 
 ex:opentrons_ot2_thermal_cycling
     a sbol:Identified, fac:CapabilityOffering ;

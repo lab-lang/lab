@@ -1874,6 +1874,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "hamilton-star",
+ "lab-capability",
  "lab-instruments",
  "lab-inventory",
  "lab-runfmt",

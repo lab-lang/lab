@@ -20,18 +20,18 @@ pub(crate) const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 pub(crate) const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
 pub(crate) const MINUTE: &str = "http://qudt.org/vocab/unit/MIN";
 
-/// One Procedure task paired with the one requirement this invocation implements.
+/// One Procedure task paired with every requirement this invocation implements atomically.
 ///
 /// The current built-in automation adapters lower independently executable documents. They must
-/// therefore reject a task whose semantics span several capability requirements rather than
-/// silently claiming the other requirements' work. A future coordinated adapter contract can
-/// introduce an explicitly multi-requirement view without weakening this boundary.
+/// therefore reject a task whose requirements were split across invocations. A normalized
+/// Procedure program may have several derived capability clauses, but they arrive here only after
+/// allocation proved that one exact Asset, adapter, and Procedure implementation owns them all.
 pub(crate) struct ExactInvocationTask<'a> {
     pub(crate) task: &'a AllocatedProcedureTask,
-    pub(crate) requirement: &'a AllocatedRequirementBinding,
+    pub(crate) requirements: Vec<&'a AllocatedRequirementBinding>,
 }
 
-/// Resolve every task in an invocation to exactly one of that invocation's requirements.
+/// Resolve every task in an invocation to all of its requirements without accepting split work.
 pub(crate) fn exact_invocation_tasks<'a>(
     adapter: &str,
     plan: &'a AdapterInvocationPlan,
@@ -51,9 +51,9 @@ pub(crate) fn exact_invocation_tasks<'a>(
             .iter()
             .filter(|requirement| requirement_ids.contains(&requirement.id))
             .collect::<Vec<_>>();
-        if task.requirements.len() != 1 || selected.len() != 1 {
+        if selected.is_empty() || selected.len() != task.requirements.len() {
             return Err(format!(
-                "{adapter} Procedure task '{}' must be owned by exactly one allocated requirement; found {} task requirements and {} in this invocation",
+                "{adapter} Procedure task '{}' must be owned atomically by this invocation; found {} task requirements and {} in this invocation",
                 task.id,
                 task.requirements.len(),
                 selected.len()
@@ -61,16 +61,37 @@ pub(crate) fn exact_invocation_tasks<'a>(
         }
         members.push(ExactInvocationTask {
             task,
-            requirement: selected[0],
+            requirements: selected,
         });
     }
-    if members.len() != invocation.tasks.len() || members.len() != invocation.requirements.len() {
+    let resolved_requirements = members
+        .iter()
+        .map(|member| member.requirements.len())
+        .sum::<usize>();
+    if members.len() != invocation.tasks.len()
+        || resolved_requirements != invocation.requirements.len()
+    {
         return Err(format!(
-            "{adapter} invocation '{}' does not map one exact requirement to every Procedure task",
+            "{adapter} invocation '{}' does not map every exact requirement to its complete Procedure task",
             invocation.id
         ));
     }
     Ok(members)
+}
+
+pub(crate) fn one_requirement<'a>(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    requirements: &[&'a AllocatedRequirementBinding],
+) -> Result<&'a AllocatedRequirementBinding, String> {
+    let [requirement] = requirements else {
+        return Err(format!(
+            "{adapter} legacy Procedure task '{}' requires exactly one capability binding, found {}",
+            task.id,
+            requirements.len()
+        ));
+    };
+    Ok(*requirement)
 }
 
 /// Typed access to one allocated Procedure task.
@@ -212,25 +233,6 @@ impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
         Ok(value.clone())
     }
 
-    pub(crate) fn text_list_parameter(&self, name: &str) -> Result<Vec<String>, String> {
-        let parameter = self.parameter(name)?;
-        let ProcedureValue::List { values, .. } = &parameter.value else {
-            return Err(self.parameter_type_error(name, "a text list"));
-        };
-        values
-            .iter()
-            .map(|value| {
-                let ScalarValue::Text(value) = &value.value else {
-                    return Err(self.parameter_type_error(name, "a text list"));
-                };
-                if value.is_empty() {
-                    return Err(self.parameter_type_error(name, "non-empty text values"));
-                }
-                Ok(value.clone())
-            })
-            .collect()
-    }
-
     pub(crate) fn require_nonzero(&self, parameter: &str, value: u32) -> Result<(), String> {
         if value == 0 {
             Err(format!(
@@ -240,13 +242,6 @@ impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
         } else {
             Ok(())
         }
-    }
-
-    pub(crate) fn material_parameter_mismatch(&self, parameter: &str) -> String {
-        format!(
-            "{} Procedure task '{}' parameter '{parameter}' does not match its exact material bindings",
-            self.adapter, self.task.id
-        )
     }
 
     pub(crate) fn capacity_error(
@@ -294,11 +289,4 @@ pub(crate) fn material_role(material: &SelectedMaterialBinding) -> Option<&str> 
         .as_str()
         .rsplit_once("::material::")
         .map(|(_, role)| role.split("::").next().unwrap_or(role))
-}
-
-pub(crate) fn material_symbols(materials: &[&SelectedMaterialBinding]) -> Vec<String> {
-    materials
-        .iter()
-        .map(|material| material.symbol.clone())
-        .collect()
 }

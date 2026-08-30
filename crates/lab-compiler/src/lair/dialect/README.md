@@ -28,7 +28,7 @@ design-intent
 
 `design-intent` contains Design values and method-neutral Workflow/Intent operations. `PortableLairProgram` is the owned wrapper for this stage.
 
-`refined-alternatives` eliminates every refinable Intent action in favor of `method.choice` regions. Each candidate contains verifier-valid Procedure dataflow and first-class Capability requirements, and every candidate for one choice yields a compatible typed signature. Registered domain operations also carry a validated canonical Procedure program directly on their task operation. `RefinedLairProgram` owns this stage. A read-only analysis projects it into `lab.planning-problem.v5`; the solver never mutates LAIR.
+`refined-alternatives` eliminates every refinable Intent action in favor of `method.choice` regions. Each candidate contains verifier-valid Procedure dataflow and first-class Capability requirements, and every candidate for one choice yields a compatible typed signature. Registered domain operations also carry a validated canonical Procedure program directly on their task operation. `RefinedLairProgram` owns this stage. A read-only analysis projects it into `lab.planning-problem.v6`; the solver never mutates LAIR.
 
 `allocated-procedure` contains one selected Method for every choice, every selected Procedure task and parameter, all Capability requirements, one exact binding for every requirement, one exact source for every material input, and one allocation context identifying the facility and source inventory digest. It contains no `method.choice`, Workflow action, or unresolved candidate. `AllocatedLairProgram` owns this stage and re-runs whole-module material-linearity analysis before exposing immutable adapter invocations.
 

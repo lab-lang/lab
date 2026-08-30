@@ -132,7 +132,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert!(index.get("facility").is_none());
     assert!(project.join(".lab/build/compiler/refined.lair").is_file());
     let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
-    assert_eq!(problem["schema_version"], "lab.planning-problem.v5");
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v6");
     assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
         problem["choices"][0]["source_operation"],
@@ -260,7 +260,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v5");
+    assert_eq!(plan["format"], "lab.execution-plan.v6");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -573,7 +573,7 @@ fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
     let manifest = read_json(
         target_root.join("tasks/001-setup-golden-gate-reaction/invocation_manifest.json"),
     );
-    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-task.v1");
+    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-task.v2");
     assert_eq!(
         manifest["task"]["operation"],
         "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
@@ -722,8 +722,55 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         })
         .unwrap();
     assert_eq!(
-        normalized_setup["requirements"][0]["procedure_implementation"],
-        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
+        normalized_setup["requirements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|requirement| requirement["capability_kind"].as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([
+            "https://sbol.io/ns/capability#InWellMixing",
+            "https://sbol.io/ns/capability#MeteredLiquidTransfer",
+        ])
+    );
+    assert!(normalized_setup["requirements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|requirement| requirement["procedure_implementation"]
+            == "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"));
+    let execution_plan = read_json(out_dir.join("plan.execution.json"));
+    let setup_execute_node = execution_plan["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| {
+            node["requirements"]
+                .as_array()
+                .is_some_and(|requirements| requirements.len() == 2)
+        })
+        .cloned()
+        .expect("the atomic pipetting program has one multi-requirement execute node");
+    assert_eq!(
+        setup_execute_node["document"]["path"],
+        "assets/opentrons_ot2/tasks/001-setup-golden-gate-reaction/automation_protocol.py"
+    );
+    assert!(
+        setup_execute_node["requirements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|requirement| {
+                execution_plan["requirements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|binding| {
+                binding["requirement_instance"].as_str() == requirement.as_str()
+            })
+            .is_some_and(|binding| binding["procedure_implementation"]
+                == "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1")
+            })
     );
 
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -809,7 +856,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     );
     assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 24);
+    assert_eq!(requirements.len(), 26);
     let liquid_handling = requirements
         .iter()
         .copied()
@@ -823,6 +870,24 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
             && binding["offering"]
                 == "https://example.org/golden-gate/opentrons_ot2_liquid_handling"
             && binding["adapter"]["driver"] == "opentrons.ot2"
+    }));
+    let pipetting = requirements
+        .iter()
+        .copied()
+        .filter(|binding| {
+            matches!(
+                binding["capability_kind"].as_str(),
+                Some("https://sbol.io/ns/capability#MeteredLiquidTransfer")
+                    | Some("https://sbol.io/ns/capability#InWellMixing")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(pipetting.len(), 4);
+    assert!(pipetting.iter().all(|binding| {
+        binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
+            && binding["adapter"]["driver"] == "opentrons.ot2"
+            && binding["adapter"]["procedure_implementation"]
+                == "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
     }));
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
@@ -842,7 +907,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 10);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
@@ -877,14 +942,21 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
             > 1,
         "independent Procedure branches should remain parallel"
     );
-    let node_id = |requirement_fragment: &str| {
-        execution_nodes
-            .iter()
-            .find(|node| {
-                node["requirement"]
+    let node_has_requirement = |node: &Value, requirement_fragment: &str| {
+        node["requirements"].as_array().is_some_and(|requirements| {
+            requirements.iter().any(|requirement| {
+                requirement
                     .as_str()
                     .is_some_and(|requirement| requirement.contains(requirement_fragment))
             })
+        }) || node["requirement"]
+            .as_str()
+            .is_some_and(|requirement| requirement.contains(requirement_fragment))
+    };
+    let node_id = |requirement_fragment: &str| {
+        execution_nodes
+            .iter()
+            .find(|node| node_has_requirement(node, requirement_fragment))
             .unwrap_or_else(|| panic!("missing execution node for {requirement_fragment}"))["id"]
             .as_str()
             .unwrap()
@@ -907,11 +979,7 @@ fn the_golden_gate_facility_plan_binds_liquid_handling_to_the_ot2() {
     );
     let transform = execution_nodes
         .iter()
-        .find(|node| {
-            node["requirement"]
-                .as_str()
-                .is_some_and(|requirement| requirement.contains("std-lab-plasmid-transform-0::"))
-        })
+        .find(|node| node_has_requirement(node, "std-lab-plasmid-transform-0::"))
         .unwrap();
     let transform_dependencies = transform["after"]
         .as_array()
@@ -1026,10 +1094,14 @@ profile = "adapters/simulator.toml""#;
             "Hamilton STAR liquid handler",
         )
         .replace("OT-2 with Thermocycler Module Gen2", "STAR");
-    let combined_offerings =
-        "    fac:capability ex:hamilton_star_liquid_handling, ex:hamilton_star_thermal_cycling .";
+    let combined_offerings = r#"    fac:capability ex:hamilton_star_liquid_handling,
+        ex:hamilton_star_metered_liquid_transfer,
+        ex:hamilton_star_in_well_mixing,
+        ex:hamilton_star_thermal_cycling ."#;
     assert!(inventory.contains(combined_offerings));
-    let split_assets = r#"    fac:capability ex:hamilton_star_liquid_handling .
+    let split_assets = r#"    fac:capability ex:hamilton_star_liquid_handling,
+        ex:hamilton_star_metered_liquid_transfer,
+        ex:hamilton_star_in_well_mixing .
 
 ex:thermal_simulator
     a sbol:TopLevel, fac:Asset ;
@@ -1094,7 +1166,8 @@ ex:thermal_simulator
         .flat_map(|route| route["artifacts"].as_array().unwrap())
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(automation_artifacts.len(), lowered_requirements);
+    assert_eq!(lowered_requirements, 10);
+    assert_eq!(automation_artifacts.len(), 8);
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
             artifact["format"].as_str(),
@@ -1104,13 +1177,23 @@ ex:thermal_simulator
 
     let plan = read_json(out_dir.join("plan.execution.json"));
     assert!(plan.get("lowerings").is_none());
+    assert_eq!(
+        plan["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|node| node["requirements"].as_array())
+            .map(Vec::len)
+            .sum::<usize>(),
+        lowered_requirements
+    );
     let reviewed_documents = plan["nodes"]
         .as_array()
         .unwrap()
         .iter()
         .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
-    assert_eq!(reviewed_documents.len(), lowered_requirements);
+    assert_eq!(reviewed_documents.len(), automation_artifacts.len());
     let mut star_documents = 0;
     let mut simulation_documents = 0;
     for document in reviewed_documents {
@@ -1173,7 +1256,7 @@ ex:thermal_simulator
             .as_array()
             .unwrap()
             .len(),
-        lowered_requirements
+        automation_artifacts.len()
     );
     std::fs::remove_dir_all(project).unwrap();
 }
@@ -1266,7 +1349,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 25);
+    assert_eq!(requirements.len(), 27);
     let liquid_handling = requirements
         .iter()
         .copied()
@@ -1279,9 +1362,25 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
     }));
+    let pipetting = requirements
+        .iter()
+        .copied()
+        .filter(|binding| {
+            matches!(
+                binding["capability_kind"].as_str(),
+                Some("https://sbol.io/ns/capability#MeteredLiquidTransfer")
+                    | Some("https://sbol.io/ns/capability#InWellMixing")
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(pipetting.len(), 4);
+    assert!(pipetting.iter().all(|binding| {
+        binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
+            && binding["adapter"]["driver"] == "opentrons.ot2"
+    }));
 
     let execution = read_json(plan_dir.join("plan.execution.json"));
-    assert_eq!(execution["format"], "lab.execution-plan.v5");
+    assert_eq!(execution["format"], "lab.execution-plan.v6");
     assert!(
         execution["materials"]
             .as_array()
@@ -1434,7 +1533,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         protocols
             .iter()
             .all(|path| path.as_str().unwrap().ends_with("automation_protocol.json")),
-        "the allocated Flex adapter emits one JSON protocol per exact requirement: {protocols:?}"
+        "the allocated Flex adapter emits one JSON protocol per exact Procedure task: {protocols:?}"
     );
 
     let lowering: Value =
@@ -1447,7 +1546,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
     assert_eq!(route["driver"], "opentrons.flex");
     assert!(route.get("scope").is_none());
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 8);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 10);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root

@@ -426,7 +426,7 @@ pub fn validate_adapter_profile(
 /// One reviewed run document emitted for an exact allocated requirement.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdapterInvocationDocument {
-    pub requirement: LocalId,
+    pub requirements: Vec<LocalId>,
     pub path: String,
     pub format: String,
 }
@@ -585,6 +585,9 @@ fn validate_invocation_implementation(
             }
             if implementation.contract != program.contract
                 || !implementation.operations.contains(&task.operation)
+                || !implementation
+                    .capability_kinds
+                    .contains(&requirement.capability_kind)
             {
                 return Err(format!(
                     "Procedure implementation '{}' does not implement task '{}' contract '{}' operation '{}'",
@@ -651,7 +654,7 @@ fn lower_simulator_invocation(
                 message: error.to_string(),
             })?;
         documents.push(AdapterInvocationDocument {
-            requirement: requirement_id.clone(),
+            requirements: vec![requirement_id.clone()],
             path,
             format: SIMULATION_RUN_FORMAT.to_owned(),
         });
@@ -1011,8 +1014,14 @@ mod tests {
         let first_lowered = lower_adapter_invocation_with_adapter(&profile, &plan, &first).unwrap();
         let second_lowered =
             lower_adapter_invocation_with_adapter(&profile, &plan, &second).unwrap();
-        assert_eq!(first_lowered.documents[0].requirement, first_requirement);
-        assert_eq!(second_lowered.documents[0].requirement, second_requirement);
+        assert_eq!(
+            first_lowered.documents[0].requirements,
+            vec![first_requirement]
+        );
+        assert_eq!(
+            second_lowered.documents[0].requirements,
+            vec![second_requirement]
+        );
         assert_eq!(first_lowered.artifacts.len(), 1);
         assert_eq!(second_lowered.artifacts.len(), 1);
         let first_document: SimulationRunDocument =

@@ -344,6 +344,7 @@ fn requirement(
         minimum_qualification: Qualification::Simulatable.iri().to_owned(),
         observed_qualification: Qualification::Simulatable.iri().to_owned(),
         control_mode: ControlMode::ReviewedFile.iri().to_owned(),
+        procedure_implementation: None,
         parameters: Vec::new(),
         adapter: Some(ExecutionAdapterBinding {
             driver: SIMULATOR.to_owned(),
@@ -363,7 +364,7 @@ fn execute_node(
         id: id.to_owned(),
         after: after.iter().map(|id| (*id).to_owned()).collect(),
         action: ExecutionPlanAction::Execute {
-            requirement: requirement.to_owned(),
+            requirements: vec![requirement.to_owned()],
             document: Some(document),
         },
     }

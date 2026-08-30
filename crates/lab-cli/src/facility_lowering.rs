@@ -176,7 +176,14 @@ pub(crate) fn lower_adapter_invocations(
                 .map(|document| {
                     (
                         document.path,
-                        (document.requirement.to_string(), document.format),
+                        (
+                            document
+                                .requirements
+                                .into_iter()
+                                .map(|requirement| requirement.to_string())
+                                .collect(),
+                            document.format,
+                        ),
                     )
                 })
                 .collect();
@@ -288,7 +295,7 @@ fn write_facility_artifacts(
     bundle: &ArtifactBundle,
     output_root: &Path,
     relative_output: &Path,
-    invocation_documents: &BTreeMap<String, (String, String)>,
+    invocation_documents: &BTreeMap<String, (Vec<String>, String)>,
 ) -> Result<WrittenFacilityArtifacts> {
     let route_root = output_root.join(relative_output);
     if let Some(path) = invocation_documents
@@ -323,7 +330,7 @@ fn write_facility_artifacts(
         }
         let sha256 = sha256_hex(artifact.contents());
         let format = invocation_document.map(|(_, format)| format.clone());
-        if let Some((requirement, format)) = invocation_document {
+        if let Some((requirements, format)) = invocation_document {
             let reviewed = ReviewedRunDocument {
                 path: relative_output
                     .join(&relative_path)
@@ -333,11 +340,13 @@ fn write_facility_artifacts(
                 format: format.clone(),
                 sha256: sha256.clone(),
             };
-            if reviewed_documents
-                .insert(requirement.clone(), reviewed)
-                .is_some()
-            {
-                bail!("several adapter artifacts implement requirement '{requirement}'");
+            for requirement in requirements {
+                if reviewed_documents
+                    .insert(requirement.clone(), reviewed.clone())
+                    .is_some()
+                {
+                    bail!("several adapter artifacts implement requirement '{requirement}'");
+                }
             }
         }
         artifacts.push(FacilityLoweredArtifact {

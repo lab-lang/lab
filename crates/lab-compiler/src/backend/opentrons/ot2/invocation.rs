@@ -8,12 +8,12 @@ use serde::Serialize;
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
-use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
+use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks, one_requirement};
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 use crate::backend::procedure::{
-    CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, serial_dilution, setup_golden_gate,
-    thermal_cycle_golden_gate,
+    CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
+    serial_dilution, thermal_cycle_golden_gate,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -24,7 +24,7 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v1";
+const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v2";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
 const CYCLE_TEMPLATE: &str = include_str!("invocation/thermal_cycle.py");
@@ -40,7 +40,7 @@ struct Ot2TaskPlan {
     adapter: String,
     adapter_profile: String,
     adapter_profile_sha256: String,
-    requirement: RequirementReview,
+    requirements: Vec<RequirementReview>,
     task: TaskReview,
     deck: Ot2AdapterProfile,
     execution: Ot2TaskExecution,
@@ -54,6 +54,20 @@ struct RequirementReview {
     observed_qualification: String,
     control_mode: String,
     parameters: Vec<SelectedCapabilityParameter>,
+}
+
+fn requirement_reviews(requirements: &[&AllocatedRequirementBinding]) -> Vec<RequirementReview> {
+    requirements
+        .iter()
+        .map(|requirement| RequirementReview {
+            id: requirement.id.clone(),
+            capability_kind: requirement.capability_kind.to_string(),
+            offering: requirement.offering.clone(),
+            observed_qualification: requirement.observed_qualification.clone(),
+            control_mode: requirement.control_mode.clone(),
+            parameters: requirement.parameters.clone(),
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -132,7 +146,7 @@ pub(in crate::backend) fn lower_invocation(
     let mut documents = Vec::new();
 
     for (ordinal, member) in tasks.into_iter().enumerate() {
-        let (slug, execution) = plan_task(profile, member.task, member.requirement)?;
+        let (slug, execution) = plan_task(profile, member.task, &member.requirements)?;
         let directory = format!("tasks/{:03}-{slug}", ordinal + 1);
         let plan = Ot2TaskPlan {
             schema_version: TASK_PLAN_SCHEMA.to_owned(),
@@ -141,14 +155,7 @@ pub(in crate::backend) fn lower_invocation(
             adapter: BACKEND.to_owned(),
             adapter_profile: profile.name.clone(),
             adapter_profile_sha256: invocation.adapter.profile_sha256.clone(),
-            requirement: RequirementReview {
-                id: member.requirement.id.clone(),
-                capability_kind: member.requirement.capability_kind.to_string(),
-                offering: member.requirement.offering.clone(),
-                observed_qualification: member.requirement.observed_qualification.clone(),
-                control_mode: member.requirement.control_mode.clone(),
-                parameters: member.requirement.parameters.clone(),
-            },
+            requirements: requirement_reviews(&member.requirements),
             task: TaskReview {
                 id: member.task.id.clone(),
                 operation: member.task.operation.to_string(),
@@ -197,7 +204,11 @@ pub(in crate::backend) fn lower_invocation(
             )
             .map_err(|error| error.to_string())?;
         documents.push(AdapterInvocationDocument {
-            requirement: member.requirement.id.clone(),
+            requirements: member
+                .requirements
+                .iter()
+                .map(|requirement| requirement.id.clone())
+                .collect(),
             path: protocol_path,
             format: OPENTRONS_PYTHON_PROTOCOL_FORMAT.to_owned(),
         });
@@ -212,20 +223,20 @@ pub(in crate::backend) fn lower_invocation(
 fn plan_task(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<(&'static str, Ot2TaskExecution), String> {
     match task.operation.as_str() {
         SETUP_GOLDEN_GATE => Ok((
             "setup-golden-gate-reaction",
-            plan_setup(profile, task, requirement)?,
+            plan_setup(profile, task, requirements)?,
         )),
         CYCLE_GOLDEN_GATE => Ok((
             "thermal-cycle-golden-gate-reaction",
-            plan_cycle(profile, task, requirement)?,
+            plan_cycle(profile, task, one_requirement("OT-2", task, requirements)?)?,
         )),
         SERIAL_DILUTION => Ok((
             "serial-dilution",
-            plan_dilution(profile, task, requirement)?,
+            plan_dilution(profile, task, one_requirement("OT-2", task, requirements)?)?,
         )),
         operation => Err(format!(
             "OT-2 invocation contains unsupported Procedure operation '{operation}' in task '{}'",
@@ -237,9 +248,9 @@ fn plan_task(
 fn plan_setup(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<Ot2TaskExecution, String> {
-    let procedure = setup_golden_gate("OT-2", task, requirement)?;
+    let procedure = normalized_golden_gate_setup("OT-2", task, requirements)?;
     let view = ProcedureTaskView::new("OT-2", task);
     let source_keys = procedure
         .additions
@@ -474,14 +485,16 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
     };
     let mut doc = Doc::new(DocMeta::new(
         title,
-        "Operator instructions for one facility-allocated Procedure requirement",
+        "Operator instructions for one facility-allocated Procedure task",
         &plan.adapter_profile,
         "Opentrons OT-2",
     ));
     doc.notice([
         bold("Allocation boundary. "),
-        text("This protocol implements only requirement "),
-        code(plan.requirement.id.as_str()),
+        text("This protocol atomically implements requirements "),
+        code(join_requirements(&plan.requirements, |requirement| {
+            requirement.id.as_str()
+        })),
         text(" on the exact Asset below. Upstream and downstream Procedure tasks remain separate reviewed plan nodes."),
     ]);
     doc.heading(1, [text("Reviewed allocation")]);
@@ -490,12 +503,16 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
         [
             vec![vec![text("Asset")], vec![code(&plan.asset)]],
             vec![
-                vec![text("Capability offering")],
-                vec![code(&plan.requirement.offering)],
+                vec![text("Capability offerings")],
+                vec![code(join_requirements(&plan.requirements, |requirement| {
+                    &requirement.offering
+                }))],
             ],
             vec![
-                vec![text("Capability kind")],
-                vec![code(&plan.requirement.capability_kind)],
+                vec![text("Capability kinds")],
+                vec![code(join_requirements(&plan.requirements, |requirement| {
+                    &requirement.capability_kind
+                }))],
             ],
             vec![
                 vec![text("Procedure task")],
@@ -678,6 +695,17 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
         }
     }
     doc
+}
+
+fn join_requirements<'a>(
+    requirements: &'a [RequirementReview],
+    value: impl Fn(&'a RequirementReview) -> &'a str,
+) -> String {
+    requirements
+        .iter()
+        .map(value)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn well_list(wells: &[Well]) -> String {

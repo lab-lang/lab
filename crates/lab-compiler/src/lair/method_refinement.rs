@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use lab_capability::{
-    ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue, ScalarValue, UnitIri,
+    CapabilityKind, ControlMode, ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue,
+    QualificationLevel, ScalarValue, UnitIri,
 };
 use lab_method::{
     IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodRegistry,
@@ -486,49 +487,80 @@ fn append_candidate(
 
         let semantic_node_id =
             LocalId::new(&node_id).expect("qualified Method task identity is stable");
-        if let Some(program) = normalize_task(&ProcedureTaskInstance {
+        let normalized_program = normalize_task(&ProcedureTaskInstance {
             id: &semantic_node_id,
             operation: &task.operation,
             outputs: &output_names,
             parameters: &resolved_parameters,
             materials: &resolved_materials,
         })
-        .map_err(|error| pliron::input_error!(operation_location(choice, context), error))?
-        {
-            task_op.set_semantic_program(context, &program);
+        .map_err(|error| pliron::input_error!(operation_location(choice, context), error))?;
+        if let Some(program) = &normalized_program {
+            task_op.set_semantic_program(context, program);
         }
 
-        for requirement in &task.requirements {
-            let requirement_id = format!("{node_id}::requirement::{}", requirement.id);
-            let requirement_op = RequirementOp::new(
-                context,
-                &requirement_id,
-                &node_id,
-                &requirement.capability_kind,
-                requirement.minimum_qualification,
-                requirement.accepted_control_modes.iter().copied(),
-            );
-            choice.append_candidate_operation(
-                context,
-                candidate_index,
-                requirement_op.get_operation(),
-            );
-            for constraint in &requirement.constraints {
-                let required = resolve_scalar_value(
+        if let Some(program) = &normalized_program {
+            let [policy] = task.requirements.as_slice() else {
+                return input_err!(
                     operation_location(choice, context),
-                    &constraint.required,
-                    parameters,
-                )?;
-                let constraint = PropertyConstraint {
-                    property_kind: constraint.property_kind.clone(),
-                    relation: constraint.relation,
-                    required,
-                };
-                let constraint_op = ConstraintOp::new(context, &requirement_id, &constraint);
-                choice.append_candidate_operation(
+                    "normalized Procedure task '{}' must declare exactly one execution policy requirement before capability derivation",
+                    task.id
+                );
+            };
+            if !policy.constraints.is_empty() {
+                return input_err!(
+                    operation_location(choice, context),
+                    "normalized Procedure task '{}' execution policy cannot carry capability constraints; the canonical program derives them",
+                    task.id
+                );
+            }
+            let formula = program
+                .validate()
+                .expect("compiler normalization returns a validated Procedure program")
+                .capability_formula();
+            for clause in formula.all_of {
+                let requirement_id = format!("{node_id}::requirement::{}", clause.role);
+                append_requirement(
                     context,
+                    choice,
                     candidate_index,
-                    constraint_op.get_operation(),
+                    &node_id,
+                    &requirement_id,
+                    &clause.capability_kind,
+                    policy.minimum_qualification,
+                    policy.accepted_control_modes.iter().copied(),
+                    &clause.constraints,
+                );
+            }
+        } else {
+            for requirement in &task.requirements {
+                let requirement_id = format!("{node_id}::requirement::{}", requirement.id);
+                let constraints = requirement
+                    .constraints
+                    .iter()
+                    .map(|constraint| {
+                        let required = resolve_scalar_value(
+                            operation_location(choice, context),
+                            &constraint.required,
+                            parameters,
+                        )?;
+                        Ok(PropertyConstraint {
+                            property_kind: constraint.property_kind.clone(),
+                            relation: constraint.relation,
+                            required,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                append_requirement(
+                    context,
+                    choice,
+                    candidate_index,
+                    &node_id,
+                    &requirement_id,
+                    &requirement.capability_kind,
+                    requirement.minimum_qualification,
+                    requirement.accepted_control_modes.iter().copied(),
+                    &constraints,
                 );
             }
         }
@@ -541,6 +573,33 @@ fn append_candidate(
     let yield_op = YieldOp::new(context, yielded);
     choice.append_candidate_operation(context, candidate_index, yield_op.get_operation());
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_requirement(
+    context: &mut Context,
+    choice: &ChoiceOp,
+    candidate_index: usize,
+    node_id: &str,
+    requirement_id: &str,
+    capability_kind: &CapabilityKind,
+    minimum_qualification: QualificationLevel,
+    accepted_control_modes: impl IntoIterator<Item = ControlMode>,
+    constraints: &[PropertyConstraint],
+) {
+    let requirement_op = RequirementOp::new(
+        context,
+        requirement_id,
+        node_id,
+        capability_kind,
+        minimum_qualification,
+        accepted_control_modes,
+    );
+    choice.append_candidate_operation(context, candidate_index, requirement_op.get_operation());
+    for constraint in constraints {
+        let constraint_op = ConstraintOp::new(context, requirement_id, constraint);
+        choice.append_candidate_operation(context, candidate_index, constraint_op.get_operation());
+    }
 }
 
 fn resolve_material_symbols(
