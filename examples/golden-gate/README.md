@@ -18,6 +18,12 @@ One plasmid feeding two strains is the point of the example. A strain is its own
 
 The DNA sequences are first-class values declared independently of the designs that reference them. Provenance is separate again: `buy` marks catalogued parts and reagents, while `build` marks the plasmids and strains this laboratory makes.
 
+## The shared PUDU workflow input
+
+This example is the Lab form of PUDU's documented `workflow_example`, not a reconstruction of a separate BuildCompiler notebook. The plasmid products, ordered parts, backbone, restriction enzyme, four strain products, two chassis, transformation replicates, and plating parameters correspond directly to PUDU's canonical `assembly_input.json` and `transformation_spec.json`. Pinned snapshots of those two inputs live under `reference/pudu-workflow/`, and `reference/pudu-workflow.json` records their upstream paths, revision, and checksums.
+
+PUDU's fixtures use SBOL 2 versioned identities ending in `/1`; Lab's SBOL 3 designs and inventory use the corresponding persistent identities without the terminal version segment. That is the only identity normalization needed to compare the program inputs.
+
 ## Check and build the experiment
 
 From `examples/golden-gate`, run:

@@ -1,0 +1,22 @@
+{
+  "schema_version": "lab.pudu-workflow-reference.v1",
+  "guide": "https://pudu.readthedocs.io/en/latest/guide/workflow.html",
+  "repository": "https://github.com/MyersResearchGroup/PUDU",
+  "revision": "1214d2f9efd557aa84bc96502379554174355eae",
+  "inputs": {
+    "assembly": {
+      "upstream_path": "workflow_example/assembly_input.json",
+      "snapshot": "pudu-workflow/assembly_input.json",
+      "upstream_sha256": "a87ffc3efe26cfff84a14a1c1e04980aa3650ce556d1e2e456315395a043864c"
+    },
+    "transformation": {
+      "upstream_path": "workflow_example/transformation_spec.json",
+      "snapshot": "pudu-workflow/transformation_spec.json",
+      "upstream_sha256": "771901aef65de87f0e72cbaaac107f2452ca0655bcf2ff449f60e076fc6e7a9b"
+    }
+  },
+  "identity_normalization": {
+    "description": "PUDU records SBOL 2 version 1 URIs; Lab records the corresponding persistent identities in SBOL 3.",
+    "strip_terminal_version": "1"
+  }
+}

@@ -111,9 +111,9 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert setup.program.contract == procedures.PIPETTING_PROGRAM_V1
     assert isinstance(setup.program.body, procedures.PipettingProgramV1)
     assert len(setup.program.body.materials) == 9
-    assert len(setup.program.body.steps) == 10
+    assert len(setup.program.body.steps) == 18
     assert any(
-        isinstance(step, procedures.Mix) and step.volume.value == Decimal("15")
+        isinstance(step, procedures.Mix) and step.volume.value == Decimal("20")
         for step in setup.program.body.steps
     )
     assert isinstance(setup.inputs[0].port_type, method_types.Port)
@@ -135,7 +135,7 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert isinstance(thermal.program.body, procedures.ThermalProgramV1)
     assert thermal.program.body.load.sample_count == 1
     assert thermal.program.body.load.volume_each.value == Decimal("20")
-    assert thermal.program.body.lid_temperature == procedures.Temperature(Decimal("105"))
+    assert thermal.program.body.lid_temperature == procedures.Temperature(Decimal("42"))
     assert thermal.program.body.stages[0].repeats == 75
     assert thermal.program.body.stages[0].steps[0].hold.value == Decimal("120")
     assert thermal.program.body.final_hold == procedures.Temperature(Decimal("4"))

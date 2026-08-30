@@ -1226,7 +1226,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     );
     assert_eq!(
         invocations["material_inventory"]["materials"]["J23101"]["component"],
-        "https://synbiohub.org/public/igem/J23101"
+        "https://sbolcanvas.org/J23101"
     );
     assert_eq!(
         invocations["material_inventory"]["materials"]["J23101"]["material_lots"]

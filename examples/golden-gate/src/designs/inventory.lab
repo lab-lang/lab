@@ -25,36 +25,36 @@ buy:
   // than a bare part, so the compiler knows what it is without being told
   // again wherever it is used.
   promoter J23101:
-    sbol_identity = "https://synbiohub.org/public/igem/J23101"
+    sbol_identity = "https://sbolcanvas.org/J23101"
     sequence = J23101_sequence
   promoter J23106:
-    sbol_identity = "https://synbiohub.org/public/igem/J23106"
+    sbol_identity = "https://sbolcanvas.org/J23106"
     sequence = J23106_sequence
 
   // The shared ribosome binding site and terminator. Neither has a narrower
   // kind here, so both are parts; a package that declares one may say more.
   part B0034:
-    sbol_identity = "https://synbiohub.org/public/igem/B0034"
+    sbol_identity = "https://sbolcanvas.org/B0034"
     sequence = B0034_sequence
   part B0015:
-    sbol_identity = "https://synbiohub.org/public/igem/B0015"
+    sbol_identity = "https://sbolcanvas.org/B0015"
     sequence = B0015_sequence
 
   // The fluorescent reporters, each a coding sequence.
   cds GFP:
-    sbol_identity = "https://synbiohub.org/public/igem/GFP"
+    sbol_identity = "https://sbolcanvas.org/GFP"
     sequence = GFP_sequence
   cds RFP:
-    sbol_identity = "https://synbiohub.org/public/igem/RFP"
+    sbol_identity = "https://sbolcanvas.org/RFP"
     sequence = RFP_sequence
 
   // Assembly backbone and the type IIS enzyme that opens it.
   backbone pSB1C3:
-    sbol_identity = "https://example.org/golden-gate/materials/pSB1C3"
+    sbol_identity = "https://sbolcanvas.org/pSB1C3"
 
   // BsaI cuts at 37 C; every plasmid it opens digests the same way.
   restriction_enzyme BsaI:
-    sbol_identity = "https://example.org/golden-gate/materials/BsaI"
+    sbol_identity = "https://SBOL2Build.org/BsaI"
     digest_temperature = 37 C
     digest_duration = 2 min
 
@@ -70,14 +70,14 @@ buy:
   // Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
   // Both are transformed the way competent cells are: chilled, shocked, recovered.
   chassis DH5alpha:
-    sbol_identity = "https://example.org/golden-gate/materials/DH5alpha"
+    sbol_identity = "https://sbolcanvas.org/DH5alpha"
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C
     recovery_duration = 60 min
 
   chassis BL21:
-    sbol_identity = "https://example.org/golden-gate/materials/BL21"
+    sbol_identity = "https://sbolcanvas.org/BL21"
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C

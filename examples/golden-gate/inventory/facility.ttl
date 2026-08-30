@@ -1,8 +1,9 @@
 @prefix cap: <https://sbol.io/ns/capability#> .
+@prefix build: <https://SBOL2Build.org/> .
+@prefix canvas: <https://sbolcanvas.org/> .
 @prefix designs: <https://example.org/golden-gate/designs/> .
 @prefix ex: <https://example.org/golden-gate/> .
 @prefix fac: <https://sbol.io/ns/facility#> .
-@prefix igem: <https://synbiohub.org/public/igem/> .
 @prefix inv: <https://sbol.io/ns/inventory#> .
 @prefix lots: <https://example.org/golden-gate/lots/> .
 @prefix materials: <https://example.org/golden-gate/materials/> .
@@ -330,52 +331,52 @@ ex:manual_waste_handling
     fac:controlMode fac:ManualControl ;
     fac:isActive true .
 
-igem:J23101
+canvas:J23101
     a sbol:Component ;
     sbol:displayId "J23101" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:J23106
+canvas:J23106
     a sbol:Component ;
     sbol:displayId "J23106" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:B0034
+canvas:B0034
     a sbol:Component ;
     sbol:displayId "B0034" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:B0015
+canvas:B0015
     a sbol:Component ;
     sbol:displayId "B0015" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:GFP
+canvas:GFP
     a sbol:Component ;
     sbol:displayId "GFP" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:RFP
+canvas:RFP
     a sbol:Component ;
     sbol:displayId "RFP" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-materials:pSB1C3
+canvas:pSB1C3
     a sbol:Component ;
     sbol:displayId "pSB1C3" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-materials:BsaI
+build:BsaI
     a sbol:Component ;
     sbol:displayId "BsaI" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000252> .
 
 materials:T4_DNA_ligase
@@ -402,16 +403,16 @@ materials:recovery_medium
     sbol:hasNamespace <https://example.org/golden-gate/materials> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-materials:DH5alpha
+canvas:DH5alpha
     a sbol:Component ;
     sbol:displayId "DH5alpha" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-materials:BL21
+canvas:BL21
     a sbol:Component ;
     sbol:displayId "BL21" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
 materials:chloramphenicol
@@ -426,40 +427,40 @@ materials:reference_gfp
     sbol:hasNamespace <https://example.org/golden-gate/materials> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-designs:composite_plasmid_1
+build:composite_plasmid_1
     a sbol:Component ;
     sbol:displayId "composite_plasmid_1" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-designs:composite_plasmid_2
+build:composite_plasmid_2
     a sbol:Component ;
     sbol:displayId "composite_plasmid_2" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-designs:composite_strain_1
+build:composite_strain_1
     a sbol:Component ;
     sbol:displayId "composite_strain_1" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-designs:composite_strain_2
+build:composite_strain_2
     a sbol:Component ;
     sbol:displayId "composite_strain_2" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-designs:composite_strain_3
+build:composite_strain_3
     a sbol:Component ;
     sbol:displayId "composite_strain_3" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-designs:composite_strain_4
+build:composite_strain_4
     a sbol:Component ;
     sbol:displayId "composite_strain_4" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
 designs:expression_strain
@@ -478,7 +479,7 @@ lots:J23101_lot
     a sbol:Implementation ;
     sbol:displayId "J23101_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:J23101 ;
+    sbol:built canvas:J23101 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -488,7 +489,7 @@ lots:J23106_lot
     a sbol:Implementation ;
     sbol:displayId "J23106_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:J23106 ;
+    sbol:built canvas:J23106 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -498,7 +499,7 @@ lots:B0034_lot
     a sbol:Implementation ;
     sbol:displayId "B0034_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:B0034 ;
+    sbol:built canvas:B0034 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -508,7 +509,7 @@ lots:B0015_lot
     a sbol:Implementation ;
     sbol:displayId "B0015_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:B0015 ;
+    sbol:built canvas:B0015 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -518,7 +519,7 @@ lots:GFP_lot
     a sbol:Implementation ;
     sbol:displayId "GFP_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:GFP ;
+    sbol:built canvas:GFP ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -528,7 +529,7 @@ lots:RFP_lot
     a sbol:Implementation ;
     sbol:displayId "RFP_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:RFP ;
+    sbol:built canvas:RFP ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -538,7 +539,7 @@ lots:pSB1C3_lot
     a sbol:Implementation ;
     sbol:displayId "pSB1C3_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:pSB1C3 ;
+    sbol:built canvas:pSB1C3 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -548,7 +549,7 @@ lots:BsaI_lot
     a sbol:Implementation ;
     sbol:displayId "BsaI_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:BsaI ;
+    sbol:built build:BsaI ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -598,7 +599,7 @@ lots:DH5alpha_lot
     a sbol:Implementation ;
     sbol:displayId "DH5alpha_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:DH5alpha ;
+    sbol:built canvas:DH5alpha ;
     fac:materialKind inv:BacterialStock ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -608,7 +609,7 @@ lots:BL21_lot
     a sbol:Implementation ;
     sbol:displayId "BL21_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:BL21 ;
+    sbol:built canvas:BL21 ;
     fac:materialKind inv:BacterialStock ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;

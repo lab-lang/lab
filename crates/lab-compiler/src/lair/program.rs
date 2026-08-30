@@ -576,19 +576,19 @@ mod tests {
 use std.bio.golden_gate
 
 buy part J23101:
-  sbol_identity = "https://synbiohub.org/public/igem/J23101"
+  sbol_identity = "https://sbolcanvas.org/J23101"
 buy part B0034:
-  sbol_identity = "https://synbiohub.org/public/igem/B0034"
+  sbol_identity = "https://sbolcanvas.org/B0034"
 buy part GFP:
-  sbol_identity = "https://synbiohub.org/public/igem/GFP"
+  sbol_identity = "https://sbolcanvas.org/GFP"
 buy part B0015:
-  sbol_identity = "https://synbiohub.org/public/igem/B0015"
+  sbol_identity = "https://sbolcanvas.org/B0015"
 buy backbone pSB1C3:
-  sbol_identity = "https://example.org/golden-gate/materials/pSB1C3"
+  sbol_identity = "https://sbolcanvas.org/pSB1C3"
 buy restriction_enzyme BsaI:
-  sbol_identity = "https://example.org/golden-gate/materials/BsaI"
+  sbol_identity = "https://SBOL2Build.org/BsaI"
 buy chassis DH5alpha:
-  sbol_identity = "https://example.org/golden-gate/materials/DH5alpha"
+  sbol_identity = "https://sbolcanvas.org/DH5alpha"
 buy antibiotic chloramphenicol:
   sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"
 buy part T4_DNA_ligase:
