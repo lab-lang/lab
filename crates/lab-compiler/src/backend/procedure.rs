@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_instruments::{ThermalProfile, ThermalStage, ThermalStep};
 use lab_procedure::{
-    FluidPathPolicy, Location, MixTechnique, PipettingStep, TransferTechnique,
+    FluidPathPolicy, Location, MixTechnique, PipettingProgramV1, PipettingStep, TransferTechnique,
     ValidatedPipettingProgramV1, ValidatedProcedureProgram, VesselRole, Volume,
 };
 
@@ -30,6 +30,16 @@ pub(crate) struct MaterialVolume<'a> {
     pub(crate) role: String,
     pub(crate) material: &'a SelectedMaterialBinding,
     pub(crate) volume_ul: u32,
+    pub(crate) source_mix: Option<GoldenGateMix>,
+    pub(crate) transfer_technique: TransferTechnique,
+    pub(crate) reuse_tip_for_final_mix: bool,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct GoldenGateMix {
+    pub(crate) cycles: u32,
+    pub(crate) volume_ul: u32,
+    pub(crate) technique: MixTechnique,
 }
 
 pub(crate) struct SetupGoldenGate<'a> {
@@ -37,8 +47,29 @@ pub(crate) struct SetupGoldenGate<'a> {
     pub(crate) replicates: usize,
     pub(crate) additions: Vec<MaterialVolume<'a>>,
     pub(crate) reaction_volume_ul: u32,
-    pub(crate) mix_cycles: u32,
-    pub(crate) mix_volume_ul: u32,
+    pub(crate) final_mix: GoldenGateMix,
+    pub(crate) source_temperature_c: Option<f64>,
+}
+
+pub(crate) fn require_basic_golden_gate_techniques(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    setup: &SetupGoldenGate<'_>,
+) -> Result<(), String> {
+    if setup.source_temperature_c.is_some()
+        || setup.final_mix.technique != MixTechnique::default()
+        || setup.additions.iter().any(|addition| {
+            addition.source_mix.is_some()
+                || addition.transfer_technique != TransferTechnique::default()
+                || addition.reuse_tip_for_final_mix
+        })
+    {
+        return Err(format!(
+            "{adapter} Procedure task '{}' does not implement its normalized Golden Gate setup techniques",
+            task.id
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) struct NormalizedThermalProgram {
@@ -896,98 +927,19 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
             position,
         })
         .collect::<Vec<_>>();
-    let materials = task
-        .materials
-        .iter()
-        .map(|material| (material.input.as_str(), material))
-        .collect::<BTreeMap<_, _>>();
-    let vessels = program
-        .vessels
-        .iter()
-        .map(|vessel| (&vessel.id, vessel))
-        .collect::<BTreeMap<_, _>>();
-    let mut additions = Vec::new();
-    let mut reaction_volume_ul = 0_u32;
-    let mut mixing = None;
-    for step in &program.steps {
-        match step {
-            PipettingStep::Distribute {
-                source,
-                destinations: step_destinations,
-                volume_each,
-                ..
-            } => {
-                if step_destinations != &destinations {
-                    return Err(format!(
-                        "{adapter} Golden Gate task '{}' distribute steps must address every product position in order",
-                        task.id
-                    ));
-                }
-                let source_vessel = vessels
-                    .get(&source.vessel)
-                    .expect("validated pipetting source vessel exists");
-                let VesselRole::MaterialSource { material } = &source_vessel.role else {
-                    return Err(format!(
-                        "{adapter} Golden Gate task '{}' distribute source '{}' is not a material source",
-                        task.id, source.vessel
-                    ));
-                };
-                let material_binding = materials.get(material.as_str()).ok_or_else(|| {
-                    format!(
-                        "{adapter} Golden Gate task '{}' normalized material '{}' has no exact allocation",
-                        task.id, material
-                    )
-                })?;
-                let volume_ul = whole_microlitres(adapter, task, "transfer", volume_each)?;
-                reaction_volume_ul =
-                    reaction_volume_ul.checked_add(volume_ul).ok_or_else(|| {
-                        format!(
-                            "{adapter} Golden Gate task '{}' reaction volume overflows",
-                            task.id
-                        )
-                    })?;
-                let role = material_role(material_binding)
-                    .map(normalized_material_role)
-                    .ok_or_else(|| {
-                        format!(
-                            "{adapter} Golden Gate task '{}' material '{}' has no stable role",
-                            task.id, material_binding.input
-                        )
-                    })?;
-                additions.push(MaterialVolume {
-                    role,
-                    material: material_binding,
-                    volume_ul,
-                });
+    let (additions, reaction_volume_ul, final_mix) =
+        match view.text_parameter("setup_strategy")?.as_str() {
+            "basic_v1" => project_basic_golden_gate(adapter, task, program, &destinations)?,
+            "temperature_staged_v1" => {
+                project_temperature_staged_golden_gate(adapter, task, program, &destinations)?
             }
-            PipettingStep::Mix {
-                targets,
-                cycles,
-                volume,
-                ..
-            } => {
-                if targets != &destinations || mixing.is_some() {
-                    return Err(format!(
-                        "{adapter} Golden Gate task '{}' must contain one final mix over every product position",
-                        task.id
-                    ));
-                }
-                mixing = Some((*cycles, whole_microlitres(adapter, task, "mix", volume)?));
-            }
-            PipettingStep::Transfer { .. } | PipettingStep::Barrier { .. } => {
+            value => {
                 return Err(format!(
-                    "{adapter} Golden Gate task '{}' contains a pipetting step outside its normalized setup shape",
+                    "{adapter} Golden Gate task '{}' uses unsupported setup strategy '{value}'",
                     task.id
                 ));
             }
-        }
-    }
-    let (mix_cycles, mix_volume_ul) = mixing.ok_or_else(|| {
-        format!(
-            "{adapter} Golden Gate task '{}' has no normalized final mix",
-            task.id
-        )
-    })?;
+        };
     if additions.is_empty() {
         return Err(format!(
             "{adapter} Golden Gate task '{}' has no normalized reagent additions",
@@ -1019,9 +971,356 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
         })?,
         additions,
         reaction_volume_ul,
-        mix_cycles,
-        mix_volume_ul,
+        final_mix,
+        source_temperature_c: exact_source_temperature(adapter, task, program)?,
     })
+}
+
+fn project_basic_golden_gate<'a>(
+    adapter: &str,
+    task: &'a AllocatedProcedureTask,
+    program: &PipettingProgramV1,
+    destinations: &[Location],
+) -> Result<(Vec<MaterialVolume<'a>>, u32, GoldenGateMix), String> {
+    let mut additions = Vec::new();
+    let mut reaction_volume_ul = 0_u32;
+    let mut final_mix = None;
+    for step in &program.steps {
+        match step {
+            PipettingStep::Distribute {
+                source,
+                destinations: step_destinations,
+                volume_each,
+                fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+                fluid_path_group: None,
+                technique,
+                ..
+            } => {
+                if step_destinations != destinations {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' basic additions must address every product position in order",
+                        task.id
+                    ));
+                }
+                let (role, material) = golden_gate_source(adapter, task, program, source)?;
+                let volume_ul = whole_microlitres(adapter, task, "transfer", volume_each)?;
+                reaction_volume_ul =
+                    reaction_volume_ul.checked_add(volume_ul).ok_or_else(|| {
+                        format!(
+                            "{adapter} Golden Gate task '{}' reaction volume overflows",
+                            task.id
+                        )
+                    })?;
+                additions.push(MaterialVolume {
+                    role,
+                    material,
+                    volume_ul,
+                    source_mix: None,
+                    transfer_technique: technique.clone(),
+                    reuse_tip_for_final_mix: false,
+                });
+            }
+            PipettingStep::Mix {
+                targets,
+                cycles,
+                volume,
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique,
+                ..
+            } if targets == destinations && final_mix.is_none() => {
+                final_mix = Some(GoldenGateMix {
+                    cycles: *cycles,
+                    volume_ul: whole_microlitres(adapter, task, "mix", volume)?,
+                    technique: technique.clone(),
+                });
+            }
+            _ => {
+                return Err(format!(
+                    "{adapter} Golden Gate task '{}' is not a canonical basic setup program",
+                    task.id
+                ));
+            }
+        }
+    }
+    let final_mix = final_mix.ok_or_else(|| {
+        format!(
+            "{adapter} Golden Gate task '{}' has no normalized final mix",
+            task.id
+        )
+    })?;
+    Ok((additions, reaction_volume_ul, final_mix))
+}
+
+fn project_temperature_staged_golden_gate<'a>(
+    adapter: &str,
+    task: &'a AllocatedProcedureTask,
+    program: &PipettingProgramV1,
+    destinations: &[Location],
+) -> Result<(Vec<MaterialVolume<'a>>, u32, GoldenGateMix), String> {
+    let sources = program
+        .materials
+        .iter()
+        .map(|material| {
+            let vessels = program
+                .vessels
+                .iter()
+                .filter(|vessel| {
+                    matches!(&vessel.role, VesselRole::MaterialSource { material: candidate } if candidate == &material.id)
+                })
+                .collect::<Vec<_>>();
+            let [vessel] = vessels.as_slice() else {
+                return Err(format!(
+                    "{adapter} Golden Gate task '{}' material '{}' must map to one source vessel",
+                    task.id, material.id
+                ));
+            };
+            let location = Location {
+                vessel: vessel.id.clone(),
+                position: 0,
+            };
+            let (role, binding) = golden_gate_source(adapter, task, program, &location)?;
+            Ok((location, role, binding))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if sources.is_empty() {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' has no normalized reagent additions",
+            task.id
+        ));
+    }
+
+    let mut steps = program.steps.iter();
+    let mut additions = Vec::<MaterialVolume<'a>>::new();
+    let mut reaction_volume_ul = 0_u32;
+    let mut final_mix = None;
+    for (replicate, destination) in destinations.iter().enumerate() {
+        for (addition_index, (source, role, material)) in sources.iter().enumerate() {
+            let source_mix = if role == "water" {
+                None
+            } else {
+                let Some(PipettingStep::Mix {
+                    targets,
+                    cycles,
+                    volume,
+                    fluid_path: FluidPathPolicy::IsolatedDestinations,
+                    fluid_path_group,
+                    technique,
+                    ..
+                }) = steps.next()
+                else {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' must mix reagent {} before replicate {} transfer",
+                        task.id,
+                        addition_index + 1,
+                        replicate + 1
+                    ));
+                };
+                if targets.as_slice() != std::slice::from_ref(source) || fluid_path_group.is_none()
+                {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' does not preserve the isolated source-mix path for reagent {} replicate {}",
+                        task.id,
+                        addition_index + 1,
+                        replicate + 1
+                    ));
+                }
+                Some((
+                    GoldenGateMix {
+                        cycles: *cycles,
+                        volume_ul: whole_microlitres(adapter, task, "source mix", volume)?,
+                        technique: technique.clone(),
+                    },
+                    fluid_path_group.clone(),
+                ))
+            };
+
+            let Some(PipettingStep::Transfer {
+                source: transfer_source,
+                destination: transfer_destination,
+                volume,
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group,
+                technique,
+                ..
+            }) = steps.next()
+            else {
+                return Err(format!(
+                    "{adapter} Golden Gate task '{}' is missing reagent {} transfer for replicate {}",
+                    task.id,
+                    addition_index + 1,
+                    replicate + 1
+                ));
+            };
+            if transfer_source != source
+                || transfer_destination != destination
+                || source_mix
+                    .as_ref()
+                    .map(|(_, group)| group)
+                    .is_some_and(|group| group != fluid_path_group)
+                || (source_mix.is_none() && fluid_path_group.is_some())
+            {
+                return Err(format!(
+                    "{adapter} Golden Gate task '{}' does not preserve reagent {} fluid-path continuity for replicate {}",
+                    task.id,
+                    addition_index + 1,
+                    replicate + 1
+                ));
+            }
+            let volume_ul = whole_microlitres(adapter, task, "transfer", volume)?;
+            let reuse_tip_for_final_mix = addition_index + 1 == sources.len();
+            let candidate = MaterialVolume {
+                role: role.clone(),
+                material,
+                volume_ul,
+                source_mix: source_mix.map(|(mix, _)| mix),
+                transfer_technique: technique.clone(),
+                reuse_tip_for_final_mix,
+            };
+            if replicate == 0 {
+                reaction_volume_ul =
+                    reaction_volume_ul.checked_add(volume_ul).ok_or_else(|| {
+                        format!(
+                            "{adapter} Golden Gate task '{}' reaction volume overflows",
+                            task.id
+                        )
+                    })?;
+                additions.push(candidate);
+            } else {
+                let expected = &additions[addition_index];
+                if expected.role != candidate.role
+                    || expected.material.input != candidate.material.input
+                    || expected.volume_ul != candidate.volume_ul
+                    || expected.source_mix != candidate.source_mix
+                    || expected.transfer_technique != candidate.transfer_technique
+                    || expected.reuse_tip_for_final_mix != candidate.reuse_tip_for_final_mix
+                {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' uses inconsistent reagent {} technique across replicates",
+                        task.id,
+                        addition_index + 1
+                    ));
+                }
+            }
+
+            if reuse_tip_for_final_mix {
+                let Some(PipettingStep::Mix {
+                    targets,
+                    cycles,
+                    volume,
+                    fluid_path: FluidPathPolicy::IsolatedDestinations,
+                    fluid_path_group: mix_group,
+                    technique,
+                    ..
+                }) = steps.next()
+                else {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' is missing final bubble clearing for replicate {}",
+                        task.id,
+                        replicate + 1
+                    ));
+                };
+                if targets.as_slice() != std::slice::from_ref(destination)
+                    || mix_group.is_none()
+                    || mix_group != fluid_path_group
+                {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' final bubble clearing does not reuse the final reagent path for replicate {}",
+                        task.id,
+                        replicate + 1
+                    ));
+                }
+                let candidate = GoldenGateMix {
+                    cycles: *cycles,
+                    volume_ul: whole_microlitres(adapter, task, "bubble clearing", volume)?,
+                    technique: technique.clone(),
+                };
+                if final_mix
+                    .replace(candidate.clone())
+                    .is_some_and(|expected| expected != candidate)
+                {
+                    return Err(format!(
+                        "{adapter} Golden Gate task '{}' uses inconsistent bubble clearing across replicates",
+                        task.id
+                    ));
+                }
+            }
+        }
+    }
+    if steps.next().is_some() {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' contains operations outside its canonical temperature-staged setup shape",
+            task.id
+        ));
+    }
+    let final_mix = final_mix.ok_or_else(|| {
+        format!(
+            "{adapter} Golden Gate task '{}' has no normalized final bubble clearing",
+            task.id
+        )
+    })?;
+    Ok((additions, reaction_volume_ul, final_mix))
+}
+
+fn golden_gate_source<'a>(
+    adapter: &str,
+    task: &'a AllocatedProcedureTask,
+    program: &PipettingProgramV1,
+    source: &Location,
+) -> Result<(String, &'a SelectedMaterialBinding), String> {
+    let source_vessel = program
+        .vessels
+        .iter()
+        .find(|vessel| vessel.id == source.vessel)
+        .expect("validated pipetting source vessel exists");
+    let VesselRole::MaterialSource { material } = &source_vessel.role else {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' source '{}' is not a material source",
+            task.id, source.vessel
+        ));
+    };
+    let material_binding = task
+        .materials
+        .iter()
+        .find(|binding| binding.input.as_str() == material.as_str())
+        .ok_or_else(|| {
+            format!(
+                "{adapter} Golden Gate task '{}' normalized material '{}' has no exact allocation",
+                task.id, material
+            )
+        })?;
+    let role = material_role(material_binding)
+        .map(normalized_material_role)
+        .ok_or_else(|| {
+            format!(
+                "{adapter} Golden Gate task '{}' material '{}' has no stable role",
+                task.id, material_binding.input
+            )
+        })?;
+    Ok((role, material_binding))
+}
+
+fn exact_source_temperature(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    program: &PipettingProgramV1,
+) -> Result<Option<f64>, String> {
+    let Some(temperature) = &program.constraints.source_temperature else {
+        return Ok(None);
+    };
+    if temperature.minimum != temperature.maximum {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' requires a source-temperature range, but this operation needs one exact staging setpoint",
+            task.id
+        ));
+    }
+    finite_f64(
+        adapter,
+        task,
+        "source temperature",
+        temperature.minimum.value(),
+    )
+    .map(Some)
 }
 
 fn validate_normalized_requirements(

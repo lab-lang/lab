@@ -19,7 +19,7 @@ use crate::backend::opentrons::flex::BACKEND;
 use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, Pipette, TipRacks};
 use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    normalized_serial_dilution, normalized_thermal_program,
+    normalized_serial_dilution, normalized_thermal_program, require_basic_golden_gate_techniques,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -235,6 +235,7 @@ fn plan_setup(
     requirements: &[&AllocatedRequirementBinding],
 ) -> Result<FlexTaskExecution, String> {
     let procedure = normalized_golden_gate_setup("Flex", task, requirements)?;
+    require_basic_golden_gate_techniques("Flex", task, &procedure)?;
     let view = ProcedureTaskView::new("Flex", task);
     known_wells(
         task,
@@ -291,10 +292,10 @@ fn plan_setup(
         &profile.instruments.small,
         &profile.stages.assembly.small_tips,
     )?;
-    if f64::from(procedure.mix_volume_ul) > working {
+    if f64::from(procedure.final_mix.volume_ul) > working {
         return Err(format!(
             "Flex Procedure task '{}' requires a {} uL mix, but the configured small pipette and tip provide {working} uL",
-            task.id, procedure.mix_volume_ul
+            task.id, procedure.final_mix.volume_ul
         ));
     }
 
@@ -306,8 +307,8 @@ fn plan_setup(
             .collect(),
         additions,
         reaction_volume_ul: procedure.reaction_volume_ul,
-        mix_cycles: procedure.mix_cycles,
-        mix_volume_ul: procedure.mix_volume_ul,
+        mix_cycles: procedure.final_mix.cycles,
+        mix_volume_ul: procedure.final_mix.volume_ul,
     })
 }
 

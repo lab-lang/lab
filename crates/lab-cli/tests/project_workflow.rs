@@ -61,6 +61,10 @@ fn read_text(path: impl AsRef<Path>) -> String {
 fn with_portable_manual_method_pins(manifest: String) -> String {
     manifest
         .replace(
+            "https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate",
+            "https://www.lab-compiler.org/ns/method#automated-golden-gate",
+        )
+        .replace(
             "https://www.lab-compiler.org/ns/method#automated-chemical-transformation",
             "https://www.lab-compiler.org/ns/method#manual-chemical-transformation",
         )
@@ -614,6 +618,13 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         .join("../../examples/golden-gate")
         .canonicalize()
         .unwrap();
+    let equivalence = read_json(example.join("reference/pudu-equivalence.json"));
+    let number = |value: &Value| value.as_f64().expect("equivalence values are numeric");
+    assert_eq!(equivalence["schema_version"], "lab.pudu-equivalence.v1");
+    assert_eq!(
+        equivalence["references"]["pudu"]["revision"],
+        "1214d2f9efd557aa84bc96502379554174355eae"
+    );
     let out_dir = std::env::temp_dir().join(format!(
         "lab-golden-gate-facility-lowering-{}-{}",
         std::process::id(),
@@ -715,13 +726,17 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
 
     let manifest = read_json(target_root.join("assembly_manifest.json"));
-    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-run.v1");
+    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-run.v2");
     assert_eq!(manifest["group"]["id"], "assembly");
     assert_eq!(manifest["execution"]["kind"], "assembly");
     assert_eq!(manifest["execution"]["setups"].as_array().unwrap().len(), 2);
     assert_eq!(
         manifest["deck"]["deck"]["thermocycler"]["model"], "thermocycler module",
         "the example's exact OT-2 Asset has a Thermocycler Module GEN1"
+    );
+    assert_eq!(
+        manifest["deck"]["deck"]["thermocycler"]["model"],
+        equivalence["hardware"]["thermocycler_load_name"]
     );
     assert!(
         manifest["execution"]["setups"][0]["execution"]["additions"]
@@ -730,6 +745,138 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
             .iter()
             .all(|addition| addition["source"]["kind"] == "material_lot")
     );
+    let setup = &manifest["execution"]["setups"][0]["execution"];
+    assert_eq!(
+        setup["reaction_wells"][0],
+        equivalence["lineage_exemplar"]["assembly_product_well"]
+    );
+    assert_eq!(
+        number(&setup["source_temperature_c"]),
+        number(&equivalence["assembly"]["source_temperature_c"])
+    );
+    assert_eq!(
+        number(&manifest["deck"]["techniques"]["aspiration_rate"]),
+        number(&equivalence["assembly"]["transfer"]["aspiration_rate"])
+    );
+    assert_eq!(
+        number(&manifest["deck"]["techniques"]["dispense_rate"]),
+        number(&equivalence["assembly"]["transfer"]["dispense_rate"])
+    );
+    let additions = setup["additions"].as_array().unwrap();
+    let mut source_order = Vec::new();
+    for role in additions
+        .iter()
+        .map(|addition| addition["role"].as_str().unwrap())
+    {
+        if source_order.last().copied() != Some(role) {
+            source_order.push(role);
+        }
+    }
+    assert_eq!(
+        source_order,
+        equivalence["assembly"]["source_order"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|role| role.as_str().unwrap())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(additions[0]["role"], "water");
+    assert!(additions[0].get("source_mix").is_none());
+    assert!(additions.iter().all(|addition| {
+        addition["transfer_technique"]["blow_out"]
+            == equivalence["assembly"]["transfer"]["blow_out"]
+            && addition["transfer_technique"]["touch_tip"]
+                == equivalence["assembly"]["transfer"]["touch_tip"]
+    }));
+    assert!(additions[1..].iter().all(|addition| {
+        addition["source_mix"]["cycles"] == equivalence["assembly"]["source_mix"]["cycles"]
+            && addition["source_mix"]["volume_ul"] == addition["volume_ul"]
+    }));
+    assert!(
+        additions[..additions.len() - 1]
+            .iter()
+            .all(|addition| addition["reuse_tip_for_final_mix"] == false)
+    );
+    assert_eq!(
+        additions.last().unwrap()["reuse_tip_for_final_mix"],
+        equivalence["assembly"]["bubble_clear"]["reuse_final_addition_tip"]
+    );
+    assert_eq!(
+        setup["final_mix"]["cycles"],
+        equivalence["assembly"]["bubble_clear"]["cycles"]
+    );
+    assert_eq!(
+        setup["final_mix"]["volume_ul"],
+        equivalence["assembly"]["bubble_clear"]["volume_ul"]
+    );
+    assert_eq!(
+        setup["final_mix"]["technique"]["aspiration"]["offset"]["value"]["value"],
+        equivalence["assembly"]["bubble_clear"]["aspiration_bottom_offset_mm"]
+            .as_i64()
+            .unwrap()
+            .to_string()
+    );
+    assert_eq!(
+        setup["final_mix"]["technique"]["dispense"]["offset"]["value"]["value"],
+        equivalence["assembly"]["bubble_clear"]["dispense_bottom_offset_mm"]
+            .as_i64()
+            .unwrap()
+            .to_string()
+    );
+    assert_eq!(
+        setup["final_mix"]["technique"]["blow_out"],
+        equivalence["assembly"]["bubble_clear"]["blow_out_each_cycle"]
+    );
+    assert_eq!(
+        setup["final_mix"]["technique"]["touch_tip"],
+        equivalence["assembly"]["bubble_clear"]["touch_tip_each_cycle"]
+    );
+    let thermal = &manifest["execution"]["thermal_programs"][0]["execution"];
+    assert_eq!(
+        number(&thermal["lid_temperature_c"]),
+        number(&equivalence["assembly"]["thermal"]["lid_temperature_c"])
+    );
+    assert_eq!(
+        thermal["profile"]["stages"][0]["repeats"],
+        equivalence["assembly"]["thermal"]["stages"][0]["repeats"]
+    );
+    for stage in 0..2 {
+        for step in 0..2 {
+            assert_eq!(
+                number(&thermal["profile"]["stages"][stage]["steps"][step]["celsius"]),
+                number(
+                    &equivalence["assembly"]["thermal"]["stages"][stage]["steps"][step]["temperature_c"]
+                )
+            );
+            assert_eq!(
+                number(&thermal["profile"]["stages"][stage]["steps"][step]["hold_seconds"]),
+                number(
+                    &equivalence["assembly"]["thermal"]["stages"][stage]["steps"][step]["hold_seconds"]
+                )
+            );
+        }
+    }
+    assert_eq!(
+        number(&thermal["final_hold_celsius"]),
+        number(&equivalence["assembly"]["thermal"]["final_hold_c"])
+    );
+    let assembly_protocol = read_text(target_root.join("assembly_protocol.py"));
+    assert!(
+        assembly_protocol.contains("temperature.set_temperature(setup[\"source_temperature_c\"]"),
+        "{assembly_protocol}"
+    );
+    assert!(
+        assembly_protocol.contains("_execute_mix(pipette, source, source_mix, techniques)"),
+        "{assembly_protocol}"
+    );
+    let deactivate_sources = assembly_protocol
+        .find("temperature.deactivate()")
+        .expect("source staging ends before cycling");
+    let execute_thermal = assembly_protocol
+        .rfind("_execute_thermal_program(thermocycler, thermal)")
+        .expect("the authored thermal program is rendered");
+    assert!(deactivate_sources < execute_thermal);
     assert_eq!(
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
         serde_json::json!(["5", "6"]),
@@ -745,9 +892,43 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         4
     );
     let first_preparation = &transformation["execution"]["preparations"][0]["execution"];
-    assert_eq!(first_preparation["cell_volume_ul"], 20);
+    assert_eq!(
+        first_preparation["cell_volume_ul"],
+        equivalence["transformation"]["competent_cells"]["volume_ul"]
+    );
+    assert_eq!(
+        first_preparation["cell_mix_cycles"],
+        equivalence["transformation"]["competent_cells"]["source_mix_cycles"]
+    );
+    assert_eq!(
+        first_preparation["cell_mix_volume_ul"],
+        equivalence["transformation"]["competent_cells"]["source_mix_volume_ul"]
+    );
     assert_eq!(first_preparation["cell_source_volume_ul"], 80);
-    assert_eq!(first_preparation["dna_volume_ul"], 2);
+    assert_eq!(
+        first_preparation["dna_volume_ul"],
+        equivalence["transformation"]["dna"]["volume_ul"]
+    );
+    assert_eq!(
+        first_preparation["dna_mix_cycles"],
+        equivalence["transformation"]["dna"]["source_mix_cycles"]
+    );
+    assert_eq!(
+        first_preparation["dna_mix_volume_ul"],
+        equivalence["transformation"]["dna"]["source_mix_volume_ul"]
+    );
+    assert_eq!(
+        first_preparation["dna_transfer_technique"]["blow_out"],
+        equivalence["transformation"]["dna"]["transfer_blow_out"]
+    );
+    assert_eq!(
+        first_preparation["bubble_clear_cycles"],
+        equivalence["transformation"]["dna"]["bubble_clear_cycles"]
+    );
+    assert_eq!(
+        first_preparation["bubble_clear_volume_ul"],
+        equivalence["transformation"]["dna"]["bubble_clear_volume_ul"]
+    );
     assert_eq!(
         first_preparation["bubble_clear_technique"]["dispense"]["offset"]["value"]["value"],
         "8"
@@ -755,6 +936,14 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(
         first_preparation["bubble_clear_technique"]["touch_tip"],
         true
+    );
+    assert_eq!(
+        first_preparation["bubble_clear_technique"]["blow_out"],
+        false
+    );
+    assert_eq!(
+        first_preparation["reaction_wells"],
+        equivalence["lineage_exemplar"]["transformation_wells"]
     );
     assert_eq!(
         first_preparation["dna"][0]["source_well"],
@@ -774,11 +963,24 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         transformation_protocol.contains("radius=techniques[\"touch_tip_radius\"]"),
         "{transformation_protocol}"
     );
+    let transfer_finish = transformation_protocol
+        .find("preparation[\"dna_transfer_technique\"]")
+        .expect("DNA transfer technique is rendered");
+    let bubble_loop = transformation_protocol
+        .find("for _ in range(preparation[\"bubble_clear_cycles\"]):")
+        .expect("bubble clearing is rendered");
+    let final_touch = transformation_protocol
+        .rfind("preparation[\"bubble_clear_technique\"]")
+        .expect("the post-bubble touch is rendered");
+    assert!(transfer_finish < bubble_loop && bubble_loop < final_touch);
     let heat_shock = &transformation["execution"]["heat_shocks"][0]["execution"];
-    assert_eq!(heat_shock["volume_each_ul"], 22.0);
     assert_eq!(
-        heat_shock["profile"]["stages"][0]["steps"][1]["celsius"],
-        42.0
+        number(&heat_shock["volume_each_ul"]),
+        number(&equivalence["transformation"]["heat_shock"]["volume_ul"])
+    );
+    assert_eq!(
+        number(&heat_shock["profile"]["stages"][0]["steps"][1]["celsius"]),
+        number(&equivalence["transformation"]["heat_shock"]["steps"][1]["temperature_c"])
     );
     assert!(
         transformation_protocol.contains("block_max_volume=execution[\"volume_each_ul\"]"),
@@ -795,10 +997,16 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     assert_eq!(
         recovery_medium["technique"]["air_gap"]["value"]["value"],
-        "10"
+        equivalence["transformation"]["recovery"]["air_gap_ul"]
+            .as_i64()
+            .unwrap()
+            .to_string()
     );
     let recovery = &transformation["execution"]["recovery_incubations"][0]["execution"];
-    assert_eq!(recovery["volume_each_ul"], 82.0);
+    assert_eq!(
+        number(&recovery["volume_each_ul"]),
+        number(&equivalence["transformation"]["recovery"]["incubation_volume_ul"])
+    );
 
     let plating = read_json(target_root.join("plating_manifest.json"));
     assert_eq!(plating["execution"]["kind"], "plating");
@@ -818,8 +1026,34 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         ])
     );
     assert_eq!(
+        dilution["dilution_wells"],
+        serde_json::json!([
+            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_1_wells"][0]},
+            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_1_wells"][1]},
+            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_2_wells"][0]},
+            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_2_wells"][1]}
+        ])
+    );
+    assert_eq!(
+        dilution["medium_volume_ul"],
+        equivalence["plating"]["medium_volume_ul"]
+    );
+    assert_eq!(
+        dilution["culture_volume_ul"],
+        equivalence["plating"]["culture_volume_ul"]
+    );
+    assert_eq!(dilution["mix_cycles"], equivalence["plating"]["mix_cycles"]);
+    assert_eq!(
+        dilution["mix_volume_ul"],
+        equivalence["plating"]["mix_volume_ul"]
+    );
+    assert_eq!(
         plating["deck"]["techniques"]["distribution_disposal_volume_ul"],
-        4
+        equivalence["plating"]["medium_distribution_disposal_volume_ul"]
+    );
+    assert_eq!(
+        plating["deck"]["techniques"]["tracked_chunk_size"],
+        equivalence["plating"]["medium_distribution_chunk_size"]
     );
     let plating_protocol = read_text(target_root.join("plating_protocol.py"));
     assert!(
@@ -834,9 +1068,23 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         plating_protocol.contains("tracked_chunk_size"),
         "{plating_protocol}"
     );
+    let seed_second = plating_protocol
+        .find("p20.mix(dilution[\"mix_cycles\"], dilution[\"mix_volume_ul\"], dilution_2)")
+        .expect("dilution two is seeded and mixed");
+    let plate_first = plating_protocol
+        .find("for entry in _plate_entries(plating, 1")
+        .expect("dilution one is plated");
+    let plate_second = plating_protocol
+        .find("for entry in _plate_entries(plating, 2")
+        .expect("dilution two is plated");
+    assert!(seed_second < plate_first && plate_first < plate_second);
     let first_plating = &plating["execution"]["platings"][0]["execution"];
     assert_eq!(first_plating["kind"], "plate_diluted_culture");
     assert_eq!(first_plating["plate_map"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        first_plating["colony_volume_ul"],
+        equivalence["plating"]["colony_volume_ul"]
+    );
     assert_eq!(
         first_plating["technique"]["dispense"]["kind"],
         "material_surface"
@@ -847,6 +1095,24 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(plate_map["entries"][0]["subject"], "composite_strain_1");
     assert_eq!(plate_map["entries"][0]["dilution_ratio"], "1/10");
     assert_eq!(plate_map["entries"][2]["dilution_ratio"], "1/100");
+    let expected_agar_wells = equivalence["lineage_exemplar"]["agar_dilution_1_wells"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(
+            equivalence["lineage_exemplar"]["agar_dilution_2_wells"]
+                .as_array()
+                .unwrap(),
+        )
+        .map(|well| well.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        plate_map["entries"].as_array().unwrap()[..4]
+            .iter()
+            .map(|entry| entry["destination"]["well"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected_agar_wells
+    );
     assert!(
         plating_protocol.contains("destination.top(techniques[\"material_surface_offset_mm\"]"),
         "{plating_protocol}"
@@ -988,6 +1254,10 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         std::collections::BTreeSet::from([
             "https://sbol.io/ns/capability#InWellMixing",
             "https://sbol.io/ns/capability#MeteredLiquidTransfer",
+            "https://sbol.io/ns/capability#PostDispenseBlowout",
+            "https://sbol.io/ns/capability#TemperatureControlledStaging",
+            "https://sbol.io/ns/capability#TouchTip",
+            "https://sbol.io/ns/capability#VesselRelativeLiquidAccess",
         ])
     );
     assert!(normalized_setup["requirements"]
@@ -1014,7 +1284,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     );
     assert_eq!(
         setup_execute_node["requirements"].as_array().unwrap().len(),
-        8
+        16
     );
     assert_eq!(
         setup_execute_node["requirements"]
@@ -1128,7 +1398,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     );
     assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 76);
+    assert_eq!(requirements.len(), 84);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1184,7 +1454,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 72);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 80);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
@@ -1204,7 +1474,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     let execution_plan = read_json(out_dir.join("plan.execution.json"));
     assert_eq!(
         execution_plan["planning"]["methods"][0]["method"],
-        "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+        "https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate"
     );
     assert_eq!(
         execution_plan["planning"]["allocated_lair"]["path"],
@@ -1240,10 +1510,10 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
             .to_owned()
     };
     let assembly_setup = node_id(
-        "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#automated-golden-gate::setup-reaction",
+        "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate::setup-reaction",
     );
     let assembly_cycle = node_id(
-        "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#automated-golden-gate::cycle-reaction",
+        "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate::cycle-reaction",
     );
     assert_eq!(assembly_setup, assembly_cycle);
     let cell_provisions = (0..4)
@@ -1401,6 +1671,7 @@ profile = "adapters/inheco-odtc.toml""#;
         );
     let combined_offerings = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing,
+        ex:hamilton_star_temperature_controlled_staging,
         ex:hamilton_star_liquid_level_aware_aspiration,
         ex:hamilton_star_vessel_relative_liquid_access,
         ex:hamilton_star_air_gap_handling,
@@ -1411,6 +1682,7 @@ profile = "adapters/inheco-odtc.toml""#;
     assert!(inventory.contains(combined_offerings));
     let split_assets = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing,
+        ex:hamilton_star_temperature_controlled_staging,
         ex:hamilton_star_liquid_level_aware_aspiration,
         ex:hamilton_star_vessel_relative_liquid_access,
         ex:hamilton_star_air_gap_handling,
@@ -1620,7 +1892,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         String::from_utf8_lossy(&planned.stderr)
     );
     let result: Value = serde_json::from_slice(&planned.stdout).unwrap();
-    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 8);
+    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 3);
 
     let lowering: Value =
         serde_json::from_slice(&std::fs::read(plan_dir.join("facility_lowering.json")).unwrap())
@@ -1683,7 +1955,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 37);
+    assert_eq!(requirements.len(), 85);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1698,7 +1970,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(pipetting.len(), 12);
+    assert_eq!(pipetting.len(), 28);
     assert!(pipetting.iter().all(|binding| {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
@@ -1773,30 +2045,17 @@ fn an_ot2_setup_transfers_dependency_dna_from_an_earlier_choice() {
     let lowering = read_json(out_dir.join("facility_lowering.json"));
     let route = &lowering["routes"][0];
     let target_root = out_dir.join(route["output"].as_str().unwrap());
-    let mut dependency_transfer = false;
-    for artifact in route["artifacts"]
+    let manifest = read_json(target_root.join("assembly_manifest.json"));
+    let dependency_transfer = manifest["execution"]["setups"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|artifact| {
-            artifact["path"]
-                .as_str()
-                .unwrap()
-                .ends_with("invocation_manifest.json")
-        })
-    {
-        let manifest = read_json(target_root.join(artifact["path"].as_str().unwrap()));
-        dependency_transfer |=
-            manifest["execution"]["additions"]
-                .as_array()
-                .is_some_and(|additions| {
-                    additions.iter().any(|addition| {
-                        addition["role"] == "dependency"
-                            && addition["symbol"] == "composite_plasmid_1"
-                            && addition["source"]["kind"] == "choice_output"
-                    })
-                });
-    }
+        .flat_map(|setup| setup["execution"]["additions"].as_array().unwrap())
+        .any(|addition| {
+            addition["role"] == "dependency"
+                && addition["symbol"] == "composite_plasmid_1"
+                && addition["source"]["kind"] == "choice_output"
+        });
     assert!(
         dependency_transfer,
         "an OT-2 setup invocation must transfer DNA produced by an earlier choice"

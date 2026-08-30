@@ -557,7 +557,9 @@ mod tests {
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
     use lab_method::{IntentOperationId, ProcedureValue, ScalarType};
-    use lab_procedure::{ValidatedProcedureProgram, vocabulary};
+    use lab_procedure::{
+        AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
+    };
 
     use crate::backend::default_adapter_profile;
     use crate::lair::session::CompilerSession;
@@ -893,7 +895,7 @@ workflow main() -> Material<Plasmid>:
             .expect("realization is a global method choice");
         assert_eq!(realization.inputs[0].name.as_str(), "design");
         assert_eq!(realization.outputs[0].name.as_str(), "product");
-        assert_eq!(realization.candidates.len(), 2);
+        assert_eq!(realization.candidates.len(), 3);
         assert!(realization.candidates.iter().any(|candidate| {
             candidate.method.as_str()
                 == "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
@@ -1017,6 +1019,107 @@ workflow main() -> Material<Plasmid>:
                 vocabulary::HEATED_LID_TEMPERATURE_CONTROL,
                 vocabulary::PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
             ])
+        );
+
+        let temperature_staged = realization
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate
+                    .method
+                    .as_str()
+                    .ends_with("#temperature-staged-golden-gate")
+            })
+            .expect("temperature-staged Golden Gate is a portable Method alternative");
+        let staged_program = temperature_staged.tasks[0]
+            .program
+            .as_ref()
+            .expect("temperature-staged setup is normalized before facility planning")
+            .validate()
+            .expect("temperature-staged setup validates");
+        let ValidatedProcedureProgram::PipettingV1(staged_program) = staged_program else {
+            panic!("temperature-staged setup must normalize to the pipetting contract")
+        };
+        let staged_program = staged_program.as_program();
+        assert_eq!(staged_program.materials.len(), 9);
+        assert_eq!(staged_program.steps.len(), 18);
+        let source_temperature = staged_program
+            .constraints
+            .source_temperature
+            .as_ref()
+            .expect("the Method requires controlled source staging");
+        assert_eq!(source_temperature.minimum, source_temperature.maximum);
+        assert_eq!(source_temperature.minimum.value().to_string(), "4");
+        let staged_capabilities = temperature_staged.tasks[0]
+            .requirements
+            .iter()
+            .map(|requirement| requirement.capability_kind.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            staged_capabilities,
+            std::collections::BTreeSet::from([
+                vocabulary::METERED_LIQUID_TRANSFER,
+                vocabulary::IN_WELL_MIXING,
+                vocabulary::TEMPERATURE_CONTROLLED_STAGING,
+                vocabulary::VESSEL_RELATIVE_LIQUID_ACCESS,
+                vocabulary::POST_DISPENSE_BLOWOUT,
+                vocabulary::TOUCH_TIP,
+            ])
+        );
+        let PipettingStep::Mix {
+            cycles: source_mix_cycles,
+            volume: source_mix_volume,
+            fluid_path_group: source_mix_path,
+            ..
+        } = &staged_program.steps[1]
+        else {
+            panic!("the first non-water reagent must be mixed before transfer")
+        };
+        let PipettingStep::Transfer {
+            fluid_path_group: source_transfer_path,
+            technique: source_transfer_technique,
+            ..
+        } = &staged_program.steps[2]
+        else {
+            panic!("source mixing must be followed by its transfer")
+        };
+        assert_eq!(*source_mix_cycles, 3);
+        assert_eq!(source_mix_volume.value().to_string(), "2");
+        assert_eq!(source_mix_path, source_transfer_path);
+        assert!(source_transfer_technique.blow_out);
+        assert!(source_transfer_technique.touch_tip);
+        let PipettingStep::Transfer {
+            fluid_path_group: final_transfer_path,
+            ..
+        } = &staged_program.steps[16]
+        else {
+            panic!("the final reagent must be transferred before bubble clearing")
+        };
+        let PipettingStep::Mix {
+            cycles,
+            volume,
+            fluid_path_group: final_mix_path,
+            technique,
+            ..
+        } = &staged_program.steps[17]
+        else {
+            panic!("the final operation must clear bubbles")
+        };
+        assert_eq!(*cycles, 2);
+        assert_eq!(volume.value().to_string(), "20");
+        assert_eq!(final_transfer_path, final_mix_path);
+        assert!(technique.blow_out && technique.touch_tip);
+        assert!(matches!(
+            &technique.aspiration,
+            AspirationStrategy::VesselBottom { offset } if offset.value().to_string() == "0"
+        ));
+        assert!(matches!(
+            &technique.dispense,
+            DispenseStrategy::VesselBottom { offset } if offset.value().to_string() == "8"
+        ));
+        assert_eq!(
+            temperature_staged.tasks[1].program, automated.tasks[1].program,
+            "preparation technique must not rewrite authored thermal intent"
         );
 
         let dilution = problem

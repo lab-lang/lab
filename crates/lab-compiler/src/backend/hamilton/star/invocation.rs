@@ -17,6 +17,7 @@ use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::procedure::{
     SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup, normalized_serial_dilution,
+    require_basic_golden_gate_techniques,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -242,6 +243,7 @@ fn plan_setup(
     String,
 > {
     let procedure = normalized_golden_gate_setup("STAR", task, requirements)?;
+    require_basic_golden_gate_techniques("STAR", task, &procedure)?;
     let view = ProcedureTaskView::new("STAR", task);
     let source_keys = procedure
         .additions
@@ -294,7 +296,10 @@ fn plan_setup(
         source_wells,
         reaction_wells.clone(),
         &device_additions,
-        (procedure.mix_cycles, f64::from(procedure.mix_volume_ul)),
+        (
+            procedure.final_mix.cycles,
+            f64::from(procedure.final_mix.volume_ul),
+        ),
     )
     .map_err(|error| error.to_string())?;
     Ok((
@@ -304,8 +309,8 @@ fn plan_setup(
             reaction_wells,
             additions,
             reaction_volume_ul: procedure.reaction_volume_ul,
-            mix_cycles: procedure.mix_cycles,
-            mix_volume_ul: procedure.mix_volume_ul,
+            mix_cycles: procedure.final_mix.cycles,
+            mix_volume_ul: procedure.final_mix.volume_ul,
         },
         device_plan,
     ))

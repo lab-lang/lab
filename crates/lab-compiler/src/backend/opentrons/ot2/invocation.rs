@@ -33,8 +33,8 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v3";
-const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v1";
+const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v4";
+const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v2";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
 const CYCLE_TEMPLATE: &str = include_str!("invocation/thermal_cycle.py");
@@ -120,8 +120,8 @@ pub(super) enum Ot2TaskExecution {
         reaction_wells: Vec<String>,
         additions: Vec<MaterialAddition>,
         reaction_volume_ul: u32,
-        mix_cycles: u32,
-        mix_volume_ul: u32,
+        final_mix: GoldenGateMixExecution,
+        source_temperature_c: Option<f64>,
     },
     ThermalProgram {
         title: String,
@@ -214,6 +214,17 @@ pub(super) struct MaterialAddition {
     #[serde(flatten)]
     pub(super) placement: MaterialPlacement,
     pub(super) volume_ul: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) source_mix: Option<GoldenGateMixExecution>,
+    pub(super) transfer_technique: TransferTechnique,
+    pub(super) reuse_tip_for_final_mix: bool,
+}
+
+#[derive(Clone, Serialize)]
+pub(super) struct GoldenGateMixExecution {
+    pub(super) cycles: u32,
+    pub(super) volume_ul: u32,
+    pub(super) technique: MixTechnique,
 }
 
 #[derive(Clone, Serialize)]
@@ -634,6 +645,13 @@ fn plan_setup(
                 load_volume_ul: None,
             },
             volume_ul: addition.volume_ul,
+            source_mix: addition.source_mix.map(|mixing| GoldenGateMixExecution {
+                cycles: mixing.cycles,
+                volume_ul: mixing.volume_ul,
+                technique: mixing.technique,
+            }),
+            transfer_technique: addition.transfer_technique,
+            reuse_tip_for_final_mix: addition.reuse_tip_for_final_mix,
         })
         .collect::<Vec<_>>();
 
@@ -645,8 +663,28 @@ fn plan_setup(
             reaction_plate.len(),
         ));
     }
-    let required_tips = (additions.len() + 1)
+    if additions
+        .iter()
+        .take(additions.len().saturating_sub(1))
+        .any(|addition| addition.reuse_tip_for_final_mix)
+    {
+        return Err(format!(
+            "OT-2 Procedure task '{}' can reuse only its final addition path for final mixing",
+            task.id
+        ));
+    }
+    let final_mix_tips = if additions
+        .last()
+        .is_some_and(|addition| addition.reuse_tip_for_final_mix)
+    {
+        0
+    } else {
+        procedure.replicates
+    };
+    let required_tips = additions
+        .len()
         .checked_mul(procedure.replicates)
+        .and_then(|tips| tips.checked_add(final_mix_tips))
         .ok_or_else(|| format!("OT-2 Procedure task '{}' tip count overflows", task.id))?;
     let tip_capacity = profile.stages.assembly.small_tips.total_capacity();
     if required_tips > tip_capacity {
@@ -661,8 +699,12 @@ fn plan_setup(
             .collect(),
         additions,
         reaction_volume_ul: procedure.reaction_volume_ul,
-        mix_cycles: procedure.mix_cycles,
-        mix_volume_ul: procedure.mix_volume_ul,
+        final_mix: GoldenGateMixExecution {
+            cycles: procedure.final_mix.cycles,
+            volume_ul: procedure.final_mix.volume_ul,
+            technique: procedure.final_mix.technique,
+        },
+        source_temperature_c: procedure.source_temperature_c,
     })
 }
 
@@ -1318,8 +1360,7 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             reaction_wells,
             additions,
             reaction_volume_ul,
-            mix_cycles,
-            mix_volume_ul,
+            final_mix,
             ..
         } => {
             doc.heading(1, [text("Load sources")]);
@@ -1350,7 +1391,8 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
                 ))],
                 vec![text(format!("Final volume: {reaction_volume_ul} µL"))],
                 vec![text(format!(
-                    "Mix each reaction {mix_cycles} times at {mix_volume_ul} µL"
+                    "Mix each reaction {} times at {} µL",
+                    final_mix.cycles, final_mix.volume_ul
                 ))],
                 vec![
                     text("Import "),

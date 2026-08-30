@@ -38,6 +38,7 @@ pub fn standard_method_definitions() -> Vec<MethodDefinition> {
     vec![
         artifact_realization_service(),
         automated_golden_gate(),
+        temperature_staged_golden_gate(),
         material_provisioning(),
         automated_chemical_transformation(),
         manual_chemical_transformation(),
@@ -79,6 +80,43 @@ fn artifact_realization_service() -> MethodDefinition {
 }
 
 fn automated_golden_gate() -> MethodDefinition {
+    golden_gate_method(
+        "automated-golden-gate",
+        GoldenGateSetupMethod::Basic {
+            mix_cycles: 3,
+            mix_volume_ul: 15,
+        },
+    )
+}
+
+fn temperature_staged_golden_gate() -> MethodDefinition {
+    golden_gate_method(
+        "temperature-staged-golden-gate",
+        GoldenGateSetupMethod::TemperatureStaged {
+            source_mix_cycles: 3,
+            source_temperature_c: 4,
+            bubble_clear_divisor_ul: 10,
+            bubble_clear_max_volume_ul: 20,
+            bubble_clear_dispense_offset_mm: 8,
+        },
+    )
+}
+
+enum GoldenGateSetupMethod {
+    Basic {
+        mix_cycles: u32,
+        mix_volume_ul: u32,
+    },
+    TemperatureStaged {
+        source_mix_cycles: u32,
+        source_temperature_c: u32,
+        bubble_clear_divisor_ul: u32,
+        bubble_clear_max_volume_ul: u32,
+        bubble_clear_dispense_offset_mm: u32,
+    },
+}
+
+fn golden_gate_method(method_id: &str, setup: GoldenGateSetupMethod) -> MethodDefinition {
     let parameters = realization_parameters();
     let setup_parameters = [
         "artifact",
@@ -109,13 +147,45 @@ fn automated_golden_gate() -> MethodDefinition {
         "heat_inactivation_minutes",
         "hold_temperature_c",
     ];
-    let setup_task_parameters = with_integer_literals(
-        select_parameters(&parameters, &setup_parameters),
-        [("mix_cycles", 3), ("mix_volume_ul", 15)],
-    );
+    let setup_task_parameters = match setup {
+        GoldenGateSetupMethod::Basic {
+            mix_cycles,
+            mix_volume_ul,
+        } => with_text_literal(
+            with_integer_literals(
+                select_parameters(&parameters, &setup_parameters),
+                [("mix_cycles", mix_cycles), ("mix_volume_ul", mix_volume_ul)],
+            ),
+            "setup_strategy",
+            "basic_v1",
+        ),
+        GoldenGateSetupMethod::TemperatureStaged {
+            source_mix_cycles,
+            source_temperature_c,
+            bubble_clear_divisor_ul,
+            bubble_clear_max_volume_ul,
+            bubble_clear_dispense_offset_mm,
+        } => with_text_literal(
+            with_integer_literals(
+                select_parameters(&parameters, &setup_parameters),
+                [
+                    ("source_mix_cycles", source_mix_cycles),
+                    ("source_temperature_c", source_temperature_c),
+                    ("bubble_clear_divisor_ul", bubble_clear_divisor_ul),
+                    ("bubble_clear_max_volume_ul", bubble_clear_max_volume_ul),
+                    (
+                        "bubble_clear_dispense_offset_mm",
+                        bubble_clear_dispense_offset_mm,
+                    ),
+                ],
+            ),
+            "setup_strategy",
+            "temperature_staged_v1",
+        ),
+    };
     let cycling_task_parameters = select_parameters(&parameters, &cycling_parameters);
     MethodDefinition {
-        id: method("automated-golden-gate"),
+        id: method(method_id),
         refines: intent("std.bio.build.realize"),
         inputs: vec![input("design", PortType::Design)],
         parameters: parameters.clone(),
@@ -696,11 +766,11 @@ fn with_integer_literals<const N: usize>(
     mut parameters: Vec<ProcedureParameterDefinition>,
     values: [(&str, u32); N],
 ) -> Vec<ProcedureParameterDefinition> {
-    parameters.extend(
-        values
-            .into_iter()
-            .map(|(name, value)| literal_integer_parameter(name, value)),
-    );
+    for (name, value) in values {
+        let id = local(name);
+        parameters.retain(|parameter| parameter.id != id);
+        parameters.push(literal_integer_parameter(name, value));
+    }
     parameters
 }
 
@@ -717,6 +787,25 @@ fn literal_integer_parameter(name: &str, value: u32) -> ProcedureParameterDefini
             value: ProcedureValue::Scalar { value },
         },
     }
+}
+
+fn with_text_literal(
+    mut parameters: Vec<ProcedureParameterDefinition>,
+    name: &str,
+    value: &str,
+) -> Vec<ProcedureParameterDefinition> {
+    let id = local(name);
+    parameters.retain(|parameter| parameter.id != id);
+    let value = PropertyValue::new(ScalarValue::Text(value.to_owned()), None)
+        .expect("built-in text Procedure literals are unitless");
+    parameters.push(ProcedureParameterDefinition {
+        id,
+        property_kind: property(&upper_camel(name)),
+        value: ProcedureValueExpression::Literal {
+            value: ProcedureValue::Scalar { value },
+        },
+    });
+    parameters
 }
 
 fn task(
@@ -871,8 +960,13 @@ mod tests {
         let transformation = registry.methods_for(&intent("std.lab.plasmid.transform"));
         let plating = registry.methods_for(&intent("std.lab.plasmid.plate"));
 
-        assert_eq!(realization.len(), 2);
+        assert_eq!(realization.len(), 3);
         assert_eq!(realization[0].id, method("automated-golden-gate"));
+        assert!(
+            realization
+                .iter()
+                .any(|candidate| candidate.id == method("temperature-staged-golden-gate"))
+        );
         assert_eq!(recovery.len(), 3);
         assert_eq!(transformation.len(), 2);
         assert_eq!(plating.len(), 2);

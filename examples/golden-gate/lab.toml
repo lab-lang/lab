@@ -8,7 +8,7 @@ entry = "src/programs/reporter_panel.lab"
 
 [[planning.methods]]
 source-operation = "std.bio.build.realize"
-method = "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+method = "https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate"
 
 [[planning.methods]]
 source-operation = "std.lab.plasmid.transform"

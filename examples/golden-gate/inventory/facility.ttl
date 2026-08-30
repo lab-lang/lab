@@ -57,6 +57,7 @@ ex:opentrons_ot2
     fac:isActive true ;
     fac:capability ex:opentrons_ot2_metered_liquid_transfer,
         ex:opentrons_ot2_in_well_mixing,
+        ex:opentrons_ot2_temperature_controlled_staging,
         ex:opentrons_ot2_liquid_level_aware_aspiration,
         ex:opentrons_ot2_vessel_relative_liquid_access,
         ex:opentrons_ot2_air_gap_handling,
@@ -104,6 +105,30 @@ ex:opentrons_ot2_maximum_mix_volume
     fac:propertyKind cap:MaximumMixVolume ;
     fac:realValue "300"^^xsd:double ;
     fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_temperature_controlled_staging
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "temperature_controlled_staging" ;
+    fac:capabilityKind cap:TemperatureControlledStaging ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_staging_temperature,
+        ex:opentrons_ot2_maximum_staging_temperature .
+
+ex:opentrons_ot2_minimum_staging_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_staging_temperature" ;
+    fac:propertyKind cap:MinimumTemperature ;
+    fac:realValue "4"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_staging_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_staging_temperature" ;
+    fac:propertyKind cap:MaximumTemperature ;
+    fac:realValue "4"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
 
 ex:opentrons_ot2_liquid_level_aware_aspiration
     a sbol:Identified, fac:CapabilityOffering ;

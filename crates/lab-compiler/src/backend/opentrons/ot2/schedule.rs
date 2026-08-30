@@ -11,7 +11,8 @@ use serde::Serialize;
 
 use super::BACKEND;
 use super::invocation::{
-    Ot2TaskExecution, PlateMapEntry, dilution_ratio, layered_plate_layout, plan_task,
+    MaterialPlacement, Ot2TaskExecution, PlateMapEntry, dilution_ratio, layered_plate_layout,
+    plan_task,
 };
 use super::profile::Ot2AdapterProfile;
 use crate::backend::invocation::exact_invocation_tasks;
@@ -324,26 +325,46 @@ pub(super) fn try_plan_golden_gate_batches(
         .iter()
         .map(|task| Ok((task.task.id.clone(), graph.task_producers(task.task)?)))
         .collect::<Result<BTreeMap<_, _>, String>>()?;
-    let assembly_pairs = pair_tasks(&tasks, &producers, SETUP_GOLDEN_GATE, CYCLE_GOLDEN_GATE)?;
+    let assembly_pairs = pair_tasks(
+        &graph,
+        &tasks,
+        &producers,
+        SETUP_GOLDEN_GATE,
+        CYCLE_GOLDEN_GATE,
+        true,
+    )?;
     let prepare_heat = pair_tasks(
+        &graph,
         &tasks,
         &producers,
         PREPARE_CHEMICAL_TRANSFORMATION,
         HEAT_SHOCK_TRANSFORMATION,
+        true,
     )?;
     let heat_recovery = pair_tasks(
+        &graph,
         &tasks,
         &producers,
         HEAT_SHOCK_TRANSFORMATION,
         ADD_RECOVERY_MEDIUM,
+        false,
     )?;
     let recovery_incubation = pair_tasks(
+        &graph,
         &tasks,
         &producers,
         ADD_RECOVERY_MEDIUM,
         INCUBATE_RECOVERY_CULTURE,
+        true,
     )?;
-    let dilution_plating = pair_tasks(&tasks, &producers, SERIAL_DILUTION, PLATE_DILUTED_CULTURE)?;
+    let dilution_plating = pair_tasks(
+        &graph,
+        &tasks,
+        &producers,
+        SERIAL_DILUTION,
+        PLATE_DILUTED_CULTURE,
+        false,
+    )?;
 
     let mut locations = Vec::new();
     let mut product_wells = BTreeMap::<LocalId, (String, u32)>::new();
@@ -460,22 +481,28 @@ pub(super) fn try_plan_golden_gate_batches(
 }
 
 fn pair_tasks(
+    graph: &TaskGraph<'_>,
     tasks: &[PlannedTask<'_>],
     producers: &BTreeMap<LocalId, BTreeSet<LocalId>>,
     producer_operation: &str,
     consumer_operation: &str,
+    within_method: bool,
 ) -> Result<Vec<(usize, usize)>, String> {
     tasks
         .iter()
         .enumerate()
         .filter(|(_, task)| task.task.operation.as_str() == producer_operation)
         .map(|(producer_index, producer)| {
+            let producer_method = graph.method_by_task[&producer.task.id].choice.as_str();
             let consumers = tasks
                 .iter()
                 .enumerate()
                 .filter(|(_, task)| {
                     task.task.operation.as_str() == consumer_operation
                         && producers[&task.task.id].contains(&producer.task.id)
+                        && (!within_method
+                            || graph.method_by_task[&task.task.id].choice.as_str()
+                                == producer_method)
                 })
                 .map(|(index, _)| index)
                 .collect::<Vec<_>>();
@@ -539,7 +566,14 @@ fn allocate_assembly(
                 additions,
                 reaction_wells,
                 ..
-            } => (additions.len() + 1) * reaction_wells.len(),
+            } => {
+                let final_mix_tips = usize::from(
+                    !additions
+                        .last()
+                        .is_some_and(|addition| addition.reuse_tip_for_final_mix),
+                );
+                (additions.len() + final_mix_tips) * reaction_wells.len()
+            }
             _ => 0,
         })
         .sum::<usize>();
@@ -701,6 +735,7 @@ fn allocate_transformation(
     let mut cell_mix_requirements = BTreeMap::<String, u32>::new();
     let mut dna_withdrawals = BTreeMap::<String, u32>::new();
     let mut dna_mix_requirements = BTreeMap::<String, u32>::new();
+    let mut external_dna_keys = BTreeSet::new();
     let mut recovery_loads = BTreeMap::<String, u32>::new();
     for (prepare, heat) in prepare_heat {
         let recovery = *recovery_by_heat.get(heat).ok_or_else(|| {
@@ -742,12 +777,13 @@ fn allocate_transformation(
             .or_insert(*cell_mix_volume_ul);
         cell_keys.insert(*prepare, cell_key);
         for placement in dna {
-            let key = format!(
-                "dna:{}:{}",
-                placement.material.symbol,
-                serde_json::to_string(&placement.material.source)
-                    .map_err(|error| error.to_string())?
-            );
+            let key = dna_source_key(placement)?;
+            if matches!(
+                &placement.material.source,
+                SelectedMaterialSource::MaterialLot { .. }
+            ) {
+                external_dna_keys.insert(key.clone());
+            }
             let volume = dna_volume_ul
                 .checked_mul(u32::try_from(reaction_wells.len()).map_err(|_| {
                     "OT-2 transformation replicate count does not fit DNA arithmetic".to_owned()
@@ -788,6 +824,36 @@ fn allocate_transformation(
     }
     let cell_loads = required_source_loads(&cell_withdrawals, &cell_mix_requirements);
     let dna_loads = required_source_loads(&dna_withdrawals, &dna_mix_requirements);
+    let dna_plate_wells = plate_wells(profile.stages.transformation.dna_plate.capacity);
+    let product_positions = product_wells
+        .values()
+        .map(|(well, _)| well.as_str())
+        .collect::<BTreeSet<_>>();
+    if product_positions
+        .iter()
+        .any(|well| !dna_plate_wells.iter().any(|candidate| candidate == well))
+    {
+        return Err(
+            "OT-2 assembly output position does not exist in the configured transformation DNA plate"
+                .to_owned(),
+        );
+    }
+    let available_external_wells = dna_plate_wells
+        .into_iter()
+        .filter(|well| !product_positions.contains(well.as_str()))
+        .collect::<Vec<_>>();
+    if external_dna_keys.len() > available_external_wells.len() {
+        return Err(format!(
+            "OT-2 transformation batch needs {} external DNA wells in addition to {} assembly products, but the configured DNA plate has only {} free wells",
+            external_dna_keys.len(),
+            product_positions.len(),
+            available_external_wells.len()
+        ));
+    }
+    let external_dna_wells = external_dna_keys
+        .into_iter()
+        .zip(available_external_wells)
+        .collect::<BTreeMap<_, _>>();
     let source_wells = assign_source_wells(
         BACKEND,
         "batched-transformation-sources",
@@ -873,39 +939,56 @@ fn allocate_transformation(
             positions: vec![cell_source_well.clone()],
         });
         for placement in dna {
-            let SelectedMaterialSource::ChoiceOutput { choice } = &placement.material.source else {
-                return Err(format!(
-                    "OT-2 batched transformation DNA '{}' must come from an allocated assembly output",
-                    placement.material.symbol
-                ));
+            let key = dna_source_key(placement)?;
+            let (well, available_volume) = match &placement.material.source {
+                SelectedMaterialSource::ChoiceOutput { choice } => {
+                    let (well, available_volume) = product_wells.get(choice).ok_or_else(|| {
+                        format!(
+                            "OT-2 cannot locate assembly output '{choice}' for DNA '{}'",
+                            placement.material.symbol
+                        )
+                    })?;
+                    if dna_loads[&key] > *available_volume {
+                        return Err(format!(
+                            "OT-2 transformations require {} uL of '{}' but assembly output '{choice}' contains {available_volume} uL",
+                            dna_loads[&key], placement.material.symbol
+                        ));
+                    }
+                    (well.clone(), *available_volume)
+                }
+                SelectedMaterialSource::MaterialLot { .. } => (
+                    external_dna_wells.get(&key).cloned().ok_or_else(|| {
+                        format!(
+                            "OT-2 cannot allocate external DNA '{}' in the transformation plate",
+                            placement.material.symbol
+                        )
+                    })?,
+                    dna_loads[&key],
+                ),
             };
-            let (well, available_volume) = product_wells.get(choice).ok_or_else(|| {
-                format!(
-                    "OT-2 cannot locate assembly output '{choice}' for DNA '{}'",
-                    placement.material.symbol
-                )
-            })?;
-            let key = format!(
-                "dna:{}:{}",
-                placement.material.symbol,
-                serde_json::to_string(&placement.material.source)
-                    .map_err(|error| error.to_string())?
-            );
-            if dna_loads[&key] > *available_volume {
-                return Err(format!(
-                    "OT-2 transformations require {} uL of '{}' but assembly output '{choice}' contains {available_volume} uL",
-                    dna_loads[&key], placement.material.symbol
-                ));
-            }
-            placement.source_well = well.clone();
-            placement.load_volume_ul = Some(*available_volume);
+            placement.source_well = well;
+            placement.load_volume_ul = Some(available_volume);
         }
         for material in prepare_materials {
-            let SelectedMaterialSource::ChoiceOutput { choice } = &material.source else {
-                return Err(format!(
-                    "OT-2 batched transformation material '{}' does not come from an assembly output",
-                    material.symbol
-                ));
+            let key = dna_material_source_key(&material.symbol, &material.source)?;
+            let well = match &material.source {
+                SelectedMaterialSource::ChoiceOutput { choice } => product_wells
+                    .get(choice)
+                    .map(|(well, _)| well.clone())
+                    .ok_or_else(|| {
+                        format!(
+                            "OT-2 cannot locate assembly output '{choice}' for DNA '{}'",
+                            material.symbol
+                        )
+                    })?,
+                SelectedMaterialSource::MaterialLot { .. } => {
+                    external_dna_wells.get(&key).cloned().ok_or_else(|| {
+                        format!(
+                            "OT-2 cannot allocate external DNA '{}' in the transformation plate",
+                            material.symbol
+                        )
+                    })?
+                }
             };
             locations.push(ScheduledPhysicalLocation {
                 value: ScheduledValueRef::MaterialInput {
@@ -913,7 +996,7 @@ fn allocate_transformation(
                     input: material.input,
                 },
                 resource: "transformation-dna-plate".to_owned(),
-                positions: vec![product_wells[choice].0.clone()],
+                positions: vec![well],
             });
         }
         add_output_locations(
@@ -1062,6 +1145,20 @@ fn required_source_loads(
             )
         })
         .collect()
+}
+
+fn dna_source_key(placement: &MaterialPlacement) -> Result<String, String> {
+    dna_material_source_key(&placement.material.symbol, &placement.material.source)
+}
+
+fn dna_material_source_key(
+    symbol: &str,
+    source: &SelectedMaterialSource,
+) -> Result<String, String> {
+    Ok(format!(
+        "dna:{symbol}:{}",
+        serde_json::to_string(source).map_err(|error| error.to_string())?
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

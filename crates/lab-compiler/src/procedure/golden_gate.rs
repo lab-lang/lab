@@ -1,12 +1,29 @@
 use lab_procedure::{
-    FluidPathPolicy, Location, MaterialInput, MaterialOutput, PipettingConstraints,
-    PipettingProgramV1, PipettingStep, ProcedureProgram, Vessel, VesselRole, Volume,
+    AspirationStrategy, DispenseStrategy, FluidPathPolicy, Length, Location, MaterialInput,
+    MaterialOutput, MixTechnique, PipettingConstraints, PipettingProgramV1, PipettingStep,
+    ProcedureProgram, Temperature, TemperatureRange, TransferTechnique, Vessel, VesselRole, Volume,
 };
 
 use super::ProcedureTaskInstance;
 use super::view::{TaskView, material_symbols, procedure_id};
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
+const MILLIMETRE: &str = "http://qudt.org/vocab/unit/MilliM";
+const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
+
+enum SetupStrategy {
+    Basic {
+        mix_cycles: u32,
+        mix_volume: u32,
+    },
+    TemperatureStaged {
+        source_mix_cycles: u32,
+        source_temperature: u32,
+        bubble_clear_cycles: u32,
+        bubble_clear_volume: u32,
+        bubble_clear_offset: u32,
+    },
+}
 
 pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedureProgram, String> {
     let view = TaskView::new(task);
@@ -30,8 +47,46 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     let enzyme_volume = view.integer_parameter("enzyme_volume_ul", Some(MICROLITRE))?;
     let ligase_volume = view.integer_parameter("ligase_volume_ul", Some(MICROLITRE))?;
     let buffer_volume = view.integer_parameter("buffer_volume_ul", Some(MICROLITRE))?;
-    let mix_cycles = view.integer_parameter("mix_cycles", None)?;
-    let mix_volume = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
+    let setup_strategy = match view.text_parameter("setup_strategy")?.as_str() {
+        "basic_v1" => SetupStrategy::Basic {
+            mix_cycles: view.integer_parameter("mix_cycles", None)?,
+            mix_volume: view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?,
+        },
+        "temperature_staged_v1" => {
+            let bubble_clear_divisor =
+                view.integer_parameter("bubble_clear_divisor_ul", Some(MICROLITRE))?;
+            let bubble_clear_max_volume =
+                view.integer_parameter("bubble_clear_max_volume_ul", Some(MICROLITRE))?;
+            if bubble_clear_divisor == 0 {
+                return Err(
+                    "parameter `bubble_clear_divisor_ul` must be greater than zero".to_owned(),
+                );
+            }
+            if bubble_clear_max_volume == 0 {
+                return Err(
+                    "parameter `bubble_clear_max_volume_ul` must be greater than zero".to_owned(),
+                );
+            }
+            let bubble_clear_cycles = reaction_volume / bubble_clear_divisor;
+            if bubble_clear_cycles == 0 {
+                return Err(format!(
+                    "reaction volume {reaction_volume} uL is too small for a bubble-clearing movement every {bubble_clear_divisor} uL"
+                ));
+            }
+            SetupStrategy::TemperatureStaged {
+                source_mix_cycles: view.integer_parameter("source_mix_cycles", None)?,
+                source_temperature: view
+                    .integer_parameter("source_temperature_c", Some(DEGREE_CELSIUS))?,
+                bubble_clear_cycles,
+                bubble_clear_volume: reaction_volume.min(bubble_clear_max_volume),
+                bubble_clear_offset: view
+                    .integer_parameter("bubble_clear_dispense_offset_mm", Some(MILLIMETRE))?,
+            }
+        }
+        value => {
+            return Err(format!("unsupported Golden Gate setup strategy `{value}`"));
+        }
+    };
 
     for (name, value) in [
         ("assembly_replicates", replicates),
@@ -40,17 +95,31 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         ("enzyme_volume_ul", enzyme_volume),
         ("ligase_volume_ul", ligase_volume),
         ("buffer_volume_ul", buffer_volume),
-        ("mix_cycles", mix_cycles),
-        ("mix_volume_ul", mix_volume),
     ] {
         if value == 0 {
             return Err(format!("parameter `{name}` must be greater than zero"));
         }
     }
-    if mix_volume > reaction_volume {
-        return Err(format!(
-            "mix volume {mix_volume} uL exceeds the {reaction_volume} uL reaction volume"
-        ));
+    match &setup_strategy {
+        SetupStrategy::Basic {
+            mix_cycles,
+            mix_volume,
+        } => {
+            if *mix_cycles == 0 || *mix_volume == 0 {
+                return Err("basic Golden Gate mixing values must be greater than zero".to_owned());
+            }
+            if *mix_volume > reaction_volume {
+                return Err(format!(
+                    "mix volume {mix_volume} uL exceeds the {reaction_volume} uL reaction volume"
+                ));
+            }
+        }
+        SetupStrategy::TemperatureStaged {
+            source_mix_cycles, ..
+        } if *source_mix_cycles == 0 => {
+            return Err("parameter `source_mix_cycles` must be greater than zero".to_owned());
+        }
+        SetupStrategy::TemperatureStaged { .. } => {}
     }
 
     let backbone_material = view.one_material("backbone")?;
@@ -85,23 +154,23 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     })?;
     let mut additions = Vec::new();
     if water_volume > 0 {
-        additions.push((water_material, water_volume));
+        additions.push((water_material, water_volume, false));
     }
     additions.extend([
-        (buffer_material, buffer_volume),
-        (ligase_material, ligase_volume),
-        (enzyme_material, enzyme_volume),
-        (backbone_material, part_volume),
+        (buffer_material, buffer_volume, true),
+        (ligase_material, ligase_volume, true),
+        (enzyme_material, enzyme_volume, true),
+        (backbone_material, part_volume, true),
     ]);
     additions.extend(
         component_materials
             .into_iter()
-            .map(|material| (material, part_volume)),
+            .map(|material| (material, part_volume, true)),
     );
     additions.extend(
         dependency_materials
             .into_iter()
-            .map(|material| (material, part_volume)),
+            .map(|material| (material, part_volume, true)),
     );
 
     let product = task
@@ -125,8 +194,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
 
     let mut materials = Vec::with_capacity(additions.len());
     let mut vessels = Vec::with_capacity(additions.len() + 1);
-    let mut steps = Vec::with_capacity(additions.len() + 1);
-    for (index, (material, volume)) in additions.into_iter().enumerate() {
+    let mut normalized_additions = Vec::with_capacity(additions.len());
+    for (index, (material, volume, mix_source)) in additions.into_iter().enumerate() {
         let material_id = procedure_id(material.id.as_str())?;
         let source_vessel = procedure_id(&format!("source-{index:04}"))?;
         materials.push(MaterialInput {
@@ -140,19 +209,14 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             positions: 1,
             initial_volume_each: None,
         });
-        steps.push(PipettingStep::Distribute {
-            id: procedure_id(&format!("add-{index:04}"))?,
-            source: Location {
+        normalized_additions.push((
+            Location {
                 vessel: source_vessel,
                 position: 0,
             },
-            destinations: destinations.clone(),
-            volume_each: Volume::parse_microlitres(volume.to_string())
-                .map_err(|error| error.to_string())?,
-            fluid_path: FluidPathPolicy::SharedSourceNoReentry,
-            fluid_path_group: None,
-            technique: Default::default(),
-        });
+            volume,
+            mix_source,
+        ));
     }
     vessels.push(Vessel {
         id: destination_vessel,
@@ -162,23 +226,124 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         positions: replicates,
         initial_volume_each: None,
     });
-    steps.push(PipettingStep::Mix {
-        id: procedure_id("mix-reactions")?,
-        targets: destinations,
-        cycles: mix_cycles,
-        volume: Volume::parse_microlitres(mix_volume.to_string())
-            .map_err(|error| error.to_string())?,
-        fluid_path: FluidPathPolicy::IsolatedDestinations,
-        fluid_path_group: None,
-        technique: Default::default(),
-    });
+    let (steps, constraints) = match setup_strategy {
+        SetupStrategy::Basic {
+            mix_cycles,
+            mix_volume,
+        } => {
+            let mut steps = Vec::with_capacity(normalized_additions.len() + 1);
+            for (index, (source, volume, _)) in normalized_additions.iter().enumerate() {
+                steps.push(PipettingStep::Distribute {
+                    id: procedure_id(&format!("add-{index:04}"))?,
+                    source: source.clone(),
+                    destinations: destinations.clone(),
+                    volume_each: Volume::parse_microlitres(volume.to_string())
+                        .map_err(|error| error.to_string())?,
+                    fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+                    fluid_path_group: None,
+                    technique: TransferTechnique::default(),
+                });
+            }
+            steps.push(PipettingStep::Mix {
+                id: procedure_id("mix-reactions")?,
+                targets: destinations,
+                cycles: mix_cycles,
+                volume: Volume::parse_microlitres(mix_volume.to_string())
+                    .map_err(|error| error.to_string())?,
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: MixTechnique::default(),
+            });
+            (steps, PipettingConstraints::default())
+        }
+        SetupStrategy::TemperatureStaged {
+            source_mix_cycles,
+            source_temperature,
+            bubble_clear_cycles,
+            bubble_clear_volume,
+            bubble_clear_offset,
+        } => {
+            let mut steps = Vec::new();
+            for (replicate, destination) in destinations.iter().enumerate() {
+                for (addition, (source, volume, mix_source)) in
+                    normalized_additions.iter().enumerate()
+                {
+                    let fluid_path_group = procedure_id(&format!(
+                        "addition-{addition:04}-replicate-{replicate:04}-path"
+                    ))?;
+                    if *mix_source {
+                        steps.push(PipettingStep::Mix {
+                            id: procedure_id(&format!(
+                                "mix-source-{addition:04}-replicate-{replicate:04}"
+                            ))?,
+                            targets: vec![source.clone()],
+                            cycles: source_mix_cycles,
+                            volume: Volume::parse_microlitres(volume.to_string())
+                                .map_err(|error| error.to_string())?,
+                            fluid_path: FluidPathPolicy::IsolatedDestinations,
+                            fluid_path_group: Some(fluid_path_group.clone()),
+                            technique: MixTechnique::default(),
+                        });
+                    }
+                    steps.push(PipettingStep::Transfer {
+                        id: procedure_id(&format!("add-{addition:04}-replicate-{replicate:04}"))?,
+                        source: source.clone(),
+                        destination: destination.clone(),
+                        volume: Volume::parse_microlitres(volume.to_string())
+                            .map_err(|error| error.to_string())?,
+                        fluid_path: FluidPathPolicy::IsolatedDestinations,
+                        fluid_path_group: mix_source.then_some(fluid_path_group.clone()),
+                        technique: TransferTechnique {
+                            blow_out: true,
+                            touch_tip: true,
+                            ..TransferTechnique::default()
+                        },
+                    });
+                    if addition + 1 == normalized_additions.len() {
+                        steps.push(PipettingStep::Mix {
+                            id: procedure_id(&format!("clear-bubbles-replicate-{replicate:04}"))?,
+                            targets: vec![destination.clone()],
+                            cycles: bubble_clear_cycles,
+                            volume: Volume::parse_microlitres(bubble_clear_volume.to_string())
+                                .map_err(|error| error.to_string())?,
+                            fluid_path: FluidPathPolicy::IsolatedDestinations,
+                            fluid_path_group: Some(fluid_path_group),
+                            technique: MixTechnique {
+                                aspiration: AspirationStrategy::VesselBottom {
+                                    offset: Length::parse_millimetres("0")
+                                        .map_err(|error| error.to_string())?,
+                                },
+                                dispense: DispenseStrategy::VesselBottom {
+                                    offset: Length::parse_millimetres(
+                                        bubble_clear_offset.to_string(),
+                                    )
+                                    .map_err(|error| error.to_string())?,
+                                },
+                                blow_out: true,
+                                touch_tip: true,
+                            },
+                        });
+                    }
+                }
+            }
+            (
+                steps,
+                PipettingConstraints {
+                    source_temperature: Some(TemperatureRange::exact(
+                        Temperature::parse_degrees_celsius(source_temperature.to_string())
+                            .map_err(|error| error.to_string())?,
+                    )),
+                },
+            )
+        }
+    };
 
     let program = PipettingProgramV1::new(
         materials,
         vec![MaterialOutput { id: product }],
         vessels,
         steps,
-        PipettingConstraints::default(),
+        constraints,
     )
     .validate()
     .map_err(|error| error.to_string())?;

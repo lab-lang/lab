@@ -13,8 +13,8 @@ use lab_capability::{
 use lab_procedure::vocabulary::{
     AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
     LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1,
-    POST_DISPENSE_BLOWOUT, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, THERMAL_PROGRAM_V1, TOUCH_TIP,
-    VESSEL_RELATIVE_LIQUID_ACCESS,
+    POST_DISPENSE_BLOWOUT, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, TEMPERATURE_CONTROLLED_STAGING,
+    THERMAL_PROGRAM_V1, TOUCH_TIP, VESSEL_RELATIVE_LIQUID_ACCESS,
 };
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
@@ -166,6 +166,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [
                             METERED_LIQUID_TRANSFER,
                             IN_WELL_MIXING,
+                            TEMPERATURE_CONTROLLED_STAGING,
                             LIQUID_LEVEL_AWARE_ASPIRATION,
                             VESSEL_RELATIVE_LIQUID_ACCESS,
                             AIR_GAP_HANDLING,
@@ -371,6 +372,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [
                             METERED_LIQUID_TRANSFER,
                             IN_WELL_MIXING,
+                            TEMPERATURE_CONTROLLED_STAGING,
                             LIQUID_LEVEL_AWARE_ASPIRATION,
                             VESSEL_RELATIVE_LIQUID_ACCESS,
                             AIR_GAP_HANDLING,

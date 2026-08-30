@@ -1,0 +1,169 @@
+{
+  "schema_version": "lab.pudu-equivalence.v1",
+  "references": {
+    "buildcompiler": {
+      "revision": "cae798452450ec152881cfe447a83469202b5bed",
+      "fixture": "notebooks/results/buildcompiler_transformation_quickstart"
+    },
+    "pudu": {
+      "revision": "1214d2f9efd557aa84bc96502379554174355eae",
+      "assembly_implementation": "src/pudu/assembly.py:SBOLLoopAssembly",
+      "transformation_implementation": "src/pudu/transformation.py:HeatShockTransformation",
+      "plating_implementation": "src/pudu/plating.py:Plating"
+    }
+  },
+  "hardware": {
+    "robot_type": "OT-2",
+    "api_level": "2.21",
+    "thermocycler_generation": 1,
+    "thermocycler_load_name": "thermocycler module"
+  },
+  "assembly": {
+    "reaction_volume_ul": 20,
+    "source_temperature_c": 4,
+    "deactivate_sources_before_thermal": true,
+    "source_order": [
+      "water",
+      "buffer",
+      "ligase",
+      "restriction-enzyme",
+      "backbone",
+      "component"
+    ],
+    "source_mix": {
+      "excluded_roles": [
+        "water"
+      ],
+      "cycles": 3,
+      "volume": "transfer_volume"
+    },
+    "transfer": {
+      "aspiration_rate": 0.5,
+      "dispense_rate": 1.0,
+      "blow_out": true,
+      "touch_tip": true
+    },
+    "bubble_clear": {
+      "reuse_final_addition_tip": true,
+      "cycles": 2,
+      "volume_ul": 20,
+      "aspiration_bottom_offset_mm": 0,
+      "dispense_bottom_offset_mm": 8,
+      "blow_out_each_cycle": true,
+      "touch_tip_each_cycle": true
+    },
+    "thermal": {
+      "lid_temperature_c": 42,
+      "stages": [
+        {
+          "repeats": 75,
+          "steps": [
+            {
+              "temperature_c": 42,
+              "hold_seconds": 120
+            },
+            {
+              "temperature_c": 16,
+              "hold_seconds": 300
+            }
+          ]
+        },
+        {
+          "repeats": 1,
+          "steps": [
+            {
+              "temperature_c": 60,
+              "hold_seconds": 600
+            },
+            {
+              "temperature_c": 80,
+              "hold_seconds": 600
+            }
+          ]
+        }
+      ],
+      "final_hold_c": 4
+    }
+  },
+  "transformation": {
+    "replicates": 2,
+    "competent_cells": {
+      "volume_ul": 20,
+      "source_mix_cycles": 3,
+      "source_mix_volume_ul": 50,
+      "distribution_disposal_volume_ul": 0
+    },
+    "dna": {
+      "volume_ul": 2,
+      "source_mix_cycles": 3,
+      "source_mix_volume_ul": 2,
+      "transfer_blow_out": true,
+      "bubble_clear_cycles": 2,
+      "bubble_clear_volume_ul": 20,
+      "aspiration_bottom_offset_mm": 0,
+      "dispense_bottom_offset_mm": 8,
+      "touch_tip_after_bubble_clear": true
+    },
+    "heat_shock": {
+      "volume_ul": 22,
+      "steps": [
+        {
+          "temperature_c": 4,
+          "hold_seconds": 1800
+        },
+        {
+          "temperature_c": 42,
+          "hold_seconds": 60
+        },
+        {
+          "temperature_c": 4,
+          "hold_seconds": 120
+        }
+      ]
+    },
+    "recovery": {
+      "medium_volume_ul": 60,
+      "dispense_above_liquid_mm": 2,
+      "air_gap_ul": 10,
+      "incubation_temperature_c": 37,
+      "incubation_seconds": 3600,
+      "incubation_volume_ul": 82
+    }
+  },
+  "plating": {
+    "serial_dilutions": 2,
+    "medium_volume_ul": 18,
+    "culture_volume_ul": 2,
+    "mix_cycles": 5,
+    "mix_volume_ul": 19,
+    "medium_distribution_chunk_size": 8,
+    "medium_distribution_disposal_volume_ul": 4,
+    "colony_volume_ul": 4,
+    "agar_surface_offset_mm": -8,
+    "blow_out": true,
+    "tip_order": "seed_dilution_2_then_plate_dilution_1_then_fresh_tip_for_dilution_2"
+  },
+  "lineage_exemplar": {
+    "assembly_product_well": "A1",
+    "transformation_wells": [
+      "A1",
+      "B1"
+    ],
+    "dilution_1_wells": [
+      "A1",
+      "B1"
+    ],
+    "dilution_2_wells": [
+      "A7",
+      "B7"
+    ],
+    "agar_dilution_1_wells": [
+      "A1",
+      "B1"
+    ],
+    "agar_dilution_2_wells": [
+      "A7",
+      "B7"
+    ]
+  }
+}
