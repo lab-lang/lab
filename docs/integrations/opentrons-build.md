@@ -51,3 +51,5 @@ Emitted protocols declare `robotType: "OT-2"`. Opentrons moved OT-2 support into
 ## Current boundary
 
 The specialization validates exact MaterialLot identity, supported Procedure semantics, reaction balance, replicate and dilution bounds, plate capacity, source-rack capacity, and tip capacity. It does not query a live inventory service, reserve stock, select among equivalent lots without policy, reason over quantity or expiration, design compatible overhangs, normalize concentrations, or upload protocols to hardware. Generated instructions and robot code require facility-specific review and qualification before physical execution.
+
+The [BuildCompiler and PUDU equivalence audit](buildcompiler-pudu-equivalence.md) records the additional transformation, recovery, plating, liquid-access, and plate-map behavior required before this specialization is equivalent to the Myers Research Group's historical Golden Gate pipeline.

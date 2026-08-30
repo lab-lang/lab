@@ -73,6 +73,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0046: Allocated Procedure is the device boundary](language/decisions/0046-allocated-procedure-is-the-device-boundary.md) | immutable exact-task adapter invocations replace fixed Protocol and whole-program device lowering |
 | [0047: Packages contribute versioned Method catalogs](language/decisions/0047-packages-contribute-versioned-method-catalogs.md) | portable packages extend Method, Procedure, and Capability semantics through one shared validated document contract |
 | [0048: Canonical Procedure programs derive atomic capability formulas](language/decisions/0048-canonical-procedures-derive-capabilities.md) | device-neutral operational programs derive fine-grained requirements that one Asset and implementation realize atomically |
+| [0049: Pipetting techniques cross device boundaries](language/decisions/0049-pipetting-techniques-cross-device.md) | portable liquid-access constraints remain distinct from calibrated adapter realizations |
 
 ## Implementation and embedding
 
@@ -84,6 +85,7 @@ Decision records preserve the reasoning and status behind the language rather th
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
+- [BuildCompiler and PUDU equivalence](integrations/buildcompiler-pudu-equivalence.md) pins the historical Myers Research Group behavior the Golden Gate OT-2 slice must preserve and defines its acceptance gates.
 
 ## Examples versus specimens
 
