@@ -13,6 +13,9 @@ use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
 use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
+use crate::backend::opentrons::ot2::schedule::{
+    Ot2BatchExecution, Ot2BatchPlan, Ot2BatchRun, try_plan_golden_gate_batches,
+};
 use crate::backend::procedure::{
     ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
     PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
@@ -23,13 +26,15 @@ use crate::backend::profile::Plates;
 use crate::backend::resources::{Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
 use crate::planning::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,
-    PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
-    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    AdapterInvocation, AdapterInvocationPlan, AllocatedExecutionGroup, AllocatedProcedureTask,
+    AllocatedRequirementBinding, PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput,
+    PlanningValueSource, SelectedCapabilityParameter, SelectedMaterialBinding,
+    SelectedMaterialSource,
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v3";
+const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v1";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
 const CYCLE_TEMPLATE: &str = include_str!("invocation/thermal_cycle.py");
@@ -37,6 +42,9 @@ const TRANSFORMATION_TEMPLATE: &str = include_str!("invocation/prepare_transform
 const RECOVERY_TEMPLATE: &str = include_str!("invocation/add_recovery_medium.py");
 const DILUTION_TEMPLATE: &str = include_str!("invocation/serial_dilution.py");
 const PLATING_TEMPLATE: &str = include_str!("invocation/plate_diluted_culture.py");
+const ASSEMBLY_BATCH_TEMPLATE: &str = include_str!("invocation/assembly_batch.py");
+const TRANSFORMATION_BATCH_TEMPLATE: &str = include_str!("invocation/transformation_batch.py");
+const PLATING_BATCH_TEMPLATE: &str = include_str!("invocation/plating_batch.py");
 const API_LEVEL_SENTINEL: &str = "\"2.21\",  # LAB:API_LEVEL";
 const PLAN_SENTINEL: &str = "\"{}\"  # LAB:INVOCATION_PLAN";
 
@@ -55,6 +63,22 @@ struct Ot2TaskPlan {
 }
 
 #[derive(Serialize)]
+struct Ot2RunPlan {
+    schema_version: String,
+    facility: String,
+    asset: String,
+    adapter: String,
+    adapter_profile: String,
+    adapter_profile_sha256: String,
+    schedule_sha256: String,
+    group: AllocatedExecutionGroup,
+    requirements: Vec<RequirementReview>,
+    tasks: Vec<TaskReview>,
+    deck: Ot2AdapterProfile,
+    execution: Ot2BatchExecution,
+}
+
+#[derive(Clone, Serialize)]
 struct RequirementReview {
     id: LocalId,
     capability_kind: String,
@@ -78,7 +102,7 @@ fn requirement_reviews(requirements: &[&AllocatedRequirementBinding]) -> Vec<Req
         .collect()
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct TaskReview {
     id: LocalId,
     operation: String,
@@ -88,9 +112,9 @@ struct TaskReview {
     materials: Vec<SelectedMaterialBinding>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Ot2TaskExecution {
+pub(super) enum Ot2TaskExecution {
     SetupGoldenGateReaction {
         artifact: String,
         reaction_wells: Vec<String>,
@@ -169,37 +193,38 @@ enum Ot2TaskExecution {
 }
 
 #[derive(Clone, Serialize)]
-struct MaterialReview {
-    role: String,
-    input: LocalId,
-    symbol: String,
-    source: SelectedMaterialSource,
+pub(super) struct MaterialReview {
+    pub(super) role: String,
+    pub(super) input: LocalId,
+    pub(super) symbol: String,
+    pub(super) source: SelectedMaterialSource,
 }
 
 #[derive(Clone, Serialize)]
-struct MaterialPlacement {
+pub(super) struct MaterialPlacement {
     #[serde(flatten)]
-    material: MaterialReview,
-    source_well: String,
+    pub(super) material: MaterialReview,
+    pub(super) source_well: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    load_volume_ul: Option<u32>,
-}
-
-#[derive(Serialize)]
-struct MaterialAddition {
-    #[serde(flatten)]
-    placement: MaterialPlacement,
-    volume_ul: u32,
+    pub(super) load_volume_ul: Option<u32>,
 }
 
 #[derive(Clone, Serialize)]
-struct PlateMapEntry {
-    dilution: usize,
-    dilution_ratio: String,
-    culture_replicate: usize,
-    plating_replicate: usize,
-    source: Well,
-    destination: Well,
+pub(super) struct MaterialAddition {
+    #[serde(flatten)]
+    pub(super) placement: MaterialPlacement,
+    pub(super) volume_ul: u32,
+}
+
+#[derive(Clone, Serialize)]
+pub(super) struct PlateMapEntry {
+    pub(super) subject: String,
+    pub(super) dilution: usize,
+    pub(super) dilution_ratio: String,
+    pub(super) culture_replicate: usize,
+    pub(super) plating_replicate: usize,
+    pub(super) source: Well,
+    pub(super) destination: Well,
 }
 
 #[derive(Serialize)]
@@ -214,12 +239,25 @@ struct PlateMapDocument<'a> {
     entries: &'a [PlateMapEntry],
 }
 
+#[derive(Serialize)]
+struct BatchPlateMapDocument<'a> {
+    schema_version: &'static str,
+    facility: &'a str,
+    asset: &'a str,
+    schedule_sha256: &'a str,
+    tasks: &'a [LocalId],
+    entries: &'a [PlateMapEntry],
+}
+
 /// Lower only the Procedure tasks and requirements allocated to this exact invocation.
 pub(in crate::backend) fn lower_invocation(
     profile: &Ot2AdapterProfile,
     invocation_plan: &AdapterInvocationPlan,
     invocation: &AdapterInvocation,
 ) -> Result<AdapterInvocationLowering, String> {
+    if let Some(batch) = try_plan_golden_gate_batches(profile, invocation_plan, invocation)? {
+        return lower_batch_invocation(profile, invocation_plan, invocation, batch);
+    }
     let tasks = exact_invocation_tasks("OT-2", invocation_plan, invocation)?;
     let mut artifacts = ArtifactBundle::new();
     let mut documents = Vec::new();
@@ -334,7 +372,195 @@ pub(in crate::backend) fn lower_invocation(
     })
 }
 
-fn plan_task(
+fn lower_batch_invocation(
+    profile: &Ot2AdapterProfile,
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+    batch: Ot2BatchPlan,
+) -> Result<AdapterInvocationLowering, String> {
+    let schedule_sha256 = batch.schedule.sha256();
+    let mut artifacts = ArtifactBundle::new();
+    let mut schedule_json =
+        serde_json::to_string_pretty(&batch.schedule).map_err(|error| error.to_string())?;
+    schedule_json.push('\n');
+    artifacts
+        .insert_text("execution_schedule.json", "application/json", schedule_json)
+        .map_err(|error| error.to_string())?;
+    artifacts
+        .insert(
+            GeneratedArtifact::text(typst::STYLE_PATH, "text/x-typst", typst::STYLE)
+                .map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+
+    let mut documents = Vec::with_capacity(batch.runs.len());
+    let plating_tasks = batch
+        .runs
+        .iter()
+        .find(|run| run.id == "plating")
+        .map(|run| run.group.tasks.clone())
+        .unwrap_or_default();
+    for run in batch.runs {
+        let plan = batch_run_plan(profile, invocation_plan, invocation, &schedule_sha256, run)?;
+        let template = match &plan.execution {
+            Ot2BatchExecution::Assembly { .. } => ASSEMBLY_BATCH_TEMPLATE,
+            Ot2BatchExecution::Transformation { .. } => TRANSFORMATION_BATCH_TEMPLATE,
+            Ot2BatchExecution::Plating { .. } => PLATING_BATCH_TEMPLATE,
+        };
+        let protocol_path = match &plan.execution {
+            Ot2BatchExecution::Assembly { .. } => "assembly_protocol.py",
+            Ot2BatchExecution::Transformation { .. } => "transformation_protocol.py",
+            Ot2BatchExecution::Plating { .. } => "plating_protocol.py",
+        };
+        let manifest_path = match &plan.execution {
+            Ot2BatchExecution::Assembly { .. } => "assembly_manifest.json",
+            Ot2BatchExecution::Transformation { .. } => "transformation_manifest.json",
+            Ot2BatchExecution::Plating { .. } => "plating_manifest.json",
+        };
+        let manual_path = match &plan.execution {
+            Ot2BatchExecution::Assembly { .. } => "assembly_manual_protocol.typ",
+            Ot2BatchExecution::Transformation { .. } => "transformation_manual_protocol.typ",
+            Ot2BatchExecution::Plating { .. } => "plating_manual_protocol.typ",
+        };
+        artifacts
+            .insert_text(
+                protocol_path,
+                "text/x-python",
+                render_embedded_python_protocol(template, &plan.deck, &plan)?,
+            )
+            .map_err(|error| error.to_string())?;
+        let mut manifest =
+            serde_json::to_string_pretty(&plan).map_err(|error| error.to_string())?;
+        manifest.push('\n');
+        artifacts
+            .insert_text(manifest_path, "application/json", manifest)
+            .map_err(|error| error.to_string())?;
+        artifacts
+            .insert_text(
+                manual_path,
+                "text/x-typst",
+                typst::render(&render_batch_manual(&plan)),
+            )
+            .map_err(|error| error.to_string())?;
+        documents.push(AdapterInvocationDocument {
+            requirements: plan.group.requirements.clone(),
+            path: protocol_path.to_owned(),
+            format: OPENTRONS_PYTHON_PROTOCOL_FORMAT.to_owned(),
+        });
+    }
+
+    let map = BatchPlateMapDocument {
+        schema_version: "lab.plate-map.v2",
+        facility: &invocation_plan.facility,
+        asset: &invocation.asset,
+        schedule_sha256: &schedule_sha256,
+        tasks: &plating_tasks,
+        entries: &batch.plate_map,
+    };
+    let mut map_json = serde_json::to_string_pretty(&map).map_err(|error| error.to_string())?;
+    map_json.push('\n');
+    artifacts
+        .insert_text("plate_map.json", "application/json", map_json)
+        .map_err(|error| error.to_string())?;
+    artifacts
+        .insert_text(
+            "plate_map.typ",
+            "text/x-typst",
+            typst::render(&render_batch_plate_map(&map)),
+        )
+        .map_err(|error| error.to_string())?;
+
+    Ok(AdapterInvocationLowering {
+        artifacts,
+        documents,
+    })
+}
+
+fn batch_run_plan(
+    profile: &Ot2AdapterProfile,
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+    schedule_sha256: &str,
+    run: Ot2BatchRun,
+) -> Result<Ot2RunPlan, String> {
+    let tasks = run
+        .group
+        .tasks
+        .iter()
+        .map(|task_id| {
+            invocation_plan
+                .methods
+                .iter()
+                .flat_map(|method| &method.tasks)
+                .find(|task| &task.id == task_id)
+                .map(task_review)
+                .ok_or_else(|| {
+                    format!(
+                        "OT-2 schedule group '{}' refers to missing task '{task_id}'",
+                        run.group.id
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let requirements = run
+        .group
+        .requirements
+        .iter()
+        .map(|requirement_id| {
+            invocation_plan
+                .methods
+                .iter()
+                .flat_map(|method| &method.tasks)
+                .flat_map(|task| &task.requirements)
+                .find(|requirement| &requirement.id == requirement_id)
+                .map(requirement_review)
+                .ok_or_else(|| {
+                    format!(
+                        "OT-2 schedule group '{}' refers to missing requirement '{requirement_id}'",
+                        run.group.id
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Ot2RunPlan {
+        schema_version: RUN_PLAN_SCHEMA.to_owned(),
+        facility: invocation_plan.facility.clone(),
+        asset: invocation.asset.clone(),
+        adapter: BACKEND.to_owned(),
+        adapter_profile: profile.name.clone(),
+        adapter_profile_sha256: invocation.adapter.profile_sha256.clone(),
+        schedule_sha256: schedule_sha256.to_owned(),
+        group: run.group,
+        requirements,
+        tasks,
+        deck: profile.clone(),
+        execution: run.execution,
+    })
+}
+
+fn task_review(task: &AllocatedProcedureTask) -> TaskReview {
+    TaskReview {
+        id: task.id.clone(),
+        operation: task.operation.to_string(),
+        inputs: task.inputs.clone(),
+        outputs: task.outputs.clone(),
+        parameters: task.parameters.clone(),
+        materials: task.materials.clone(),
+    }
+}
+
+fn requirement_review(requirement: &AllocatedRequirementBinding) -> RequirementReview {
+    RequirementReview {
+        id: requirement.id.clone(),
+        capability_kind: requirement.capability_kind.to_string(),
+        offering: requirement.offering.clone(),
+        observed_qualification: requirement.observed_qualification.clone(),
+        control_mode: requirement.control_mode.clone(),
+        parameters: requirement.parameters.clone(),
+    }
+}
+
+pub(super) fn plan_task(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
     requirements: &[&AllocatedRequirementBinding],
@@ -845,6 +1071,7 @@ fn plan_plating(
                     + culture_replicate * procedure.plating_replicates
                     + plating_replicate;
                 plate_map.push(PlateMapEntry {
+                    subject: procedure.subject.clone(),
                     dilution: dilution + 1,
                     dilution_ratio: dilution_ratio(
                         procedure.medium_volume_ul,
@@ -876,7 +1103,7 @@ fn plan_plating(
     })
 }
 
-fn layered_plate_layout(
+pub(super) fn layered_plate_layout(
     task: &AllocatedProcedureTask,
     resource: &str,
     plates: &Plates,
@@ -926,7 +1153,7 @@ fn layered_plate_layout(
     ))
 }
 
-fn dilution_ratio(
+pub(super) fn dilution_ratio(
     medium_volume_ul: u32,
     culture_volume_ul: u32,
     steps: usize,
@@ -966,8 +1193,16 @@ fn render_python_protocol(plan: &Ot2TaskPlan) -> Result<String, String> {
         Ot2TaskExecution::SerialDilution { .. } => DILUTION_TEMPLATE,
         Ot2TaskExecution::PlateDilutedCulture { .. } => PLATING_TEMPLATE,
     };
+    render_embedded_python_protocol(template, &plan.deck, plan)
+}
+
+fn render_embedded_python_protocol<T: Serialize>(
+    template: &str,
+    profile: &Ot2AdapterProfile,
+    plan: &T,
+) -> Result<String, String> {
     let api_level =
-        serde_json::to_string(&plan.deck.protocol.api_level).map_err(|error| error.to_string())?;
+        serde_json::to_string(&profile.protocol.api_level).map_err(|error| error.to_string())?;
     let output = replace_once(
         template,
         API_LEVEL_SENTINEL,
@@ -1379,6 +1614,162 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             ]);
         }
     }
+    doc
+}
+
+fn render_batch_manual(plan: &Ot2RunPlan) -> Doc {
+    let (title, summary) = match &plan.execution {
+        Ot2BatchExecution::Assembly {
+            setups,
+            thermal_programs,
+        } => (
+            "Golden Gate assembly run",
+            format!(
+                "Set up {} assembly reactions and execute {} compatible thermal programs as one reviewed OT-2 run.",
+                setups.len(),
+                thermal_programs.len()
+            ),
+        ),
+        Ot2BatchExecution::Transformation {
+            preparations,
+            heat_shocks,
+            recovery_additions,
+            recovery_incubations,
+        } => (
+            "Golden Gate transformation run",
+            format!(
+                "Prepare {} transformations, execute {} heat-shock programs, add recovery medium in {} operations, and execute {} recovery incubations without remapping the reaction plate.",
+                preparations.len(),
+                heat_shocks.len(),
+                recovery_additions.len(),
+                recovery_incubations.len()
+            ),
+        ),
+        Ot2BatchExecution::Plating {
+            dilutions,
+            platings,
+        } => (
+            "Golden Gate dilution and plating run",
+            format!(
+                "Perform {} serial-dilution programs and {} selective-plating programs using the static plate map.",
+                dilutions.len(),
+                platings.len()
+            ),
+        ),
+    };
+    let mut doc = Doc::new(DocMeta::new(
+        title,
+        "Operator instructions for one allocated multi-task device run",
+        &plan.adapter_profile,
+        "Opentrons OT-2",
+    ));
+    doc.notice([
+        bold("Reviewed schedule. "),
+        text("This document realizes execution group "),
+        code(&plan.group.id),
+        text(" from immutable schedule "),
+        code(&plan.schedule_sha256),
+        text(" on Asset "),
+        code(&plan.asset),
+        text(". Do not substitute wells, labware, or hardware without rebuilding and reviewing the plan."),
+    ]);
+    doc.para_text(summary);
+    doc.heading(1, [text("Procedure tasks")]);
+    doc.table(
+        [Column::left("Task"), Column::left("Operation")],
+        plan.tasks
+            .iter()
+            .map(|task| vec![vec![code(task.id.as_str())], vec![code(&task.operation)]]),
+    );
+    doc.heading(1, [text("Facility allocations")]);
+    doc.table(
+        [
+            Column::left("Requirement"),
+            Column::left("Capability"),
+            Column::left("Offering"),
+        ],
+        plan.requirements.iter().map(|requirement| {
+            vec![
+                vec![code(requirement.id.as_str())],
+                vec![code(&requirement.capability_kind)],
+                vec![code(&requirement.offering)],
+            ]
+        }),
+    );
+    doc.heading(1, [text("Run files")]);
+    doc.bullets([
+        vec![
+            text("Review the exact deck, physical allocations, and operation parameters in the corresponding "),
+            code(format!("{}_manifest.json", plan.group.id)),
+            text(" file."),
+        ],
+        vec![
+            text("Import the corresponding "),
+            code(format!("{}_protocol.py", plan.group.id)),
+            text(" into the Opentrons App and confirm that the loaded module is the installed Thermocycler Module GEN1."),
+        ],
+        vec![
+            text("Verify the adapter profile digest is "),
+            code(&plan.adapter_profile_sha256),
+            text(" before starting motion."),
+        ],
+    ]);
+    if matches!(plan.execution, Ot2BatchExecution::Plating { .. }) {
+        doc.para([
+            text("Review "),
+            code("plate_map.pdf"),
+            text(" before plating and use it as the static source-to-destination record."),
+        ]);
+    }
+    doc
+}
+
+fn render_batch_plate_map(map: &BatchPlateMapDocument<'_>) -> Doc {
+    let mut doc = Doc::new(DocMeta::new(
+        "Golden Gate selective plating map",
+        "Static physical allocation for the fused OT-2 plating run",
+        "Facility-allocated schedule",
+        "Opentrons OT-2",
+    ));
+    doc.notice([
+        bold("Identity boundary. "),
+        text("This map belongs to Asset "),
+        code(map.asset),
+        text(" and immutable schedule "),
+        code(map.schedule_sha256),
+        text("."),
+    ]);
+    doc.heading(1, [text("Allocated agar positions")]);
+    doc.table(
+        [
+            Column::left("Culture"),
+            Column::right("Dilution"),
+            Column::right("Ratio"),
+            Column::right("Culture replicate"),
+            Column::right("Plating replicate"),
+            Column::left("Source"),
+            Column::left("Agar destination"),
+        ],
+        map.entries.iter().map(|entry| {
+            vec![
+                vec![code(&entry.subject)],
+                vec![text(entry.dilution.to_string())],
+                vec![text(&entry.dilution_ratio)],
+                vec![text(entry.culture_replicate.to_string())],
+                vec![text(entry.plating_replicate.to_string())],
+                vec![code(format!(
+                    "plate {} {}",
+                    entry.source.plate + 1,
+                    entry.source.well
+                ))],
+                vec![code(format!(
+                    "plate {} {}",
+                    entry.destination.plate + 1,
+                    entry.destination.well
+                ))],
+            ]
+        }),
+    );
     doc
 }
 

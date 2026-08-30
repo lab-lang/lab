@@ -643,16 +643,19 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert!(!out_dir.join("lowerings").exists());
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "planned");
-    // Planning names every requirement-scoped protocol, so a path can go straight into the
-    // device application without asking the backend to rediscover the experiment.
+    // Planning names the three reviewed device runs produced by the allocated OT-2 schedule.
     let protocols = result["result"]["protocols"].as_array().unwrap();
-    assert_eq!(protocols.len(), 28);
-    assert!(
+    assert_eq!(protocols.len(), 3);
+    assert_eq!(
         protocols
             .iter()
-            .all(|path| path.as_str().unwrap().contains("/tasks/")
-                && path.as_str().unwrap().ends_with("/automation_protocol.py")),
-        "{protocols:?}"
+            .map(|path| Path::new(path.as_str().unwrap()).file_name().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "assembly_protocol.py",
+            "plating_protocol.py",
+            "transformation_protocol.py",
+        ]
     );
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
         .args([
@@ -665,72 +668,63 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         .unwrap();
     let printed = String::from_utf8(human.stdout).unwrap();
     assert!(printed.contains("Automation protocols:"), "{printed}");
-    assert!(
-        printed.contains("tasks/001-setup-golden-gate-reaction/automation_protocol.py"),
-        "{printed}"
-    );
+    assert!(printed.contains("assembly_protocol.py"), "{printed}");
+    assert!(printed.contains("transformation_protocol.py"), "{printed}");
+    assert!(printed.contains("plating_protocol.py"), "{printed}");
 
     let lowering: Value =
         serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
             .unwrap();
     let target_root = out_dir.join(lowering["routes"][0]["output"].as_str().unwrap());
     assert!(lowering["routes"][0].get("scope").is_none());
-    assert!(
-        target_root
-            .join("tasks/001-setup-golden-gate-reaction/automation_protocol.py")
-            .is_file()
+    for path in [
+        "assembly_protocol.py",
+        "transformation_protocol.py",
+        "plating_protocol.py",
+        "execution_schedule.json",
+        "assembly_manifest.json",
+        "transformation_manifest.json",
+        "plating_manifest.json",
+        "plate_map.json",
+        "plate_map.pdf",
+    ] {
+        assert!(target_root.join(path).is_file(), "missing {path}");
+    }
+
+    let schedule = read_json(target_root.join("execution_schedule.json"));
+    assert_eq!(
+        schedule["schema_version"],
+        "lab.allocated-procedure-schedule.v1"
     );
-    assert!(
-        target_root
-            .join("tasks/002-thermal-cycle-golden-gate-reaction/automation_protocol.py")
-            .is_file()
+    assert_eq!(
+        schedule["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|group| group["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["assembly", "transformation", "plating"]
     );
-    assert!(
-        target_root
-            .join("tasks/005-prepare-chemical-transformation/automation_protocol.py")
-            .is_file()
+    assert_eq!(
+        schedule["groups"][1]["after"],
+        serde_json::json!(["assembly"])
     );
-    assert!(
-        target_root
-            .join("tasks/006-heat-shock-transformation/automation_protocol.py")
-            .is_file()
-    );
-    assert!(
-        target_root
-            .join("tasks/007-add-recovery-medium/automation_protocol.py")
-            .is_file()
-    );
-    assert!(
-        target_root
-            .join("tasks/008-incubate-recovery-culture/automation_protocol.py")
-            .is_file()
-    );
-    assert!(
-        target_root
-            .join("tasks/009-serial-dilution/automation_protocol.py")
-            .is_file()
-    );
-    assert!(
-        target_root
-            .join("tasks/010-plate-diluted-culture/automation_protocol.py")
-            .is_file()
+    assert_eq!(
+        schedule["groups"][2]["after"],
+        serde_json::json!(["transformation"])
     );
 
-    let manifest = read_json(
-        target_root.join("tasks/001-setup-golden-gate-reaction/invocation_manifest.json"),
-    );
-    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-task.v3");
-    assert_eq!(
-        manifest["task"]["operation"],
-        "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
-    );
-    assert_eq!(manifest["execution"]["kind"], "setup_golden_gate_reaction");
+    let manifest = read_json(target_root.join("assembly_manifest.json"));
+    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-run.v1");
+    assert_eq!(manifest["group"]["id"], "assembly");
+    assert_eq!(manifest["execution"]["kind"], "assembly");
+    assert_eq!(manifest["execution"]["setups"].as_array().unwrap().len(), 2);
     assert_eq!(
         manifest["deck"]["deck"]["thermocycler"]["model"], "thermocycler module",
         "the example's exact OT-2 Asset has a Thermocycler Module GEN1"
     );
     assert!(
-        manifest["execution"]["additions"]
+        manifest["execution"]["setups"][0]["execution"]["additions"]
             .as_array()
             .unwrap()
             .iter()
@@ -741,77 +735,81 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         serde_json::json!(["5", "6"]),
         "the allocated adapter emits the concrete deck plan"
     );
-    let transformation = read_json(
-        target_root.join("tasks/005-prepare-chemical-transformation/invocation_manifest.json"),
-    );
+    let transformation = read_json(target_root.join("transformation_manifest.json"));
+    assert_eq!(transformation["execution"]["kind"], "transformation");
     assert_eq!(
-        transformation["execution"]["kind"],
-        "prepare_chemical_transformation"
+        transformation["execution"]["preparations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
     );
-    assert_eq!(transformation["execution"]["cell_volume_ul"], 20);
-    assert_eq!(transformation["execution"]["dna_volume_ul"], 2);
+    let first_preparation = &transformation["execution"]["preparations"][0]["execution"];
+    assert_eq!(first_preparation["cell_volume_ul"], 20);
+    assert_eq!(first_preparation["cell_source_volume_ul"], 80);
+    assert_eq!(first_preparation["dna_volume_ul"], 2);
     assert_eq!(
-        transformation["execution"]["bubble_clear_technique"]["dispense"]["offset"]["value"]["value"],
+        first_preparation["bubble_clear_technique"]["dispense"]["offset"]["value"]["value"],
         "8"
     );
     assert_eq!(
-        transformation["execution"]["bubble_clear_technique"]["touch_tip"],
+        first_preparation["bubble_clear_technique"]["touch_tip"],
         true
     );
-    let transformation_protocol = read_text(
-        target_root.join("tasks/005-prepare-chemical-transformation/automation_protocol.py"),
+    assert_eq!(
+        first_preparation["dna"][0]["source_well"],
+        manifest["execution"]["setups"][0]["execution"]["reaction_wells"][0],
+        "the assembly product well becomes the exact transformation DNA source"
     );
+    let transformation_protocol = read_text(target_root.join("transformation_protocol.py"));
     assert!(
         transformation_protocol.contains("disposal_volume=0"),
         "{transformation_protocol}"
     );
     assert!(
-        transformation_protocol.contains("for _ in range(execution[\"bubble_clear_cycles\"]):"),
+        transformation_protocol.contains("for _ in range(preparation[\"bubble_clear_cycles\"]):"),
         "{transformation_protocol}"
     );
     assert!(
         transformation_protocol.contains("radius=techniques[\"touch_tip_radius\"]"),
         "{transformation_protocol}"
     );
-    let heat_shock =
-        read_json(target_root.join("tasks/006-heat-shock-transformation/invocation_manifest.json"));
-    assert_eq!(heat_shock["execution"]["volume_each_ul"], 22.0);
+    let heat_shock = &transformation["execution"]["heat_shocks"][0]["execution"];
+    assert_eq!(heat_shock["volume_each_ul"], 22.0);
     assert_eq!(
-        heat_shock["execution"]["profile"]["stages"][0]["steps"][1]["celsius"],
+        heat_shock["profile"]["stages"][0]["steps"][1]["celsius"],
         42.0
     );
-    let heat_shock_protocol =
-        read_text(target_root.join("tasks/006-heat-shock-transformation/automation_protocol.py"));
     assert!(
-        heat_shock_protocol.contains("block_max_volume=execution[\"volume_each_ul\"]"),
-        "{heat_shock_protocol}"
+        transformation_protocol.contains("block_max_volume=execution[\"volume_each_ul\"]"),
+        "{transformation_protocol}"
     );
     assert!(
-        !heat_shock_protocol.contains("is_simulating"),
+        !transformation_protocol.contains("is_simulating"),
         "thermal work may not disappear during simulation"
     );
-    let recovery_medium =
-        read_json(target_root.join("tasks/007-add-recovery-medium/invocation_manifest.json"));
+    let recovery_medium = &transformation["execution"]["recovery_additions"][0]["execution"];
     assert_eq!(
-        recovery_medium["execution"]["technique"]["dispense"]["kind"],
+        recovery_medium["technique"]["dispense"]["kind"],
         "above_liquid"
     );
     assert_eq!(
-        recovery_medium["execution"]["technique"]["air_gap"]["value"]["value"],
+        recovery_medium["technique"]["air_gap"]["value"]["value"],
         "10"
     );
-    let recovery =
-        read_json(target_root.join("tasks/008-incubate-recovery-culture/invocation_manifest.json"));
-    assert_eq!(recovery["execution"]["volume_each_ul"], 82.0);
-    let dilution =
-        read_json(target_root.join("tasks/009-serial-dilution/invocation_manifest.json"));
-    assert_eq!(dilution["execution"]["kind"], "serial_dilution");
+    let recovery = &transformation["execution"]["recovery_incubations"][0]["execution"];
+    assert_eq!(recovery["volume_each_ul"], 82.0);
+
+    let plating = read_json(target_root.join("plating_manifest.json"));
+    assert_eq!(plating["execution"]["kind"], "plating");
+    let dilution = &plating["execution"]["dilutions"][0]["execution"];
+    assert_eq!(dilution["kind"], "serial_dilution");
     assert_eq!(
-        dilution["execution"]["medium"]["source"]["material_lot"],
+        dilution["medium"]["source"]["material_lot"],
         "https://example.org/golden-gate/lots/recovery_medium_lot"
     );
     assert_eq!(
-        dilution["execution"]["dilution_wells"],
+        dilution["dilution_wells"],
         serde_json::json!([
             {"plate": 0, "well": "A1"},
             {"plate": 0, "well": "B1"},
@@ -820,57 +818,41 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         ])
     );
     assert_eq!(
-        dilution["deck"]["techniques"]["distribution_disposal_volume_ul"],
+        plating["deck"]["techniques"]["distribution_disposal_volume_ul"],
         4
     );
-    let dilution_protocol =
-        read_text(target_root.join("tasks/009-serial-dilution/automation_protocol.py"));
+    let plating_protocol = read_text(target_root.join("plating_protocol.py"));
     assert!(
-        dilution_protocol.contains("current_volume / source.max_volume"),
-        "{dilution_protocol}"
+        plating_protocol.contains("current_volume / source.max_volume"),
+        "{plating_protocol}"
     );
     assert!(
-        dilution_protocol.contains("tracked_low_volume_fraction"),
-        "{dilution_protocol}"
+        plating_protocol.contains("tracked_low_volume_fraction"),
+        "{plating_protocol}"
     );
     assert!(
-        dilution_protocol.contains("tracked_chunk_size"),
-        "{dilution_protocol}"
+        plating_protocol.contains("tracked_chunk_size"),
+        "{plating_protocol}"
     );
-    let plating =
-        read_json(target_root.join("tasks/010-plate-diluted-culture/invocation_manifest.json"));
-    assert_eq!(plating["execution"]["kind"], "plate_diluted_culture");
+    let first_plating = &plating["execution"]["platings"][0]["execution"];
+    assert_eq!(first_plating["kind"], "plate_diluted_culture");
+    assert_eq!(first_plating["plate_map"].as_array().unwrap().len(), 4);
     assert_eq!(
-        plating["execution"]["plate_map"].as_array().unwrap().len(),
-        4
-    );
-    assert_eq!(
-        plating["execution"]["technique"]["dispense"]["kind"],
+        first_plating["technique"]["dispense"]["kind"],
         "material_surface"
     );
-    assert!(
-        target_root
-            .join("tasks/010-plate-diluted-culture/plate_map.json")
-            .is_file()
-    );
-    assert!(
-        target_root
-            .join("tasks/010-plate-diluted-culture/plate_map.pdf")
-            .is_file()
-    );
-    let plate_map = read_json(target_root.join("tasks/010-plate-diluted-culture/plate_map.json"));
-    assert_eq!(plate_map["artifact"], "composite_strain_1");
+    let plate_map = read_json(target_root.join("plate_map.json"));
+    assert_eq!(plate_map["schema_version"], "lab.plate-map.v2");
+    assert_eq!(plate_map["entries"].as_array().unwrap().len(), 16);
+    assert_eq!(plate_map["entries"][0]["subject"], "composite_strain_1");
     assert_eq!(plate_map["entries"][0]["dilution_ratio"], "1/10");
     assert_eq!(plate_map["entries"][2]["dilution_ratio"], "1/100");
-    assert_eq!(plate_map["entries"], plating["execution"]["plate_map"]);
-    let plating_protocol =
-        read_text(target_root.join("tasks/010-plate-diluted-culture/automation_protocol.py"));
     assert!(
         plating_protocol.contains("destination.top(techniques[\"material_surface_offset_mm\"]"),
         "{plating_protocol}"
     );
     assert!(
-        plating_protocol.contains("pipette.blow_out()"),
+        plating_protocol.contains("p20.blow_out()"),
         "{plating_protocol}"
     );
 
@@ -934,8 +916,8 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "https://example.org/golden-gate/facility"
     );
     assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
-    assert_eq!(facility["protocols"].as_array().unwrap().len(), 28);
-    assert_eq!(facility["documents"].as_array().unwrap().len(), 32);
+    assert_eq!(facility["protocols"].as_array().unwrap().len(), 3);
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 4);
     for path in facility["protocols"]
         .as_array()
         .unwrap()
@@ -959,7 +941,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         index["facility"]["facility_solution"],
         "compiler/facility-solution.json"
     );
-    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 28);
+    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 3);
     assert!(
         index["facility"]["protocols"][0]
             .as_str()
@@ -1020,32 +1002,42 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         .unwrap()
         .iter()
         .find(|node| {
-            node["requirements"]
-                .as_array()
-                .is_some_and(|requirements| requirements.len() == 2)
+            node["document"]["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("/assembly_protocol.py"))
         })
         .cloned()
-        .expect("the atomic pipetting program has one multi-requirement execute node");
+        .expect("the allocated assembly group has one reviewed execute node");
     assert_eq!(
         setup_execute_node["document"]["path"],
-        "assets/opentrons_ot2/tasks/001-setup-golden-gate-reaction/automation_protocol.py"
+        "assets/opentrons_ot2/assembly_protocol.py"
     );
-    assert!(
+    assert_eq!(
+        setup_execute_node["requirements"].as_array().unwrap().len(),
+        8
+    );
+    assert_eq!(
         setup_execute_node["requirements"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|requirement| {
+            .map(|requirement| {
                 execution_plan["requirements"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|binding| {
-                binding["requirement_instance"].as_str() == requirement.as_str()
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|binding| {
+                        binding["requirement_instance"].as_str() == requirement.as_str()
+                    })
+                    .unwrap()["procedure_implementation"]
+                    .as_str()
+                    .unwrap()
             })
-            .is_some_and(|binding| binding["procedure_implementation"]
-                == "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1")
-            })
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([
+            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
+            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
+        ])
     );
 
     let human = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -1086,9 +1078,14 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "{printed}"
     );
     assert!(printed.contains("Automation protocols:"), "{printed}");
-    assert!(printed.contains("automation_protocol.py"), "{printed}");
+    assert!(printed.contains("assembly_protocol.py"), "{printed}");
+    assert!(printed.contains("transformation_protocol.py"), "{printed}");
+    assert!(printed.contains("plating_protocol.py"), "{printed}");
     assert!(printed.contains("Documents:"), "{printed}");
-    assert!(printed.contains("manual_protocol.pdf"), "{printed}");
+    assert!(
+        printed.contains("assembly_manual_protocol.pdf"),
+        "{printed}"
+    );
 
     std::fs::remove_dir_all(out_dir).unwrap();
 }
@@ -1194,7 +1191,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         .iter()
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(protocols.len(), 28);
+    assert_eq!(protocols.len(), 3);
     assert!(protocols.iter().all(|artifact| {
         artifact["format"] == "opentrons.python-protocol"
             && artifact["sha256"].as_str().unwrap().len() == 64
@@ -1248,15 +1245,20 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     let assembly_cycle = node_id(
         "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#automated-golden-gate::cycle-reaction",
     );
-    let cell_provision = node_id("std-lab-plasmid-provision-0::");
-    let provision = execution_nodes
-        .iter()
-        .find(|node| node["id"] == cell_provision)
-        .expect("the competent-cell provisioning task is executable");
-    assert!(
-        provision["after"].as_array().is_none_or(Vec::is_empty),
-        "cell provisioning is independent of plasmid assembly"
-    );
+    assert_eq!(assembly_setup, assembly_cycle);
+    let cell_provisions = (0..4)
+        .map(|index| node_id(&format!("std-lab-plasmid-provision-{index}::")))
+        .collect::<Vec<_>>();
+    for cell_provision in &cell_provisions {
+        let provision = execution_nodes
+            .iter()
+            .find(|node| node["id"] == *cell_provision)
+            .expect("the competent-cell provisioning task is executable");
+        assert!(
+            provision["after"].as_array().is_none_or(Vec::is_empty),
+            "cell provisioning is independent of plasmid assembly"
+        );
+    }
     let transform = execution_nodes
         .iter()
         .find(|node| node_has_requirement(node, "std-lab-plasmid-transform-0::"))
@@ -1269,19 +1271,17 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         transform_dependencies,
-        std::collections::BTreeSet::from([
-            assembly_setup.as_str(),
-            assembly_cycle.as_str(),
-            cell_provision.as_str(),
-        ]),
-        "transformation must wait for both its realized plasmid and provisioned cells"
+        std::iter::once(assembly_setup.as_str())
+            .chain(cell_provisions.iter().map(String::as_str))
+            .collect::<std::collections::BTreeSet<_>>(),
+        "the fused transformation run must wait for every realized plasmid and provisioned cell input"
     );
     assert!(execution_plan.get("lowerings").is_none());
     let reviewed_protocols = execution_nodes
         .iter()
         .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
-    assert_eq!(reviewed_protocols.len(), 28);
+    assert_eq!(reviewed_protocols.len(), 3);
     assert!(reviewed_protocols.iter().all(|document| {
         document["format"] == "opentrons.python-protocol"
             && document["sha256"].as_str().unwrap().len() == 64

@@ -2,6 +2,7 @@
 
 mod invocation;
 mod profile;
+mod schedule;
 
 /// Stable adapter identity used by explicit Asset bindings, device plans, and adapter diagnostics.
 pub(in crate::backend::opentrons::ot2) const BACKEND: &str = "opentrons.ot2";

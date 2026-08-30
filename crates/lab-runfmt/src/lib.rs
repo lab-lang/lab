@@ -290,15 +290,11 @@ impl ExecutionPlanDocument {
                                 requirement
                             ));
                         }
-                        let key = (
-                            &binding.asset,
-                            &binding.adapter,
-                            &binding.procedure_implementation,
-                        );
+                        let key = (&binding.asset, &binding.adapter);
                         if let Some(expected) = &execution_key {
                             if expected != &key {
                                 return Err(format!(
-                                    "execute node '{}' combines requirements with different Asset, adapter, or Procedure implementation bindings",
+                                    "execute node '{}' combines requirements with different Asset or adapter bindings",
                                     node.id
                                 ));
                             }
@@ -897,10 +893,13 @@ mod tests {
 
         plan.requirements[1].procedure_implementation =
             Some("https://example.org/implementation/other".to_owned());
+        plan.validate().unwrap();
+
+        plan.requirements[1].asset = "https://example.org/other-asset".to_owned();
         assert!(
             plan.validate()
                 .unwrap_err()
-                .contains("different Asset, adapter, or Procedure implementation bindings")
+                .contains("different Asset or adapter bindings")
         );
     }
 

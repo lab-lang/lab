@@ -1,7 +1,7 @@
 //! Reference-bench default values for every profile field.
 
 use crate::backend::opentrons::ot2::profile::schema::{
-    AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TechniqueCalibration,
+    AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, SourceRack, TechniqueCalibration,
     TemperatureModule, Thermocycler, TipRacks, TransformationStage,
 };
 
@@ -141,10 +141,18 @@ pub(super) fn default_transformation_dna_plate() -> Plates {
     }
 }
 
+pub(super) fn default_transformation_source_rack() -> SourceRack {
+    SourceRack {
+        labware: "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap".to_owned(),
+        slot: "3".to_owned(),
+        capacity: 24,
+    }
+}
+
 pub(super) fn default_transformation_small_tips() -> TipRacks {
     TipRacks {
         labware: "opentrons_96_tiprack_20ul".to_owned(),
-        slots: vec!["3".to_owned()],
+        slots: vec!["9".to_owned()],
         capacity: default_plate_capacity(),
     }
 }
@@ -160,6 +168,7 @@ pub(super) fn default_transformation_large_tips() -> TipRacks {
 pub(super) fn default_transformation_stage() -> TransformationStage {
     TransformationStage {
         dna_plate: default_transformation_dna_plate(),
+        source_rack: default_transformation_source_rack(),
         small_tips: default_transformation_small_tips(),
         large_tips: default_transformation_large_tips(),
     }

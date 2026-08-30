@@ -46,3 +46,13 @@ pub struct MediaRack {
     pub slot: String,
     pub medium_well: String,
 }
+
+/// One addressable rack of reagent or material sources.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRack {
+    pub labware: String,
+    pub slot: String,
+    #[serde(default = "default_plate_capacity")]
+    pub capacity: usize,
+}

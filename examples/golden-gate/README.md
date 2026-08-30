@@ -37,7 +37,7 @@ The package selects `inventory/facility.ttl`, a conformant SBOLInventory documen
 lab run .lab/build --dry-run
 ```
 
-The facility phase selects 22 Method instances and binds 76 atomic requirements to exact CapabilityOfferings and Assets. Four manual material-provisioning requirements remain on the operator workstation. The other 72 requirements belong to 28 normalized Procedure tasks allocated to the OT-2: two assembly tasks for each plasmid, followed by transformation setup, heat shock, recovery-medium addition, recovery incubation, serial dilution, and selective plating for each strain. Because the allocated OT-2 has explicit implementations for the canonical pipetting and thermal contracts, `lab build` emits one independently reviewable Python protocol for every automated task without reading a package target. It also emits 28 task-level manual-protocol PDFs and four static plate-map PDFs. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
+The facility phase selects 22 Method instances and binds 76 atomic requirements to exact CapabilityOfferings and Assets. Four manual material-provisioning requirements remain on the operator workstation. The other 72 requirements belong to 28 normalized Procedure tasks allocated to the OT-2: two assembly tasks for each plasmid, followed by transformation setup, heat shock, recovery-medium addition, recovery incubation, serial dilution, and selective plating for each strain. The adapter preserves those scientific task identities while scheduling them into three reviewed device runs: assembly, transformation, and plating. `lab build` emits three standalone Python protocols, three run-level operator PDFs, and one static aggregate plate-map PDF. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
 
 | Path | Contents |
 | --- | --- |
@@ -48,15 +48,15 @@ The facility phase selects 22 Method instances and binds 76 atomic requirements 
 | `.lab/build/compiler/adapter-invocations.json` | immutable exact tasks grouped by selected Asset and adapter |
 | `.lab/build/facility_lowering.json` | emitted artifacts, formats, Requirements, profiles, and digests by Asset route |
 | `.lab/build/plan.execution.json` | reviewed facility-wide dependency DAG and child documents |
-| `.lab/build/assets/opentrons_ot2/tasks/001-setup-golden-gate-reaction/` | exact setup task manifest, standalone Python protocol, and operator PDF |
-| `.lab/build/assets/opentrons_ot2/tasks/002-thermal-cycle-golden-gate-reaction/` | exact cycling task manifest, standalone Python protocol, and operator PDF |
-| `.lab/build/assets/opentrons_ot2/tasks/005-prepare-chemical-transformation/` | the first strain's competent-cell and DNA setup with PUDU-derived pipetting techniques |
-| `.lab/build/assets/opentrons_ot2/tasks/009-serial-dilution/` | the first strain's two replicate-aware dilution series and tracked medium aspiration |
-| `.lab/build/assets/opentrons_ot2/tasks/010-plate-diluted-culture/plate_map.pdf` | static selective-plate allocation generated from the same checked plan as the robot protocol |
+| `.lab/build/assets/opentrons_ot2/execution_schedule.json` | versioned execution groups, dependencies, and persistent physical locations |
+| `.lab/build/assets/opentrons_ot2/assembly_protocol.py` | both reaction setups and their shared authored thermal program |
+| `.lab/build/assets/opentrons_ot2/transformation_protocol.py` | all competent-cell/DNA setup, heat shock, recovery-medium addition, and recovery incubation work |
+| `.lab/build/assets/opentrons_ot2/plating_protocol.py` | all replicate-aware dilution and selective plating work with PUDU's contamination-safe two-tip order |
+| `.lab/build/assets/opentrons_ot2/plate_map.pdf` | static aggregate selective-plate allocation generated from the same checked schedule as the robot protocol |
 
-The Procedure graph preserves explicit typed edges between reaction setup and thermal cycling and from each built plasmid into its dependent strain workflows. The reviewed execution DAG is derived from those same selected values; an adapter does not reconstruct a separate wave or artifact graph.
+The Procedure graph preserves explicit typed edges between reaction setup and thermal cycling and from each built plasmid into its dependent strain workflows. The allocated schedule freezes the exact assembly-product wells used as transformation DNA sources and the exact recovered-culture wells used by dilution. The reviewed execution DAG is derived from those same selected values; an adapter does not reconstruct a separate wave or artifact graph.
 
-The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/build --dry-run` verifies the inventory, compiler evidence, adapter profile, every exact-task protocol and support-artifact digest, and the complete DAG before narrating the plan. Each generated protocol is tied to one exact allocated Procedure task and its complete atomic requirement set, but the example does not claim that this Asset is hardware-qualified for live execution.
+The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/build --dry-run` verifies the inventory, compiler evidence, adapter profile, every scheduled protocol and support-artifact digest, and the complete DAG before narrating the plan. Each generated protocol is tied to an exact execution group containing the union of its allocated Procedure tasks and atomic requirements, but the example does not claim that this Asset is hardware-qualified for live execution.
 
 ## Use another instrument
 
@@ -67,7 +67,7 @@ Another facility can run the same experiment by supplying an SBOLInventory docum
 Find the emitted protocols with:
 
 ```bash
-find .lab/build/assets -name automation_protocol.py -print
+find .lab/build/assets/opentrons_ot2 -name '*_protocol.py' -print
 ```
 
 Open the Opentrons app, go to **Protocols**, and import one of those files. The app must have OT-2 support; use the 8.4.x app or the `Opentrons-OT2` build because a 9.x app rejects OT-2 protocols.
@@ -77,7 +77,7 @@ To check a protocol without the GUI, run the app's analyzer over the selected fi
 ```bash
 /Applications/Opentrons.app/Contents/Resources/python/bin/python3.10 \
   -m opentrons.cli analyze --json-output /tmp/analysis.json \
-  "$(find .lab/build/assets -name automation_protocol.py -print -quit)"
+  .lab/build/assets/opentrons_ot2/assembly_protocol.py
 ```
 
 To lint, typecheck, and simulate the complete emitted OT-2 package:

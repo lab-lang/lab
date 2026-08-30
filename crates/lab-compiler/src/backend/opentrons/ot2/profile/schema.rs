@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
+pub use crate::backend::profile::{MediaRack, Plates, SourceRack, TipRacks};
 
 use crate::backend::opentrons::ot2::profile::defaults::*;
 
@@ -159,6 +159,9 @@ pub struct TransformationStage {
     /// Plate holding the assembled plasmids a transformation draws from.
     #[serde(default = "default_transformation_dna_plate")]
     pub dna_plate: Plates,
+    /// Rack holding competent-cell sources and recovery medium.
+    #[serde(default = "default_transformation_source_rack")]
+    pub source_rack: SourceRack,
     #[serde(default = "default_transformation_small_tips")]
     pub small_tips: TipRacks,
     #[serde(default = "default_transformation_large_tips")]

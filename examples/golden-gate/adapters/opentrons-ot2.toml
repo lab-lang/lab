@@ -53,9 +53,14 @@ labware = "nest_96_wellplate_100ul_pcr_full_skirt"
 slots = ["2"]
 capacity = 96
 
+[stages.transformation.source_rack]
+labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
+slot = "3"
+capacity = 24
+
 [stages.transformation.small_tips]
 labware = "opentrons_96_tiprack_20ul"
-slots = ["3"]
+slots = ["9"]
 capacity = 96
 
 [stages.transformation.large_tips]

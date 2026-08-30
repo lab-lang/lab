@@ -59,6 +59,14 @@ pub enum ScheduledValueRef {
 }
 
 impl AllocatedProcedureSchedule {
+    /// Digest the canonical serde representation frozen into each emitted device run.
+    pub fn sha256(&self) -> String {
+        let bytes = serde_json::to_vec(self).expect(
+            "AllocatedProcedureSchedule contains only infallibly serializable semantic values",
+        );
+        super::hex_sha256(&bytes)
+    }
+
     pub fn new(
         plan: &AdapterInvocationPlan,
         invocation: &AdapterInvocation,

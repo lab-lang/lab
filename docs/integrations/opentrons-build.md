@@ -13,7 +13,7 @@ The production path has six mandatory boundaries:
 3. A read-only LAIR analysis constructs one global planning problem. Facility planning selects Methods, exact active MaterialLots, CapabilityOfferings, Assets, adapter bindings, and dependencies together.
 4. The allocation pass applies the complete solution to the same LAIR identities and produces verifier-valid Allocated Procedure LAIR with no unresolved Method choice.
 5. `lab.adapter-invocations.v8` projects immutable selected Methods, exact value edges, and Procedure tasks plus exact Procedure implementation, requirement, offering, Asset, profile, material, inventory, and allocated-LAIR digests. An adapter receives only the tasks and requirements assigned to its exact invocation.
-6. The OT-2 adapter validates each assigned task and its complete requirement set against the canonical program and checked operational profile, then emits one standalone reviewed Python protocol, invocation manifest, and operator document for that task.
+6. The OT-2 adapter validates every assigned task and its complete requirement set against the canonical program and checked operational profile, constructs `lab.allocated-procedure-schedule.v1` with persistent physical locations and dependency-preserving execution groups, and emits one standalone reviewed Python protocol, manifest, and operator document for each group.
 
 The fixed Protocol dialect and the pre-facility Golden Gate selector no longer exist. OT-2 lowering cannot accept `CheckedModule`, portable LAIR, refined alternatives, or an entire source program. It therefore cannot select a scientific Method, re-query inventory, substitute an Asset, or reconstruct work that allocation did not assign to it.
 
@@ -25,9 +25,9 @@ The pipetting programs preserve exact transfers, distributions, mixes, logical v
 
 The adapter profile realizes portable technique requirements with facility-reviewed calibration. The example profile retains the PUDU-derived reduced aspiration rate, 10 mL conical source model, 10 mm meniscus offset, 3 mm floor, 20 percent low-volume fallback, eight-destination tracking chunk, 4 µL distribution disposal volume, 2 mm above-liquid dispense, 8 mm agar-surface offset, and calibrated touch-tip settings. Those values are not embedded in the Method or canonical Procedure program.
 
-The adapter-owned task plan then assigns wells and validates deck constraints. Labware, slots, modules, pipettes, mounts, API level, and capacity come from the exact Asset's validated `lab.adapter-profile.v2` overlay. The profile cannot select an adapter or Asset; the manifest's exact Asset-to-driver binding and facility solution already made those decisions.
+The adapter-owned schedule assigns persistent wells and validates deck constraints across the complete invocation. Labware, slots, modules, pipettes, mounts, API level, and capacity come from the exact Asset's validated `lab.adapter-profile.v2` overlay. The profile cannot select an adapter or Asset; the manifest's exact Asset-to-driver binding and facility solution already made those decisions.
 
-The emitted Python file embeds the complete immutable OT-2 task plan. Rust renders a checked template for the supported operation and injects the canonical plan and API level. Every Python protocol is standalone, and its sibling `invocation_manifest.json` exposes the exact facility, Asset, offerings, requirement set, Procedure task and implementation, parameters, material bindings, deck, and profile digest that produced it. Selective-plating tasks additionally emit a static JSON and PDF plate map from the same checked allocation used to render the robot protocol.
+Each emitted Python file embeds the complete immutable OT-2 run plan. Rust renders a checked template for the scheduled execution group and injects the canonical programs, persistent locations, profile, and API level. Every Python protocol is standalone, and its sibling run manifest exposes the exact facility, Asset, offerings, requirement set, Procedure tasks and implementations, parameters, material bindings, schedule digest, deck, and profile digest that produced it. The plating group additionally emits a static JSON and PDF plate map from the same checked allocation used to render the robot protocol.
 
 ## Inventory and dependency boundary
 
@@ -37,16 +37,17 @@ Material sources on Allocated Procedure tasks are either exact MaterialLot bindi
 
 ## Generated package
 
-A facility-aware `lab build` writes the compiler evidence under `.lab/build/compiler/`, the exact facility solution and lowering manifest at the build root, one directory per selected Asset under `.lab/build/assets/`, and one directory per allocated task inside that Asset bundle. For an OT-2 the task directory contains:
+A facility-aware `lab build` writes the compiler evidence under `.lab/build/compiler/`, the exact facility solution and lowering manifest at the build root, and one directory per selected Asset under `.lab/build/assets/`. For the complete Golden Gate invocation, the OT-2 Asset bundle contains:
 
-- `automation_protocol.py`, the standalone reviewed Opentrons protocol;
-- `invocation_manifest.json`, the exact immutable task and allocation projection;
-- `manual_protocol.typ` and its rendered `manual_protocol.pdf`; and
-- the shared typesetting support copied into the bundle.
+- `execution_schedule.json`, the versioned execution groups, dependencies, and persistent physical-location ledger;
+- `assembly_protocol.py`, `transformation_protocol.py`, and `plating_protocol.py`, the three standalone reviewed Opentrons protocols;
+- `assembly_manifest.json`, `transformation_manifest.json`, and `plating_manifest.json`, the exact immutable group and allocation projections;
+- one Typst source and rendered operator PDF per run; and
+- `plate_map.json`, `plate_map.typ`, and `plate_map.pdf`, static plating evidence generated from the reviewed allocation.
 
-A selective-plating task also contains `plate_map.json`, `plate_map.typ`, and `plate_map.pdf`. For the bundled two-plasmid/four-strain example, the facility route contains 28 automation protocols and 32 PDF documents: two assembly tasks per plasmid and six transformation-through-plating tasks per strain, plus one plate-map PDF per strain.
+For the bundled two-plasmid/four-strain example, the facility route contains three automation protocols and four PDF documents. The assembly protocol batches both setup/cycle pairs, the transformation protocol batches all preparation/heat-shock/recovery chains, and the plating protocol batches all dilution/plating pairs. The scientific tasks, their individual requirements, and their provenance identities remain distinct inside the reviewed runs.
 
-`plan.execution.json` references each independently executable protocol by its complete requirement set and digest. Runtime preflight validates the inventory, planning evidence, adapter profile, child documents, and dependency DAG before narration or dispatch. An offering's SBOLInventory qualification still determines whether planning, simulation, or live execution is allowed; the presence of generated Python does not promote it.
+`plan.execution.json` references each independently executable run by the union of its exact task requirement sets and by its document digest. Runtime preflight validates the inventory, planning evidence, adapter profile, child documents, schedule, and dependency DAG before narration or dispatch. An offering's SBOLInventory qualification still determines whether planning, simulation, or live execution is allowed; the presence of generated Python does not promote it.
 
 Run `scripts/check-opentrons-bundle.sh <bundle>` to byte-compile every emitted Python protocol. Set `LAB_OPENTRONS_SIMULATOR` and run `scripts/simulate-opentrons.sh <bundle>` to exercise them with the official simulator.
 
@@ -58,4 +59,4 @@ Emitted protocols declare `robotType: "OT-2"`. Opentrons moved OT-2 support into
 
 The specialization validates exact MaterialLot identity, supported Procedure semantics, reaction balance, transformation and plating replicate shape, dilution volume sufficiency, plate and source-rack capacity, tip capacity, thermocycler working volume, and physical well allocation. It does not query a live inventory service, reserve stock, select among equivalent lots without policy, reason over quantity or expiration, design compatible overhangs, normalize concentrations, or upload protocols to hardware. Generated instructions and robot code require facility-specific review and qualification before physical execution.
 
-The adapter currently emits one reviewed protocol per allocated Procedure task. That preserves facility-wide allocation and review boundaries, but it does not yet fuse serial dilution and plating into PUDU's two-tip-per-culture execution schedule. Cross-task fusion must be an explicit, verified Procedure-plan optimization over shared physical locations and fluid-path constraints; it cannot be hidden in an OT-2 template. The [BuildCompiler and PUDU equivalence audit](buildcompiler-pudu-equivalence.md) records this remaining resource-equivalence gap and the validation boundary for the implemented behavior.
+The adapter recognizes the complete allocated Golden Gate Procedure graph and emits three dependency-ordered runs. Serial dilution and plating share one explicit execution group, preserving PUDU's two-tip-per-culture schedule: the first path seeds dilution two before contacting agar and then plates dilution one, while a fresh path plates dilution two. A partial or different Procedure graph falls back to independently reviewable task protocols rather than being silently forced into this specialization. The [BuildCompiler and PUDU equivalence audit](buildcompiler-pudu-equivalence.md) records the exact comparison and validation boundary.

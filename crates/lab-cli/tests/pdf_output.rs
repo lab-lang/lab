@@ -50,7 +50,19 @@ fn facility_plan_typesets_every_document_to_pdf() {
         .filter(|artifact| artifact["role"] == "operator_document")
         .map(|artifact| artifact["path"].as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(documents.len(), 32);
+    assert_eq!(documents.len(), 4);
+    assert_eq!(
+        documents
+            .iter()
+            .map(|document| Path::new(document).file_name().unwrap().to_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([
+            "assembly_manual_protocol.pdf",
+            "plate_map.pdf",
+            "plating_manual_protocol.pdf",
+            "transformation_manual_protocol.pdf",
+        ])
+    );
     for document in documents {
         let path = target_root.join(document);
         let bytes = std::fs::read(&path)

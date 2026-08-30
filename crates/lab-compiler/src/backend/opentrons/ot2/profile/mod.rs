@@ -196,6 +196,10 @@ impl Ot2AdapterProfile {
             self.temperature_claim(),
             ("the DNA plate".to_owned(), stage.dna_plate.slots.clone()),
             (
+                "the transformation source rack".to_owned(),
+                vec![stage.source_rack.slot.clone()],
+            ),
+            (
                 "transformation small tips".to_owned(),
                 stage.small_tips.slots.clone(),
             ),
@@ -238,6 +242,7 @@ impl Ot2AdapterProfile {
             self.deck.thermocycler.labware.clone(),
             stages.assembly.small_tips.labware.clone(),
             stages.transformation.dna_plate.labware.clone(),
+            stages.transformation.source_rack.labware.clone(),
             stages.transformation.small_tips.labware.clone(),
             stages.transformation.large_tips.labware.clone(),
             stages.plating.dilution_plate.labware.clone(),
