@@ -488,6 +488,7 @@ mod tests {
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
     use lab_method::{IntentOperationId, ProcedureValue, ScalarType};
+    use lab_procedure::{ValidatedProcedureProgram, vocabulary};
 
     use crate::backend::default_adapter_profile;
     use crate::lair::session::CompilerSession;
@@ -839,6 +840,31 @@ workflow main() -> Material<Plasmid>:
             })
             .expect("automated Golden Gate remains selectable");
         assert_eq!(automated.tasks.len(), 2);
+        let program = automated.tasks[0]
+            .program
+            .as_ref()
+            .expect("Golden Gate setup is normalized before facility planning")
+            .validate()
+            .expect("normalized program validates");
+        let ValidatedProcedureProgram::PipettingV1(program) = program;
+        assert_eq!(program.as_program().materials.len(), 9);
+        assert_eq!(program.as_program().steps.len(), 10);
+        let capabilities = program
+            .capability_formula()
+            .all_of
+            .into_iter()
+            .map(|clause| clause.capability_kind)
+            .collect::<Vec<_>>();
+        assert!(
+            capabilities
+                .iter()
+                .any(|kind| kind.as_str() == vocabulary::METERED_LIQUID_TRANSFER)
+        );
+        assert!(
+            capabilities
+                .iter()
+                .any(|kind| kind.as_str() == vocabulary::IN_WELL_MIXING)
+        );
         let setup_parameters = &automated.tasks[0].parameters;
         let artifact = setup_parameters
             .iter()

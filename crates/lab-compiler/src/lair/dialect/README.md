@@ -28,7 +28,7 @@ design-intent
 
 `design-intent` contains Design values and method-neutral Workflow/Intent operations. `PortableLairProgram` is the owned wrapper for this stage.
 
-`refined-alternatives` eliminates every refinable Intent action in favor of `method.choice` regions. Each candidate contains verifier-valid Procedure dataflow and first-class Capability requirements, and every candidate for one choice yields a compatible typed signature. `RefinedLairProgram` owns this stage. A read-only analysis projects it into `lab.planning-problem.v4`; the solver never mutates LAIR.
+`refined-alternatives` eliminates every refinable Intent action in favor of `method.choice` regions. Each candidate contains verifier-valid Procedure dataflow and first-class Capability requirements, and every candidate for one choice yields a compatible typed signature. Registered domain operations also carry a validated canonical Procedure program directly on their task operation. `RefinedLairProgram` owns this stage. A read-only analysis projects it into `lab.planning-problem.v5`; the solver never mutates LAIR.
 
 `allocated-procedure` contains one selected Method for every choice, every selected Procedure task and parameter, all Capability requirements, one exact binding for every requirement, one exact source for every material input, and one allocation context identifying the facility and source inventory digest. It contains no `method.choice`, Workflow action, or unresolved candidate. `AllocatedLairProgram` owns this stage and re-runs whole-module material-linearity analysis before exposing immutable adapter invocations.
 
@@ -44,7 +44,7 @@ SBOLInventory is not imported into LAIR. Facility, Zone, Asset, CapabilityOfferi
 
 ## Adapter and runtime boundary
 
-`lab.adapter-invocations.v5` is projected only from verifier-valid Allocated Procedure LAIR. It freezes selected Method graphs, typed tasks and parameters, exact requirement-to-offering-to-Asset bindings, exact material sources, adapter/profile bindings, and the inventory, planning-problem, and allocated-LAIR digests. External code consumes these owned serializable records, never the Pliron module.
+`lab.adapter-invocations.v6` is projected only from verifier-valid Allocated Procedure LAIR. It freezes selected Method graphs, typed tasks and normalized programs, parameters, exact requirement-to-offering-to-Asset bindings, exact material sources, adapter/profile bindings, and the inventory, planning-problem, and allocated-LAIR digests. External code consumes these owned serializable records, never the Pliron module.
 
 The built-in OT-2, Flex, and STAR adapters lower exact assigned Procedure tasks. Device-specific planning may introduce private typed plans or dialects, but it cannot revisit Method selection or facility allocation. Versioned execution plans and child run documents are runtime ABIs derived from those invocations, not later LAIR stages.
 

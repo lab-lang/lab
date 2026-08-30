@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use lab_capability::{AbsoluteIri, CapabilityKind, ControlMode, MethodId, QualificationLevel};
 use lab_method::{IntentOperationId, LocalId};
+use lab_procedure::{ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -17,7 +18,7 @@ use super::{
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v5";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v6";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -48,6 +49,8 @@ pub struct AllocatedMethod {
 pub struct AllocatedProcedureTask {
     pub id: LocalId,
     pub operation: lab_capability::OperationId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<ProcedureProgram>,
     pub inputs: Vec<PlanningTaskInput>,
     pub outputs: Vec<PlanningTaskOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -178,6 +181,7 @@ impl AdapterInvocationPlan {
                 tasks.push(AllocatedProcedureTask {
                     id: task.id.clone(),
                     operation: task.operation.clone(),
+                    program: task.program.clone(),
                     inputs: task.inputs.clone(),
                     outputs: task.outputs.clone(),
                     parameters: task.parameters.clone(),
@@ -270,6 +274,15 @@ impl AdapterInvocationPlan {
                     return Err(AdapterInvocationValidationError::EmptyTask {
                         task: task.id.clone(),
                     });
+                }
+                if let Some(program) = &task.program {
+                    let validated = program.validate().map_err(|error| {
+                        AdapterInvocationValidationError::InvalidProcedureProgram {
+                            task: task.id.clone(),
+                            message: error.to_string(),
+                        }
+                    })?;
+                    validate_program_bindings(task, &validated)?;
                 }
                 for material in &task.materials {
                     if !materials.insert(material.input.clone()) {
@@ -402,6 +415,51 @@ impl AdapterInvocationPlan {
         }
         Ok(())
     }
+}
+
+fn validate_program_bindings(
+    task: &AllocatedProcedureTask,
+    program: &ValidatedProcedureProgram,
+) -> Result<(), AdapterInvocationValidationError> {
+    match program {
+        ValidatedProcedureProgram::PipettingV1(program) => {
+            let task_materials = task
+                .materials
+                .iter()
+                .map(|material| material.input.as_str())
+                .collect::<BTreeSet<_>>();
+            let program_materials = program
+                .as_program()
+                .materials
+                .iter()
+                .map(|material| material.id.as_str())
+                .collect::<BTreeSet<_>>();
+            if !program_materials.is_subset(&task_materials) {
+                return Err(
+                    AdapterInvocationValidationError::ProcedureMaterialBindings {
+                        task: task.id.clone(),
+                    },
+                );
+            }
+            let task_outputs = task
+                .outputs
+                .iter()
+                .map(|output| output.name.as_str())
+                .collect::<BTreeSet<_>>();
+            let program_outputs = program
+                .as_program()
+                .outputs
+                .iter()
+                .map(|output| output.id.as_str())
+                .collect::<BTreeSet<_>>();
+            if task_outputs != program_outputs {
+                return Err(AdapterInvocationValidationError::ProcedureOutputBindings {
+                    task: task.id.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_material_inventory(
@@ -553,6 +611,12 @@ pub enum AdapterInvocationValidationError {
     DuplicateTask { task: LocalId },
     #[error("Procedure task `{task}` contains no capability requirements")]
     EmptyTask { task: LocalId },
+    #[error("Procedure task `{task}` has an invalid normalized program: {message}")]
+    InvalidProcedureProgram { task: LocalId, message: String },
+    #[error("Procedure task `{task}` normalized program references an undeclared material input")]
+    ProcedureMaterialBindings { task: LocalId },
+    #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
+    ProcedureOutputBindings { task: LocalId },
     #[error("adapter invocations repeat Procedure material input `{input}`")]
     DuplicateMaterialInput { input: LocalId },
     #[error("Procedure material input `{input}` has an invalid physical source")]

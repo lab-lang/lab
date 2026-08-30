@@ -267,6 +267,7 @@ fn extract_candidate(
             tasks.push(PlanningProcedureTask {
                 id: task_id,
                 operation: task.semantic_operation(context),
+                program: task.semantic_program(context),
                 inputs,
                 outputs,
                 parameters: Vec::new(),

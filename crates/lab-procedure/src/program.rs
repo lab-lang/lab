@@ -12,7 +12,7 @@ use crate::{PipettingProgramV1, PipettingProgramValidationError, ValidatedPipett
 /// The envelope remains ordinary serialized data so package and Python extensions do not depend on
 /// compiler IR. A contract registry validates and projects the payload into a typed program before
 /// planning or adapter code consumes it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProcedureProgram {
     pub contract: ProcedureContractId,
@@ -51,6 +51,15 @@ impl ProcedureProgram {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ValidatedProcedureProgram {
     PipettingV1(ValidatedPipettingProgramV1),
+}
+
+impl ValidatedProcedureProgram {
+    /// Derive the exact facility capability formula required to realize this program.
+    pub fn capability_formula(&self) -> crate::CapabilityFormula {
+        match self {
+            Self::PipettingV1(program) => program.capability_formula(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

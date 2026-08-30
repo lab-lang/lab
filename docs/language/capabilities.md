@@ -71,7 +71,7 @@ Method documents and planning pins remain intentionally separate. A catalog stat
 
 `PortableLairProgram::refine_methods` replaces every supported reachable Intent operation with a `method.choice`. Each candidate region contains generic `procedure.task`, `procedure.parameter`, `procedure.material`, `capability.requirement`, and `capability.constraint` operations and yields a compatible typed result. Source-to-Method ancestry and stable local identities are retained.
 
-The resulting `refined-alternatives` LAIR graph is the only authoritative requirement graph. Facility planning does not walk `CheckedModule`, an action-capability string table, or a separate requirement catalog to rediscover work. A read-only analysis projects `lab.planning-problem.v4` directly from verifier-valid LAIR.
+The resulting `refined-alternatives` LAIR graph is the only authoritative requirement graph. Facility planning does not walk `CheckedModule`, an action-capability string table, or a separate requirement catalog to rediscover work. A read-only analysis projects `lab.planning-problem.v5` directly from verifier-valid LAIR.
 
 The graph-wide solver combines Method choices with one validated immutable SBOLInventory snapshot, exact active MaterialLot evidence, configured adapter bindings, and manifest policy. It selects exact Methods, CapabilityOfferings, Assets, adapters, material sources, and dependencies together. Zero eligible solutions is an explained failure. Several semantically equal solutions remain an explained ambiguity unless explicit policy distinguishes them.
 
@@ -93,7 +93,7 @@ Qualification belongs to the offering, not the Asset or adapter. A runtime imple
 
 ## Adapter uptake
 
-`lab.adapter-invocations.v5` is projected from Allocated Procedure LAIR and retains selected Methods, tasks, requirements, parameters, materials, offerings, Assets, adapters, profile digests, and compiler-evidence digests. Invocations group only the tasks and requirements allocated to one exact Asset and adapter.
+`lab.adapter-invocations.v6` is projected from Allocated Procedure LAIR and retains selected Methods, tasks, normalized programs, requirements, parameters, materials, offerings, Assets, adapters, profile digests, and compiler-evidence digests. Invocations group only the tasks and requirements allocated to one exact Asset and adapter.
 
 Shared typed Procedure views validate operation semantics, capability kind, parameter identity and type, canonical QUDT unit, material role, and allocation ownership before device-specific code runs. OT-2, Flex, and STAR use this boundary today. Unsupported Procedure operations or values fail explicitly instead of being ignored.
 

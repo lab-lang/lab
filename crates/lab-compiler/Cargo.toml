@@ -32,6 +32,7 @@ lab-inventory.workspace = true
 lab-runfmt.workspace = true
 lab-language.workspace = true
 lab-method.workspace = true
+lab-procedure.workspace = true
 sbol-inventory.workspace = true
 opentrons-protocol.workspace = true
 pliron.workspace = true

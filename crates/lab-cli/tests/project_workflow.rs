@@ -132,7 +132,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert!(index.get("facility").is_none());
     assert!(project.join(".lab/build/compiler/refined.lair").is_file());
     let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
-    assert_eq!(problem["schema_version"], "lab.planning-problem.v4");
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v5");
     assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
         problem["choices"][0]["source_operation"],
@@ -692,7 +692,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v5");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v6");
     assert_eq!(
         invocations["material_inventory"]["facility"],
         "https://example.org/golden-gate/facility"

@@ -1154,6 +1154,7 @@ mod tests {
             id: id(id_value),
             operation: OperationId::new(format!("https://example.org/procedure/{operation}"))
                 .unwrap(),
+            program: None,
             inputs: Vec::new(),
             outputs: vec![PlanningTaskOutput {
                 name: id("result"),

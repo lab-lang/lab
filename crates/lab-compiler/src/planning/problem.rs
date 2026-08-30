@@ -7,12 +7,13 @@ use lab_capability::{
     QualificationLevel,
 };
 use lab_method::{IntentOperationId, LocalId, PortType, ProcedureValue};
+use lab_procedure::{ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v4";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v5";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///
@@ -62,6 +63,10 @@ pub struct PlanningMethodCandidate {
 pub struct PlanningProcedureTask {
     pub id: LocalId,
     pub operation: OperationId,
+    /// Canonical, device-neutral operational semantics when this task's open operation has a
+    /// registered normalization contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<ProcedureProgram>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<PlanningTaskInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -438,6 +443,15 @@ fn validate_candidate(
                 });
             }
         }
+        if let Some(program) = &task.program {
+            let validated = program.validate().map_err(|error| {
+                PlanningProblemValidationError::InvalidProcedureProgram {
+                    task: task.id.clone(),
+                    message: error.to_string(),
+                }
+            })?;
+            validate_program_bindings(task, &validated)?;
+        }
         if task.requirements.is_empty() {
             return Err(PlanningProblemValidationError::MissingRequirement {
                 task: task.id.clone(),
@@ -487,6 +501,49 @@ fn validate_candidate(
                 owner: choice.id.clone(),
                 value_source: yielded.source.clone(),
             });
+        }
+    }
+    Ok(())
+}
+
+fn validate_program_bindings(
+    task: &PlanningProcedureTask,
+    program: &ValidatedProcedureProgram,
+) -> Result<(), PlanningProblemValidationError> {
+    match program {
+        ValidatedProcedureProgram::PipettingV1(program) => {
+            let task_materials = task
+                .materials
+                .iter()
+                .map(|material| material.id.as_str())
+                .collect::<BTreeSet<_>>();
+            let program_materials = program
+                .as_program()
+                .materials
+                .iter()
+                .map(|material| material.id.as_str())
+                .collect::<BTreeSet<_>>();
+            if !program_materials.is_subset(&task_materials) {
+                return Err(PlanningProblemValidationError::ProcedureMaterialBindings {
+                    task: task.id.clone(),
+                });
+            }
+            let task_outputs = task
+                .outputs
+                .iter()
+                .map(|output| output.name.as_str())
+                .collect::<BTreeSet<_>>();
+            let program_outputs = program
+                .as_program()
+                .outputs
+                .iter()
+                .map(|output| output.id.as_str())
+                .collect::<BTreeSet<_>>();
+            if task_outputs != program_outputs {
+                return Err(PlanningProblemValidationError::ProcedureOutputBindings {
+                    task: task.id.clone(),
+                });
+            }
         }
     }
     Ok(())
@@ -559,6 +616,12 @@ pub enum PlanningProblemValidationError {
         material: LocalId,
         producer: LocalId,
     },
+    #[error("Procedure task `{task}` has an invalid normalized program: {message}")]
+    InvalidProcedureProgram { task: LocalId, message: String },
+    #[error("Procedure task `{task}` normalized program references an undeclared material input")]
+    ProcedureMaterialBindings { task: LocalId },
+    #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
+    ProcedureOutputBindings { task: LocalId },
     #[error("Procedure task `{task}` has no Capability requirement")]
     MissingRequirement { task: LocalId },
     #[error("Capability requirement `{requirement}` occurs more than once")]

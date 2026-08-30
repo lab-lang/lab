@@ -39,6 +39,9 @@ use crate::lair::dialect::workflow::{
     DiluteOp, MaterialType as WorkflowMaterialType, PlateOp, ProvisionOp, RealizeOp, RecoverOp,
     TransformOp,
 };
+use crate::procedure::{
+    ProcedureTaskInstance, ResolvedProcedureMaterial, ResolvedProcedureParameter, normalize_task,
+};
 
 pub(crate) fn refine_method_alternatives(
     context: &mut Context,
@@ -397,17 +400,18 @@ fn append_candidate(
             .map(|output| port_type(context, &output.port_type))
             .collect();
         let node_id = qualified_id(choice_id, &method.id, &task.id);
+        let output_names = task
+            .outputs
+            .iter()
+            .map(|output| output.name.clone())
+            .collect::<Vec<_>>();
         let task_op = TaskOp::new(
             context,
             &node_id,
             &task.operation,
             task_operands,
             task_results,
-            &task
-                .outputs
-                .iter()
-                .map(|output| output.name.clone())
-                .collect::<Vec<_>>(),
+            &output_names,
         );
         for (index, output) in task.outputs.iter().enumerate() {
             values.insert(
@@ -420,6 +424,7 @@ fn append_candidate(
         }
         choice.append_candidate_operation(context, candidate_index, task_op.get_operation());
 
+        let mut resolved_materials = Vec::new();
         for material in &task.materials {
             let symbols = resolve_material_symbols(
                 operation_location(choice, context),
@@ -438,6 +443,11 @@ fn append_candidate(
                     String::new()
                 };
                 let input_id = format!("{node_id}::material::{}{suffix}", material.id);
+                resolved_materials.push(ResolvedProcedureMaterial {
+                    id: LocalId::new(&input_id)
+                        .expect("qualified Method material identity is stable"),
+                    symbol: symbol.clone(),
+                });
                 let material_op = MaterialInputOp::new(context, input_id, &node_id, symbol);
                 choice.append_candidate_operation(
                     context,
@@ -447,6 +457,7 @@ fn append_candidate(
             }
         }
 
+        let mut resolved_parameters = Vec::new();
         for parameter in &task.parameters {
             let parameter_id = format!("{node_id}::parameter::{}", parameter.id);
             let value = resolve_procedure_value(
@@ -454,6 +465,11 @@ fn append_candidate(
                 &parameter.value,
                 parameters,
             )?;
+            resolved_parameters.push(ResolvedProcedureParameter {
+                id: LocalId::new(&parameter_id)
+                    .expect("qualified Method parameter identity is stable"),
+                value: value.clone(),
+            });
             let parameter_op = ParameterOp::new(
                 context,
                 parameter_id,
@@ -466,6 +482,20 @@ fn append_candidate(
                 candidate_index,
                 parameter_op.get_operation(),
             );
+        }
+
+        let semantic_node_id =
+            LocalId::new(&node_id).expect("qualified Method task identity is stable");
+        if let Some(program) = normalize_task(&ProcedureTaskInstance {
+            id: &semantic_node_id,
+            operation: &task.operation,
+            outputs: &output_names,
+            parameters: &resolved_parameters,
+            materials: &resolved_materials,
+        })
+        .map_err(|error| pliron::input_error!(operation_location(choice, context), error))?
+        {
+            task_op.set_semantic_program(context, &program);
         }
 
         for requirement in &task.requirements {

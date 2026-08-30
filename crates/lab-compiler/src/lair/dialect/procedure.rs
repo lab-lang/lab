@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 
 use lab_capability::{AbsoluteIri, OperationId, PropertyKind};
 use lab_method::{LocalId, PortType, ProcedureValue};
+use lab_procedure::ProcedureProgram;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;
@@ -69,7 +70,8 @@ impl Verify for DataType {
     attributes = (
         node_id: StringAttr,
         operation: StringAttr,
-        task_output_names: VecAttr
+        task_output_names: VecAttr,
+        normalized_program: StringAttr
     )
 )]
 pub(crate) struct TaskOp;
@@ -135,6 +137,23 @@ impl TaskOp {
                 .expect("verified procedure.task output names are stable IDs")
             })
             .collect()
+    }
+
+    pub(crate) fn set_semantic_program(&self, context: &mut Context, program: &ProcedureProgram) {
+        self.set_attr_normalized_program(
+            context,
+            StringAttr::new(
+                serde_json::to_string(program)
+                    .expect("ProcedureProgram contains only infallibly serializable values"),
+            ),
+        );
+    }
+
+    pub(crate) fn semantic_program(&self, context: &Context) -> Option<ProcedureProgram> {
+        self.get_attr_normalized_program(context).map(|program| {
+            serde_json::from_str(program.as_str())
+                .expect("verified procedure.task carries a valid normalized program")
+        })
     }
 }
 
@@ -202,6 +221,23 @@ impl Verify for TaskOp {
                 return verify_err!(
                     self.loc(context),
                     "procedure.task results must be Design, Procedure material, or Procedure data values"
+                );
+            }
+        }
+        if let Some(program) = self.get_attr_normalized_program(context) {
+            let parsed = match serde_json::from_str::<ProcedureProgram>(program.as_str()) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    return verify_err!(
+                        self.loc(context),
+                        "procedure.task has an invalid normalized program document: {error}"
+                    );
+                }
+            };
+            if let Err(error) = parsed.validate() {
+                return verify_err!(
+                    self.loc(context),
+                    "procedure.task has an invalid normalized program: {error}"
                 );
             }
         }

@@ -734,6 +734,7 @@ mod tests {
                         tasks: vec![AllocatedProcedureTask {
                             id: task_id.clone(),
                             operation: OperationId::new(operation).unwrap(),
+                            program: None,
                             inputs: Vec::new(),
                             outputs: Vec::new(),
                             parameters: Vec::new(),

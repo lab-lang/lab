@@ -82,7 +82,7 @@ class MethodTests(unittest.TestCase):
 
         self.assertIn("https://example.org/method#sequence-synthesis", refined.lair)
         self.assertIn(SEQUENCE_SYNTHESIS, refined.lair)
-        self.assertEqual(refined.planning_problem["schema_version"], "lab.planning-problem.v4")
+        self.assertEqual(refined.planning_problem["schema_version"], "lab.planning-problem.v5")
         choices = refined.planning_problem["choices"]
         self.assertEqual(len(choices), 1)
         self.assertEqual(
