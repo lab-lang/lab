@@ -27,6 +27,7 @@ from .methods import (
     Scalar,
     ScalarType,
 )
+from .procedures import ProcedureProgram, parse_program
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +226,7 @@ class AllocatedProcedureTask:
 
     id: str
     operation: str
+    program: ProcedureProgram | None
     inputs: tuple[ProcedureTaskInput, ...]
     outputs: tuple[ProcedureTaskOutput, ...]
     parameters: tuple[AllocatedProcedureParameter, ...]
@@ -514,9 +516,11 @@ def _allocated_requirement(raw: dict[str, Any]) -> AllocatedRequirement:
 
 
 def _allocated_task(raw: dict[str, Any]) -> AllocatedProcedureTask:
+    program = raw.get("program")
     return AllocatedProcedureTask(
         id=cast(str, raw["id"]),
         operation=cast(str, raw["operation"]),
+        program=(parse_program(cast(dict[str, Any], program)) if program is not None else None),
         inputs=tuple(
             ProcedureTaskInput(
                 source=_value_source(cast(dict[str, Any], item["source"])),

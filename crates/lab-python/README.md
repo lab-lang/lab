@@ -130,6 +130,7 @@ Python calls the same project service as `lab plan`; it does not implement a sep
 
 ```python
 import lab
+from lab import procedures
 
 planned = lab.plan_project("examples/golden-gate")
 print(planned.inventory.facility)
@@ -137,6 +138,11 @@ for invocation in planned.invocations:
     print(invocation.asset, invocation.adapter.driver)
     for task in planned.invocation_tasks(invocation):
         print(task.operation)
+        if task.program is not None:
+            print(task.program.contract)
+            if isinstance(task.program.body, procedures.ThermalProgramV1):
+                for stage in task.program.body.stages:
+                    print(stage.repeats, stage.steps)
         for requirement in task.requirements:
             print(requirement.capability_kind, requirement.offering)
 ```
@@ -148,7 +154,7 @@ program = lab.check(designs.module, workflows.module)
 planned = lab.plan(program, project="path/to/facility-package")
 ```
 
-The returned `FacilityPlan` provides typed Method, Procedure task, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
+The returned `FacilityPlan` provides typed Method, Procedure task, canonical program, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. `lab.procedures` exposes immutable `PipettingProgramV1` and `ThermalProgramV1` bodies with exact `Decimal` quantities, typed vessel roles and liquid operations, and typed thermal stages and steps. Rust remains the authority that normalizes and validates these programs and derives their capability formulas; Python reads the frozen result. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
 
 ## Adapter discovery and profile validation
 

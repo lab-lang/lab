@@ -1,12 +1,13 @@
 """Python consumes the same exact facility-planning service as the Lab CLI."""
 
 import shutil
+from decimal import Decimal
 from pathlib import Path
 
 import lab
 import pytest
 from lab import methods as method_types
-from lab import planning
+from lab import planning, procedures
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 GOLDEN_GATE = REPOSITORY / "examples" / "golden-gate"
@@ -106,6 +107,15 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
         if requirement.adapter == invocation.adapter
     )
     setup = next(task for task in tasks if task.operation.endswith("#SetupGoldenGateReaction"))
+    assert setup.program is not None
+    assert setup.program.contract == procedures.PIPETTING_PROGRAM_V1
+    assert isinstance(setup.program.body, procedures.PipettingProgramV1)
+    assert len(setup.program.body.materials) == 9
+    assert len(setup.program.body.steps) == 10
+    assert any(
+        isinstance(step, procedures.Mix) and step.volume.value == Decimal("15")
+        for step in setup.program.body.steps
+    )
     assert isinstance(setup.inputs[0].port_type, method_types.Port)
     assert setup.inputs[0].port_type.kind == "design"
     reaction_volume = next(
@@ -116,6 +126,31 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert reaction_volume.value.value is not None
     assert reaction_volume.value.value.value.type is method_types.ScalarType.INTEGER
     assert reaction_volume.value.value.unit == "http://qudt.org/vocab/unit/MicroL"
+
+    thermal = next(
+        task for task in tasks if task.operation.endswith("#ThermalCycleGoldenGateReaction")
+    )
+    assert thermal.program is not None
+    assert thermal.program.contract == procedures.THERMAL_PROGRAM_V1
+    assert isinstance(thermal.program.body, procedures.ThermalProgramV1)
+    assert thermal.program.body.load.sample_count == 1
+    assert thermal.program.body.load.volume_each.value == Decimal("20")
+    assert thermal.program.body.lid_temperature == procedures.Temperature(Decimal("105"))
+    assert thermal.program.body.stages[0].repeats == 75
+    assert thermal.program.body.stages[0].steps[0].hold.value == Decimal("120")
+    assert thermal.program.body.final_hold == procedures.Temperature(Decimal("4"))
+    assert {requirement.capability_kind for requirement in thermal.requirements} == {
+        f"{CAPABILITY}ProgrammedBlockTemperatureControl",
+        f"{CAPABILITY}HeatedLidTemperatureControl",
+    }
+
+    unnormalized = next(
+        task
+        for method in planned.methods
+        for task in method.tasks
+        if task.operation.endswith("#ProvisionMaterial")
+    )
+    assert unnormalized.program is None
 
     with pytest.raises(KeyError):
         planned.task("not-a-task")

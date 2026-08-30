@@ -15,14 +15,29 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
     assert ot2.services.lowering
     assert not ot2.services.runtime
     assert ot2.default_profile.driver == ot2.id
-    assert len(ot2.procedure_implementations) == 1
-    pipetting = ot2.procedure_implementations[0]
+    assert len(ot2.procedure_implementations) == 2
+    pipetting = next(
+        implementation
+        for implementation in ot2.procedure_implementations
+        if implementation.contract.endswith("#PipettingProgramV1")
+    )
     assert pipetting.contract.endswith("#PipettingProgramV1")
     assert pipetting.operations == (
         "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture",
         "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction",
     )
     assert "https://sbol.io/ns/capability#MeteredLiquidTransfer" in pipetting.capability_kinds
+    thermal = next(
+        implementation
+        for implementation in ot2.procedure_implementations
+        if implementation.contract.endswith("#ThermalProgramV1")
+    )
+    assert thermal.operations == (
+        "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction",
+    )
+    assert "https://sbol.io/ns/capability#ProgrammedBlockTemperatureControl" in (
+        thermal.capability_kinds
+    )
 
 
 def test_profile_validation_uses_the_explicit_driver() -> None:

@@ -21,6 +21,7 @@ from typing import Any, cast
 from . import adapters as adapters
 from . import methods as methods
 from . import planning as planning
+from . import procedures as procedures
 from . import sbol as sbol
 from ._artifacts import artifact
 from ._circuits import (
@@ -220,6 +221,7 @@ __all__ = [
     "plan_project",
     "planning",
     "plate",
+    "procedures",
     "provision",
     "purify",
     "quantify",
