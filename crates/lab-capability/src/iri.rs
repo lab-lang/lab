@@ -214,6 +214,14 @@ semantic_iri!(
     OperationId,
     "The stable absolute IRI identifying a semantic procedure operation."
 );
+semantic_iri!(
+    ProcedureContractId,
+    "The stable absolute IRI identifying a versioned operational Procedure contract."
+);
+semantic_iri!(
+    ProcedureImplementationId,
+    "The stable absolute IRI identifying one adapter implementation of a Procedure contract."
+);
 
 #[cfg(test)]
 mod tests {

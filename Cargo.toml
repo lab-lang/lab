@@ -12,6 +12,7 @@ members = [
     "crates/lab-language-server",
     "crates/lab-method",
     "crates/lab-package",
+    "crates/lab-procedure",
     "crates/lab-project",
     "crates/lab-sbol",
     "crates/lab-python",
@@ -88,6 +89,7 @@ lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }
 lab-method = { path = "crates/lab-method", version = "0.1.2" }
 opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.2" }
+lab-procedure = { path = "crates/lab-procedure", version = "0.1.2" }
 lab-project = { path = "crates/lab-project", version = "0.1.2" }
 lab-runfmt = { path = "crates/lab-runfmt", version = "0.1.2" }
 lab-sbol = { path = "crates/lab-sbol", version = "0.1.2" }

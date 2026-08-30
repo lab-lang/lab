@@ -1814,6 +1814,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-procedure"
+version = "0.1.2"
+dependencies = [
+ "lab-capability",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-project"
 version = "0.1.2"
 dependencies = [

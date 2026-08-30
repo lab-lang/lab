@@ -12,8 +12,8 @@ mod value;
 
 pub use constraint::{ConstraintEvaluationError, ConstraintRelation, PropertyConstraint};
 pub use iri::{
-    AbsoluteIri, CapabilityKind, IriError, MethodId, OperationId, PropertyKind, UnitIri,
-    is_absolute_iri,
+    AbsoluteIri, CapabilityKind, IriError, MethodId, OperationId, ProcedureContractId,
+    ProcedureImplementationId, PropertyKind, UnitIri, is_absolute_iri,
 };
 pub use qualification::{
     ControlMode, ControlModeError, QualificationLevel, QualificationLevelError,
