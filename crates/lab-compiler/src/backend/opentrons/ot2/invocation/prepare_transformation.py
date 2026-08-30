@@ -1,6 +1,7 @@
 """Requirement-scoped chemical-transformation setup emitted by Lab."""
 
 import json
+from typing import Any
 
 from opentrons import protocol_api
 
@@ -17,11 +18,11 @@ PLAN_JSON = "{}"  # LAB:INVOCATION_PLAN
 PLAN = json.loads(PLAN_JSON)
 
 
-def _quantity_value(quantity: dict) -> float:
+def _quantity_value(quantity: dict[str, Any]) -> float:
     return float(quantity["value"]["value"])
 
 
-def _aspiration_location(well, strategy: dict):
+def _aspiration_location(well: Any, strategy: dict[str, Any]) -> Any:
     kind = strategy["kind"]
     if kind == "liquid":
         return well
@@ -30,7 +31,9 @@ def _aspiration_location(well, strategy: dict):
     raise ValueError(f"Unsupported transformation aspiration strategy: {kind}")
 
 
-def _dispense_location(well, strategy: dict, techniques: dict):
+def _dispense_location(
+    well: Any, strategy: dict[str, Any], techniques: dict[str, Any]
+) -> Any:
     kind = strategy["kind"]
     if kind == "liquid":
         return well
@@ -45,7 +48,12 @@ def _dispense_location(well, strategy: dict, techniques: dict):
     raise ValueError(f"Unsupported transformation dispense strategy: {kind}")
 
 
-def _finish_technique(pipette, destination, technique: dict, techniques: dict) -> None:
+def _finish_technique(
+    pipette: Any,
+    destination: Any,
+    technique: dict[str, Any],
+    techniques: dict[str, Any],
+) -> None:
     if technique["blow_out"]:
         pipette.blow_out()
     if technique["touch_tip"]:
@@ -103,9 +111,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         description="Allocated competent-cell input",
         display_color="#87CEEB",
     )
-    cells.load_liquid(
-        liquid=cell_liquid, volume=execution["cell_source_volume_ul"]
-    )
+    cells.load_liquid(liquid=cell_liquid, volume=execution["cell_source_volume_ul"])
 
     large.distribute(
         volume=execution["cell_volume_ul"],
@@ -132,11 +138,15 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             small.mix(
                 execution["dna_mix_cycles"],
                 execution["dna_mix_volume_ul"],
-                _aspiration_location(source, execution["dna_mix_technique"]["aspiration"]),
+                _aspiration_location(
+                    source, execution["dna_mix_technique"]["aspiration"]
+                ),
             )
             small.aspirate(
                 execution["dna_volume_ul"],
-                _aspiration_location(source, execution["dna_transfer_technique"]["aspiration"]),
+                _aspiration_location(
+                    source, execution["dna_transfer_technique"]["aspiration"]
+                ),
                 rate=techniques["aspiration_rate"],
             )
             small.dispense(

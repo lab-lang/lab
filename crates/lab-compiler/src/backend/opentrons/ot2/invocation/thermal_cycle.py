@@ -26,7 +26,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     thermocycler.load_labware(deck["thermocycler"]["labware"])
     protocol.comment(execution["title"])
     protocol.comment(
-        "Process only the staged samples in wells " + ", ".join(execution["sample_wells"])
+        "Process only the staged samples in wells "
+        + ", ".join(execution["sample_wells"])
     )
     thermocycler.close_lid()
     if execution["lid_temperature_c"] is not None:
@@ -47,4 +48,6 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         thermocycler.set_block_temperature(execution["final_hold_celsius"])
     thermocycler.deactivate_lid()
     thermocycler.open_lid()
-    protocol.comment("Thermal program complete. Preserve the named Procedure output before continuing.")
+    protocol.comment(
+        "Thermal program complete. Preserve the named Procedure output before continuing."
+    )

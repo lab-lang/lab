@@ -60,14 +60,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             well.load_liquid(liquid=culture, volume=volume)
 
     key = lambda entry: (entry["dilution"], entry["culture_replicate"])
-    for (dilution, culture_replicate), entries in groupby(
+    for (dilution, culture_replicate), grouped_entries in groupby(
         execution["plate_map"], key=key
     ):
-        entries = list(entries)
+        entries = list(grouped_entries)
         source_allocation = entries[0]["source"]
-        source = dilution_plates[source_allocation["plate"]][
-            source_allocation["well"]
-        ]
+        source = dilution_plates[source_allocation["plate"]][source_allocation["well"]]
         pipette.pick_up_tip()
         for entry in entries:
             destination_allocation = entry["destination"]

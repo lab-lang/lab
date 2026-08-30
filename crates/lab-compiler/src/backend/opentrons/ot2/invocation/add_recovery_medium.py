@@ -1,6 +1,7 @@
 """Requirement-scoped recovery-medium addition emitted by Lab."""
 
 import json
+from typing import Any
 
 from opentrons import protocol_api
 
@@ -17,11 +18,13 @@ PLAN_JSON = "{}"  # LAB:INVOCATION_PLAN
 PLAN = json.loads(PLAN_JSON)
 
 
-def _quantity_value(quantity: dict) -> float:
+def _quantity_value(quantity: dict[str, Any]) -> float:
     return float(quantity["value"]["value"])
 
 
-def _destination(well, strategy: dict, techniques: dict):
+def _destination(
+    well: Any, strategy: dict[str, Any], techniques: dict[str, Any]
+) -> Any:
     kind = strategy["kind"]
     if kind == "liquid":
         return well

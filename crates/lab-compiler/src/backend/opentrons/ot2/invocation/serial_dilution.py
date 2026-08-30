@@ -1,6 +1,7 @@
 """Requirement-scoped serial dilution emitted by Lab."""
 
 import json
+from typing import Any
 
 from opentrons import protocol_api
 
@@ -17,12 +18,20 @@ PLAN_JSON = "{}"  # LAB:INVOCATION_PLAN
 PLAN = json.loads(PLAN_JSON)
 
 
-def _tracked_aspiration_location(protocol, source, techniques: dict):
+def _tracked_aspiration_location(
+    protocol: protocol_api.ProtocolContext,
+    source: Any,
+    techniques: dict[str, Any],
+) -> Any:
     current_volume = source.current_liquid_volume()
     if current_volume is None:
-        raise RuntimeError("The configured dilution-medium source has no tracked volume")
+        raise RuntimeError(
+            "The configured dilution-medium source has no tracked volume"
+        )
     if current_volume < source.max_volume * techniques["tracked_low_volume_fraction"]:
-        protocol.comment("Low dilution-medium volume; using the labware default aspiration location")
+        protocol.comment(
+            "Low dilution-medium volume; using the labware default aspiration location"
+        )
         return source
     usable_depth = source.depth - techniques["tracked_usable_depth_offset_mm"]
     liquid_height = (current_volume / source.max_volume) * usable_depth
@@ -130,9 +139,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 destination,
                 rate=techniques["dispense_rate"],
             )
-            p20.mix(
-                execution["mix_cycles"], execution["mix_volume_ul"], destination
-            )
+            p20.mix(execution["mix_cycles"], execution["mix_volume_ul"], destination)
             source = destination
         p20.drop_tip()
 
