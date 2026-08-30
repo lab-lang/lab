@@ -57,6 +57,7 @@ ex:opentrons_ot2
     fac:isActive true ;
     fac:capability ex:opentrons_ot2_metered_liquid_transfer,
         ex:opentrons_ot2_in_well_mixing,
+        ex:opentrons_ot2_liquid_level_aware_aspiration,
         ex:opentrons_ot2_programmed_block_temperature_control,
         ex:opentrons_ot2_heated_lid_temperature_control .
 
@@ -99,6 +100,14 @@ ex:opentrons_ot2_maximum_mix_volume
     fac:propertyKind cap:MaximumMixVolume ;
     fac:realValue "300"^^xsd:double ;
     fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_liquid_level_aware_aspiration
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "liquid_level_aware_aspiration" ;
+    fac:capabilityKind cap:LiquidLevelAwareAspiration ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
 
 ex:opentrons_ot2_programmed_block_temperature_control
     a sbol:Identified, fac:CapabilityOffering ;

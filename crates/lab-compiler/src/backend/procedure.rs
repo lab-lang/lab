@@ -9,7 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_instruments::{ThermalProfile, ThermalStage, ThermalStep};
 use lab_procedure::{
-    FluidPathPolicy, Location, PipettingStep, ValidatedProcedureProgram, VesselRole, Volume,
+    FluidPathPolicy, Location, MixTechnique, PipettingStep, TransferTechnique,
+    ValidatedPipettingProgramV1, ValidatedProcedureProgram, VesselRole, Volume,
 };
 
 use crate::backend::invocation::{ProcedureTaskView, material_role};
@@ -18,7 +19,12 @@ use crate::planning::{
     SelectedMaterialBinding,
 };
 
-pub(crate) use crate::procedure::{CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE};
+const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
+
+pub(crate) use crate::procedure::{
+    ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
+    PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
+};
 
 pub(crate) struct MaterialVolume<'a> {
     pub(crate) role: String,
@@ -37,6 +43,7 @@ pub(crate) struct SetupGoldenGate<'a> {
 
 pub(crate) struct NormalizedThermalProgram {
     pub(crate) artifact: String,
+    pub(crate) title: String,
     pub(crate) sample_count: usize,
     pub(crate) volume_each_ul: f64,
     pub(crate) lid_temperature_c: Option<f64>,
@@ -45,13 +52,785 @@ pub(crate) struct NormalizedThermalProgram {
 }
 
 pub(crate) struct SerialDilution<'a> {
+    pub(crate) subject: String,
     pub(crate) culture_source: &'a PlanningValueSource,
     pub(crate) medium: &'a SelectedMaterialBinding,
+    pub(crate) culture_replicates: usize,
     pub(crate) serial_dilutions: usize,
+    pub(crate) initial_volume_ul: u32,
     pub(crate) medium_volume_ul: u32,
     pub(crate) culture_volume_ul: u32,
     pub(crate) mix_cycles: u32,
     pub(crate) mix_volume_ul: u32,
+    pub(crate) medium_technique: TransferTechnique,
+    pub(crate) transfer_technique: TransferTechnique,
+    pub(crate) mix_technique: MixTechnique,
+}
+
+pub(crate) struct ChemicalTransformation<'a> {
+    pub(crate) artifact: String,
+    pub(crate) cell_source: &'a PlanningValueSource,
+    pub(crate) dna: Vec<&'a SelectedMaterialBinding>,
+    pub(crate) replicates: usize,
+    pub(crate) cell_mix_cycles: u32,
+    pub(crate) cell_mix_volume_ul: u32,
+    pub(crate) cell_mix_technique: MixTechnique,
+    pub(crate) cell_volume_ul: u32,
+    pub(crate) cell_transfer_technique: TransferTechnique,
+    pub(crate) dna_mix_cycles: u32,
+    pub(crate) dna_mix_volume_ul: u32,
+    pub(crate) dna_mix_technique: MixTechnique,
+    pub(crate) dna_volume_ul: u32,
+    pub(crate) dna_transfer_technique: TransferTechnique,
+    pub(crate) bubble_clear_cycles: u32,
+    pub(crate) bubble_clear_volume_ul: u32,
+    pub(crate) bubble_clear_technique: MixTechnique,
+}
+
+pub(crate) struct RecoveryMediumAddition<'a> {
+    pub(crate) subject: String,
+    pub(crate) culture_source: &'a PlanningValueSource,
+    pub(crate) medium: &'a SelectedMaterialBinding,
+    pub(crate) replicates: usize,
+    pub(crate) initial_volume_ul: u32,
+    pub(crate) recovery_volume_ul: u32,
+    pub(crate) technique: TransferTechnique,
+}
+
+pub(crate) struct SelectivePlating<'a> {
+    pub(crate) subject: String,
+    pub(crate) culture_source: &'a PlanningValueSource,
+    pub(crate) selection: &'a SelectedMaterialBinding,
+    pub(crate) culture_replicates: usize,
+    pub(crate) serial_dilutions: usize,
+    pub(crate) plating_replicates: usize,
+    pub(crate) initial_volume_by_dilution_ul: Vec<u32>,
+    pub(crate) medium_volume_ul: u32,
+    pub(crate) culture_volume_ul: u32,
+    pub(crate) colony_volume_ul: u32,
+    pub(crate) technique: TransferTechnique,
+}
+
+pub(crate) fn normalized_chemical_transformation<'a>(
+    adapter: &str,
+    task: &'a AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<ChemicalTransformation<'a>, String> {
+    let program = normalized_pipetting_program(
+        adapter,
+        task,
+        requirements,
+        PREPARE_CHEMICAL_TRANSFORMATION,
+        "chemical-transformation preparation",
+    )?;
+    if task.inputs.len() != 2 {
+        return Err(format!(
+            "{adapter} transformation task '{}' must have design and competent-cell inputs",
+            task.id
+        ));
+    }
+    let view = ProcedureTaskView::new(adapter, task);
+    view.require_material_roles(&["dependencies"])?;
+    let artifact = view.text_parameter("artifact")?;
+    let program = program.as_program();
+    let [output] = program.outputs.as_slice() else {
+        return Err(format!(
+            "{adapter} transformation task '{}' must declare exactly one mixture output",
+            task.id
+        ));
+    };
+    let cells = program
+        .vessels
+        .iter()
+        .filter(|vessel| matches!(vessel.role, VesselRole::ProcedureInput { input: 1 }))
+        .collect::<Vec<_>>();
+    let reactions = program
+        .vessels
+        .iter()
+        .filter(|vessel| {
+            matches!(&vessel.role, VesselRole::Product { output: candidate } if candidate == &output.id)
+        })
+        .collect::<Vec<_>>();
+    let ([cells], [reactions]) = (cells.as_slice(), reactions.as_slice()) else {
+        return Err(format!(
+            "{adapter} transformation task '{}' must map competent cells and its mixture to one vessel each",
+            task.id
+        ));
+    };
+    let destinations = (0..reactions.positions)
+        .map(|position| Location {
+            vessel: reactions.id.clone(),
+            position,
+        })
+        .collect::<Vec<_>>();
+    let replicates = destinations.len();
+    let materials = task
+        .materials
+        .iter()
+        .map(|material| (material.input.as_str(), material))
+        .collect::<BTreeMap<_, _>>();
+    let vessels = program
+        .vessels
+        .iter()
+        .map(|vessel| (&vessel.id, vessel))
+        .collect::<BTreeMap<_, _>>();
+    let dna = program
+        .materials
+        .iter()
+        .map(|material| {
+            materials.get(material.id.as_str()).copied().ok_or_else(|| {
+                format!(
+                    "{adapter} transformation task '{}' normalized DNA '{}' has no exact material allocation",
+                    task.id, material.id
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if dna.is_empty() || dna.len() != materials.len() {
+        return Err(format!(
+            "{adapter} transformation task '{}' must consume every allocated DNA exactly once",
+            task.id
+        ));
+    }
+    let mut steps = program.steps.iter();
+    let PipettingStep::Mix {
+        targets,
+        cycles: cell_mix_cycles,
+        volume: cell_mix_volume,
+        technique: cell_mix_technique,
+        fluid_path_group: cell_group,
+        ..
+    } = steps.next().ok_or_else(|| {
+        format!(
+            "{adapter} transformation task '{}' has no competent-cell mix",
+            task.id
+        )
+    })?
+    else {
+        return Err(format!(
+            "{adapter} transformation task '{}' must begin by mixing competent cells",
+            task.id
+        ));
+    };
+    let cell_location = Location {
+        vessel: cells.id.clone(),
+        position: 0,
+    };
+    if targets.as_slice() != std::slice::from_ref(&cell_location) {
+        return Err(format!(
+            "{adapter} transformation task '{}' mixes the wrong competent-cell source",
+            task.id
+        ));
+    }
+    let PipettingStep::Distribute {
+        source,
+        destinations: cell_destinations,
+        volume_each: cell_volume,
+        technique: cell_transfer_technique,
+        fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+        fluid_path_group,
+        ..
+    } = steps.next().ok_or_else(|| {
+        format!(
+            "{adapter} transformation task '{}' has no competent-cell distribution",
+            task.id
+        )
+    })?
+    else {
+        return Err(format!(
+            "{adapter} transformation task '{}' must distribute competent cells after mixing",
+            task.id
+        ));
+    };
+    if source != &cell_location
+        || cell_destinations != &destinations
+        || cell_group.is_none()
+        || cell_group != fluid_path_group
+    {
+        return Err(format!(
+            "{adapter} transformation task '{}' does not preserve one contamination-safe competent-cell path",
+            task.id
+        ));
+    }
+
+    let mut dna_mix = None;
+    let mut dna_transfer = None;
+    let mut bubble_clear = None;
+    for (material_index, material) in program.materials.iter().enumerate() {
+        let source_vessel = vessels
+            .values()
+            .filter(|vessel| {
+                matches!(&vessel.role, VesselRole::MaterialSource { material: candidate } if candidate == &material.id)
+            })
+            .copied()
+            .collect::<Vec<_>>();
+        let [source_vessel] = source_vessel.as_slice() else {
+            return Err(format!(
+                "{adapter} transformation task '{}' DNA material '{}' must map to one source vessel",
+                task.id, material.id
+            ));
+        };
+        let dna_location = Location {
+            vessel: source_vessel.id.clone(),
+            position: 0,
+        };
+        for (replicate, destination) in destinations.iter().enumerate() {
+            let trio = [
+                steps.next().ok_or_else(|| {
+                    format!(
+                        "{adapter} transformation task '{}' is missing DNA mix {material_index}/{replicate}",
+                        task.id
+                    )
+                })?,
+                steps.next().ok_or_else(|| {
+                    format!(
+                        "{adapter} transformation task '{}' is missing DNA transfer {material_index}/{replicate}",
+                        task.id
+                    )
+                })?,
+                steps.next().ok_or_else(|| {
+                    format!(
+                        "{adapter} transformation task '{}' is missing bubble clearing {material_index}/{replicate}",
+                        task.id
+                    )
+                })?,
+            ];
+            let PipettingStep::Mix {
+                targets,
+                cycles,
+                volume,
+                technique,
+                fluid_path_group: mix_group,
+                ..
+            } = trio[0]
+            else {
+                return Err(format!(
+                    "{adapter} transformation task '{}' must mix DNA before transfer",
+                    task.id
+                ));
+            };
+            if targets.as_slice() != std::slice::from_ref(&dna_location) {
+                return Err(format!(
+                    "{adapter} transformation task '{}' mixes the wrong DNA source",
+                    task.id
+                ));
+            }
+            let mix = (
+                *cycles,
+                whole_microlitres(adapter, task, "DNA mix", volume)?,
+                technique.clone(),
+            );
+            if dna_mix
+                .replace(mix.clone())
+                .is_some_and(|first| first != mix)
+            {
+                return Err(format!(
+                    "{adapter} transformation task '{}' uses inconsistent DNA mixing",
+                    task.id
+                ));
+            }
+            let PipettingStep::Transfer {
+                source,
+                destination: transfer_destination,
+                volume,
+                technique,
+                fluid_path_group: transfer_group,
+                ..
+            } = trio[1]
+            else {
+                return Err(format!(
+                    "{adapter} transformation task '{}' must transfer DNA after mixing",
+                    task.id
+                ));
+            };
+            if source != &dna_location
+                || transfer_destination != destination
+                || mix_group.is_none()
+                || mix_group != transfer_group
+            {
+                return Err(format!(
+                    "{adapter} transformation task '{}' DNA transfer does not preserve its isolated path",
+                    task.id
+                ));
+            }
+            let transfer = (
+                whole_microlitres(adapter, task, "DNA transfer", volume)?,
+                technique.clone(),
+            );
+            if dna_transfer
+                .replace(transfer.clone())
+                .is_some_and(|first| first != transfer)
+            {
+                return Err(format!(
+                    "{adapter} transformation task '{}' uses inconsistent DNA transfer technique",
+                    task.id
+                ));
+            }
+            let PipettingStep::Mix {
+                targets,
+                cycles,
+                volume,
+                technique,
+                fluid_path_group: bubble_group,
+                ..
+            } = trio[2]
+            else {
+                return Err(format!(
+                    "{adapter} transformation task '{}' must clear bubbles after DNA transfer",
+                    task.id
+                ));
+            };
+            if targets.as_slice() != std::slice::from_ref(destination)
+                || bubble_group != transfer_group
+            {
+                return Err(format!(
+                    "{adapter} transformation task '{}' bubble clearing does not preserve the DNA path",
+                    task.id
+                ));
+            }
+            let bubble = (
+                *cycles,
+                whole_microlitres(adapter, task, "bubble-clear mix", volume)?,
+                technique.clone(),
+            );
+            if bubble_clear
+                .replace(bubble.clone())
+                .is_some_and(|first| first != bubble)
+            {
+                return Err(format!(
+                    "{adapter} transformation task '{}' uses inconsistent bubble clearing",
+                    task.id
+                ));
+            }
+        }
+    }
+    if steps.next().is_some() {
+        return Err(format!(
+            "{adapter} transformation task '{}' contains operations outside its canonical shape",
+            task.id
+        ));
+    }
+    let (dna_mix_cycles, dna_mix_volume_ul, dna_mix_technique) =
+        dna_mix.expect("validated transformation has DNA mixing");
+    let (dna_volume_ul, dna_transfer_technique) =
+        dna_transfer.expect("validated transformation has DNA transfer");
+    let (bubble_clear_cycles, bubble_clear_volume_ul, bubble_clear_technique) =
+        bubble_clear.expect("validated transformation has bubble clearing");
+    Ok(ChemicalTransformation {
+        artifact,
+        cell_source: &task.inputs[1].source,
+        dna,
+        replicates,
+        cell_mix_cycles: *cell_mix_cycles,
+        cell_mix_volume_ul: whole_microlitres(
+            adapter,
+            task,
+            "competent-cell mix",
+            cell_mix_volume,
+        )?,
+        cell_mix_technique: cell_mix_technique.clone(),
+        cell_volume_ul: whole_microlitres(adapter, task, "competent-cell transfer", cell_volume)?,
+        cell_transfer_technique: cell_transfer_technique.clone(),
+        dna_mix_cycles,
+        dna_mix_volume_ul,
+        dna_mix_technique,
+        dna_volume_ul,
+        dna_transfer_technique,
+        bubble_clear_cycles,
+        bubble_clear_volume_ul,
+        bubble_clear_technique,
+    })
+}
+
+pub(crate) fn normalized_recovery_medium<'a>(
+    adapter: &str,
+    task: &'a AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<RecoveryMediumAddition<'a>, String> {
+    let program = normalized_pipetting_program(
+        adapter,
+        task,
+        requirements,
+        ADD_RECOVERY_MEDIUM,
+        "recovery-medium addition",
+    )?;
+    if task.inputs.len() != 1 {
+        return Err(format!(
+            "{adapter} recovery task '{}' must have one transformed-culture input",
+            task.id
+        ));
+    }
+    let view = ProcedureTaskView::new(adapter, task);
+    let subject = view.text_parameter("subject")?;
+    view.require_material_roles(&["medium"])?;
+    let medium = view.one_material("medium")?;
+    let program = program.as_program();
+    let [material] = program.materials.as_slice() else {
+        return Err(format!(
+            "{adapter} recovery task '{}' must declare one medium",
+            task.id
+        ));
+    };
+    if medium.input.as_str() != material.id.as_str() {
+        return Err(format!(
+            "{adapter} recovery task '{}' normalized medium does not match its allocation",
+            task.id
+        ));
+    }
+    let [source_vessel, culture_vessel] = program.vessels.as_slice() else {
+        return Err(format!(
+            "{adapter} recovery task '{}' must map medium and culture to two vessels",
+            task.id
+        ));
+    };
+    if !matches!(&source_vessel.role, VesselRole::MaterialSource { material: candidate } if candidate == &material.id)
+    {
+        return Err(format!(
+            "{adapter} recovery task '{}' has a non-canonical medium vessel",
+            task.id
+        ));
+    }
+    let VesselRole::InputOutput {
+        input: 0,
+        output: culture_output,
+    } = &culture_vessel.role
+    else {
+        return Err(format!(
+            "{adapter} recovery task '{}' must update its input culture in place",
+            task.id
+        ));
+    };
+    if !program
+        .outputs
+        .iter()
+        .any(|output| &output.id == culture_output)
+    {
+        return Err(format!(
+            "{adapter} recovery task '{}' culture vessel names an unknown output",
+            task.id
+        ));
+    }
+    let initial_volume_ul = culture_vessel
+        .initial_volume_each
+        .as_ref()
+        .ok_or_else(|| {
+            format!(
+                "{adapter} recovery task '{}' has no exact initial culture volume",
+                task.id
+            )
+        })
+        .and_then(|volume| whole_microlitres(adapter, task, "initial culture", volume))?;
+    let [
+        PipettingStep::Distribute {
+            source,
+            destinations,
+            volume_each,
+            fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+            technique,
+            ..
+        },
+    ] = program.steps.as_slice()
+    else {
+        return Err(format!(
+            "{adapter} recovery task '{}' must contain one contamination-safe medium distribution",
+            task.id
+        ));
+    };
+    let expected_destinations = (0..culture_vessel.positions)
+        .map(|position| Location {
+            vessel: culture_vessel.id.clone(),
+            position,
+        })
+        .collect::<Vec<_>>();
+    if source
+        != &(Location {
+            vessel: source_vessel.id.clone(),
+            position: 0,
+        })
+        || destinations != &expected_destinations
+    {
+        return Err(format!(
+            "{adapter} recovery task '{}' medium distribution addresses the wrong cultures",
+            task.id
+        ));
+    }
+    Ok(RecoveryMediumAddition {
+        subject,
+        culture_source: &task.inputs[0].source,
+        medium,
+        replicates: usize::try_from(culture_vessel.positions).map_err(|_| {
+            format!(
+                "{adapter} recovery task '{}' replicate count does not fit this platform",
+                task.id
+            )
+        })?,
+        initial_volume_ul,
+        recovery_volume_ul: whole_microlitres(adapter, task, "recovery medium", volume_each)?,
+        technique: technique.clone(),
+    })
+}
+
+pub(crate) fn normalized_selective_plating<'a>(
+    adapter: &str,
+    task: &'a AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<SelectivePlating<'a>, String> {
+    let program = normalized_pipetting_program(
+        adapter,
+        task,
+        requirements,
+        PLATE_DILUTED_CULTURE,
+        "selective plating",
+    )?;
+    if task.inputs.len() != 1 {
+        return Err(format!(
+            "{adapter} plating task '{}' must have one diluted-culture input",
+            task.id
+        ));
+    }
+    let view = ProcedureTaskView::new(adapter, task);
+    let subject = view.text_parameter("subject")?;
+    view.require_material_roles(&["selection"])?;
+    let selection = view.one_material("selection")?;
+    let program = program.as_program();
+    let [material] = program.materials.as_slice() else {
+        return Err(format!(
+            "{adapter} plating task '{}' must declare one selective medium",
+            task.id
+        ));
+    };
+    if selection.input.as_str() != material.id.as_str() {
+        return Err(format!(
+            "{adapter} plating task '{}' normalized selection does not match its allocation",
+            task.id
+        ));
+    }
+    let [output] = program.outputs.as_slice() else {
+        return Err(format!(
+            "{adapter} plating task '{}' must declare one plate output",
+            task.id
+        ));
+    };
+    let inputs = program
+        .vessels
+        .iter()
+        .filter(|vessel| matches!(vessel.role, VesselRole::ProcedureInput { input: 0 }))
+        .collect::<Vec<_>>();
+    let products = program
+        .vessels
+        .iter()
+        .filter(|vessel| {
+            matches!(&vessel.role, VesselRole::MaterialProduct { material: candidate, output: candidate_output }
+                if candidate == &material.id && candidate_output == &output.id)
+        })
+        .collect::<Vec<_>>();
+    let [product] = products.as_slice() else {
+        return Err(format!(
+            "{adapter} plating task '{}' must map selective medium and output to one plate vessel",
+            task.id
+        ));
+    };
+    if inputs.is_empty() {
+        return Err(format!(
+            "{adapter} plating task '{}' has no dilution vessels",
+            task.id
+        ));
+    }
+    let culture_replicates = usize::try_from(inputs[0].positions).map_err(|_| {
+        format!(
+            "{adapter} plating task '{}' culture replicate count does not fit this platform",
+            task.id
+        )
+    })?;
+    if inputs.iter().any(|vessel| {
+        usize::try_from(vessel.positions).ok() != Some(culture_replicates)
+            || vessel.initial_volume_each.is_none()
+    }) {
+        return Err(format!(
+            "{adapter} plating task '{}' dilution vessels do not preserve one uniform replicate layout",
+            task.id
+        ));
+    }
+    let serial_dilutions = inputs.len();
+    let source_count = culture_replicates
+        .checked_mul(serial_dilutions)
+        .ok_or_else(|| {
+            format!(
+                "{adapter} plating task '{}' source count overflows",
+                task.id
+            )
+        })?;
+    if program.steps.len() != source_count {
+        return Err(format!(
+            "{adapter} plating task '{}' must contain one distribution per dilution and culture replicate",
+            task.id
+        ));
+    }
+    let spot_count = usize::try_from(product.positions).map_err(|_| {
+        format!(
+            "{adapter} plating task '{}' spot count does not fit this platform",
+            task.id
+        )
+    })?;
+    if spot_count % source_count != 0 {
+        return Err(format!(
+            "{adapter} plating task '{}' spot count is not divisible by its culture sources",
+            task.id
+        ));
+    }
+    let plating_replicates = spot_count / source_count;
+    let product_locations = (0..product.positions)
+        .map(|position| Location {
+            vessel: product.id.clone(),
+            position,
+        })
+        .collect::<Vec<_>>();
+    let mut colony_volume_ul = None;
+    let mut technique = None;
+    let mut spot_cursor = 0;
+    for (source_index, step) in program.steps.iter().enumerate() {
+        let dilution = source_index / culture_replicates;
+        let replicate = source_index % culture_replicates;
+        let PipettingStep::Distribute {
+            source,
+            destinations,
+            volume_each,
+            fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+            technique: step_technique,
+            ..
+        } = step
+        else {
+            return Err(format!(
+                "{adapter} plating task '{}' contains a non-distribution operation",
+                task.id
+            ));
+        };
+        let expected_source = Location {
+            vessel: inputs[dilution].id.clone(),
+            position: u32::try_from(replicate).map_err(|_| {
+                format!(
+                    "{adapter} plating task '{}' replicate does not fit this platform",
+                    task.id
+                )
+            })?,
+        };
+        let next_cursor = spot_cursor + plating_replicates;
+        if source != &expected_source
+            || destinations != &product_locations[spot_cursor..next_cursor]
+        {
+            return Err(format!(
+                "{adapter} plating task '{}' does not preserve dilution-major spot ordering",
+                task.id
+            ));
+        }
+        spot_cursor = next_cursor;
+        let volume = whole_microlitres(adapter, task, "colony spot", volume_each)?;
+        if colony_volume_ul
+            .replace(volume)
+            .is_some_and(|first| first != volume)
+        {
+            return Err(format!(
+                "{adapter} plating task '{}' uses inconsistent colony volumes",
+                task.id
+            ));
+        }
+        if technique
+            .replace(step_technique.clone())
+            .is_some_and(|first| first != *step_technique)
+        {
+            return Err(format!(
+                "{adapter} plating task '{}' uses inconsistent plating techniques",
+                task.id
+            ));
+        }
+    }
+    let initial_volume_by_dilution_ul = inputs
+        .iter()
+        .map(|vessel| {
+            whole_microlitres(
+                adapter,
+                task,
+                "dilution input",
+                vessel
+                    .initial_volume_each
+                    .as_ref()
+                    .expect("dilution input volume checked above"),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let medium_volume_ul = view.integer_parameter("medium_volume_ul", Some(MICROLITRE))?;
+    let culture_volume_ul = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
+    let full_dilution_volume =
+        medium_volume_ul
+            .checked_add(culture_volume_ul)
+            .ok_or_else(|| {
+                format!(
+                    "{adapter} plating task '{}' dilution volume overflows",
+                    task.id
+                )
+            })?;
+    for (dilution, observed) in initial_volume_by_dilution_ul.iter().enumerate() {
+        let expected = if dilution + 1 == serial_dilutions {
+            full_dilution_volume
+        } else {
+            medium_volume_ul
+        };
+        if *observed != expected {
+            return Err(format!(
+                "{adapter} plating task '{}' dilution {} has {observed} uL remaining, expected {expected} uL from its canonical serial-dilution handoff",
+                task.id,
+                dilution + 1
+            ));
+        }
+    }
+    Ok(SelectivePlating {
+        subject,
+        culture_source: &task.inputs[0].source,
+        selection,
+        culture_replicates,
+        serial_dilutions,
+        plating_replicates,
+        initial_volume_by_dilution_ul,
+        medium_volume_ul,
+        culture_volume_ul,
+        colony_volume_ul: colony_volume_ul.expect("validated plating has colony transfers"),
+        technique: technique.expect("validated plating has a technique"),
+    })
+}
+
+fn normalized_pipetting_program(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+    expected_operation: &str,
+    label: &str,
+) -> Result<ValidatedPipettingProgramV1, String> {
+    if task.operation.as_str() != expected_operation {
+        return Err(format!(
+            "{adapter} expected normalized {label}, found operation '{}' in task '{}'",
+            task.operation, task.id
+        ));
+    }
+    let document = task.program.as_ref().ok_or_else(|| {
+        format!(
+            "{adapter} Procedure task '{}' is missing its normalized pipetting program",
+            task.id
+        )
+    })?;
+    let validated = document.validate().map_err(|error| {
+        format!(
+            "{adapter} Procedure task '{}' has an invalid normalized program: {error}",
+            task.id
+        )
+    })?;
+    validate_normalized_requirements(adapter, task, requirements, &validated)?;
+    let ValidatedProcedureProgram::PipettingV1(program) = validated else {
+        return Err(format!(
+            "{adapter} {label} task '{}' normalized to a non-pipetting contract",
+            task.id
+        ));
+    };
+    Ok(program)
 }
 
 /// Project the normalized Golden Gate setup through the shared pipetting contract.
@@ -334,12 +1113,17 @@ pub(crate) fn normalized_thermal_program(
     task: &AllocatedProcedureTask,
     requirements: &[&AllocatedRequirementBinding],
 ) -> Result<NormalizedThermalProgram, String> {
-    if task.operation.as_str() != CYCLE_GOLDEN_GATE {
-        return Err(format!(
-            "{adapter} expected normalized Golden Gate thermal cycling, found operation '{}' in task '{}'",
-            task.operation, task.id
-        ));
-    }
+    let operation_title = match task.operation.as_str() {
+        CYCLE_GOLDEN_GATE => "Thermal cycle Golden Gate reaction",
+        HEAT_SHOCK_TRANSFORMATION => "Heat-shock transformation",
+        INCUBATE_RECOVERY_CULTURE => "Incubate recovery culture",
+        operation => {
+            return Err(format!(
+                "{adapter} expected a normalized thermal operation, found operation '{operation}' in task '{}'",
+                task.id
+            ));
+        }
+    };
     let document = task.program.as_ref().ok_or_else(|| {
         format!(
             "{adapter} Procedure task '{}' is missing its normalized thermal program",
@@ -362,7 +1146,13 @@ pub(crate) fn normalized_thermal_program(
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
     view.require_material_roles(&[])?;
-    let artifact = view.text_parameter("artifact")?;
+    let subject = view
+        .optional_text_parameter("artifact")?
+        .or(view.optional_text_parameter("subject")?);
+    let title = match &subject {
+        Some(subject) => format!("{operation_title} for {subject}"),
+        None => operation_title.to_owned(),
+    };
     let lid_temperature_c = program
         .lid_temperature
         .as_ref()
@@ -408,7 +1198,8 @@ pub(crate) fn normalized_thermal_program(
             .collect::<Result<Vec<_>, String>>()?,
     };
     Ok(NormalizedThermalProgram {
-        artifact,
+        artifact: subject.unwrap_or_else(|| operation_title.to_owned()),
+        title,
         sample_count: usize::try_from(program.load.sample_count).map_err(|_| {
             format!(
                 "{adapter} Procedure task '{}' sample count does not fit this platform",
@@ -470,6 +1261,7 @@ pub(crate) fn normalized_serial_dilution<'a>(
     };
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
+    let subject = view.text_parameter("subject")?;
     view.require_material_roles(&["medium"])?;
     if task.inputs.len() != 1 {
         return Err(format!(
@@ -525,18 +1317,41 @@ pub(crate) fn normalized_serial_dilution<'a>(
             task.id
         ));
     };
-    if program.vessels.len() != 3 || culture_vessel.positions != 1 || medium_vessel.positions != 1 {
+    if program.vessels.len() != 3 || medium_vessel.positions != 1 {
         return Err(format!(
             "{adapter} serial-dilution task '{}' has a non-canonical logical vessel layout",
             task.id
         ));
     }
-    let serial_dilutions = usize::try_from(product_vessel.positions).map_err(|_| {
+    let culture_replicates = usize::try_from(culture_vessel.positions).map_err(|_| {
+        format!(
+            "{adapter} serial-dilution task '{}' culture replicate count does not fit this platform",
+            task.id
+        )
+    })?;
+    let position_count = usize::try_from(product_vessel.positions).map_err(|_| {
         format!(
             "{adapter} serial-dilution task '{}' destination count does not fit this platform",
             task.id
         )
     })?;
+    if position_count % culture_replicates != 0 {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' destination count is not divisible by its culture replicates",
+            task.id
+        ));
+    }
+    let serial_dilutions = position_count / culture_replicates;
+    let initial_volume_ul = culture_vessel
+        .initial_volume_each
+        .as_ref()
+        .ok_or_else(|| {
+            format!(
+                "{adapter} serial-dilution task '{}' has no exact initial culture volume",
+                task.id
+            )
+        })
+        .and_then(|volume| whole_microlitres(adapter, task, "initial culture", volume))?;
     let destinations = (0..product_vessel.positions)
         .map(|position| Location {
             vessel: product_vessel.id.clone(),
@@ -544,7 +1359,8 @@ pub(crate) fn normalized_serial_dilution<'a>(
         })
         .collect::<Vec<_>>();
     let expected_steps = serial_dilutions
-        .checked_mul(2)
+        .checked_mul(culture_replicates)
+        .and_then(|steps| steps.checked_mul(2))
         .and_then(|steps| steps.checked_add(1))
         .ok_or_else(|| {
             format!(
@@ -563,6 +1379,7 @@ pub(crate) fn normalized_serial_dilution<'a>(
         destinations: medium_destinations,
         volume_each,
         fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+        technique: medium_technique,
         ..
     } = &program.steps[0]
     else {
@@ -586,21 +1403,40 @@ pub(crate) fn normalized_serial_dilution<'a>(
     let medium_volume_ul = whole_microlitres(adapter, task, "medium transfer", volume_each)?;
     let mut culture_volume_ul = None;
     let mut mixing = None;
-    for (position, pair) in program.steps[1..].chunks_exact(2).enumerate() {
+    let mut transfer_technique = None;
+    let mut mix_technique = None;
+    for (series_position, pair) in program.steps[1..].chunks_exact(2).enumerate() {
+        let replicate = series_position / serial_dilutions;
+        let dilution = series_position % serial_dilutions;
+        let position = dilution
+            .checked_mul(culture_replicates)
+            .and_then(|base| base.checked_add(replicate))
+            .ok_or_else(|| {
+                format!(
+                    "{adapter} serial-dilution task '{}' position arithmetic overflows",
+                    task.id
+                )
+            })?;
         let destination = &destinations[position];
-        let expected_source = if position == 0 {
+        let expected_source = if dilution == 0 {
             Location {
                 vessel: culture_vessel.id.clone(),
-                position: 0,
+                position: u32::try_from(replicate).map_err(|_| {
+                    format!(
+                        "{adapter} serial-dilution task '{}' replicate does not fit this platform",
+                        task.id
+                    )
+                })?,
             }
         } else {
-            destinations[position - 1].clone()
+            destinations[position - culture_replicates].clone()
         };
         let PipettingStep::Transfer {
             source,
             destination: step_destination,
             volume,
             fluid_path: FluidPathPolicy::IsolatedDestinations,
+            technique,
             ..
         } = &pair[0]
         else {
@@ -625,11 +1461,21 @@ pub(crate) fn normalized_serial_dilution<'a>(
                 task.id
             ));
         }
+        if transfer_technique
+            .replace(technique.clone())
+            .is_some_and(|first| first != *technique)
+        {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' uses inconsistent transfer techniques",
+                task.id
+            ));
+        }
         let PipettingStep::Mix {
             targets,
             cycles,
             volume,
             fluid_path: FluidPathPolicy::IsolatedDestinations,
+            technique,
             ..
         } = &pair[1]
         else {
@@ -651,18 +1497,34 @@ pub(crate) fn normalized_serial_dilution<'a>(
                 task.id
             ));
         }
+        if mix_technique
+            .replace(technique.clone())
+            .is_some_and(|first| first != *technique)
+        {
+            return Err(format!(
+                "{adapter} serial-dilution task '{}' uses inconsistent mix techniques",
+                task.id
+            ));
+        }
     }
     let culture_volume_ul = culture_volume_ul.expect("a validated product vessel is non-empty");
     let (mix_cycles, mix_volume_ul) = mixing.expect("a validated product vessel is non-empty");
 
     Ok(SerialDilution {
+        subject,
         culture_source: &task.inputs[0].source,
         medium,
+        culture_replicates,
         serial_dilutions,
+        initial_volume_ul,
         medium_volume_ul,
         culture_volume_ul,
         mix_cycles,
         mix_volume_ul,
+        medium_technique: medium_technique.clone(),
+        transfer_technique: transfer_technique
+            .expect("a validated serial dilution has a transfer technique"),
+        mix_technique: mix_technique.expect("a validated serial dilution has a mix technique"),
     })
 }
 

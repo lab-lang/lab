@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 pub use error::Ot2ProfileError;
 // Only the field types other `ot2` submodules reach into directly
 // are re-exported; the rest of the schema stays behind `Ot2AdapterProfile`.
-pub use schema::Stages;
 use schema::{Instruments, ProtocolOptions, SharedDeck};
+pub use schema::{Stages, TechniqueCalibration};
 
 /// Deck slots an OT-2 can address. Slot 12 is the fixed trash.
 const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
@@ -25,7 +25,7 @@ const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "
 const THERMOCYCLER_SLOTS: [&str; 4] = ["7", "8", "10", "11"];
 
 /// The complete OT-2 implementation configuration consumed by planning and emission.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Ot2AdapterProfile {
     /// File-stem label supplied by the exact Asset binding. It is review metadata, not profile input.
@@ -36,6 +36,8 @@ pub struct Ot2AdapterProfile {
     pub protocol: ProtocolOptions,
     #[serde(default)]
     pub instruments: Instruments,
+    #[serde(default)]
+    pub techniques: TechniqueCalibration,
     #[serde(default)]
     pub deck: SharedDeck,
     #[serde(default)]
@@ -48,6 +50,7 @@ impl Default for Ot2AdapterProfile {
             name: "opentrons.ot2".to_owned(),
             protocol: ProtocolOptions::default(),
             instruments: Instruments::default(),
+            techniques: TechniqueCalibration::default(),
             deck: SharedDeck::default(),
             stages: Stages::default(),
         }
@@ -64,6 +67,7 @@ impl Ot2AdapterProfile {
     }
 
     pub fn validate(&self) -> Result<(), Ot2ProfileError> {
+        self.validate_techniques()?;
         for (stage, claims) in [
             ("assembly", self.assembly_claims()),
             ("transformation", self.transformation_claims()),
@@ -92,6 +96,79 @@ impl Ot2AdapterProfile {
                     seen.push((context.clone(), slot));
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn validate_techniques(&self) -> Result<(), Ot2ProfileError> {
+        let calibration = &self.techniques;
+        for (parameter, value) in [
+            ("aspiration_rate", calibration.aspiration_rate),
+            ("dispense_rate", calibration.dispense_rate),
+            (
+                "tracked_meniscus_offset_mm",
+                calibration.tracked_meniscus_offset_mm,
+            ),
+            (
+                "tracked_usable_depth_offset_mm",
+                calibration.tracked_usable_depth_offset_mm,
+            ),
+            (
+                "tracked_minimum_height_mm",
+                calibration.tracked_minimum_height_mm,
+            ),
+            ("above_liquid_offset_mm", calibration.above_liquid_offset_mm),
+            ("touch_tip_speed_mm_s", calibration.touch_tip_speed_mm_s),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(Ot2ProfileError::InvalidTechnique {
+                    parameter,
+                    message: "must be finite and greater than zero",
+                });
+            }
+        }
+        for (parameter, value) in [
+            (
+                "material_surface_offset_mm",
+                calibration.material_surface_offset_mm,
+            ),
+            (
+                "touch_tip_vertical_offset_mm",
+                calibration.touch_tip_vertical_offset_mm,
+            ),
+        ] {
+            if !value.is_finite() {
+                return Err(Ot2ProfileError::InvalidTechnique {
+                    parameter,
+                    message: "must be finite",
+                });
+            }
+        }
+        for (parameter, value) in [
+            (
+                "tracked_low_volume_fraction",
+                calibration.tracked_low_volume_fraction,
+            ),
+            ("touch_tip_radius", calibration.touch_tip_radius),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(Ot2ProfileError::InvalidTechnique {
+                    parameter,
+                    message: "must be finite and between zero and one",
+                });
+            }
+        }
+        if calibration.tracked_source_volume_ul == 0 {
+            return Err(Ot2ProfileError::InvalidTechnique {
+                parameter: "tracked_source_volume_ul",
+                message: "must be greater than zero",
+            });
+        }
+        if calibration.tracked_chunk_size == 0 {
+            return Err(Ot2ProfileError::InvalidTechnique {
+                parameter: "tracked_chunk_size",
+                message: "must be greater than zero",
+            });
         }
         Ok(())
     }
@@ -184,6 +261,8 @@ mod tests {
         assert_eq!(profile.deck.temperature_module.slot, "1");
         assert_eq!(profile.stages.plating.agar_plate.slots, ["5", "6"]);
         assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 192);
+        assert_eq!(profile.techniques.tracked_chunk_size, 8);
+        assert_eq!(profile.techniques.touch_tip_vertical_offset_mm, -14.0);
     }
 
     #[test]
@@ -257,5 +336,15 @@ capacity = 96
         let error = Ot2AdapterProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
             .expect_err("a misspelled key must not fall back to a default");
         assert!(error.to_string().contains("parse"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unsafe_technique_calibration() {
+        let error = Ot2AdapterProfile::parse(
+            "bench-two",
+            "[techniques]\ntracked_low_volume_fraction = 1.5\n",
+        )
+        .expect_err("fractions outside the unit interval are unsafe");
+        assert!(error.to_string().contains("tracked_low_volume_fraction"));
     }
 }

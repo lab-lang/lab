@@ -142,6 +142,55 @@ impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
 
     pub(crate) fn text_parameter(&self, name: &str) -> Result<String, String> {
         let parameter = self.parameter(name)?;
+        self.text_parameter_value(name, parameter)
+    }
+
+    pub(crate) fn optional_text_parameter(&self, name: &str) -> Result<Option<String>, String> {
+        let suffix = format!("::parameter::{name}");
+        let matches = self
+            .task
+            .parameters
+            .iter()
+            .filter(|parameter| parameter.id.as_str().ends_with(&suffix))
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [parameter] => self.text_parameter_value(name, parameter).map(Some),
+            _ => Err(format!(
+                "{} Procedure task '{}' has several parameters named '{name}'",
+                self.adapter, self.task.id
+            )),
+        }
+    }
+
+    pub(crate) fn integer_parameter(&self, name: &str, unit: Option<&str>) -> Result<u32, String> {
+        let parameter = self.parameter(name)?;
+        let ProcedureValue::Scalar { value: property } = &parameter.value else {
+            return Err(self.parameter_type_error(name, "an integer scalar"));
+        };
+        let ScalarValue::Integer(value) = &property.value else {
+            return Err(self.parameter_type_error(name, "an integer scalar"));
+        };
+        if property.unit.as_ref().map(|unit| unit.as_str()) != unit {
+            return Err(self.parameter_type_error(
+                name,
+                unit.map_or(
+                    "a unitless integer",
+                    |_| "an integer with the required unit",
+                ),
+            ));
+        }
+        value
+            .to_string()
+            .parse::<u32>()
+            .map_err(|_| self.parameter_type_error(name, "a non-negative 32-bit integer"))
+    }
+
+    fn text_parameter_value(
+        &self,
+        name: &str,
+        parameter: &PlanningProcedureParameter,
+    ) -> Result<String, String> {
         let ProcedureValue::Scalar { value: property } = &parameter.value else {
             return Err(self.parameter_type_error(name, "a text scalar"));
         };

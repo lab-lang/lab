@@ -1,6 +1,7 @@
 use lab_procedure::{
-    FluidPathPolicy, Location, MaterialInput, MaterialOutput, PipettingConstraints,
-    PipettingProgramV1, PipettingStep, ProcedureProgram, Vessel, VesselRole, Volume,
+    AspirationStrategy, FluidPathPolicy, Location, MaterialInput, MaterialOutput,
+    PipettingConstraints, PipettingProgramV1, PipettingStep, ProcedureProgram, TransferTechnique,
+    Vessel, VesselRole, Volume,
 };
 
 use super::ProcedureTaskInstance;
@@ -25,6 +26,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     let view = TaskView::new(task);
     view.require_material_roles(&["medium"])?;
     let medium = view.one_material("medium")?;
+    let replicates = view.integer_parameter("replicates", None)?;
+    let initial_volume = view.integer_parameter("initial_volume_ul", Some(MICROLITRE))?;
     let serial_dilutions = view.integer_parameter("serial_dilutions", None)?;
     let medium_volume = view.integer_parameter("medium_volume_ul", Some(MICROLITRE))?;
     let culture_volume = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
@@ -32,6 +35,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     let mix_volume = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
     for (name, value) in [
         ("serial_dilutions", serial_dilutions),
+        ("replicates", replicates),
+        ("initial_volume_ul", initial_volume),
         ("medium_volume_ul", medium_volume),
         ("culture_volume_ul", culture_volume),
         ("mix_cycles", mix_cycles),
@@ -55,14 +60,17 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     let medium_vessel = procedure_id("medium-source")?;
     let output = procedure_id(task.outputs[0].as_str())?;
     let dilution_vessel = procedure_id("dilution-plate")?;
-    let destinations = (0..serial_dilutions)
+    let position_count = replicates
+        .checked_mul(serial_dilutions)
+        .ok_or_else(|| "serial-dilution position count overflows".to_owned())?;
+    let destinations = (0..position_count)
         .map(|position| Location {
             vessel: dilution_vessel.clone(),
             position,
         })
         .collect::<Vec<_>>();
     let mut steps = Vec::with_capacity(
-        usize::try_from(serial_dilutions)
+        usize::try_from(position_count)
             .unwrap_or(usize::MAX)
             .saturating_mul(2)
             .saturating_add(1),
@@ -77,41 +85,56 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         volume_each: volume(medium_volume)?,
         fluid_path: FluidPathPolicy::SharedSourceNoReentry,
         fluid_path_group: None,
-        technique: Default::default(),
+        technique: TransferTechnique {
+            aspiration: AspirationStrategy::TrackedLiquidSurface,
+            ..TransferTechnique::default()
+        },
     });
-    for position in 0..serial_dilutions {
-        let source = if position == 0 {
-            Location {
-                vessel: culture_vessel.clone(),
-                position: 0,
-            }
-        } else {
-            Location {
-                vessel: dilution_vessel.clone(),
-                position: position - 1,
-            }
-        };
-        let destination = destinations[usize::try_from(position)
-            .map_err(|_| "serial-dilution position does not fit this platform".to_owned())?]
-        .clone();
-        steps.push(PipettingStep::Transfer {
-            id: procedure_id(&format!("dilute-{position:04}"))?,
-            source,
-            destination: destination.clone(),
-            volume: volume(culture_volume)?,
-            fluid_path: FluidPathPolicy::IsolatedDestinations,
-            fluid_path_group: None,
-            technique: Default::default(),
-        });
-        steps.push(PipettingStep::Mix {
-            id: procedure_id(&format!("mix-{position:04}"))?,
-            targets: vec![destination],
-            cycles: mix_cycles,
-            volume: volume(mix_volume)?,
-            fluid_path: FluidPathPolicy::IsolatedDestinations,
-            fluid_path_group: None,
-            technique: Default::default(),
-        });
+    for replicate in 0..replicates {
+        let group = procedure_id(&format!("series-{replicate:04}"))?;
+        for dilution in 0..serial_dilutions {
+            let position = dilution
+                .checked_mul(replicates)
+                .and_then(|base| base.checked_add(replicate))
+                .ok_or_else(|| "serial-dilution position arithmetic overflows".to_owned())?;
+            let source = if dilution == 0 {
+                Location {
+                    vessel: culture_vessel.clone(),
+                    position: replicate,
+                }
+            } else {
+                Location {
+                    vessel: dilution_vessel.clone(),
+                    position: (dilution - 1)
+                        .checked_mul(replicates)
+                        .and_then(|base| base.checked_add(replicate))
+                        .ok_or_else(|| {
+                            "serial-dilution source position arithmetic overflows".to_owned()
+                        })?,
+                }
+            };
+            let destination = destinations[usize::try_from(position)
+                .map_err(|_| "serial-dilution position does not fit this platform".to_owned())?]
+            .clone();
+            steps.push(PipettingStep::Transfer {
+                id: procedure_id(&format!("dilute-{replicate:04}-{dilution:04}"))?,
+                source,
+                destination: destination.clone(),
+                volume: volume(culture_volume)?,
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: Some(group.clone()),
+                technique: Default::default(),
+            });
+            steps.push(PipettingStep::Mix {
+                id: procedure_id(&format!("mix-{replicate:04}-{dilution:04}"))?,
+                targets: vec![destination],
+                cycles: mix_cycles,
+                volume: volume(mix_volume)?,
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: Some(group.clone()),
+                technique: Default::default(),
+            });
+        }
     }
 
     let program = PipettingProgramV1::new(
@@ -123,8 +146,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             Vessel {
                 id: culture_vessel,
                 role: VesselRole::ProcedureInput { input: 0 },
-                positions: 1,
-                initial_volume_each: None,
+                positions: replicates,
+                initial_volume_each: Some(volume(initial_volume)?),
             },
             Vessel {
                 id: medium_vessel,
@@ -137,7 +160,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             Vessel {
                 id: dilution_vessel,
                 role: VesselRole::Product { output },
-                positions: serial_dilutions,
+                positions: position_count,
                 initial_volume_each: None,
             },
         ],

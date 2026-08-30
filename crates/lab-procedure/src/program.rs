@@ -195,7 +195,7 @@ mod tests {
         let thermal = ThermalProgramV1 {
             load: ThermalLoad {
                 input: 0,
-                output: id("product"),
+                outputs: vec![id("product")],
                 sample_count: 1,
                 volume_each: Volume::parse_microlitres("20").unwrap(),
             },

@@ -582,7 +582,13 @@ fn validate_program_bindings(
                 .iter()
                 .map(|output| output.name.as_str())
                 .collect::<BTreeSet<_>>();
-            if task_outputs != BTreeSet::from([program.load.output.as_str()]) {
+            let program_outputs = program
+                .load
+                .outputs
+                .iter()
+                .map(|output| output.as_str())
+                .collect::<BTreeSet<_>>();
+            if task_outputs != program_outputs {
                 return Err(PlanningProblemValidationError::ProcedureOutputBindings {
                     task: task.id.clone(),
                 });

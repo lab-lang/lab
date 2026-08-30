@@ -1,11 +1,11 @@
-"""Requirement-scoped Golden Gate thermal cycle emitted by Lab."""
+"""Requirement-scoped thermal program emitted by Lab."""
 
 import json
 
 from opentrons import protocol_api
 
 metadata = {
-    "protocolName": "Lab Golden Gate thermal cycle",
+    "protocolName": "Lab thermal program",
     "author": "Lab Compiler",
     "description": "One facility-allocated Procedure requirement",
 }
@@ -24,8 +24,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     thermocycler = protocol.load_module(deck["thermocycler"]["model"])
     thermocycler.load_labware(deck["thermocycler"]["labware"])
+    protocol.comment(execution["title"])
     protocol.comment(
-        "Cycle only the staged reactions in wells " + ", ".join(execution["reaction_wells"])
+        "Process only the staged samples in wells " + ", ".join(execution["sample_wells"])
     )
     thermocycler.close_lid()
     if execution["lid_temperature_c"] is not None:
@@ -46,4 +47,4 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         thermocycler.set_block_temperature(execution["final_hold_celsius"])
     thermocycler.deactivate_lid()
     thermocycler.open_lid()
-    protocol.comment("Thermal cycling complete. Recover the named Procedure output before continuing.")
+    protocol.comment("Thermal program complete. Preserve the named Procedure output before continuing.")

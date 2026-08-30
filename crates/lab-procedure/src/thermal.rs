@@ -24,8 +24,12 @@ use crate::{
 pub struct ThermalLoad {
     /// Zero-based input of the enclosing Procedure task that is loaded into the instrument.
     pub input: u32,
-    /// Exact enclosing Procedure output produced after the program completes.
-    pub output: ProcedureLocalId,
+    /// Exact enclosing Procedure outputs established after the program completes.
+    ///
+    /// Multiple typed outputs may describe the same processed physical load. For example, heat
+    /// shock establishes both a named strain product and the transformed culture that proceeds to
+    /// recovery.
+    pub outputs: Vec<ProcedureLocalId>,
     /// Number of independently addressable samples run under the same profile.
     pub sample_count: u32,
     /// Fill volume of each sample.
@@ -69,6 +73,17 @@ impl ThermalProgramV1 {
     pub fn validate(self) -> Result<ValidatedThermalProgramV1, ThermalProgramValidationError> {
         if self.load.sample_count == 0 {
             return Err(ThermalProgramValidationError::NoSamples);
+        }
+        if self.load.outputs.is_empty() {
+            return Err(ThermalProgramValidationError::NoOutputs);
+        }
+        let mut outputs = BTreeSet::new();
+        for output in &self.load.outputs {
+            if !outputs.insert(output.clone()) {
+                return Err(ThermalProgramValidationError::DuplicateOutput {
+                    output: output.clone(),
+                });
+            }
         }
         if self.stages.is_empty() {
             return Err(ThermalProgramValidationError::NoStages);
@@ -213,6 +228,10 @@ impl AsRef<ThermalProgramV1> for ValidatedThermalProgramV1 {
 pub enum ThermalProgramValidationError {
     #[error("thermal program has no samples")]
     NoSamples,
+    #[error("thermal program has no outputs")]
+    NoOutputs,
+    #[error("thermal program repeats output `{output}`")]
+    DuplicateOutput { output: ProcedureLocalId },
     #[error("thermal program has no stages")]
     NoStages,
     #[error("thermal program repeats stage `{stage}`")]
@@ -279,7 +298,7 @@ mod tests {
         ThermalProgramV1 {
             load: ThermalLoad {
                 input: 0,
-                output: id("product"),
+                outputs: vec![id("product")],
                 sample_count: 8,
                 volume_each: Volume::parse_microlitres("20").unwrap(),
             },
@@ -342,6 +361,20 @@ mod tests {
         assert!(matches!(
             invalid.validate(),
             Err(ThermalProgramValidationError::NoSamples)
+        ));
+
+        let mut invalid = program();
+        invalid.load.outputs.clear();
+        assert!(matches!(
+            invalid.validate(),
+            Err(ThermalProgramValidationError::NoOutputs)
+        ));
+
+        let mut invalid = program();
+        invalid.load.outputs.push(id("product"));
+        assert!(matches!(
+            invalid.validate(),
+            Err(ThermalProgramValidationError::DuplicateOutput { .. })
         ));
 
         let mut invalid = program();

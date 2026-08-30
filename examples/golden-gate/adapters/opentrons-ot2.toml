@@ -5,6 +5,23 @@
 [protocol]
 api_level = "2.21"
 
+# Calibrated realization of portable Procedure techniques. These defaults preserve the optimized PUDU practice while keeping the scientific request device-neutral.
+[techniques]
+aspiration_rate = 0.5
+dispense_rate = 1.0
+tracked_source_volume_ul = 10000
+tracked_meniscus_offset_mm = 10.0
+tracked_usable_depth_offset_mm = 10.0
+tracked_minimum_height_mm = 3.0
+tracked_low_volume_fraction = 0.2
+tracked_chunk_size = 8
+distribution_disposal_volume_ul = 4
+above_liquid_offset_mm = 2.0
+material_surface_offset_mm = -8.0
+touch_tip_radius = 0.5
+touch_tip_vertical_offset_mm = -14.0
+touch_tip_speed_mm_s = 20.0
+
 [instruments.small]
 model = "p20_single_gen2"
 mount = "left"

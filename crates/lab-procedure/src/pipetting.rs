@@ -44,6 +44,16 @@ pub enum VesselRole {
     Product {
         output: ProcedureLocalId,
     },
+    /// A physical vessel arriving through a task input and leaving as a new material state.
+    InputOutput {
+        input: u32,
+        output: ProcedureLocalId,
+    },
+    /// A material substrate, such as selective agar, that becomes the task's product.
+    MaterialProduct {
+        material: ProcedureLocalId,
+        output: ProcedureLocalId,
+    },
     Intermediate,
 }
 
@@ -263,21 +273,27 @@ impl PipettingProgramV1 {
                     vessel: vessel.id.clone(),
                 });
             }
-            if let VesselRole::MaterialSource { material } = &vessel.role
-                && !material_ids.contains(material)
-            {
-                return Err(PipettingProgramValidationError::UnknownMaterial {
-                    vessel: vessel.id.clone(),
-                    material: material.clone(),
-                });
-            }
-            if let VesselRole::Product { output } = &vessel.role
-                && !output_ids.contains(output)
-            {
-                return Err(PipettingProgramValidationError::UnknownOutput {
-                    vessel: vessel.id.clone(),
-                    output: output.clone(),
-                });
+            match &vessel.role {
+                VesselRole::MaterialSource { material }
+                | VesselRole::MaterialProduct { material, .. }
+                    if !material_ids.contains(material) =>
+                {
+                    return Err(PipettingProgramValidationError::UnknownMaterial {
+                        vessel: vessel.id.clone(),
+                        material: material.clone(),
+                    });
+                }
+                VesselRole::Product { output }
+                | VesselRole::InputOutput { output, .. }
+                | VesselRole::MaterialProduct { output, .. }
+                    if !output_ids.contains(output) =>
+                {
+                    return Err(PipettingProgramValidationError::UnknownOutput {
+                        vessel: vessel.id.clone(),
+                        output: output.clone(),
+                    });
+                }
+                _ => {}
             }
         }
 
@@ -643,7 +659,13 @@ fn build_liquid_ledger(
             .initial_volume_each
             .as_ref()
             .map(|volume| volume.value().clone())
-            .or_else(|| matches!(vessel.role, VesselRole::Product { .. }).then(|| zero.clone()));
+            .or_else(|| {
+                matches!(
+                    vessel.role,
+                    VesselRole::Product { .. } | VesselRole::MaterialProduct { .. }
+                )
+                .then(|| zero.clone())
+            });
         for position in 0..vessel.positions {
             final_volumes.insert(
                 Location {

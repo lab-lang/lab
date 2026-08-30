@@ -84,7 +84,19 @@ class MaterialSourceVesselRole:
 
 
 @dataclass(frozen=True, slots=True)
+class InputOutputVesselRole:
+    input: int
+    output: str
+
+
+@dataclass(frozen=True, slots=True)
 class ProductVesselRole:
+    output: str
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialProductVesselRole:
+    material: str
     output: str
 
 
@@ -94,7 +106,12 @@ class IntermediateVesselRole:
 
 
 VesselRole = (
-    ProcedureInputVesselRole | MaterialSourceVesselRole | ProductVesselRole | IntermediateVesselRole
+    ProcedureInputVesselRole
+    | MaterialSourceVesselRole
+    | InputOutputVesselRole
+    | ProductVesselRole
+    | MaterialProductVesselRole
+    | IntermediateVesselRole
 )
 
 
@@ -249,7 +266,7 @@ class PipettingProgramV1:
 @dataclass(frozen=True, slots=True)
 class ThermalLoad:
     input: int
-    output: str
+    outputs: tuple[str, ...]
     sample_count: int
     volume_each: Volume
 
@@ -337,8 +354,16 @@ def _vessel(raw: dict[str, Any]) -> Vessel:
         parsed_role: VesselRole = ProcedureInputVesselRole(input=cast(int, role["input"]))
     elif kind == "material_source":
         parsed_role = MaterialSourceVesselRole(material=cast(str, role["material"]))
+    elif kind == "input_output":
+        parsed_role = InputOutputVesselRole(
+            input=cast(int, role["input"]), output=cast(str, role["output"])
+        )
     elif kind == "product":
         parsed_role = ProductVesselRole(output=cast(str, role["output"]))
+    elif kind == "material_product":
+        parsed_role = MaterialProductVesselRole(
+            material=cast(str, role["material"]), output=cast(str, role["output"])
+        )
     elif kind == "intermediate":
         parsed_role = IntermediateVesselRole()
     else:
@@ -453,7 +478,7 @@ def _thermal_program(raw: dict[str, Any]) -> ThermalProgramV1:
     return ThermalProgramV1(
         load=ThermalLoad(
             input=cast(int, load["input"]),
-            output=cast(str, load["output"]),
+            outputs=tuple(cast(list[str], load["outputs"])),
             sample_count=cast(int, load["sample_count"]),
             volume_each=_volume(cast(dict[str, Any], load["volume_each"])),
         ),
@@ -552,6 +577,7 @@ __all__ = [
     "Distribute",
     "Duration",
     "FluidPathPolicy",
+    "InputOutputVesselRole",
     "IntermediateVesselRole",
     "Length",
     "LiquidAspiration",
@@ -559,6 +585,7 @@ __all__ = [
     "Location",
     "MaterialInput",
     "MaterialOutput",
+    "MaterialProductVesselRole",
     "MaterialSourceVesselRole",
     "MaterialSurfaceDispense",
     "Mix",

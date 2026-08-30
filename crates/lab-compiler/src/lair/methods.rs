@@ -39,11 +39,14 @@ pub fn standard_method_definitions() -> Vec<MethodDefinition> {
         artifact_realization_service(),
         automated_golden_gate(),
         material_provisioning(),
-        chemical_transformation(),
+        automated_chemical_transformation(),
+        manual_chemical_transformation(),
         manual_recovery(),
         controlled_recovery(),
+        automated_recovery(),
         serial_dilution(),
-        antibiotic_selection(),
+        automated_antibiotic_selection(),
+        manual_antibiotic_selection(),
     ]
 }
 
@@ -191,7 +194,102 @@ fn material_provisioning() -> MethodDefinition {
     }
 }
 
-fn chemical_transformation() -> MethodDefinition {
+fn automated_chemical_transformation() -> MethodDefinition {
+    let parameters = transformation_parameters();
+    MethodDefinition {
+        id: method("automated-chemical-transformation"),
+        refines: intent("std.lab.plasmid.transform"),
+        inputs: vec![
+            input("design", PortType::Design),
+            input("cells", material("CompetentCells")),
+        ],
+        parameters: parameters.clone(),
+        tasks: vec![
+            task(
+                "prepare-transformation",
+                "PrepareChemicalTransformation",
+                vec![input_ref("design"), input_ref("cells")],
+                vec![output("mixture", material("TransformationMixture"))],
+                with_integer_literals(
+                    select_parameters(
+                        &parameters,
+                        &[
+                            "artifact",
+                            "chassis",
+                            "plasmids",
+                            "dependencies",
+                            "replicates",
+                            "dna_count",
+                            "cell_volume_ul",
+                            "dna_volume_ul",
+                        ],
+                    ),
+                    [
+                        ("cell_mix_cycles", 3),
+                        ("cell_mix_volume_ul", 50),
+                        ("dna_mix_cycles", 3),
+                        ("bubble_clear_cycles", 2),
+                        ("bubble_clear_volume_ul", 20),
+                        ("bubble_clear_dispense_offset_mm", 8),
+                    ],
+                ),
+                vec![material_parameter("dependencies", "dependencies")],
+                vec![requirement(
+                    "liquid-handling",
+                    "LiquidHandling",
+                    [ControlMode::ReviewedFile, ControlMode::Api],
+                    vec![],
+                )],
+            ),
+            task(
+                "heat-shock",
+                "HeatShockTransformation",
+                vec![task_ref("prepare-transformation", "mixture")],
+                vec![
+                    output("strain", material("StrainProduct")),
+                    output("culture", material("TransformedCulture")),
+                ],
+                with_integer_literals(
+                    select_parameters(
+                        &parameters,
+                        &[
+                            "artifact",
+                            "replicates",
+                            "dna_count",
+                            "cell_volume_ul",
+                            "dna_volume_ul",
+                            "cold_minutes",
+                            "heat_shock_temperature_c",
+                            "heat_shock_minutes",
+                        ],
+                    ),
+                    [
+                        ("cold_temperature_c", 4),
+                        ("post_shock_minutes", 2),
+                        ("hold_temperature_c", 4),
+                    ],
+                ),
+                vec![],
+                vec![requirement(
+                    "thermal-cycling",
+                    "ThermalCycling",
+                    [
+                        ControlMode::ReviewedFile,
+                        ControlMode::Api,
+                        ControlMode::Sila2,
+                    ],
+                    vec![],
+                )],
+            ),
+        ],
+        outputs: vec![
+            method_output("strain", "heat-shock", "strain"),
+            method_output("culture", "heat-shock", "culture"),
+        ],
+    }
+}
+
+fn manual_chemical_transformation() -> MethodDefinition {
     let parameters = transformation_parameters();
     MethodDefinition {
         id: method("manual-chemical-transformation"),
@@ -245,6 +343,75 @@ fn controlled_recovery() -> MethodDefinition {
     )
 }
 
+fn automated_recovery() -> MethodDefinition {
+    let parameters = recovery_parameters();
+    MethodDefinition {
+        id: method("automated-recovery"),
+        refines: intent("std.lab.plasmid.recover"),
+        inputs: vec![input("culture", material("TransformedCulture"))],
+        parameters: parameters.clone(),
+        tasks: vec![
+            task(
+                "add-medium",
+                "AddRecoveryMedium",
+                vec![input_ref("culture")],
+                vec![output("mixture", material("RecoveryMixture"))],
+                with_integer_literals(
+                    select_parameters(
+                        &parameters,
+                        &[
+                            "subject",
+                            "replicates",
+                            "initial_volume_ul",
+                            "recovery_volume_ul",
+                        ],
+                    ),
+                    [("air_gap_ul", 10)],
+                ),
+                vec![material_literal("medium", "recovery_medium")],
+                vec![requirement(
+                    "liquid-handling",
+                    "LiquidHandling",
+                    [ControlMode::ReviewedFile, ControlMode::Api],
+                    vec![],
+                )],
+            ),
+            task(
+                "incubate",
+                "IncubateRecoveryCulture",
+                vec![task_ref("add-medium", "mixture")],
+                vec![output("recovered", material("RecoveredCulture"))],
+                with_integer_literals(
+                    select_parameters(
+                        &parameters,
+                        &[
+                            "subject",
+                            "duration",
+                            "replicates",
+                            "initial_volume_ul",
+                            "recovery_volume_ul",
+                            "recovery_temperature_c",
+                        ],
+                    ),
+                    [("hold_temperature_c", 4)],
+                ),
+                vec![],
+                vec![requirement(
+                    "thermal-incubation",
+                    "ThermalCycling",
+                    [
+                        ControlMode::ReviewedFile,
+                        ControlMode::Api,
+                        ControlMode::Sila2,
+                    ],
+                    vec![],
+                )],
+            ),
+        ],
+        outputs: vec![method_output("recovered", "incubate", "recovered")],
+    }
+}
+
 fn recovery_method(
     name: &str,
     control_modes: impl IntoIterator<Item = ControlMode>,
@@ -288,8 +455,22 @@ fn recovery_method(
     }
 }
 
+fn recovery_parameters() -> Vec<MethodParameter> {
+    vec![
+        parameter("subject", ScalarType::Text),
+        parameter("duration", ScalarType::Real),
+        parameter("replicates", ScalarType::Integer),
+        parameter("initial_volume_ul", ScalarType::Integer),
+        parameter("recovery_volume_ul", ScalarType::Integer),
+        parameter("recovery_temperature_c", ScalarType::Integer),
+    ]
+}
+
 fn serial_dilution() -> MethodDefinition {
     let parameters = vec![
+        parameter("subject", ScalarType::Text),
+        parameter("replicates", ScalarType::Integer),
+        parameter("initial_volume_ul", ScalarType::Integer),
         parameter("serial_dilutions", ScalarType::Integer),
         parameter("medium_volume_ul", ScalarType::Integer),
         parameter("culture_volume_ul", ScalarType::Integer),
@@ -307,7 +488,14 @@ fn serial_dilution() -> MethodDefinition {
             with_integer_literals(
                 select_parameters(
                     &parameters,
-                    &["serial_dilutions", "medium_volume_ul", "culture_volume_ul"],
+                    &[
+                        "subject",
+                        "replicates",
+                        "initial_volume_ul",
+                        "serial_dilutions",
+                        "medium_volume_ul",
+                        "culture_volume_ul",
+                    ],
                 ),
                 [("mix_cycles", 5), ("mix_volume_ul", 19)],
             ),
@@ -327,7 +515,44 @@ fn serial_dilution() -> MethodDefinition {
     }
 }
 
-fn antibiotic_selection() -> MethodDefinition {
+fn automated_antibiotic_selection() -> MethodDefinition {
+    let parameters = vec![
+        parameter("subject", ScalarType::Text),
+        parameter("selection", ScalarType::Text),
+        parameter("replicates", ScalarType::Integer),
+        parameter("culture_replicates", ScalarType::Integer),
+        parameter("serial_dilutions", ScalarType::Integer),
+        parameter("medium_volume_ul", ScalarType::Integer),
+        parameter("culture_volume_ul", ScalarType::Integer),
+        parameter("colony_volume_ul", ScalarType::Integer),
+    ];
+    MethodDefinition {
+        id: method("automated-antibiotic-selection"),
+        refines: intent("std.lab.plasmid.plate"),
+        inputs: vec![input("culture", material("DilutedCulture"))],
+        parameters: parameters.clone(),
+        tasks: vec![task(
+            "plate",
+            "PlateDilutedCulture",
+            vec![input_ref("culture")],
+            vec![output("plate", material("Plate"))],
+            parameters
+                .iter()
+                .map(|parameter| procedure_parameter(&parameter.name, parameter, None))
+                .collect(),
+            vec![material_parameter("selection", "selection")],
+            vec![requirement(
+                "liquid-handling",
+                "LiquidHandling",
+                [ControlMode::ReviewedFile, ControlMode::Api],
+                vec![],
+            )],
+        )],
+        outputs: vec![method_output("plate", "plate", "plate")],
+    }
+}
+
+fn manual_antibiotic_selection() -> MethodDefinition {
     let parameters = vec![
         parameter("selection", ScalarType::Text),
         parameter("replicates", ScalarType::Integer),
@@ -396,6 +621,7 @@ fn transformation_parameters() -> Vec<MethodParameter> {
         list_parameter("plasmids", ScalarType::Text),
         list_parameter("dependencies", ScalarType::Text),
         parameter("replicates", ScalarType::Integer),
+        parameter("dna_count", ScalarType::Integer),
     ]
     .into_iter()
     .chain(
@@ -437,6 +663,8 @@ fn select_parameters(
 fn parameter_unit(name: &str) -> Option<UnitIri> {
     if name.ends_with("_ul") {
         Some(unit("MicroL"))
+    } else if name.ends_with("_mm") {
+        Some(unit("MilliM"))
     } else if name.ends_with("_temperature_c") {
         Some(unit("DEG_C"))
     } else if name.ends_with("_minutes") {
@@ -638,11 +866,22 @@ mod tests {
         let registry = standard_method_registry();
         let realization = registry.methods_for(&intent("std.bio.build.realize"));
         let recovery = registry.methods_for(&intent("std.lab.plasmid.recover"));
+        let transformation = registry.methods_for(&intent("std.lab.plasmid.transform"));
+        let plating = registry.methods_for(&intent("std.lab.plasmid.plate"));
 
         assert_eq!(realization.len(), 2);
         assert_eq!(realization[0].id, method("automated-golden-gate"));
-        assert_eq!(recovery.len(), 2);
-        assert!(realization.iter().all(|method| method.validate().is_ok()));
+        assert_eq!(recovery.len(), 3);
+        assert_eq!(transformation.len(), 2);
+        assert_eq!(plating.len(), 2);
+        assert!(
+            realization
+                .iter()
+                .chain(recovery)
+                .chain(transformation)
+                .chain(plating)
+                .all(|method| method.validate().is_ok())
+        );
     }
 
     #[test]

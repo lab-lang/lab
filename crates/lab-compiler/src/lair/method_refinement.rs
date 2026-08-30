@@ -310,9 +310,20 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
             "replicates",
             u32_value(&transform.get_attr_transform_replicates(context).unwrap()),
         );
+        insert_integer(
+            &mut parameters,
+            "dna_count",
+            u32::try_from(required_strings(transform.get_attr_transform_plasmids(context)).len())
+                .expect("verified string-vector length fits u32"),
+        );
         let chemistry = transform.get_attr_transform_chemistry(context).unwrap();
         insert_chemistry(&mut parameters, &chemistry, STRAIN_CHEMISTRY_KEYS);
     } else if let Some(recover) = Operation::get_op::<RecoverOp>(operation, context) {
+        insert_text(
+            &mut parameters,
+            "subject",
+            required_string(recover.get_attr_recover_artifact(context)),
+        );
         let magnitude = required_string(recover.get_attr_recover_duration_magnitude(context));
         let scalar = ExactDecimal::parse(&magnitude)
             .map_err(|error| pliron::input_error!(operation.deref(context).loc(), error))?;
@@ -333,11 +344,46 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
                 value: PropertyValue::new(ScalarValue::Real(scalar), Some(unit)).unwrap(),
             },
         );
+        insert_integer(
+            &mut parameters,
+            "replicates",
+            u32_value(&recover.get_attr_recover_replicates(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "initial_volume_ul",
+            u32_value(&recover.get_attr_recover_initial_volume_ul(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "recovery_volume_ul",
+            u32_value(&recover.get_attr_recover_medium_volume_ul(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "recovery_temperature_c",
+            u32_value(&recover.get_attr_recover_temperature_c(context).unwrap()),
+        );
     } else if let Some(dilute) = Operation::get_op::<DiluteOp>(operation, context) {
+        insert_text(
+            &mut parameters,
+            "subject",
+            required_string(dilute.get_attr_dilute_artifact(context)),
+        );
         insert_integer(
             &mut parameters,
             "serial_dilutions",
             u32_value(&dilute.get_attr_dilute_serial_dilutions(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "replicates",
+            u32_value(&dilute.get_attr_dilute_replicates(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "initial_volume_ul",
+            u32_value(&dilute.get_attr_dilute_initial_volume_ul(context).unwrap()),
         );
         insert_integer(
             &mut parameters,
@@ -352,6 +398,11 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
     } else if let Some(plate) = Operation::get_op::<PlateOp>(operation, context) {
         insert_text(
             &mut parameters,
+            "subject",
+            required_string(plate.get_attr_plate_artifact(context)),
+        );
+        insert_text(
+            &mut parameters,
             "selection",
             required_string(plate.get_attr_plate_selection(context)),
         );
@@ -359,6 +410,31 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
             &mut parameters,
             "replicates",
             u32_value(&plate.get_attr_plate_replicates(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "culture_replicates",
+            u32_value(&plate.get_attr_plate_culture_replicates(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "serial_dilutions",
+            u32_value(&plate.get_attr_plate_serial_dilutions(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "medium_volume_ul",
+            u32_value(&plate.get_attr_plate_medium_volume_ul(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "culture_volume_ul",
+            u32_value(&plate.get_attr_plate_culture_volume_ul(context).unwrap()),
+        );
+        insert_integer(
+            &mut parameters,
+            "colony_volume_ul",
+            u32_value(&plate.get_attr_plate_colony_volume_ul(context).unwrap()),
         );
     }
     Ok(IntentInstance {

@@ -17,7 +17,7 @@ def thermal_program() -> dict[str, object]:
         "body": {
             "load": {
                 "input": 0,
-                "output": "product",
+                "outputs": ["product", "named-strain"],
                 "sample_count": 8,
                 "volume_each": quantity("20", procedures.MICROLITRE),
             },
@@ -45,6 +45,7 @@ def test_thermal_program_preserves_exact_quantities_and_optional_ramp_control() 
     program = procedures.parse_program(thermal_program())
 
     assert isinstance(program.body, procedures.ThermalProgramV1)
+    assert program.body.load.outputs == ("product", "named-strain")
     step = program.body.stages[0].steps[0]
     assert step.temperature.value == Decimal("95")
     assert step.hold.value == Decimal("15")
@@ -77,7 +78,12 @@ def test_pipetting_program_exposes_portable_techniques() -> None:
                 },
                 {
                     "id": "dilutions",
-                    "role": {"kind": "product", "output": "culture"},
+                    "role": {"kind": "input_output", "input": 0, "output": "culture"},
+                    "positions": 1,
+                },
+                {
+                    "id": "agar",
+                    "role": {"kind": "material_product", "material": "agar", "output": "plate"},
                     "positions": 1,
                 },
             ],
@@ -111,6 +117,8 @@ def test_pipetting_program_exposes_portable_techniques() -> None:
     assert isinstance(parsed.body, procedures.PipettingProgramV1)
     vessel = parsed.body.vessels[0]
     assert vessel.initial_volume_each == procedures.Volume(Decimal("10000"))
+    assert parsed.body.vessels[1].role == procedures.InputOutputVesselRole(0, "culture")
+    assert parsed.body.vessels[2].role == procedures.MaterialProductVesselRole("agar", "plate")
     step = parsed.body.steps[0]
     assert isinstance(step, procedures.Transfer)
     assert step.fluid_path_group == "dilution-one"

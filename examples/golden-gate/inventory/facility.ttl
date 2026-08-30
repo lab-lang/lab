@@ -57,6 +57,11 @@ ex:opentrons_ot2
     fac:isActive true ;
     fac:capability ex:opentrons_ot2_metered_liquid_transfer,
         ex:opentrons_ot2_in_well_mixing,
+        ex:opentrons_ot2_liquid_level_aware_aspiration,
+        ex:opentrons_ot2_vessel_relative_liquid_access,
+        ex:opentrons_ot2_air_gap_handling,
+        ex:opentrons_ot2_post_dispense_blowout,
+        ex:opentrons_ot2_touch_tip,
         ex:opentrons_ot2_programmed_block_temperature_control,
         ex:opentrons_ot2_heated_lid_temperature_control .
 
@@ -99,6 +104,54 @@ ex:opentrons_ot2_maximum_mix_volume
     fac:propertyKind cap:MaximumMixVolume ;
     fac:realValue "300"^^xsd:double ;
     fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_liquid_level_aware_aspiration
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "liquid_level_aware_aspiration" ;
+    fac:capabilityKind cap:LiquidLevelAwareAspiration ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:opentrons_ot2_vessel_relative_liquid_access
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "vessel_relative_liquid_access" ;
+    fac:capabilityKind cap:VesselRelativeLiquidAccess ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:opentrons_ot2_air_gap_handling
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "air_gap_handling" ;
+    fac:capabilityKind cap:AirGapHandling ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_maximum_air_gap_volume .
+
+ex:opentrons_ot2_maximum_air_gap_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_air_gap_volume" ;
+    fac:propertyKind cap:MaximumAirGapVolume ;
+    fac:realValue "20"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_post_dispense_blowout
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "post_dispense_blowout" ;
+    fac:capabilityKind cap:PostDispenseBlowout ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:opentrons_ot2_touch_tip
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "touch_tip" ;
+    fac:capabilityKind cap:TouchTip ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
 
 ex:opentrons_ot2_programmed_block_temperature_control
     a sbol:Identified, fac:CapabilityOffering ;

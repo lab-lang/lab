@@ -362,11 +362,20 @@ fn append_workflow(
                 duration_magnitude,
                 duration_unit,
             } => {
+                let BuildArtifactIntent::Strain(intent) = &artifact else {
+                    return Err(unsupported_realization(&name, "recover", "strain"));
+                };
+                let transformed_volume = transformed_volume_ul(intent)?;
                 let operation = RecoverOp::new(
                     context,
                     workflow_value(&values, input, &name)?,
+                    name.clone(),
                     duration_magnitude.clone(),
                     duration_unit.clone(),
+                    intent.transformation_replicates,
+                    transformed_volume,
+                    intent.chemistry.recovery_volume_ul,
+                    intent.chemistry.recovery_temperature_c,
                 );
                 values.insert(culture.clone(), operation.get_result_recovered(context));
                 root.append_operation(context, operation.get_operation(), 0);
@@ -378,7 +387,10 @@ fn append_workflow(
                 let operation = DiluteOp::new(
                     context,
                     workflow_value(&values, input, &name)?,
+                    name.clone(),
                     intent.serial_dilutions,
+                    intent.transformation_replicates,
+                    recovered_volume_ul(intent)?,
                     intent.chemistry.medium_volume_ul,
                     intent.chemistry.culture_volume_ul,
                 );
@@ -396,8 +408,14 @@ fn append_workflow(
                 let operation = PlateOp::new(
                     context,
                     workflow_value(&values, culture, &name)?,
+                    name.clone(),
                     selection.clone(),
                     intent.plating_replicates,
+                    intent.transformation_replicates,
+                    intent.serial_dilutions,
+                    intent.chemistry.medium_volume_ul,
+                    intent.chemistry.culture_volume_ul,
+                    intent.chemistry.colony_volume_ul,
                 );
                 values.insert(plate.clone(), operation.get_result_plate(context));
                 root.append_operation(context, operation.get_operation(), 0);
@@ -405,6 +423,39 @@ fn append_workflow(
         }
     }
     Ok(())
+}
+
+fn transformed_volume_ul(
+    intent: &crate::lair::source_lowering::StrainArtifactIntent,
+) -> Result<u32, PortableLairError> {
+    let dna_count = u32::try_from(intent.plasmids.len()).map_err(|_| {
+        PortableLairError::Stage(format!(
+            "strain '{}' has too many plasmids to represent its transformation volume",
+            intent.name
+        ))
+    })?;
+    u32::from(intent.chemistry.dna_volume_ul)
+        .checked_mul(dna_count)
+        .and_then(|dna| dna.checked_add(u32::from(intent.chemistry.cell_volume_ul)))
+        .ok_or_else(|| {
+            PortableLairError::Stage(format!(
+                "strain '{}' transformation volume overflows",
+                intent.name
+            ))
+        })
+}
+
+fn recovered_volume_ul(
+    intent: &crate::lair::source_lowering::StrainArtifactIntent,
+) -> Result<u32, PortableLairError> {
+    transformed_volume_ul(intent)?
+        .checked_add(u32::from(intent.chemistry.recovery_volume_ul))
+        .ok_or_else(|| {
+            PortableLairError::Stage(format!(
+                "strain '{}' recovery volume overflows",
+                intent.name
+            ))
+        })
 }
 
 fn assembly_chemistry(
@@ -918,7 +969,8 @@ workflow main() -> Material<Plasmid>:
         };
         let thermal = thermal.as_program();
         assert_eq!(thermal.load.input, 0);
-        assert_eq!(thermal.load.output.as_str(), "product");
+        assert_eq!(thermal.load.outputs.len(), 1);
+        assert_eq!(thermal.load.outputs[0].as_str(), "product");
         assert_eq!(thermal.load.sample_count, 1);
         assert_eq!(thermal.load.volume_each.value().to_string(), "20");
         assert_eq!(thermal.stages.len(), 2);
@@ -970,12 +1022,14 @@ workflow main() -> Material<Plasmid>:
                 lab_procedure::VesselRole::ProcedureInput { input: 0 }
             )
         }));
-        assert_eq!(dilution_program.as_program().steps.len(), 5);
-        assert_eq!(dilution_task.requirements.len(), 2);
+        assert_eq!(dilution_program.as_program().steps.len(), 9);
+        assert_eq!(dilution_task.requirements.len(), 3);
         assert!(dilution_task.requirements.iter().all(|requirement| {
             matches!(
                 requirement.capability_kind.as_str(),
-                vocabulary::METERED_LIQUID_TRANSFER | vocabulary::IN_WELL_MIXING
+                vocabulary::METERED_LIQUID_TRANSFER
+                    | vocabulary::IN_WELL_MIXING
+                    | vocabulary::LIQUID_LEVEL_AWARE_ASPIRATION
             )
         }));
 
@@ -984,8 +1038,12 @@ workflow main() -> Material<Plasmid>:
             .iter()
             .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.recover")
             .expect("recovery is a global method choice");
-        assert_eq!(recovery.candidates.len(), 2);
-        for candidate in &recovery.candidates {
+        assert_eq!(recovery.candidates.len(), 3);
+        for candidate in recovery
+            .candidates
+            .iter()
+            .filter(|candidate| !candidate.method.as_str().ends_with("#automated-recovery"))
+        {
             let constraint = &candidate.tasks[0].requirements[0].constraints[0];
             assert_eq!(
                 constraint.required.unit.as_ref().unwrap().as_str(),
@@ -996,15 +1054,127 @@ workflow main() -> Material<Plasmid>:
                 ScalarValue::Real(value) if value.to_string() == "30"
             ));
         }
+        let automated_recovery = recovery
+            .candidates
+            .iter()
+            .find(|candidate| candidate.method.as_str().ends_with("#automated-recovery"))
+            .expect("automated recovery is a real method alternative");
+        assert_eq!(automated_recovery.tasks.len(), 2);
+        let add_medium = automated_recovery.tasks[0]
+            .program
+            .as_ref()
+            .expect("recovery medium addition is normalized")
+            .validate()
+            .expect("recovery medium program validates");
+        let ValidatedProcedureProgram::PipettingV1(add_medium) = add_medium else {
+            panic!("recovery medium addition must be pipetting")
+        };
+        let recovered_location = lab_procedure::Location {
+            vessel: lab_procedure::ProcedureLocalId::new("recovery-cultures").unwrap(),
+            position: 0,
+        };
+        assert_eq!(
+            add_medium
+                .liquid_ledger()
+                .final_volume(&recovered_location)
+                .expect("recovered culture volume is exact")
+                .to_string(),
+            "82"
+        );
+        let incubation = automated_recovery.tasks[1]
+            .program
+            .as_ref()
+            .expect("recovery incubation is normalized")
+            .validate()
+            .expect("recovery incubation program validates");
+        let ValidatedProcedureProgram::ThermalV1(incubation) = incubation else {
+            panic!("recovery incubation must be thermal")
+        };
+        assert_eq!(
+            incubation.as_program().load.volume_each.value().to_string(),
+            "82"
+        );
+        assert_eq!(
+            incubation.as_program().stages[0].steps[0]
+                .hold
+                .value()
+                .to_string(),
+            "1800"
+        );
         let transformation = problem
             .choices
             .iter()
             .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.transform")
             .expect("transformation is a global method choice");
+        assert_eq!(transformation.candidates.len(), 2);
+        let automated_transformation = transformation
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate
+                    .method
+                    .as_str()
+                    .ends_with("#automated-chemical-transformation")
+            })
+            .expect("automated transformation is a real method alternative");
+        assert_eq!(automated_transformation.tasks.len(), 2);
+        let preparation = automated_transformation.tasks[0]
+            .program
+            .as_ref()
+            .expect("transformation preparation is normalized")
+            .validate()
+            .expect("transformation preparation validates");
+        let ValidatedProcedureProgram::PipettingV1(preparation) = preparation else {
+            panic!("transformation preparation must be pipetting")
+        };
+        assert_eq!(preparation.as_program().steps.len(), 8);
+        assert_eq!(automated_transformation.tasks[0].requirements.len(), 5);
+        let heat_shock = automated_transformation.tasks[1]
+            .program
+            .as_ref()
+            .expect("heat shock is normalized")
+            .validate()
+            .expect("heat shock validates");
+        let ValidatedProcedureProgram::ThermalV1(heat_shock) = heat_shock else {
+            panic!("heat shock must be thermal")
+        };
+        assert_eq!(heat_shock.as_program().load.outputs.len(), 2);
+        assert_eq!(
+            heat_shock.as_program().load.volume_each.value().to_string(),
+            "22"
+        );
         assert!(matches!(
             transformation.candidates[0].tasks[0].materials[0].source,
             crate::planning::PlanningMaterialSource::ChoiceOutput { .. }
         ));
+
+        let plating = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.plate")
+            .expect("plating is a global method choice");
+        let automated_plating = plating
+            .candidates
+            .iter()
+            .find(|candidate| {
+                candidate
+                    .method
+                    .as_str()
+                    .ends_with("#automated-antibiotic-selection")
+            })
+            .expect("automated selective plating is a real method alternative");
+        let plate_program = automated_plating.tasks[0]
+            .program
+            .as_ref()
+            .expect("selective plating is normalized")
+            .validate()
+            .expect("selective plating validates");
+        let ValidatedProcedureProgram::PipettingV1(plate_program) = plate_program else {
+            panic!("selective plating must be pipetting")
+        };
+        assert_eq!(plate_program.as_program().steps.len(), 4);
+        assert_eq!(plate_program.as_program().vessels.len(), 3);
+        assert_eq!(automated_plating.tasks[0].requirements.len(), 3);
 
         let json = serde_json::to_string_pretty(&problem).expect("problem serializes");
         let decoded: PlanningProblem = serde_json::from_str(&json).expect("problem deserializes");
@@ -1039,15 +1209,32 @@ workflow main() -> Material<Plasmid>:
         )
         .expect("Golden Gate inventory validates");
         let policy = FacilityPlanningPolicy {
-            method_pins: vec![MethodPin {
-                selector: MethodPinSelector::SourceOperation {
-                    source_operation: IntentOperationId::new("std.bio.build.realize").unwrap(),
-                },
-                method: lab_capability::MethodId::new(
+            method_pins: [
+                (
+                    "std.bio.build.realize",
                     "https://www.lab-compiler.org/ns/method#automated-golden-gate",
-                )
-                .unwrap(),
-            }],
+                ),
+                (
+                    "std.lab.plasmid.transform",
+                    "https://www.lab-compiler.org/ns/method#automated-chemical-transformation",
+                ),
+                (
+                    "std.lab.plasmid.recover",
+                    "https://www.lab-compiler.org/ns/method#automated-recovery",
+                ),
+                (
+                    "std.lab.plasmid.plate",
+                    "https://www.lab-compiler.org/ns/method#automated-antibiotic-selection",
+                ),
+            ]
+            .into_iter()
+            .map(|(operation, method)| MethodPin {
+                selector: MethodPinSelector::SourceOperation {
+                    source_operation: IntentOperationId::new(operation).unwrap(),
+                },
+                method: lab_capability::MethodId::new(method).unwrap(),
+            })
+            .collect(),
             adapter_requirement: AdapterRequirement::Optional,
         };
         let adapters = AdapterBindingSnapshot::resolve(
@@ -1098,7 +1285,7 @@ workflow main() -> Material<Plasmid>:
             ir.contains("https://example.org/golden-gate/opentrons_ot2"),
             "{ir}"
         );
-        assert!(ir.contains("#manual-recovery"), "{ir}");
+        assert!(ir.contains("#automated-recovery"), "{ir}");
         assert!(!ir.contains("method.choice"), "{ir}");
         assert!(!ir.contains("method.yield"), "{ir}");
 
@@ -1134,8 +1321,12 @@ workflow main() -> Material<Plasmid>:
                 .any(|method| { method.method.as_str().ends_with("#automated-golden-gate") })
         );
         assert!(invocations.methods.iter().any(|method| {
-            method.method.as_str().ends_with("#manual-recovery")
-                && method.tasks[0].requirements[0].adapter.is_none()
+            method.method.as_str().ends_with("#automated-recovery")
+                && method.tasks.iter().all(|task| {
+                    task.requirements
+                        .iter()
+                        .all(|binding| binding.adapter.is_some())
+                })
         }));
         let json = serde_json::to_string_pretty(&invocations).unwrap();
         let decoded: AdapterInvocationPlan = serde_json::from_str(&json).unwrap();

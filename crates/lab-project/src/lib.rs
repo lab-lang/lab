@@ -860,11 +860,17 @@ shared = { path = "../shared" }
             .methods
             .methods_for(&lab_method::IntentOperationId::new("std.lab.plasmid.recover").unwrap());
 
-        assert_eq!(recovery.len(), 3);
-        assert!(
+        assert_eq!(
             recovery
                 .iter()
-                .any(|method| method.id.as_str() == "https://example.org/method/custom-recovery")
+                .map(|method| method.id.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                "https://www.lab-compiler.org/ns/method#manual-recovery",
+                "https://www.lab-compiler.org/ns/method#controlled-recovery",
+                "https://www.lab-compiler.org/ns/method#automated-recovery",
+                "https://example.org/method/custom-recovery",
+            ])
         );
     }
 

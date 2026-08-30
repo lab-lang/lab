@@ -1,12 +1,87 @@
 //! Reference-bench default values for every profile field.
 
 use crate::backend::opentrons::ot2::profile::schema::{
-    AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TemperatureModule, Thermocycler,
-    TipRacks, TransformationStage,
+    AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TechniqueCalibration,
+    TemperatureModule, Thermocycler, TipRacks, TransformationStage,
 };
 
 pub(super) fn default_api_level() -> String {
     "2.21".to_owned()
+}
+
+pub(super) fn default_aspiration_rate() -> f64 {
+    0.5
+}
+
+pub(super) fn default_dispense_rate() -> f64 {
+    1.0
+}
+
+pub(super) fn default_tracked_source_volume_ul() -> u32 {
+    10_000
+}
+
+pub(super) fn default_tracked_meniscus_offset_mm() -> f64 {
+    10.0
+}
+
+pub(super) fn default_tracked_usable_depth_offset_mm() -> f64 {
+    10.0
+}
+
+pub(super) fn default_tracked_minimum_height_mm() -> f64 {
+    3.0
+}
+
+pub(super) fn default_tracked_low_volume_fraction() -> f64 {
+    0.2
+}
+
+pub(super) fn default_tracked_chunk_size() -> usize {
+    8
+}
+
+pub(super) fn default_distribution_disposal_volume_ul() -> u32 {
+    4
+}
+
+pub(super) fn default_above_liquid_offset_mm() -> f64 {
+    2.0
+}
+
+pub(super) fn default_material_surface_offset_mm() -> f64 {
+    -8.0
+}
+
+pub(super) fn default_touch_tip_radius() -> f64 {
+    0.5
+}
+
+pub(super) fn default_touch_tip_vertical_offset_mm() -> f64 {
+    -14.0
+}
+
+pub(super) fn default_touch_tip_speed_mm_s() -> f64 {
+    20.0
+}
+
+pub(super) fn default_technique_calibration() -> TechniqueCalibration {
+    TechniqueCalibration {
+        aspiration_rate: default_aspiration_rate(),
+        dispense_rate: default_dispense_rate(),
+        tracked_source_volume_ul: default_tracked_source_volume_ul(),
+        tracked_meniscus_offset_mm: default_tracked_meniscus_offset_mm(),
+        tracked_usable_depth_offset_mm: default_tracked_usable_depth_offset_mm(),
+        tracked_minimum_height_mm: default_tracked_minimum_height_mm(),
+        tracked_low_volume_fraction: default_tracked_low_volume_fraction(),
+        tracked_chunk_size: default_tracked_chunk_size(),
+        distribution_disposal_volume_ul: default_distribution_disposal_volume_ul(),
+        above_liquid_offset_mm: default_above_liquid_offset_mm(),
+        material_surface_offset_mm: default_material_surface_offset_mm(),
+        touch_tip_radius: default_touch_tip_radius(),
+        touch_tip_vertical_offset_mm: default_touch_tip_vertical_offset_mm(),
+        touch_tip_speed_mm_s: default_touch_tip_speed_mm_s(),
+    }
 }
 
 pub(super) fn default_small_pipette() -> Pipette {

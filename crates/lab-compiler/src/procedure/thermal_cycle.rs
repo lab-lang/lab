@@ -46,7 +46,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     let program = ThermalProgramV1 {
         load: ThermalLoad {
             input: 0,
-            output: procedure_id(task.outputs[0].as_str())?,
+            outputs: vec![procedure_id(task.outputs[0].as_str())?],
             sample_count,
             volume_each: Volume::parse_microlitres(volume_each.to_string())
                 .map_err(|error| error.to_string())?,

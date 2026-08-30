@@ -11,9 +11,10 @@ use lab_capability::{
     CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
 };
 use lab_procedure::vocabulary::{
-    CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
-    METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
-    THERMAL_PROGRAM_V1,
+    AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
+    LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1,
+    POST_DISPENSE_BLOWOUT, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, THERMAL_PROGRAM_V1, TOUCH_TIP,
+    VESSEL_RELATIVE_LIQUID_ACCESS,
 };
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
@@ -28,7 +29,10 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
-use crate::procedure::{CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE};
+use crate::procedure::{
+    ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
+    PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
+};
 use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
@@ -152,7 +156,22 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 vec![
                     pipetting_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
-                        [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [
+                            SETUP_GOLDEN_GATE,
+                            PREPARE_CHEMICAL_TRANSFORMATION,
+                            ADD_RECOVERY_MEDIUM,
+                            SERIAL_DILUTION,
+                            PLATE_DILUTED_CULTURE,
+                        ],
+                        [
+                            METERED_LIQUID_TRANSFER,
+                            IN_WELL_MIXING,
+                            LIQUID_LEVEL_AWARE_ASPIRATION,
+                            VESSEL_RELATIVE_LIQUID_ACCESS,
+                            AIR_GAP_HANDLING,
+                            POST_DISPENSE_BLOWOUT,
+                            TOUCH_TIP,
+                        ],
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
@@ -165,6 +184,11 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     )?,
                     thermal_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
+                        [
+                            CYCLE_GOLDEN_GATE,
+                            HEAT_SHOCK_TRANSFORMATION,
+                            INCUBATE_RECOVERY_CULTURE,
+                        ],
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
@@ -198,6 +222,11 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     pipetting_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
                         [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [
+                            METERED_LIQUID_TRANSFER,
+                            IN_WELL_MIXING,
+                            LIQUID_LEVEL_AWARE_ASPIRATION,
+                        ],
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
@@ -210,6 +239,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     )?,
                     thermal_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexThermalV1",
+                        [CYCLE_GOLDEN_GATE],
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
@@ -242,6 +272,11 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 vec![pipetting_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
                     [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                    [
+                        METERED_LIQUID_TRANSFER,
+                        IN_WELL_MIXING,
+                        LIQUID_LEVEL_AWARE_ASPIRATION,
+                    ],
                     [ControlMode::ReviewedFile, ControlMode::Api],
                     [STAR_RUN_FORMAT],
                     [STAR_RUN_FORMAT],
@@ -271,6 +306,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![thermal_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#InhecoOdtcThermalV1",
+                    [CYCLE_GOLDEN_GATE],
                     [ControlMode::Sila2],
                     [THERMOCYCLE_RUN_FORMAT],
                     [THERMOCYCLE_RUN_FORMAT],
@@ -325,7 +361,22 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 vec![
                     pipetting_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
-                        [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [
+                            SETUP_GOLDEN_GATE,
+                            PREPARE_CHEMICAL_TRANSFORMATION,
+                            ADD_RECOVERY_MEDIUM,
+                            SERIAL_DILUTION,
+                            PLATE_DILUTED_CULTURE,
+                        ],
+                        [
+                            METERED_LIQUID_TRANSFER,
+                            IN_WELL_MIXING,
+                            LIQUID_LEVEL_AWARE_ASPIRATION,
+                            VESSEL_RELATIVE_LIQUID_ACCESS,
+                            AIR_GAP_HANDLING,
+                            POST_DISPENSE_BLOWOUT,
+                            TOUCH_TIP,
+                        ],
                         [ControlMode::ReviewedFile],
                         [SIMULATION_RUN_FORMAT],
                         [SIMULATION_RUN_FORMAT],
@@ -338,6 +389,11 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     )?,
                     thermal_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorThermalV1",
+                        [
+                            CYCLE_GOLDEN_GATE,
+                            HEAT_SHOCK_TRANSFORMATION,
+                            INCUBATE_RECOVERY_CULTURE,
+                        ],
                         [ControlMode::ReviewedFile],
                         [SIMULATION_RUN_FORMAT],
                         [SIMULATION_RUN_FORMAT],
@@ -396,9 +452,16 @@ fn descriptor<const C: usize, const F: usize, const M: usize, const A: usize, co
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pipetting_implementation<const O: usize, const M: usize, const A: usize, const E: usize>(
+fn pipetting_implementation<
+    const O: usize,
+    const C: usize,
+    const M: usize,
+    const A: usize,
+    const E: usize,
+>(
     id: &'static str,
     operations: [&'static str; O],
+    capability_kinds: [&'static str; C],
     control_modes: [ControlMode; M],
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
@@ -422,7 +485,7 @@ fn pipetting_implementation<const O: usize, const M: usize, const A: usize, cons
                 })
             })
             .collect::<Result<_, _>>()?,
-        capability_kinds: [METERED_LIQUID_TRANSFER, IN_WELL_MIXING]
+        capability_kinds: capability_kinds
             .into_iter()
             .map(|kind| {
                 CapabilityKind::new(kind).map_err(|error| {
@@ -440,8 +503,9 @@ fn pipetting_implementation<const O: usize, const M: usize, const A: usize, cons
 }
 
 #[allow(clippy::too_many_arguments)]
-fn thermal_implementation<const M: usize, const A: usize, const E: usize>(
+fn thermal_implementation<const O: usize, const M: usize, const A: usize, const E: usize>(
     id: &'static str,
+    operations: [&'static str; O],
     control_modes: [ControlMode; M],
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
@@ -475,10 +539,16 @@ fn thermal_implementation<const M: usize, const A: usize, const E: usize>(
         })?,
         contract: ProcedureContractId::new(THERMAL_PROGRAM_V1)
             .expect("built-in Procedure contract is an absolute IRI"),
-        operations: [OperationId::new(CYCLE_GOLDEN_GATE)
-            .expect("built-in Procedure operation is an absolute IRI")]
-        .into_iter()
-        .collect(),
+        operations: operations
+            .into_iter()
+            .map(|operation| {
+                OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
         capability_kinds,
         control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
@@ -980,10 +1050,14 @@ mod tests {
         );
         assert_eq!(
             star_pipetting.capability_kinds,
-            [METERED_LIQUID_TRANSFER, IN_WELL_MIXING]
-                .into_iter()
-                .map(|kind| CapabilityKind::new(kind).unwrap())
-                .collect()
+            [
+                METERED_LIQUID_TRANSFER,
+                IN_WELL_MIXING,
+                LIQUID_LEVEL_AWARE_ASPIRATION,
+            ]
+            .into_iter()
+            .map(|kind| CapabilityKind::new(kind).unwrap())
+            .collect()
         );
 
         let ot2 = catalog

@@ -1,4 +1,4 @@
-use lab_capability::ScalarValue;
+use lab_capability::{ExactDecimal, ScalarValue};
 use lab_method::ProcedureValue;
 use lab_procedure::ProcedureLocalId;
 
@@ -51,6 +51,21 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
             .as_str()
             .parse::<u32>()
             .map_err(|_| format!("parameter `{name}` must fit the unsigned 32-bit range"))
+    }
+
+    pub(super) fn decimal_parameter(
+        &self,
+        name: &str,
+    ) -> Result<(ExactDecimal, Option<&str>), String> {
+        let ProcedureValue::Scalar { value } = self.parameter(name)? else {
+            return Err(format!("parameter `{name}` must be a numeric scalar"));
+        };
+        let decimal = match &value.value {
+            ScalarValue::Integer(integer) => ExactDecimal::from_integer(integer),
+            ScalarValue::Real(decimal) => decimal.clone(),
+            _ => return Err(format!("parameter `{name}` must be a numeric scalar")),
+        };
+        Ok((decimal, value.unit.as_ref().map(|unit| unit.as_str())))
     }
 
     pub(super) fn text_parameter(&self, name: &str) -> Result<String, String> {

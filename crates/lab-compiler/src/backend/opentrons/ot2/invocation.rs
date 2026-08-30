@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use lab_instruments::ThermalProfile;
 use lab_method::LocalId;
+use lab_procedure::{MixTechnique, TransferTechnique};
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
 use serde::Serialize;
 
@@ -13,10 +14,13 @@ use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 use crate::backend::procedure::{
-    CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    normalized_serial_dilution, normalized_thermal_program,
+    ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
+    PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
+    normalized_chemical_transformation, normalized_golden_gate_setup, normalized_recovery_medium,
+    normalized_selective_plating, normalized_serial_dilution, normalized_thermal_program,
 };
-use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
+use crate::backend::profile::Plates;
+use crate::backend::resources::{Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
 use crate::planning::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,
@@ -25,11 +29,14 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v2";
+const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v3";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
 const CYCLE_TEMPLATE: &str = include_str!("invocation/thermal_cycle.py");
+const TRANSFORMATION_TEMPLATE: &str = include_str!("invocation/prepare_transformation.py");
+const RECOVERY_TEMPLATE: &str = include_str!("invocation/add_recovery_medium.py");
 const DILUTION_TEMPLATE: &str = include_str!("invocation/serial_dilution.py");
+const PLATING_TEMPLATE: &str = include_str!("invocation/plate_diluted_culture.py");
 const API_LEVEL_SENTINEL: &str = "\"2.21\",  # LAB:API_LEVEL";
 const PLAN_SENTINEL: &str = "\"{}\"  # LAB:INVOCATION_PLAN";
 
@@ -92,33 +99,90 @@ enum Ot2TaskExecution {
         mix_cycles: u32,
         mix_volume_ul: u32,
     },
-    ThermalCycleGoldenGateReaction {
-        artifact: String,
-        reaction_wells: Vec<String>,
+    ThermalProgram {
+        title: String,
+        sample_wells: Vec<String>,
         volume_each_ul: f64,
         lid_temperature_c: Option<f64>,
         profile: ThermalProfile,
         final_hold_celsius: Option<f64>,
     },
-    SerialDilution {
+    PrepareChemicalTransformation {
+        artifact: String,
+        cell_source: PlanningValueSource,
+        cell_source_well: String,
+        cell_source_volume_ul: u32,
+        dna: Vec<MaterialPlacement>,
+        reaction_wells: Vec<String>,
+        cell_mix_cycles: u32,
+        cell_mix_volume_ul: u32,
+        cell_mix_technique: MixTechnique,
+        cell_volume_ul: u32,
+        cell_transfer_technique: TransferTechnique,
+        dna_mix_cycles: u32,
+        dna_mix_volume_ul: u32,
+        dna_mix_technique: MixTechnique,
+        dna_volume_ul: u32,
+        dna_transfer_technique: TransferTechnique,
+        bubble_clear_cycles: u32,
+        bubble_clear_volume_ul: u32,
+        bubble_clear_technique: MixTechnique,
+    },
+    AddRecoveryMedium {
+        artifact: String,
         culture_source: PlanningValueSource,
-        culture_well: String,
+        culture_wells: Vec<String>,
+        medium: MaterialPlacement,
+        initial_volume_ul: u32,
+        recovery_volume_ul: u32,
+        technique: TransferTechnique,
+    },
+    SerialDilution {
+        artifact: String,
+        culture_source: PlanningValueSource,
+        culture_wells: Vec<String>,
         medium: MaterialPlacement,
         dilution_wells: Vec<Well>,
+        initial_volume_ul: u32,
         medium_volume_ul: u32,
         culture_volume_ul: u32,
         mix_cycles: u32,
         mix_volume_ul: u32,
+        medium_technique: TransferTechnique,
+        transfer_technique: TransferTechnique,
+        mix_technique: MixTechnique,
+    },
+    PlateDilutedCulture {
+        artifact: String,
+        culture_source: PlanningValueSource,
+        selection: MaterialReview,
+        dilution_wells: Vec<Well>,
+        agar_wells: Vec<Well>,
+        initial_volume_by_dilution_ul: Vec<u32>,
+        culture_replicates: usize,
+        serial_dilutions: usize,
+        plating_replicates: usize,
+        colony_volume_ul: u32,
+        technique: TransferTechnique,
+        plate_map: Vec<PlateMapEntry>,
     },
 }
 
 #[derive(Clone, Serialize)]
-struct MaterialPlacement {
+struct MaterialReview {
     role: String,
     input: LocalId,
     symbol: String,
     source: SelectedMaterialSource,
+}
+
+#[derive(Clone, Serialize)]
+struct MaterialPlacement {
+    #[serde(flatten)]
+    material: MaterialReview,
     source_well: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    load_volume_ul: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -126,6 +190,28 @@ struct MaterialAddition {
     #[serde(flatten)]
     placement: MaterialPlacement,
     volume_ul: u32,
+}
+
+#[derive(Clone, Serialize)]
+struct PlateMapEntry {
+    dilution: usize,
+    dilution_ratio: String,
+    culture_replicate: usize,
+    plating_replicate: usize,
+    source: Well,
+    destination: Well,
+}
+
+#[derive(Serialize)]
+struct PlateMapDocument<'a> {
+    schema_version: &'static str,
+    facility: &'a str,
+    asset: &'a str,
+    task: &'a LocalId,
+    artifact: &'a str,
+    culture_source: &'a PlanningValueSource,
+    selection: &'a MaterialReview,
+    entries: &'a [PlateMapEntry],
 }
 
 /// Lower only the Procedure tasks and requirements allocated to this exact invocation.
@@ -186,6 +272,41 @@ pub(in crate::backend) fn lower_invocation(
                 typst::render(&render_manual(&plan)),
             )
             .map_err(|error| error.to_string())?;
+        if let Ot2TaskExecution::PlateDilutedCulture {
+            artifact,
+            culture_source,
+            selection,
+            plate_map,
+            ..
+        } = &plan.execution
+        {
+            let map = PlateMapDocument {
+                schema_version: "lab.plate-map.v1",
+                facility: &plan.facility,
+                asset: &plan.asset,
+                task: &plan.task.id,
+                artifact,
+                culture_source,
+                selection,
+                entries: plate_map,
+            };
+            let mut json = serde_json::to_string_pretty(&map).map_err(|error| error.to_string())?;
+            json.push('\n');
+            artifacts
+                .insert_text(
+                    format!("{directory}/plate_map.json"),
+                    "application/json",
+                    json,
+                )
+                .map_err(|error| error.to_string())?;
+            artifacts
+                .insert_text(
+                    format!("{directory}/plate_map.typ"),
+                    "text/x-typst",
+                    typst::render(&render_plate_map(&plan)),
+                )
+                .map_err(|error| error.to_string())?;
+        }
         artifacts
             .insert(
                 GeneratedArtifact::text(
@@ -225,11 +346,31 @@ fn plan_task(
         )),
         CYCLE_GOLDEN_GATE => Ok((
             "thermal-cycle-golden-gate-reaction",
-            plan_cycle(profile, task, requirements)?,
+            plan_thermal(profile, task, requirements)?,
+        )),
+        PREPARE_CHEMICAL_TRANSFORMATION => Ok((
+            "prepare-chemical-transformation",
+            plan_transformation(profile, task, requirements)?,
+        )),
+        HEAT_SHOCK_TRANSFORMATION => Ok((
+            "heat-shock-transformation",
+            plan_thermal(profile, task, requirements)?,
+        )),
+        ADD_RECOVERY_MEDIUM => Ok((
+            "add-recovery-medium",
+            plan_recovery_medium(profile, task, requirements)?,
+        )),
+        INCUBATE_RECOVERY_CULTURE => Ok((
+            "incubate-recovery-culture",
+            plan_thermal(profile, task, requirements)?,
         )),
         SERIAL_DILUTION => Ok((
             "serial-dilution",
             plan_dilution(profile, task, requirements)?,
+        )),
+        PLATE_DILUTED_CULTURE => Ok((
+            "plate-diluted-culture",
+            plan_plating(profile, task, requirements)?,
         )),
         operation => Err(format!(
             "OT-2 invocation contains unsupported Procedure operation '{operation}' in task '{}'",
@@ -262,11 +403,9 @@ fn plan_setup(
         .into_iter()
         .map(|addition| MaterialAddition {
             placement: MaterialPlacement {
-                role: addition.role.to_owned(),
-                input: addition.material.input.clone(),
-                symbol: addition.material.symbol.clone(),
-                source: addition.material.source.clone(),
+                material: material_review(addition.role, addition.material),
                 source_well: source_wells[&addition.material.symbol].clone(),
+                load_volume_ul: None,
             },
             volume_ul: addition.volume_ul,
         })
@@ -301,19 +440,205 @@ fn plan_setup(
     })
 }
 
-fn plan_cycle(
+fn plan_transformation(
+    profile: &Ot2AdapterProfile,
+    task: &AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<Ot2TaskExecution, String> {
+    let procedure = normalized_chemical_transformation("OT-2", task, requirements)?;
+    let view = ProcedureTaskView::new("OT-2", task);
+    let reaction_wells = known_wells(
+        task,
+        "transformation reaction plate",
+        profile.deck.thermocycler.capacity,
+    )?;
+    if procedure.replicates > reaction_wells.len() {
+        return Err(view.capacity_error(
+            "transformation reaction plate",
+            procedure.replicates,
+            reaction_wells.len(),
+        ));
+    }
+    let dna_keys = procedure
+        .dna
+        .iter()
+        .map(|material| material.symbol.clone())
+        .collect::<BTreeSet<_>>();
+    if dna_keys.len() != procedure.dna.len() {
+        return Err(format!(
+            "OT-2 Procedure task '{}' has duplicate DNA symbols that cannot be staged unambiguously",
+            task.id
+        ));
+    }
+    let dna_wells = assign_source_wells(
+        BACKEND,
+        "prepare-chemical-transformation",
+        dna_keys,
+        profile.stages.transformation.dna_plate.capacity,
+    )
+    .map_err(|error| error.to_string())?;
+    let dna_source_volume_ul = procedure
+        .dna_volume_ul
+        .checked_mul(u32::try_from(procedure.replicates).map_err(|_| {
+            format!(
+                "OT-2 Procedure task '{}' replicate count does not fit a source-volume calculation",
+                task.id
+            )
+        })?)
+        .map(|volume| volume.max(procedure.dna_mix_volume_ul))
+        .ok_or_else(|| format!("OT-2 Procedure task '{}' DNA volume overflows", task.id))?;
+    let dna = procedure
+        .dna
+        .into_iter()
+        .map(|material| MaterialPlacement {
+            material: material_review("dependency".to_owned(), material),
+            source_well: dna_wells[&material.symbol].clone(),
+            load_volume_ul: Some(dna_source_volume_ul),
+        })
+        .collect::<Vec<_>>();
+    let small_tips = procedure.replicates.checked_mul(dna.len()).ok_or_else(|| {
+        format!(
+            "OT-2 Procedure task '{}' small-tip count overflows",
+            task.id
+        )
+    })?;
+    let small_tip_capacity = profile.stages.transformation.small_tips.total_capacity();
+    if small_tips > small_tip_capacity {
+        return Err(view.capacity_error(
+            "transformation small-tip racks",
+            small_tips,
+            small_tip_capacity,
+        ));
+    }
+    if profile.stages.transformation.large_tips.total_capacity() == 0 {
+        return Err(view.capacity_error("transformation large-tip racks", 1, 0));
+    }
+    let cell_source_well = known_wells(
+        task,
+        "competent-cell rack",
+        profile.deck.temperature_module.capacity,
+    )?
+    .into_iter()
+    .next()
+    .expect("known wells is non-empty");
+    let cell_source_volume_ul = procedure
+        .cell_volume_ul
+        .checked_mul(u32::try_from(procedure.replicates).map_err(|_| {
+            format!(
+                "OT-2 Procedure task '{}' replicate count does not fit a source-volume calculation",
+                task.id
+            )
+        })?)
+        .map(|volume| volume.max(procedure.cell_mix_volume_ul))
+        .ok_or_else(|| {
+            format!(
+                "OT-2 Procedure task '{}' competent-cell volume overflows",
+                task.id
+            )
+        })?;
+
+    Ok(Ot2TaskExecution::PrepareChemicalTransformation {
+        artifact: procedure.artifact,
+        cell_source: procedure.cell_source.clone(),
+        cell_source_well,
+        cell_source_volume_ul,
+        dna,
+        reaction_wells: reaction_wells
+            .into_iter()
+            .take(procedure.replicates)
+            .collect(),
+        cell_mix_cycles: procedure.cell_mix_cycles,
+        cell_mix_volume_ul: procedure.cell_mix_volume_ul,
+        cell_mix_technique: procedure.cell_mix_technique,
+        cell_volume_ul: procedure.cell_volume_ul,
+        cell_transfer_technique: procedure.cell_transfer_technique,
+        dna_mix_cycles: procedure.dna_mix_cycles,
+        dna_mix_volume_ul: procedure.dna_mix_volume_ul,
+        dna_mix_technique: procedure.dna_mix_technique,
+        dna_volume_ul: procedure.dna_volume_ul,
+        dna_transfer_technique: procedure.dna_transfer_technique,
+        bubble_clear_cycles: procedure.bubble_clear_cycles,
+        bubble_clear_volume_ul: procedure.bubble_clear_volume_ul,
+        bubble_clear_technique: procedure.bubble_clear_technique,
+    })
+}
+
+fn plan_recovery_medium(
+    profile: &Ot2AdapterProfile,
+    task: &AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<Ot2TaskExecution, String> {
+    let procedure = normalized_recovery_medium("OT-2", task, requirements)?;
+    let view = ProcedureTaskView::new("OT-2", task);
+    let culture_wells = known_wells(
+        task,
+        "recovery culture plate",
+        profile.deck.thermocycler.capacity,
+    )?;
+    if procedure.replicates > culture_wells.len() {
+        return Err(view.capacity_error(
+            "recovery culture plate",
+            procedure.replicates,
+            culture_wells.len(),
+        ));
+    }
+    if profile.stages.transformation.large_tips.total_capacity() == 0 {
+        return Err(view.capacity_error("recovery large-tip racks", 1, 0));
+    }
+    let source_well = known_wells(
+        task,
+        "recovery-medium rack",
+        profile.deck.temperature_module.capacity,
+    )?
+    .into_iter()
+    .next()
+    .expect("known wells is non-empty");
+    let load_volume_ul = procedure
+        .recovery_volume_ul
+        .checked_mul(u32::try_from(procedure.replicates).map_err(|_| {
+            format!(
+                "OT-2 Procedure task '{}' replicate count does not fit a source-volume calculation",
+                task.id
+            )
+        })?)
+        .ok_or_else(|| {
+            format!(
+                "OT-2 Procedure task '{}' recovery-medium volume overflows",
+                task.id
+            )
+        })?;
+
+    Ok(Ot2TaskExecution::AddRecoveryMedium {
+        artifact: procedure.subject,
+        culture_source: procedure.culture_source.clone(),
+        culture_wells: culture_wells
+            .into_iter()
+            .take(procedure.replicates)
+            .collect(),
+        medium: MaterialPlacement {
+            material: material_review("medium".to_owned(), procedure.medium),
+            source_well,
+            load_volume_ul: Some(load_volume_ul),
+        },
+        initial_volume_ul: procedure.initial_volume_ul,
+        recovery_volume_ul: procedure.recovery_volume_ul,
+        technique: procedure.technique,
+    })
+}
+
+fn plan_thermal(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
     requirements: &[&AllocatedRequirementBinding],
 ) -> Result<Ot2TaskExecution, String> {
     let procedure = normalized_thermal_program("OT-2", task, requirements)?;
     let view = ProcedureTaskView::new("OT-2", task);
-    let reaction_wells = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
-    if procedure.sample_count > reaction_wells.len() {
+    let sample_wells = known_wells(task, "sample plate", profile.deck.thermocycler.capacity)?;
+    if procedure.sample_count > sample_wells.len() {
         return Err(view.capacity_error(
-            "reaction plate",
+            "sample plate",
             procedure.sample_count,
-            reaction_wells.len(),
+            sample_wells.len(),
         ));
     }
     for (name, value) in procedure
@@ -363,9 +688,9 @@ fn plan_cycle(
         ));
     }
 
-    Ok(Ot2TaskExecution::ThermalCycleGoldenGateReaction {
-        artifact: procedure.artifact,
-        reaction_wells: reaction_wells
+    Ok(Ot2TaskExecution::ThermalProgram {
+        title: procedure.title,
+        sample_wells: sample_wells
             .into_iter()
             .take(procedure.sample_count)
             .collect(),
@@ -383,54 +708,263 @@ fn plan_dilution(
 ) -> Result<Ot2TaskExecution, String> {
     let procedure = normalized_serial_dilution("OT-2", task, requirements)?;
     let view = ProcedureTaskView::new("OT-2", task);
-    let mut allocator = PlateAllocator::new(
-        BACKEND,
-        "serial-dilution",
-        "dilution_plate",
+    let dilution_wells = layered_plate_layout(
+        task,
+        "dilution plates",
         &profile.stages.plating.dilution_plate,
-    );
-    let dilution_wells = allocator
-        .take(procedure.serial_dilutions)
-        .map_err(|error| error.to_string())?;
+        procedure.serial_dilutions,
+        procedure.culture_replicates,
+    )?;
     let culture_wells = known_wells(
         task,
         "culture staging plate",
         profile.deck.thermocycler.capacity,
     )?;
-    if procedure.serial_dilutions > profile.stages.plating.small_tips.total_capacity() {
+    if procedure.culture_replicates > culture_wells.len() {
+        return Err(view.capacity_error(
+            "culture staging plate",
+            procedure.culture_replicates,
+            culture_wells.len(),
+        ));
+    }
+    if procedure.culture_replicates > profile.stages.plating.small_tips.total_capacity() {
         return Err(view.capacity_error(
             "dilution small-tip racks",
-            procedure.serial_dilutions,
+            procedure.culture_replicates,
             profile.stages.plating.small_tips.total_capacity(),
         ));
     }
     if profile.stages.plating.large_tips.total_capacity() == 0 {
         return Err(view.capacity_error("dilution large-tip racks", 1, 0));
     }
+    let chunk_count = dilution_wells
+        .len()
+        .div_ceil(profile.techniques.tracked_chunk_size);
+    let medium_load_ul = procedure
+        .medium_volume_ul
+        .checked_mul(u32::try_from(dilution_wells.len()).map_err(|_| {
+            format!(
+                "OT-2 Procedure task '{}' dilution count does not fit a source-volume calculation",
+                task.id
+            )
+        })?)
+        .and_then(|volume| {
+            profile
+                .techniques
+                .distribution_disposal_volume_ul
+                .checked_mul(u32::try_from(chunk_count).ok()?)
+                .and_then(|disposal| volume.checked_add(disposal))
+        })
+        .ok_or_else(|| {
+            format!(
+                "OT-2 Procedure task '{}' recovery-medium volume overflows",
+                task.id
+            )
+        })?;
+    if medium_load_ul > profile.techniques.tracked_source_volume_ul {
+        return Err(format!(
+            "OT-2 Procedure task '{}' needs {medium_load_ul} uL of dilution medium including calibrated disposal volume, but its tracked source is configured with {} uL",
+            task.id, profile.techniques.tracked_source_volume_ul
+        ));
+    }
 
     Ok(Ot2TaskExecution::SerialDilution {
+        artifact: procedure.subject,
         culture_source: procedure.culture_source.clone(),
-        culture_well: culture_wells[0].clone(),
+        culture_wells: culture_wells
+            .into_iter()
+            .take(procedure.culture_replicates)
+            .collect(),
         medium: MaterialPlacement {
-            role: "medium".to_owned(),
-            input: procedure.medium.input.clone(),
-            symbol: procedure.medium.symbol.clone(),
-            source: procedure.medium.source.clone(),
+            material: material_review("medium".to_owned(), procedure.medium),
             source_well: profile.stages.plating.media_rack.medium_well.clone(),
+            load_volume_ul: Some(profile.techniques.tracked_source_volume_ul),
         },
         dilution_wells,
+        initial_volume_ul: procedure.initial_volume_ul,
         medium_volume_ul: procedure.medium_volume_ul,
         culture_volume_ul: procedure.culture_volume_ul,
         mix_cycles: procedure.mix_cycles,
         mix_volume_ul: procedure.mix_volume_ul,
+        medium_technique: procedure.medium_technique,
+        transfer_technique: procedure.transfer_technique,
+        mix_technique: procedure.mix_technique,
     })
+}
+
+fn plan_plating(
+    profile: &Ot2AdapterProfile,
+    task: &AllocatedProcedureTask,
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<Ot2TaskExecution, String> {
+    let procedure = normalized_selective_plating("OT-2", task, requirements)?;
+    let view = ProcedureTaskView::new("OT-2", task);
+    let dilution_wells = layered_plate_layout(
+        task,
+        "dilution plates",
+        &profile.stages.plating.dilution_plate,
+        procedure.serial_dilutions,
+        procedure.culture_replicates,
+    )?;
+    let agar_per_dilution = procedure
+        .culture_replicates
+        .checked_mul(procedure.plating_replicates)
+        .ok_or_else(|| {
+            format!(
+                "OT-2 Procedure task '{}' agar-well count overflows",
+                task.id
+            )
+        })?;
+    let agar_wells = layered_plate_layout(
+        task,
+        "selective agar plates",
+        &profile.stages.plating.agar_plate,
+        procedure.serial_dilutions,
+        agar_per_dilution,
+    )?;
+    let required_tips = procedure
+        .culture_replicates
+        .checked_mul(procedure.serial_dilutions)
+        .ok_or_else(|| {
+            format!(
+                "OT-2 Procedure task '{}' plating tip count overflows",
+                task.id
+            )
+        })?;
+    let tip_capacity = profile.stages.plating.small_tips.total_capacity();
+    if required_tips > tip_capacity {
+        return Err(view.capacity_error("plating small-tip racks", required_tips, tip_capacity));
+    }
+    let mut plate_map = Vec::with_capacity(agar_wells.len());
+    for dilution in 0..procedure.serial_dilutions {
+        for culture_replicate in 0..procedure.culture_replicates {
+            let source =
+                dilution_wells[dilution * procedure.culture_replicates + culture_replicate].clone();
+            for plating_replicate in 0..procedure.plating_replicates {
+                let destination_index = dilution * agar_per_dilution
+                    + culture_replicate * procedure.plating_replicates
+                    + plating_replicate;
+                plate_map.push(PlateMapEntry {
+                    dilution: dilution + 1,
+                    dilution_ratio: dilution_ratio(
+                        procedure.medium_volume_ul,
+                        procedure.culture_volume_ul,
+                        dilution + 1,
+                    )?,
+                    culture_replicate: culture_replicate + 1,
+                    plating_replicate: plating_replicate + 1,
+                    source: source.clone(),
+                    destination: agar_wells[destination_index].clone(),
+                });
+            }
+        }
+    }
+
+    Ok(Ot2TaskExecution::PlateDilutedCulture {
+        artifact: procedure.subject,
+        culture_source: procedure.culture_source.clone(),
+        selection: material_review("selection".to_owned(), procedure.selection),
+        dilution_wells,
+        agar_wells,
+        initial_volume_by_dilution_ul: procedure.initial_volume_by_dilution_ul,
+        culture_replicates: procedure.culture_replicates,
+        serial_dilutions: procedure.serial_dilutions,
+        plating_replicates: procedure.plating_replicates,
+        colony_volume_ul: procedure.colony_volume_ul,
+        technique: procedure.technique,
+        plate_map,
+    })
+}
+
+fn layered_plate_layout(
+    task: &AllocatedProcedureTask,
+    resource: &str,
+    plates: &Plates,
+    layers: usize,
+    positions_per_layer: usize,
+) -> Result<Vec<Well>, String> {
+    let wells = plate_wells(plates.capacity);
+    if wells.len() != plates.capacity || layers == 0 || positions_per_layer == 0 {
+        return Err(format!(
+            "OT-2 Procedure task '{}' cannot address {resource} with {} layers of {positions_per_layer} positions and declared per-plate capacity {}",
+            task.id, layers, plates.capacity
+        ));
+    }
+    let shared_region = plates.capacity / layers;
+    if positions_per_layer <= shared_region {
+        return Ok((0..layers)
+            .flat_map(|layer| {
+                let offset = layer * shared_region;
+                (0..positions_per_layer).map({
+                    let wells = &wells;
+                    move |position| Well {
+                        plate: 0,
+                        well: wells[offset + position].clone(),
+                    }
+                })
+            })
+            .collect());
+    }
+    if layers <= plates.slots.len() && positions_per_layer <= plates.capacity {
+        return Ok((0..layers)
+            .flat_map(|layer| {
+                (0..positions_per_layer).map({
+                    let wells = &wells;
+                    move |position| Well {
+                        plate: layer,
+                        well: wells[position].clone(),
+                    }
+                })
+            })
+            .collect());
+    }
+    Err(format!(
+        "OT-2 Procedure task '{}' needs {layers} isolated {resource} regions of {positions_per_layer} positions, but the profile supplies {} plates with {} positions each",
+        task.id,
+        plates.slots.len(),
+        plates.capacity
+    ))
+}
+
+fn dilution_ratio(
+    medium_volume_ul: u32,
+    culture_volume_ul: u32,
+    steps: usize,
+) -> Result<String, String> {
+    let total = medium_volume_ul
+        .checked_add(culture_volume_ul)
+        .ok_or_else(|| "OT-2 dilution-ratio volume arithmetic overflows".to_owned())?;
+    let divisor = greatest_common_divisor(culture_volume_ul, total);
+    let numerator = u128::from(culture_volume_ul / divisor);
+    let denominator = u128::from(total / divisor);
+    let exponent = u32::try_from(steps)
+        .map_err(|_| "OT-2 dilution-ratio exponent does not fit this platform".to_owned())?;
+    let numerator = numerator
+        .checked_pow(exponent)
+        .ok_or_else(|| "OT-2 dilution-ratio numerator overflows".to_owned())?;
+    let denominator = denominator
+        .checked_pow(exponent)
+        .ok_or_else(|| "OT-2 dilution-ratio denominator overflows".to_owned())?;
+    Ok(format!("{numerator}/{denominator}"))
+}
+
+fn greatest_common_divisor(mut left: u32, mut right: u32) -> u32 {
+    while right != 0 {
+        let remainder = left % right;
+        left = right;
+        right = remainder;
+    }
+    left.max(1)
 }
 
 fn render_python_protocol(plan: &Ot2TaskPlan) -> Result<String, String> {
     let template = match &plan.execution {
         Ot2TaskExecution::SetupGoldenGateReaction { .. } => SETUP_TEMPLATE,
-        Ot2TaskExecution::ThermalCycleGoldenGateReaction { .. } => CYCLE_TEMPLATE,
+        Ot2TaskExecution::ThermalProgram { .. } => CYCLE_TEMPLATE,
+        Ot2TaskExecution::PrepareChemicalTransformation { .. } => TRANSFORMATION_TEMPLATE,
+        Ot2TaskExecution::AddRecoveryMedium { .. } => RECOVERY_TEMPLATE,
         Ot2TaskExecution::SerialDilution { .. } => DILUTION_TEMPLATE,
+        Ot2TaskExecution::PlateDilutedCulture { .. } => PLATING_TEMPLATE,
     };
     let api_level =
         serde_json::to_string(&plan.deck.protocol.api_level).map_err(|error| error.to_string())?;
@@ -488,10 +1022,19 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
         Ot2TaskExecution::SetupGoldenGateReaction { artifact, .. } => {
             format!("Set up Golden Gate reaction for {artifact}")
         }
-        Ot2TaskExecution::ThermalCycleGoldenGateReaction { artifact, .. } => {
-            format!("Thermal cycle Golden Gate reaction for {artifact}")
+        Ot2TaskExecution::ThermalProgram { title, .. } => title.clone(),
+        Ot2TaskExecution::PrepareChemicalTransformation { artifact, .. } => {
+            format!("Prepare chemical transformation for {artifact}")
         }
-        Ot2TaskExecution::SerialDilution { .. } => "Serially dilute recovered culture".to_owned(),
+        Ot2TaskExecution::AddRecoveryMedium { artifact, .. } => {
+            format!("Add recovery medium for {artifact}")
+        }
+        Ot2TaskExecution::SerialDilution { artifact, .. } => {
+            format!("Serially dilute recovered culture for {artifact}")
+        }
+        Ot2TaskExecution::PlateDilutedCulture { artifact, .. } => {
+            format!("Plate {artifact} cultures on selective medium")
+        }
     };
     let mut doc = Doc::new(DocMeta::new(
         title,
@@ -556,9 +1099,9 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
                 ],
                 additions.iter().map(|addition| {
                     vec![
-                        vec![text(&addition.placement.role)],
-                        vec![code(&addition.placement.symbol)],
-                        vec![code(material_source(&addition.placement.source))],
+                        vec![text(&addition.placement.material.role)],
+                        vec![code(&addition.placement.material.symbol)],
+                        vec![code(material_source(&addition.placement.material.source))],
                         vec![code(&addition.placement.source_well)],
                         vec![text(format!("{} µL", addition.volume_ul))],
                     ]
@@ -582,8 +1125,8 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             ]);
             doc.para_text("Leave the reaction plate on the thermocycler after setup. The next reviewed thermal-cycling node consumes these reaction wells; this setup protocol does not cycle them.");
         }
-        Ot2TaskExecution::ThermalCycleGoldenGateReaction {
-            reaction_wells,
+        Ot2TaskExecution::ThermalProgram {
+            sample_wells,
             volume_each_ul,
             lid_temperature_c,
             profile,
@@ -593,7 +1136,7 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             doc.heading(1, [text("Stage the allocated reaction")]);
             doc.para([
                 text("Confirm that the upstream setup task left only this reaction in wells "),
-                code(reaction_wells.join(", ")),
+                code(sample_wells.join(", ")),
                 text(" of the configured thermocycler plate."),
             ]);
             doc.heading(1, [text("Review the thermal program")]);
@@ -642,15 +1185,108 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             ]);
             doc.para_text("Remove and label the completed reaction before another independently allocated setup/cycle pair reuses the staging wells.");
         }
+        Ot2TaskExecution::PrepareChemicalTransformation {
+            cell_source,
+            cell_source_well,
+            dna,
+            reaction_wells,
+            cell_volume_ul,
+            dna_volume_ul,
+            bubble_clear_cycles,
+            bubble_clear_volume_ul,
+            ..
+        } => {
+            doc.heading(1, [text("Stage transformation inputs")]);
+            let mut rows = vec![vec![
+                vec![text("Competent cells")],
+                vec![code(value_source(cell_source))],
+                vec![code(format!("temperature rack {cell_source_well}"))],
+            ]];
+            rows.extend(dna.iter().map(|placement| {
+                vec![
+                    vec![code(&placement.material.symbol)],
+                    vec![code(material_source(&placement.material.source))],
+                    vec![code(format!("DNA plate {}", placement.source_well))],
+                ]
+            }));
+            doc.table(
+                [
+                    Column::left("Input"),
+                    Column::left("Physical source"),
+                    Column::left("Location"),
+                ],
+                rows,
+            );
+            doc.heading(1, [text("Run the allocated transformation setup")]);
+            doc.bullets([
+                vec![text(format!(
+                    "Reaction wells: {}",
+                    reaction_wells.join(", ")
+                ))],
+                vec![text(format!(
+                    "Add {cell_volume_ul} µL competent cells and {dna_volume_ul} µL of each DNA input to every reaction"
+                ))],
+                vec![text(format!(
+                    "Clear bubbles with {bubble_clear_cycles} strokes at {bubble_clear_volume_ul} µL after every DNA addition"
+                ))],
+            ]);
+            doc.para_text("The generated protocol preserves the reviewed source mixing, contamination paths, blowout, touch-tip, and vessel-relative bubble-clearing technique. Leave the plate on the thermocycler for the heat-shock task.");
+        }
+        Ot2TaskExecution::AddRecoveryMedium {
+            culture_source,
+            culture_wells,
+            medium,
+            initial_volume_ul,
+            recovery_volume_ul,
+            ..
+        } => {
+            doc.heading(1, [text("Stage recovery inputs")]);
+            doc.table(
+                [
+                    Column::left("Input"),
+                    Column::left("Physical source"),
+                    Column::left("Location"),
+                ],
+                [
+                    vec![
+                        vec![text("Heat-shocked cultures")],
+                        vec![code(value_source(culture_source))],
+                        vec![code(format!(
+                            "thermocycler plate {}",
+                            culture_wells.join(", ")
+                        ))],
+                    ],
+                    vec![
+                        vec![code(&medium.material.symbol)],
+                        vec![code(material_source(&medium.material.source))],
+                        vec![code(format!("temperature rack {}", medium.source_well))],
+                    ],
+                ],
+            );
+            doc.heading(1, [text("Run the allocated medium addition")]);
+            doc.bullets([
+                vec![text(format!(
+                    "Each culture begins at {initial_volume_ul} µL"
+                ))],
+                vec![text(format!(
+                    "Add {recovery_volume_ul} µL medium above each culture without contacting it"
+                ))],
+                vec![text(
+                    "Preserve the configured air gap and one contamination-safe source path",
+                )],
+            ]);
+            doc.para_text("Leave the plate on the thermocycler for the independently reviewed recovery-incubation task.");
+        }
         Ot2TaskExecution::SerialDilution {
             culture_source,
-            culture_well,
+            culture_wells,
             medium,
             dilution_wells,
             medium_volume_ul,
             culture_volume_ul,
             mix_cycles,
             mix_volume_ul,
+            ..
         } => {
             doc.heading(1, [text("Stage inputs")]);
             doc.table(
@@ -663,11 +1299,14 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
                     vec![
                         vec![text("Recovered culture")],
                         vec![code(value_source(culture_source))],
-                        vec![code(format!("thermocycler plate {culture_well}"))],
+                        vec![code(format!(
+                            "thermocycler plate {}",
+                            culture_wells.join(", ")
+                        ))],
                     ],
                     vec![
-                        vec![code(&medium.symbol)],
-                        vec![code(material_source(&medium.source))],
+                        vec![code(&medium.material.symbol)],
+                        vec![code(material_source(&medium.material.source))],
                         vec![code(format!("media rack {}", medium.source_well))],
                     ],
                 ],
@@ -692,8 +1331,128 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             ]);
             doc.para_text("Preserve and label the final dilution wells for the downstream task named by the reviewed execution plan.");
         }
+        Ot2TaskExecution::PlateDilutedCulture {
+            culture_source,
+            selection,
+            dilution_wells,
+            agar_wells,
+            colony_volume_ul,
+            plating_replicates,
+            ..
+        } => {
+            doc.heading(1, [text("Stage dilution and selective plates")]);
+            doc.table(
+                [Column::left("Input"), Column::left("Exact value")],
+                [
+                    vec![
+                        vec![text("Diluted culture")],
+                        vec![code(value_source(culture_source))],
+                    ],
+                    vec![
+                        vec![text("Dilution wells")],
+                        vec![code(well_list(dilution_wells))],
+                    ],
+                    vec![
+                        vec![text("Selective medium")],
+                        vec![code(format!(
+                            "{} ({})",
+                            selection.symbol,
+                            material_source(&selection.source)
+                        ))],
+                    ],
+                    vec![vec![text("Agar wells")], vec![code(well_list(agar_wells))]],
+                ],
+            );
+            doc.heading(1, [text("Run the allocated plating")]);
+            doc.bullets([
+                vec![text(format!(
+                    "Spot {colony_volume_ul} µL per well with {plating_replicates} plating replicates"
+                ))],
+                vec![text("Dispense at the calibrated material-surface offset and blow out after every spot")],
+                vec![
+                    text("Review "),
+                    code("plate_map.pdf"),
+                    text(" or "),
+                    code("plate_map.json"),
+                    text(" before starting."),
+                ],
+            ]);
+        }
     }
     doc
+}
+
+fn render_plate_map(plan: &Ot2TaskPlan) -> Doc {
+    let Ot2TaskExecution::PlateDilutedCulture {
+        artifact,
+        selection,
+        plate_map,
+        ..
+    } = &plan.execution
+    else {
+        unreachable!("plate maps are rendered only for plating tasks")
+    };
+    let mut doc = Doc::new(DocMeta::new(
+        "Selective plating map",
+        "Static evidence generated from the same reviewed allocation as the OT-2 protocol",
+        &plan.adapter_profile,
+        "Opentrons OT-2",
+    ));
+    doc.notice([
+        bold("Identity boundary. "),
+        text("This map belongs to Procedure task "),
+        code(plan.task.id.as_str()),
+        text(" for "),
+        code(artifact),
+        text(" on Asset "),
+        code(&plan.asset),
+        text(" and selective material "),
+        code(format!(
+            "{} ({})",
+            selection.symbol,
+            material_source(&selection.source)
+        )),
+        text("."),
+    ]);
+    doc.heading(1, [text("Allocated agar positions")]);
+    doc.table(
+        [
+            Column::right("Dilution step"),
+            Column::right("Ratio"),
+            Column::right("Culture replicate"),
+            Column::right("Plating replicate"),
+            Column::left("Source"),
+            Column::left("Agar destination"),
+        ],
+        plate_map.iter().map(|entry| {
+            vec![
+                vec![text(entry.dilution.to_string())],
+                vec![text(&entry.dilution_ratio)],
+                vec![text(entry.culture_replicate.to_string())],
+                vec![text(entry.plating_replicate.to_string())],
+                vec![code(format!(
+                    "plate {} {}",
+                    entry.source.plate + 1,
+                    entry.source.well
+                ))],
+                vec![code(format!(
+                    "plate {} {}",
+                    entry.destination.plate + 1,
+                    entry.destination.well
+                ))],
+            ]
+        }),
+    );
+    doc
+}
+
+fn material_review(role: impl Into<String>, material: &SelectedMaterialBinding) -> MaterialReview {
+    MaterialReview {
+        role: role.into(),
+        input: material.input.clone(),
+        symbol: material.symbol.clone(),
+        source: material.source.clone(),
+    }
 }
 
 fn join_requirements<'a>(

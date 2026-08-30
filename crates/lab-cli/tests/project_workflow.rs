@@ -54,6 +54,26 @@ fn read_json(path: impl AsRef<Path>) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
 
+fn read_text(path: impl AsRef<Path>) -> String {
+    std::fs::read_to_string(path).unwrap()
+}
+
+fn with_portable_manual_method_pins(manifest: String) -> String {
+    manifest
+        .replace(
+            "https://www.lab-compiler.org/ns/method#automated-chemical-transformation",
+            "https://www.lab-compiler.org/ns/method#manual-chemical-transformation",
+        )
+        .replace(
+            "https://www.lab-compiler.org/ns/method#automated-recovery",
+            "https://www.lab-compiler.org/ns/method#manual-recovery",
+        )
+        .replace(
+            "https://www.lab-compiler.org/ns/method#automated-antibiotic-selection",
+            "https://www.lab-compiler.org/ns/method#manual-antibiotic-selection",
+        )
+}
+
 fn solution_requirements(solution: &Value) -> Vec<&Value> {
     solution["selections"]
         .as_array()
@@ -120,7 +140,7 @@ fn assert_serial_dilutions_use_pipetting(
             std::collections::BTreeSet::from(["distribute", "mix", "transfer"])
         );
         let requirements = task["requirements"].as_array().unwrap();
-        assert_eq!(requirements.len(), 2);
+        assert_eq!(requirements.len(), 3);
         assert_eq!(
             requirements
                 .iter()
@@ -128,6 +148,7 @@ fn assert_serial_dilutions_use_pipetting(
                 .collect::<std::collections::BTreeSet<_>>(),
             std::collections::BTreeSet::from([
                 "https://sbol.io/ns/capability#InWellMixing",
+                "https://sbol.io/ns/capability#LiquidLevelAwareAspiration",
                 "https://sbol.io/ns/capability#MeteredLiquidTransfer",
             ])
         );
@@ -163,7 +184,7 @@ fn assert_golden_gate_uses_thermal_program(
         );
         let program = &task["program"]["body"];
         assert_eq!(program["load"]["input"], 0);
-        assert_eq!(program["load"]["output"], "product");
+        assert_eq!(program["load"]["outputs"], serde_json::json!(["product"]));
         assert_eq!(program["load"]["volume_each"]["value"]["value"], "20");
         assert_eq!(program["stages"][0]["id"], "digest-ligate-cycle");
         assert_eq!(program["stages"][0]["steps"][0]["id"], "digest");
@@ -588,7 +609,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
 }
 
 #[test]
-fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
+fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples/golden-gate")
         .canonicalize()
@@ -625,7 +646,7 @@ fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
     // Planning names every requirement-scoped protocol, so a path can go straight into the
     // device application without asking the backend to rediscover the experiment.
     let protocols = result["result"]["protocols"].as_array().unwrap();
-    assert_eq!(protocols.len(), 8);
+    assert_eq!(protocols.len(), 28);
     assert!(
         protocols
             .iter()
@@ -666,26 +687,39 @@ fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
     );
     assert!(
         target_root
-            .join("tasks/005-serial-dilution/automation_protocol.py")
+            .join("tasks/005-prepare-chemical-transformation/automation_protocol.py")
             .is_file()
     );
     assert!(
-        !walk_files(&target_root)
-            .iter()
-            .any(|path| path.to_string_lossy().contains("transformation_protocol")),
-        "the OT-2 must not absorb transformation allocated to the manual workstation"
+        target_root
+            .join("tasks/006-heat-shock-transformation/automation_protocol.py")
+            .is_file()
     );
     assert!(
-        !walk_files(&target_root)
-            .iter()
-            .any(|path| path.to_string_lossy().contains("plating_protocol")),
-        "the dilution requirement must not absorb downstream plating"
+        target_root
+            .join("tasks/007-add-recovery-medium/automation_protocol.py")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("tasks/008-incubate-recovery-culture/automation_protocol.py")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("tasks/009-serial-dilution/automation_protocol.py")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("tasks/010-plate-diluted-culture/automation_protocol.py")
+            .is_file()
     );
 
     let manifest = read_json(
         target_root.join("tasks/001-setup-golden-gate-reaction/invocation_manifest.json"),
     );
-    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-task.v2");
+    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-task.v3");
     assert_eq!(
         manifest["task"]["operation"],
         "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
@@ -703,12 +737,137 @@ fn facility_lowering_emits_one_protocol_for_each_exact_ot2_requirement() {
         serde_json::json!(["5", "6"]),
         "the allocated adapter emits the concrete deck plan"
     );
+    let transformation = read_json(
+        target_root.join("tasks/005-prepare-chemical-transformation/invocation_manifest.json"),
+    );
+    assert_eq!(
+        transformation["execution"]["kind"],
+        "prepare_chemical_transformation"
+    );
+    assert_eq!(transformation["execution"]["cell_volume_ul"], 20);
+    assert_eq!(transformation["execution"]["dna_volume_ul"], 2);
+    assert_eq!(
+        transformation["execution"]["bubble_clear_technique"]["dispense"]["offset"]["value"]["value"],
+        "8"
+    );
+    assert_eq!(
+        transformation["execution"]["bubble_clear_technique"]["touch_tip"],
+        true
+    );
+    let transformation_protocol = read_text(
+        target_root.join("tasks/005-prepare-chemical-transformation/automation_protocol.py"),
+    );
+    assert!(
+        transformation_protocol.contains("disposal_volume=0"),
+        "{transformation_protocol}"
+    );
+    assert!(
+        transformation_protocol.contains("for _ in range(execution[\"bubble_clear_cycles\"]):"),
+        "{transformation_protocol}"
+    );
+    assert!(
+        transformation_protocol.contains("radius=techniques[\"touch_tip_radius\"]"),
+        "{transformation_protocol}"
+    );
+    let heat_shock =
+        read_json(target_root.join("tasks/006-heat-shock-transformation/invocation_manifest.json"));
+    assert_eq!(heat_shock["execution"]["volume_each_ul"], 22.0);
+    assert_eq!(
+        heat_shock["execution"]["profile"]["stages"][0]["steps"][1]["celsius"],
+        42.0
+    );
+    let heat_shock_protocol =
+        read_text(target_root.join("tasks/006-heat-shock-transformation/automation_protocol.py"));
+    assert!(
+        heat_shock_protocol.contains("block_max_volume=execution[\"volume_each_ul\"]"),
+        "{heat_shock_protocol}"
+    );
+    assert!(
+        !heat_shock_protocol.contains("is_simulating"),
+        "thermal work may not disappear during simulation"
+    );
+    let recovery_medium =
+        read_json(target_root.join("tasks/007-add-recovery-medium/invocation_manifest.json"));
+    assert_eq!(
+        recovery_medium["execution"]["technique"]["dispense"]["kind"],
+        "above_liquid"
+    );
+    assert_eq!(
+        recovery_medium["execution"]["technique"]["air_gap"]["value"]["value"],
+        "10"
+    );
+    let recovery =
+        read_json(target_root.join("tasks/008-incubate-recovery-culture/invocation_manifest.json"));
+    assert_eq!(recovery["execution"]["volume_each_ul"], 82.0);
     let dilution =
-        read_json(target_root.join("tasks/005-serial-dilution/invocation_manifest.json"));
+        read_json(target_root.join("tasks/009-serial-dilution/invocation_manifest.json"));
     assert_eq!(dilution["execution"]["kind"], "serial_dilution");
     assert_eq!(
         dilution["execution"]["medium"]["source"]["material_lot"],
         "https://example.org/golden-gate/lots/recovery_medium_lot"
+    );
+    assert_eq!(
+        dilution["execution"]["dilution_wells"],
+        serde_json::json!([
+            {"plate": 0, "well": "A1"},
+            {"plate": 0, "well": "B1"},
+            {"plate": 0, "well": "A7"},
+            {"plate": 0, "well": "B7"}
+        ])
+    );
+    assert_eq!(
+        dilution["deck"]["techniques"]["distribution_disposal_volume_ul"],
+        4
+    );
+    let dilution_protocol =
+        read_text(target_root.join("tasks/009-serial-dilution/automation_protocol.py"));
+    assert!(
+        dilution_protocol.contains("current_volume / source.max_volume"),
+        "{dilution_protocol}"
+    );
+    assert!(
+        dilution_protocol.contains("tracked_low_volume_fraction"),
+        "{dilution_protocol}"
+    );
+    assert!(
+        dilution_protocol.contains("tracked_chunk_size"),
+        "{dilution_protocol}"
+    );
+    let plating =
+        read_json(target_root.join("tasks/010-plate-diluted-culture/invocation_manifest.json"));
+    assert_eq!(plating["execution"]["kind"], "plate_diluted_culture");
+    assert_eq!(
+        plating["execution"]["plate_map"].as_array().unwrap().len(),
+        4
+    );
+    assert_eq!(
+        plating["execution"]["technique"]["dispense"]["kind"],
+        "material_surface"
+    );
+    assert!(
+        target_root
+            .join("tasks/010-plate-diluted-culture/plate_map.json")
+            .is_file()
+    );
+    assert!(
+        target_root
+            .join("tasks/010-plate-diluted-culture/plate_map.pdf")
+            .is_file()
+    );
+    let plate_map = read_json(target_root.join("tasks/010-plate-diluted-culture/plate_map.json"));
+    assert_eq!(plate_map["artifact"], "composite_strain_1");
+    assert_eq!(plate_map["entries"][0]["dilution_ratio"], "1/10");
+    assert_eq!(plate_map["entries"][2]["dilution_ratio"], "1/100");
+    assert_eq!(plate_map["entries"], plating["execution"]["plate_map"]);
+    let plating_protocol =
+        read_text(target_root.join("tasks/010-plate-diluted-culture/automation_protocol.py"));
+    assert!(
+        plating_protocol.contains("destination.top(techniques[\"material_surface_offset_mm\"]"),
+        "{plating_protocol}"
+    );
+    assert!(
+        plating_protocol.contains("pipette.blow_out()"),
+        "{plating_protocol}"
     );
 
     std::fs::remove_dir_all(out_dir).unwrap();
@@ -771,8 +930,8 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "https://example.org/golden-gate/facility"
     );
     assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
-    assert_eq!(facility["protocols"].as_array().unwrap().len(), 8);
-    assert_eq!(facility["documents"].as_array().unwrap().len(), 8);
+    assert_eq!(facility["protocols"].as_array().unwrap().len(), 28);
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 32);
     for path in facility["protocols"]
         .as_array()
         .unwrap()
@@ -796,7 +955,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         index["facility"]["facility_solution"],
         "compiler/facility-solution.json"
     );
-    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 8);
+    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 28);
     assert!(
         index["facility"]["protocols"][0]
             .as_str()
@@ -968,7 +1127,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     );
     assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 32);
+    assert_eq!(requirements.len(), 76);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -983,7 +1142,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(pipetting.len(), 12);
+    assert_eq!(pipetting.len(), 28);
     assert!(pipetting.iter().all(|binding| {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
@@ -1024,14 +1183,14 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 16);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 72);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(protocols.len(), 8);
+    assert_eq!(protocols.len(), 28);
     assert!(protocols.iter().all(|artifact| {
         artifact["format"] == "opentrons.python-protocol"
             && artifact["sha256"].as_str().unwrap().len() == 64
@@ -1118,7 +1277,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         .iter()
         .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
-    assert_eq!(reviewed_protocols.len(), 8);
+    assert_eq!(reviewed_protocols.len(), 28);
     assert!(reviewed_protocols.iter().all(|document| {
         document["format"] == "opentrons.python-protocol"
             && document["sha256"].as_str().unwrap().len() == 64
@@ -1180,7 +1339,8 @@ fn a_facility_can_lower_exact_requirements_through_several_assets() {
     copy_dir(&example, &project);
 
     let manifest_path = project.join("lab.toml");
-    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    let manifest =
+        with_portable_manual_method_pins(std::fs::read_to_string(&manifest_path).unwrap());
     let configured_ot2 = r#"[[execution.adapters]]
 asset = "https://example.org/golden-gate/opentrons_ot2"
 driver = "opentrons.ot2"
@@ -1237,11 +1397,21 @@ profile = "adapters/inheco-odtc.toml""#;
         );
     let combined_offerings = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing,
+        ex:hamilton_star_liquid_level_aware_aspiration,
+        ex:hamilton_star_vessel_relative_liquid_access,
+        ex:hamilton_star_air_gap_handling,
+        ex:hamilton_star_post_dispense_blowout,
+        ex:hamilton_star_touch_tip,
         ex:inheco_odtc_programmed_block_temperature_control,
         ex:inheco_odtc_heated_lid_temperature_control ."#;
     assert!(inventory.contains(combined_offerings));
     let split_assets = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
-        ex:hamilton_star_in_well_mixing .
+        ex:hamilton_star_in_well_mixing,
+        ex:hamilton_star_liquid_level_aware_aspiration,
+        ex:hamilton_star_vessel_relative_liquid_access,
+        ex:hamilton_star_air_gap_handling,
+        ex:hamilton_star_post_dispense_blowout,
+        ex:hamilton_star_touch_tip .
 
 ex:inheco_odtc
     a sbol:TopLevel, fac:Asset ;
@@ -1307,7 +1477,7 @@ ex:inheco_odtc
         .flat_map(|route| route["artifacts"].as_array().unwrap())
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(lowered_requirements, 16);
+    assert_eq!(lowered_requirements, 20);
     assert_eq!(automation_artifacts.len(), 8);
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
@@ -1509,7 +1679,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 33);
+    assert_eq!(requirements.len(), 37);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1652,11 +1822,13 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         );
     std::fs::write(inventory_path, inventory).unwrap();
     let manifest_path = project.join("lab.toml");
-    let manifest = std::fs::read_to_string(&manifest_path)
-        .unwrap()
-        .replace("opentrons_ot2", "opentrons_flex")
-        .replace("opentrons.ot2", "opentrons.flex")
-        .replace("opentrons-ot2.toml", "opentrons-flex.toml");
+    let manifest = with_portable_manual_method_pins(
+        std::fs::read_to_string(&manifest_path)
+            .unwrap()
+            .replace("opentrons_ot2", "opentrons_flex")
+            .replace("opentrons.ot2", "opentrons.flex")
+            .replace("opentrons-ot2.toml", "opentrons-flex.toml"),
+    );
     std::fs::write(manifest_path, manifest).unwrap();
     std::fs::write(project.join("adapters/opentrons-flex.toml"), "").unwrap();
     let out_dir = project.join("review");
@@ -1697,7 +1869,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
     assert_eq!(route["driver"], "opentrons.flex");
     assert!(route.get("scope").is_none());
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 16);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 20);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root

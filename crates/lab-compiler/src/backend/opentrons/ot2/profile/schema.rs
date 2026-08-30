@@ -7,6 +7,46 @@ pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
 
 use crate::backend::opentrons::ot2::profile::defaults::*;
 
+/// Calibrated OT-2 realization policy for portable pipetting techniques.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TechniqueCalibration {
+    #[serde(default = "default_aspiration_rate")]
+    pub aspiration_rate: f64,
+    #[serde(default = "default_dispense_rate")]
+    pub dispense_rate: f64,
+    #[serde(default = "default_tracked_source_volume_ul")]
+    pub tracked_source_volume_ul: u32,
+    #[serde(default = "default_tracked_meniscus_offset_mm")]
+    pub tracked_meniscus_offset_mm: f64,
+    #[serde(default = "default_tracked_usable_depth_offset_mm")]
+    pub tracked_usable_depth_offset_mm: f64,
+    #[serde(default = "default_tracked_minimum_height_mm")]
+    pub tracked_minimum_height_mm: f64,
+    #[serde(default = "default_tracked_low_volume_fraction")]
+    pub tracked_low_volume_fraction: f64,
+    #[serde(default = "default_tracked_chunk_size")]
+    pub tracked_chunk_size: usize,
+    #[serde(default = "default_distribution_disposal_volume_ul")]
+    pub distribution_disposal_volume_ul: u32,
+    #[serde(default = "default_above_liquid_offset_mm")]
+    pub above_liquid_offset_mm: f64,
+    #[serde(default = "default_material_surface_offset_mm")]
+    pub material_surface_offset_mm: f64,
+    #[serde(default = "default_touch_tip_radius")]
+    pub touch_tip_radius: f64,
+    #[serde(default = "default_touch_tip_vertical_offset_mm")]
+    pub touch_tip_vertical_offset_mm: f64,
+    #[serde(default = "default_touch_tip_speed_mm_s")]
+    pub touch_tip_speed_mm_s: f64,
+}
+
+impl Default for TechniqueCalibration {
+    fn default() -> Self {
+        default_technique_calibration()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProtocolOptions {
