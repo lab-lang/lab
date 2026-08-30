@@ -2,7 +2,7 @@
 
 This is Lab's end-to-end facility example: a package describes a small reporter panel biologically, compiles it into portable capability requirements, allocates those requirements against an SBOLInventory facility, and lowers the resulting OT-2 bindings into automation protocols.
 
-It reproduces the three-stage workflow from [PUDU](https://pudu.readthedocs.io/en/latest/guide/workflow.html): Golden Gate assembly, heat-shock transformation, and serial dilution with selective plating from two composite plasmids into four engineered strains.
+It reproduces the complete cloning workflow represented by [PUDU](https://pudu.readthedocs.io/en/latest/guide/workflow.html): Golden Gate assembly, chemical transformation and heat shock, recovery-medium addition and incubation, replicate-aware serial dilution, and selective plating from two composite plasmids into four engineered strains.
 
 ## What it builds
 
@@ -31,13 +31,13 @@ lab build
 
 ## Facility-derived outputs
 
-The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the laboratory's zones, exact stock MaterialLots, a manual workstation, and an Opentrons OT-2 Asset with plannable metered-transfer, in-well-mixing, programmed-block-temperature, and heated-lid offerings. The thermal offering parameters state the installed module's 96-sample capacity, 10–100 µL working-volume range, 4–99 °C block range, and 37–110 °C lid range from the [Thermocycler Module GEN2 product description](https://insights.opentrons.com/hubfs/5383285/Products/Modules/Thermocycler%20GEN2%20White%20Paper.pdf). The local adapter binding states that Lab's `opentrons.ot2` implementation can operate that exact Asset.
+The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the laboratory's zones, exact stock MaterialLots, a manual workstation, and an Opentrons OT-2 Asset. The Asset offers plannable metered transfer, in-well mixing, liquid-level-aware aspiration, vessel-relative liquid access, air-gap handling, post-dispense blowout, touch-tip, programmed block-temperature control, and heated-lid control. The thermal offering parameters state the installed module's 96-sample capacity, 10–100 µL working-volume range, 4–99 °C block range, and 37–110 °C lid range from the [Thermocycler Module GEN2 product description](https://insights.opentrons.com/hubfs/5383285/Products/Modules/Thermocycler%20GEN2%20White%20Paper.pdf). The local adapter binding states that Lab's `opentrons.ot2` implementation can operate that exact Asset, while `adapters/opentrons-ot2.toml` supplies the reviewed deck and technique calibration.
 
 ```bash
 lab run .lab/build --dry-run
 ```
 
-The facility phase selects 22 Method instances and binds their 32 requirements to exact CapabilityOfferings and Assets. Sixteen fine-grained requirements belong to the eight normalized tasks allocated to the OT-2: each setup or dilution jointly requires transfer and mixing, and each thermal program jointly requires block and heated-lid control. Because the allocated OT-2 has an installed lowering adapter for both canonical contracts, `lab build` emits independently reviewable Python protocols for those eight tasks without reading a package target. Manual provisioning, transformation, recovery, and plating remain explicit allocated work in the facility-wide plan without being misrepresented as OT-2 code. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
+The facility phase selects 22 Method instances and binds 76 atomic requirements to exact CapabilityOfferings and Assets. Four manual material-provisioning requirements remain on the operator workstation. The other 72 requirements belong to 28 normalized Procedure tasks allocated to the OT-2: two assembly tasks for each plasmid, followed by transformation setup, heat shock, recovery-medium addition, recovery incubation, serial dilution, and selective plating for each strain. Because the allocated OT-2 has explicit implementations for the canonical pipetting and thermal contracts, `lab build` emits one independently reviewable Python protocol for every automated task without reading a package target. It also emits 28 task-level manual-protocol PDFs and four static plate-map PDFs. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
 
 | Path | Contents |
 | --- | --- |
@@ -50,7 +50,9 @@ The facility phase selects 22 Method instances and binds their 32 requirements t
 | `.lab/build/plan.execution.json` | reviewed facility-wide dependency DAG and child documents |
 | `.lab/build/assets/opentrons_ot2/tasks/001-setup-golden-gate-reaction/` | exact setup task manifest, standalone Python protocol, and operator PDF |
 | `.lab/build/assets/opentrons_ot2/tasks/002-thermal-cycle-golden-gate-reaction/` | exact cycling task manifest, standalone Python protocol, and operator PDF |
-| `.lab/build/assets/opentrons_ot2/tasks/005-serial-dilution/` | one of four independently allocated dilution task bundles |
+| `.lab/build/assets/opentrons_ot2/tasks/005-prepare-chemical-transformation/` | the first strain's competent-cell and DNA setup with PUDU-derived pipetting techniques |
+| `.lab/build/assets/opentrons_ot2/tasks/009-serial-dilution/` | the first strain's two replicate-aware dilution series and tracked medium aspiration |
+| `.lab/build/assets/opentrons_ot2/tasks/010-plate-diluted-culture/plate_map.pdf` | static selective-plate allocation generated from the same checked plan as the robot protocol |
 
 The Procedure graph preserves explicit typed edges between reaction setup and thermal cycling and from each built plasmid into its dependent strain workflows. The reviewed execution DAG is derived from those same selected values; an adapter does not reconstruct a separate wave or artifact graph.
 
