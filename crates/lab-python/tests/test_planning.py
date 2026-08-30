@@ -187,12 +187,16 @@ def test_a_python_program_uses_the_packages_inventory_and_adapter_context() -> N
 def test_file_backed_planning_composes_package_authored_method_documents(tmp_path: Path) -> None:
     project = tmp_path / "golden-gate"
     shutil.copytree(GOLDEN_GATE, project)
-    with (project / "lab.toml").open("a", encoding="utf-8") as manifest:
-        manifest.write(
-            f'\n[methods]\ndocuments = ["methods/custom.json"]\n\n'
-            f'[[planning.methods]]\nsource-operation = "std.lab.plasmid.recover"\n'
-            f'method = "{CUSTOM_RECOVERY}"\n'
-        )
+    manifest_path = project / "lab.toml"
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    standard_recovery = 'method = "https://www.lab-compiler.org/ns/method#automated-recovery"'
+    assert manifest_text.count(standard_recovery) == 1
+    manifest_path.write_text(
+        manifest_text.replace(standard_recovery, f'method = "{CUSTOM_RECOVERY}"'),
+        encoding="utf-8",
+    )
+    with manifest_path.open("a", encoding="utf-8") as manifest:
+        manifest.write('\n[methods]\ndocuments = ["methods/custom.json"]\n')
     (project / "methods").mkdir()
     method_types.MethodCatalog((custom_recovery(),)).write(project / "methods/custom.json")
 

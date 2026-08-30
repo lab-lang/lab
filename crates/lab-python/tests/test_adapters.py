@@ -23,6 +23,9 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
     )
     assert pipetting.contract.endswith("#PipettingProgramV1")
     assert pipetting.operations == (
+        "https://www.lab-compiler.org/ns/procedure#AddRecoveryMedium",
+        "https://www.lab-compiler.org/ns/procedure#PlateDilutedCulture",
+        "https://www.lab-compiler.org/ns/procedure#PrepareChemicalTransformation",
         "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture",
         "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction",
     )
@@ -33,6 +36,8 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
         if implementation.contract.endswith("#ThermalProgramV1")
     )
     assert thermal.operations == (
+        "https://www.lab-compiler.org/ns/procedure#HeatShockTransformation",
+        "https://www.lab-compiler.org/ns/procedure#IncubateRecoveryCulture",
         "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction",
     )
     assert "https://sbol.io/ns/capability#ProgrammedBlockTemperatureControl" in (
