@@ -5,7 +5,7 @@
 [protocol]
 api_level = "2.21"
 
-# Calibrated realization of portable Procedure techniques. These defaults preserve the optimized PUDU practice while keeping the scientific request device-neutral.
+# Facility-reviewed realization parameters for portable Procedure techniques.
 [techniques]
 aspiration_rate = 0.5
 dispense_rate = 1.0

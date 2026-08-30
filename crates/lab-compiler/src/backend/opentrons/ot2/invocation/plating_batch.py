@@ -182,7 +182,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         plating = plating_scheduled["execution"]
         culture_count = len(dilution["culture_wells"])
         if len(dilution["dilution_wells"]) != 2 * culture_count:
-            raise RuntimeError("PUDU-equivalent plating requires exactly two dilutions")
+            raise RuntimeError(
+                "Interleaved dilution/plating scheduling requires exactly two dilutions"
+            )
         for replicate, culture_name in enumerate(dilution["culture_wells"]):
             culture_ordinal += 1
             culture_source = cultures[culture_name]

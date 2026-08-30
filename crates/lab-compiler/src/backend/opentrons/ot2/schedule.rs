@@ -1095,7 +1095,7 @@ fn allocate_plating(
     };
     if serial_dilutions != 2 {
         return Err(format!(
-            "OT-2 PUDU-equivalent fused plating requires exactly two serial dilutions, found {serial_dilutions}"
+            "OT-2 interleaved dilution/plating scheduling requires exactly two serial dilutions, found {serial_dilutions}"
         ));
     }
     let dilution_layout = layered_plate_layout(
