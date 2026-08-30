@@ -53,7 +53,7 @@ ex:opentrons_ot2
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:automation_bench ;
     fac:manufacturer "Opentrons" ;
-    fac:model "OT-2 with Thermocycler Module Gen2" ;
+    fac:model "OT-2 with Thermocycler Module GEN1" ;
     fac:isActive true ;
     fac:capability ex:opentrons_ot2_metered_liquid_transfer,
         ex:opentrons_ot2_in_well_mixing,

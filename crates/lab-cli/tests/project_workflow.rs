@@ -725,6 +725,10 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
     );
     assert_eq!(manifest["execution"]["kind"], "setup_golden_gate_reaction");
+    assert_eq!(
+        manifest["deck"]["deck"]["thermocycler"]["model"], "thermocycler module",
+        "the example's exact OT-2 Asset has a Thermocycler Module GEN1"
+    );
     assert!(
         manifest["execution"]["additions"]
             .as_array()
@@ -1371,7 +1375,7 @@ profile = "adapters/inheco-odtc.toml""#;
             "Opentrons OT-2 with Thermocycler Module",
             "Hamilton STAR liquid handler",
         )
-        .replace("OT-2 with Thermocycler Module Gen2", "STAR")
+        .replace("OT-2 with Thermocycler Module GEN1", "STAR")
         .replace(
             "hamilton_star_programmed_block_temperature_control",
             "inheco_odtc_programmed_block_temperature_control",
@@ -1817,7 +1821,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         .replace("opentrons_ot2", "opentrons_flex")
         .replace("Opentrons OT-2", "Opentrons Flex")
         .replace(
-            "OT-2 with Thermocycler Module Gen2",
+            "OT-2 with Thermocycler Module GEN1",
             "Flex with Thermocycler Module Gen2",
         );
     std::fs::write(inventory_path, inventory).unwrap();

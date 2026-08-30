@@ -36,10 +36,10 @@ slot = "1"
 labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
 capacity = 24
 
-# The Thermocycler Module GEN2 occupies slots 7, 8, 10, and 11, so it declares
+# The Thermocycler Module GEN1 occupies slots 7, 8, 10, and 11, so it declares
 # no slot of its own and nothing else may claim those.
 [deck.thermocycler]
-model = "thermocycler module gen2"
+model = "thermocycler module"
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
 capacity = 96
 
