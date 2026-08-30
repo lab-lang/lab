@@ -125,6 +125,7 @@ mod tests {
                         material: id("source"),
                     },
                     positions: 1,
+                    initial_volume_each: None,
                 },
                 Vessel {
                     id: id("destination-vessel"),
@@ -132,6 +133,7 @@ mod tests {
                         output: id("product"),
                     },
                     positions: 1,
+                    initial_volume_each: None,
                 },
             ],
             vec![PipettingStep::Transfer {
@@ -146,6 +148,8 @@ mod tests {
                 },
                 volume: Volume::parse_microlitres("1.25").unwrap(),
                 fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: Default::default(),
             }],
             PipettingConstraints::default(),
         )

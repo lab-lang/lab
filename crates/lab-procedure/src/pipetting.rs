@@ -1,17 +1,21 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use lab_capability::{CapabilityKind, ConstraintRelation, PropertyConstraint, PropertyKind};
+use lab_capability::{
+    CapabilityKind, ConstraintRelation, ExactDecimal, PropertyConstraint, PropertyKind,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::vocabulary::{
-    IN_WELL_MIXING, MAXIMUM_MIX_VOLUME, MAXIMUM_TEMPERATURE, MAXIMUM_TRANSFER_VOLUME,
-    METERED_LIQUID_TRANSFER, MINIMUM_TEMPERATURE, MINIMUM_TRANSFER_VOLUME,
-    TEMPERATURE_CONTROLLED_STAGING,
+    AIR_GAP_HANDLING, IN_WELL_MIXING, LIQUID_LEVEL_AWARE_ASPIRATION, MAXIMUM_AIR_GAP_VOLUME,
+    MAXIMUM_MIX_VOLUME, MAXIMUM_TEMPERATURE, MAXIMUM_TRANSFER_VOLUME, METERED_LIQUID_TRANSFER,
+    MINIMUM_TEMPERATURE, MINIMUM_TRANSFER_VOLUME, POST_DISPENSE_BLOWOUT,
+    TEMPERATURE_CONTROLLED_STAGING, TOUCH_TIP, VESSEL_RELATIVE_LIQUID_ACCESS,
 };
 use crate::{
-    BindingScope, CapabilityClause, CapabilityFormula, ProcedureLocalId, TemperatureRange, Volume,
+    BindingScope, CapabilityClause, CapabilityFormula, Length, ProcedureLocalId, TemperatureRange,
+    Volume,
 };
 
 /// One material made available to a canonical pipetting program.
@@ -49,6 +53,10 @@ pub struct Vessel {
     pub id: ProcedureLocalId,
     pub role: VesselRole,
     pub positions: u32,
+    /// Exact liquid volume initially present in every position when it is known to the Method.
+    /// Material sources may omit this value so the adapter can calculate a sufficient source load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_volume_each: Option<Volume>,
 }
 
 /// One logical position in a Procedure vessel.
@@ -69,6 +77,64 @@ pub enum FluidPathPolicy {
     SharedSourceNoReentry,
 }
 
+/// Where a realization must aspirate relative to the vessel and liquid state.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AspirationStrategy {
+    /// Ordinary submerged aspiration; the implementation chooses a qualified default position.
+    #[default]
+    Liquid,
+    /// Recompute the position from the planned current volume and validated vessel geometry.
+    TrackedLiquidSurface,
+    /// Aspirate at an exact offset above the vessel bottom.
+    VesselBottom { offset: Length },
+}
+
+/// Where a realization must dispense relative to the vessel, liquid, or receiving material.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DispenseStrategy {
+    /// Ordinary in-liquid dispense; the implementation chooses a qualified default position.
+    #[default]
+    Liquid,
+    /// Dispense above the receiving liquid without contacting it.
+    AboveLiquid,
+    /// Dispense at an exact offset above the vessel bottom.
+    VesselBottom { offset: Length },
+    /// Dispense at an exact signed offset from the vessel top.
+    VesselTop { offset: Length },
+    /// Dispense onto a non-liquid material surface such as selective agar.
+    MaterialSurface,
+}
+
+/// Portable technique constraints on a transfer or distribution.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TransferTechnique {
+    #[serde(default)]
+    pub aspiration: AspirationStrategy,
+    #[serde(default)]
+    pub dispense: DispenseStrategy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub air_gap: Option<Volume>,
+    #[serde(default)]
+    pub blow_out: bool,
+    #[serde(default)]
+    pub touch_tip: bool,
+}
+
+/// Portable liquid-access constraints on an in-place mix.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MixTechnique {
+    #[serde(default)]
+    pub aspiration: AspirationStrategy,
+    #[serde(default)]
+    pub dispense: DispenseStrategy,
+    #[serde(default)]
+    pub blow_out: bool,
+    #[serde(default)]
+    pub touch_tip: bool,
+}
+
 /// One stable, observable liquid operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -79,6 +145,11 @@ pub enum PipettingStep {
         destination: Location,
         volume: Volume,
         fluid_path: FluidPathPolicy,
+        /// Steps carrying the same group identity must use one continuous fluid path.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fluid_path_group: Option<ProcedureLocalId>,
+        #[serde(default)]
+        technique: TransferTechnique,
     },
     Distribute {
         id: ProcedureLocalId,
@@ -86,6 +157,10 @@ pub enum PipettingStep {
         destinations: Vec<Location>,
         volume_each: Volume,
         fluid_path: FluidPathPolicy,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fluid_path_group: Option<ProcedureLocalId>,
+        #[serde(default)]
+        technique: TransferTechnique,
     },
     Mix {
         id: ProcedureLocalId,
@@ -93,6 +168,10 @@ pub enum PipettingStep {
         cycles: u32,
         volume: Volume,
         fluid_path: FluidPathPolicy,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fluid_path_group: Option<ProcedureLocalId>,
+        #[serde(default)]
+        technique: MixTechnique,
     },
     Barrier {
         id: ProcedureLocalId,
@@ -288,17 +367,29 @@ impl PipettingProgramV1 {
         {
             return Err(PipettingProgramValidationError::NoLiquidOperations);
         }
-        Ok(ValidatedPipettingProgramV1(self))
+        let ledger = build_liquid_ledger(&self)?;
+        Ok(ValidatedPipettingProgramV1 {
+            program: self,
+            ledger,
+        })
     }
 }
 
 /// A pipetting program whose contract, graph, references, and operation bounds are valid.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ValidatedPipettingProgramV1(PipettingProgramV1);
+pub struct ValidatedPipettingProgramV1 {
+    program: PipettingProgramV1,
+    ledger: LiquidLedger,
+}
 
 impl ValidatedPipettingProgramV1 {
     pub fn as_program(&self) -> &PipettingProgramV1 {
-        &self.0
+        &self.program
+    }
+
+    /// The deterministic liquid effects proven while validating this program.
+    pub fn liquid_ledger(&self) -> &LiquidLedger {
+        &self.ledger
     }
 
     /// Derive exact facility demands from the operations present in this program.
@@ -306,18 +397,54 @@ impl ValidatedPipettingProgramV1 {
         let mut transfer_minimum: Option<&Volume> = None;
         let mut transfer_maximum: Option<&Volume> = None;
         let mut mix_maximum: Option<&Volume> = None;
-        for step in &self.0.steps {
+        let mut maximum_air_gap: Option<&Volume> = None;
+        let mut tracked_aspiration = false;
+        let mut vessel_relative_access = false;
+        let mut blow_out = false;
+        let mut touch_tip = false;
+        for step in &self.program.steps {
             match step {
-                PipettingStep::Transfer { volume, .. }
+                PipettingStep::Transfer {
+                    volume, technique, ..
+                }
                 | PipettingStep::Distribute {
                     volume_each: volume,
+                    technique,
                     ..
                 } => {
                     transfer_minimum = minimum_volume(transfer_minimum, volume);
                     transfer_maximum = maximum_volume(transfer_maximum, volume);
+                    maximum_air_gap = technique
+                        .air_gap
+                        .as_ref()
+                        .map_or(maximum_air_gap, |volume| {
+                            maximum_volume(maximum_air_gap, volume)
+                        });
+                    collect_technique(
+                        &technique.aspiration,
+                        &technique.dispense,
+                        technique.blow_out,
+                        technique.touch_tip,
+                        &mut tracked_aspiration,
+                        &mut vessel_relative_access,
+                        &mut blow_out,
+                        &mut touch_tip,
+                    );
                 }
-                PipettingStep::Mix { volume, .. } => {
+                PipettingStep::Mix {
+                    volume, technique, ..
+                } => {
                     mix_maximum = maximum_volume(mix_maximum, volume);
+                    collect_technique(
+                        &technique.aspiration,
+                        &technique.dispense,
+                        technique.blow_out,
+                        technique.touch_tip,
+                        &mut tracked_aspiration,
+                        &mut vessel_relative_access,
+                        &mut blow_out,
+                        &mut touch_tip,
+                    );
                 }
                 PipettingStep::Barrier { .. } => {}
             }
@@ -349,7 +476,7 @@ impl ValidatedPipettingProgramV1 {
                 )],
             });
         }
-        if let Some(temperature) = &self.0.constraints.source_temperature {
+        if let Some(temperature) = &self.program.constraints.source_temperature {
             all_of.push(CapabilityClause {
                 role: local("source-temperature"),
                 capability_kind: capability(TEMPERATURE_CONTROLLED_STAGING),
@@ -367,6 +494,35 @@ impl ValidatedPipettingProgramV1 {
                 ],
             });
         }
+        if tracked_aspiration {
+            all_of.push(feature_clause(
+                "tracked-aspiration",
+                LIQUID_LEVEL_AWARE_ASPIRATION,
+            ));
+        }
+        if vessel_relative_access {
+            all_of.push(feature_clause(
+                "vessel-relative-access",
+                VESSEL_RELATIVE_LIQUID_ACCESS,
+            ));
+        }
+        if let Some(maximum) = maximum_air_gap {
+            all_of.push(CapabilityClause {
+                role: local("air-gap"),
+                capability_kind: capability(AIR_GAP_HANDLING),
+                constraints: vec![constraint(
+                    MAXIMUM_AIR_GAP_VOLUME,
+                    ConstraintRelation::AtLeast,
+                    maximum,
+                )],
+            });
+        }
+        if blow_out {
+            all_of.push(feature_clause("blowout", POST_DISPENSE_BLOWOUT));
+        }
+        if touch_tip {
+            all_of.push(feature_clause("touch-tip", TOUCH_TIP));
+        }
         CapabilityFormula {
             binding_scope: BindingScope::AtomicAssetAssembly,
             all_of,
@@ -377,6 +533,25 @@ impl ValidatedPipettingProgramV1 {
 impl AsRef<PipettingProgramV1> for ValidatedPipettingProgramV1 {
     fn as_ref(&self) -> &PipettingProgramV1 {
         self.as_program()
+    }
+}
+
+/// Exact liquid bookkeeping derived from ordered canonical steps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LiquidLedger {
+    final_volumes: BTreeMap<Location, Option<ExactDecimal>>,
+    withdrawn: BTreeMap<Location, ExactDecimal>,
+}
+
+impl LiquidLedger {
+    /// Known final volume in microlitres, or `None` when the input fill was intentionally open.
+    pub fn final_volume(&self, location: &Location) -> Option<&ExactDecimal> {
+        self.final_volumes.get(location).and_then(Option::as_ref)
+    }
+
+    /// Total volume withdrawn from one logical location in microlitres.
+    pub fn withdrawn(&self, location: &Location) -> Option<&ExactDecimal> {
+        self.withdrawn.get(location)
     }
 }
 
@@ -436,6 +611,168 @@ pub enum PipettingProgramValidationError {
     ZeroMixCycles { step: ProcedureLocalId },
     #[error("pipetting barrier `{step}` has no reason")]
     EmptyBarrierReason { step: ProcedureLocalId },
+    #[error(
+        "pipetting step `{step}` withdraws {required} uL from `{vessel}` position {position}, which contains only {available} uL"
+    )]
+    InsufficientVolume {
+        step: ProcedureLocalId,
+        vessel: ProcedureLocalId,
+        position: u32,
+        required: String,
+        available: String,
+    },
+    #[error(
+        "pipetting mix `{step}` requires {required} uL in `{vessel}` position {position}, which contains only {available} uL"
+    )]
+    InsufficientMixVolume {
+        step: ProcedureLocalId,
+        vessel: ProcedureLocalId,
+        position: u32,
+        required: String,
+        available: String,
+    },
+}
+
+fn build_liquid_ledger(
+    program: &PipettingProgramV1,
+) -> Result<LiquidLedger, PipettingProgramValidationError> {
+    let zero = ExactDecimal::parse("0").expect("zero is a valid exact decimal");
+    let mut final_volumes = BTreeMap::new();
+    for vessel in &program.vessels {
+        let initial = vessel
+            .initial_volume_each
+            .as_ref()
+            .map(|volume| volume.value().clone())
+            .or_else(|| matches!(vessel.role, VesselRole::Product { .. }).then(|| zero.clone()));
+        for position in 0..vessel.positions {
+            final_volumes.insert(
+                Location {
+                    vessel: vessel.id.clone(),
+                    position,
+                },
+                initial.clone(),
+            );
+        }
+    }
+    let mut withdrawn = BTreeMap::<Location, ExactDecimal>::new();
+    for step in &program.steps {
+        match step {
+            PipettingStep::Transfer {
+                id,
+                source,
+                destination,
+                volume,
+                ..
+            } => move_liquid(
+                id,
+                source,
+                std::slice::from_ref(destination),
+                volume.value(),
+                &mut final_volumes,
+                &mut withdrawn,
+            )?,
+            PipettingStep::Distribute {
+                id,
+                source,
+                destinations,
+                volume_each,
+                ..
+            } => move_liquid(
+                id,
+                source,
+                destinations,
+                volume_each.value(),
+                &mut final_volumes,
+                &mut withdrawn,
+            )?,
+            PipettingStep::Mix {
+                id,
+                targets,
+                volume,
+                ..
+            } => {
+                for target in targets {
+                    if let Some(Some(available)) = final_volumes.get(target)
+                        && available < volume.value()
+                    {
+                        return Err(PipettingProgramValidationError::InsufficientMixVolume {
+                            step: id.clone(),
+                            vessel: target.vessel.clone(),
+                            position: target.position,
+                            required: volume.value().to_string(),
+                            available: available.to_string(),
+                        });
+                    }
+                }
+            }
+            PipettingStep::Barrier { .. } => {}
+        }
+    }
+    Ok(LiquidLedger {
+        final_volumes,
+        withdrawn,
+    })
+}
+
+fn move_liquid(
+    step: &ProcedureLocalId,
+    source: &Location,
+    destinations: &[Location],
+    volume_each: &ExactDecimal,
+    volumes: &mut BTreeMap<Location, Option<ExactDecimal>>,
+    withdrawn: &mut BTreeMap<Location, ExactDecimal>,
+) -> Result<(), PipettingProgramValidationError> {
+    let total = volume_each.multiplied_by_u32(
+        u32::try_from(destinations.len()).expect("validated positions fit in u32"),
+    );
+    if let Some(Some(available)) = volumes.get(source) {
+        if available < &total {
+            return Err(PipettingProgramValidationError::InsufficientVolume {
+                step: step.clone(),
+                vessel: source.vessel.clone(),
+                position: source.position,
+                required: total.to_string(),
+                available: available.to_string(),
+            });
+        }
+        volumes.insert(source.clone(), Some(available.subtracted_by(&total)));
+    }
+    withdrawn
+        .entry(source.clone())
+        .and_modify(|current| *current = current.added_to(&total))
+        .or_insert(total);
+    for destination in destinations {
+        if let Some(Some(current)) = volumes.get(destination) {
+            volumes.insert(destination.clone(), Some(current.added_to(volume_each)));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_technique(
+    aspiration: &AspirationStrategy,
+    dispense: &DispenseStrategy,
+    step_blow_out: bool,
+    step_touch_tip: bool,
+    tracked_aspiration: &mut bool,
+    vessel_relative_access: &mut bool,
+    blow_out: &mut bool,
+    touch_tip: &mut bool,
+) {
+    *tracked_aspiration |= matches!(aspiration, AspirationStrategy::TrackedLiquidSurface);
+    *vessel_relative_access |= matches!(aspiration, AspirationStrategy::VesselBottom { .. })
+        || !matches!(dispense, DispenseStrategy::Liquid);
+    *blow_out |= step_blow_out;
+    *touch_tip |= step_touch_tip;
+}
+
+fn feature_clause(role: &str, kind: &str) -> CapabilityClause {
+    CapabilityClause {
+        role: local(role),
+        capability_kind: capability(kind),
+        constraints: Vec::new(),
+    }
 }
 
 fn validate_location(
@@ -514,7 +851,7 @@ fn property(value: &str) -> PropertyKind {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Temperature, vocabulary};
+    use crate::{Length, Temperature, vocabulary};
 
     fn id(value: &str) -> ProcedureLocalId {
         ProcedureLocalId::new(value).unwrap()
@@ -538,6 +875,7 @@ mod tests {
                         material: id("water"),
                     },
                     positions: 1,
+                    initial_volume_each: None,
                 },
                 Vessel {
                     id: id("reactions"),
@@ -545,6 +883,7 @@ mod tests {
                         output: id("reaction"),
                     },
                     positions: 2,
+                    initial_volume_each: None,
                 },
             ],
             vec![
@@ -554,6 +893,8 @@ mod tests {
                     destinations: vec![location("reactions", 0), location("reactions", 1)],
                     volume_each: Volume::parse_microlitres("0.5").unwrap(),
                     fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+                    fluid_path_group: None,
+                    technique: TransferTechnique::default(),
                 },
                 PipettingStep::Transfer {
                     id: id("add-buffer"),
@@ -561,13 +902,17 @@ mod tests {
                     destination: location("reactions", 0),
                     volume: Volume::parse_microlitres("2").unwrap(),
                     fluid_path: FluidPathPolicy::IsolatedDestinations,
+                    fluid_path_group: None,
+                    technique: TransferTechnique::default(),
                 },
                 PipettingStep::Mix {
                     id: id("mix-reactions"),
                     targets: vec![location("reactions", 0), location("reactions", 1)],
                     cycles: 3,
-                    volume: Volume::parse_microlitres("15").unwrap(),
+                    volume: Volume::parse_microlitres("0.5").unwrap(),
                     fluid_path: FluidPathPolicy::IsolatedDestinations,
+                    fluid_path_group: None,
+                    technique: MixTechnique::default(),
                 },
             ],
             PipettingConstraints {
@@ -660,5 +1005,88 @@ mod tests {
             program.validate().unwrap_err(),
             PipettingProgramValidationError::NoSteps
         );
+    }
+
+    #[test]
+    fn techniques_derive_exact_additional_capabilities() {
+        let mut program = example();
+        let PipettingStep::Distribute { technique, .. } = &mut program.steps[0] else {
+            unreachable!()
+        };
+        *technique = TransferTechnique {
+            aspiration: AspirationStrategy::TrackedLiquidSurface,
+            dispense: DispenseStrategy::AboveLiquid,
+            air_gap: Some(Volume::parse_microlitres("10").unwrap()),
+            blow_out: true,
+            touch_tip: true,
+        };
+        let PipettingStep::Mix { technique, .. } = &mut program.steps[2] else {
+            unreachable!()
+        };
+        technique.dispense = DispenseStrategy::VesselBottom {
+            offset: Length::parse_millimetres("8").unwrap(),
+        };
+
+        let formula = program.validate().unwrap().capability_formula();
+        assert_eq!(
+            formula
+                .all_of
+                .iter()
+                .map(|clause| clause.capability_kind.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                vocabulary::METERED_LIQUID_TRANSFER,
+                vocabulary::IN_WELL_MIXING,
+                vocabulary::TEMPERATURE_CONTROLLED_STAGING,
+                vocabulary::LIQUID_LEVEL_AWARE_ASPIRATION,
+                vocabulary::VESSEL_RELATIVE_LIQUID_ACCESS,
+                vocabulary::AIR_GAP_HANDLING,
+                vocabulary::POST_DISPENSE_BLOWOUT,
+                vocabulary::TOUCH_TIP,
+            ]
+        );
+        let air_gap = &formula.all_of[5];
+        assert_eq!(air_gap.constraints.len(), 1);
+        assert_eq!(
+            air_gap.constraints[0].property_kind.as_str(),
+            vocabulary::MAXIMUM_AIR_GAP_VOLUME
+        );
+    }
+
+    #[test]
+    fn validation_builds_an_exact_liquid_ledger_and_rejects_underflow() {
+        let validated = example().validate().unwrap();
+        assert_eq!(
+            validated
+                .liquid_ledger()
+                .withdrawn(&location("water-source", 0))
+                .unwrap()
+                .to_string(),
+            "3"
+        );
+        assert_eq!(
+            validated
+                .liquid_ledger()
+                .final_volume(&location("reactions", 0))
+                .unwrap()
+                .to_string(),
+            "2.5"
+        );
+        assert_eq!(
+            validated
+                .liquid_ledger()
+                .final_volume(&location("reactions", 1))
+                .unwrap()
+                .to_string(),
+            "0.5"
+        );
+
+        let mut insufficient = example();
+        insufficient.vessels[0].initial_volume_each =
+            Some(Volume::parse_microlitres("2.5").unwrap());
+        assert!(matches!(
+            insufficient.validate(),
+            Err(PipettingProgramValidationError::InsufficientVolume { .. })
+        ));
     }
 }

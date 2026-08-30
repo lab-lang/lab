@@ -1538,6 +1538,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     id: local("source"),
                     role: VesselRole::Intermediate,
                     positions: 1,
+                    initial_volume_each: None,
                 },
                 Vessel {
                     id: local("destination"),
@@ -1545,6 +1546,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                         output: local("result"),
                     },
                     positions: 1,
+                    initial_volume_each: None,
                 },
             ],
             vec![
@@ -1560,6 +1562,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     },
                     volume: Volume::parse_microlitres("1").unwrap(),
                     fluid_path: FluidPathPolicy::IsolatedDestinations,
+                    fluid_path_group: None,
+                    technique: Default::default(),
                 },
                 PipettingStep::Mix {
                     id: local("mix"),
@@ -1570,6 +1574,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     cycles: 3,
                     volume: Volume::parse_microlitres("1").unwrap(),
                     fluid_path: FluidPathPolicy::IsolatedDestinations,
+                    fluid_path_group: None,
+                    technique: Default::default(),
                 },
             ],
             PipettingConstraints::default(),

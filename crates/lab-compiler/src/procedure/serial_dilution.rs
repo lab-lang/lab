@@ -76,6 +76,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         destinations: destinations.clone(),
         volume_each: volume(medium_volume)?,
         fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+        fluid_path_group: None,
+        technique: Default::default(),
     });
     for position in 0..serial_dilutions {
         let source = if position == 0 {
@@ -98,6 +100,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             destination: destination.clone(),
             volume: volume(culture_volume)?,
             fluid_path: FluidPathPolicy::IsolatedDestinations,
+            fluid_path_group: None,
+            technique: Default::default(),
         });
         steps.push(PipettingStep::Mix {
             id: procedure_id(&format!("mix-{position:04}"))?,
@@ -105,6 +109,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             cycles: mix_cycles,
             volume: volume(mix_volume)?,
             fluid_path: FluidPathPolicy::IsolatedDestinations,
+            fluid_path_group: None,
+            technique: Default::default(),
         });
     }
 
@@ -118,6 +124,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 id: culture_vessel,
                 role: VesselRole::ProcedureInput { input: 0 },
                 positions: 1,
+                initial_volume_each: None,
             },
             Vessel {
                 id: medium_vessel,
@@ -125,11 +132,13 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                     material: medium_id,
                 },
                 positions: 1,
+                initial_volume_each: None,
             },
             Vessel {
                 id: dilution_vessel,
                 role: VesselRole::Product { output },
                 positions: serial_dilutions,
+                initial_volume_each: None,
             },
         ],
         steps,

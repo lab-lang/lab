@@ -15,6 +15,13 @@ pub const HEATED_LID_TEMPERATURE_CONTROL: &str =
     "https://sbol.io/ns/capability#HeatedLidTemperatureControl";
 pub const CONTROLLED_TEMPERATURE_RAMP: &str =
     "https://sbol.io/ns/capability#ControlledTemperatureRamp";
+pub const LIQUID_LEVEL_AWARE_ASPIRATION: &str =
+    "https://sbol.io/ns/capability#LiquidLevelAwareAspiration";
+pub const VESSEL_RELATIVE_LIQUID_ACCESS: &str =
+    "https://sbol.io/ns/capability#VesselRelativeLiquidAccess";
+pub const AIR_GAP_HANDLING: &str = "https://sbol.io/ns/capability#AirGapHandling";
+pub const POST_DISPENSE_BLOWOUT: &str = "https://sbol.io/ns/capability#PostDispenseBlowout";
+pub const TOUCH_TIP: &str = "https://sbol.io/ns/capability#TouchTip";
 
 pub const MINIMUM_TRANSFER_VOLUME: &str = "https://sbol.io/ns/capability#MinimumTransferVolume";
 pub const MAXIMUM_TRANSFER_VOLUME: &str = "https://sbol.io/ns/capability#MaximumTransferVolume";
@@ -31,8 +38,10 @@ pub const MINIMUM_THERMAL_SAMPLE_VOLUME: &str =
 pub const MAXIMUM_THERMAL_SAMPLE_VOLUME: &str =
     "https://sbol.io/ns/capability#MaximumThermalSampleVolume";
 pub const MAXIMUM_RAMP_RATE: &str = "https://sbol.io/ns/capability#MaximumRampRate";
+pub const MAXIMUM_AIR_GAP_VOLUME: &str = "https://sbol.io/ns/capability#MaximumAirGapVolume";
 
 pub const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 pub const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
 pub const SECOND: &str = "http://qudt.org/vocab/unit/SEC";
 pub const DEGREE_CELSIUS_PER_SECOND: &str = "http://qudt.org/vocab/unit/DEG_C-PER-SEC";
+pub const MILLIMETRE: &str = "http://qudt.org/vocab/unit/MilliM";

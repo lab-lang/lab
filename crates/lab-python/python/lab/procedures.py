@@ -19,11 +19,19 @@ MICROLITRE = "http://qudt.org/vocab/unit/MicroL"
 DEGREE_CELSIUS = "http://qudt.org/vocab/unit/DEG_C"
 SECOND = "http://qudt.org/vocab/unit/SEC"
 DEGREE_CELSIUS_PER_SECOND = "http://qudt.org/vocab/unit/DEG_C-PER-SEC"
+MILLIMETRE = "http://qudt.org/vocab/unit/MilliM"
 
 
 @dataclass(frozen=True, slots=True)
 class Volume:
     """An exact positive volume in canonical QUDT microlitres."""
+
+    value: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class Length:
+    """An exact signed length in canonical QUDT millimetres."""
 
     value: Decimal
 
@@ -95,6 +103,7 @@ class Vessel:
     id: str
     role: VesselRole
     positions: int
+    initial_volume_each: Volume | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,12 +120,83 @@ class FluidPathPolicy(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class LiquidAspiration:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class TrackedLiquidSurfaceAspiration:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class VesselBottomAspiration:
+    offset: Length
+
+
+AspirationStrategy = LiquidAspiration | TrackedLiquidSurfaceAspiration | VesselBottomAspiration
+
+
+@dataclass(frozen=True, slots=True)
+class LiquidDispense:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class AboveLiquidDispense:
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class VesselBottomDispense:
+    offset: Length
+
+
+@dataclass(frozen=True, slots=True)
+class VesselTopDispense:
+    offset: Length
+
+
+@dataclass(frozen=True, slots=True)
+class MaterialSurfaceDispense:
+    pass
+
+
+DispenseStrategy = (
+    LiquidDispense
+    | AboveLiquidDispense
+    | VesselBottomDispense
+    | VesselTopDispense
+    | MaterialSurfaceDispense
+)
+
+
+@dataclass(frozen=True, slots=True)
+class TransferTechnique:
+    aspiration: AspirationStrategy = LiquidAspiration()
+    dispense: DispenseStrategy = LiquidDispense()
+    air_gap: Volume | None = None
+    blow_out: bool = False
+    touch_tip: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class MixTechnique:
+    aspiration: AspirationStrategy = LiquidAspiration()
+    dispense: DispenseStrategy = LiquidDispense()
+    blow_out: bool = False
+    touch_tip: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Transfer:
     id: str
     source: Location
     destination: Location
     volume: Volume
     fluid_path: FluidPathPolicy
+    fluid_path_group: str | None
+    technique: TransferTechnique
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +206,8 @@ class Distribute:
     destinations: tuple[Location, ...]
     volume_each: Volume
     fluid_path: FluidPathPolicy
+    fluid_path_group: str | None
+    technique: TransferTechnique
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +217,8 @@ class Mix:
     cycles: int
     volume: Volume
     fluid_path: FluidPathPolicy
+    fluid_path_group: str | None
+    technique: MixTechnique
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,6 +347,11 @@ def _vessel(raw: dict[str, Any]) -> Vessel:
         id=cast(str, raw["id"]),
         role=parsed_role,
         positions=cast(int, raw["positions"]),
+        initial_volume_each=(
+            _volume(cast(dict[str, Any], raw["initial_volume_each"]))
+            if raw.get("initial_volume_each") is not None
+            else None
+        ),
     )
 
 
@@ -279,6 +368,8 @@ def _pipetting_step(raw: dict[str, Any]) -> PipettingStep:
             destination=_location(cast(dict[str, Any], raw["destination"])),
             volume=_volume(cast(dict[str, Any], raw["volume"])),
             fluid_path=FluidPathPolicy(cast(str, raw["fluid_path"])),
+            fluid_path_group=cast(str | None, raw.get("fluid_path_group")),
+            technique=_transfer_technique(cast(dict[str, Any], raw.get("technique", {}))),
         )
     if kind == "distribute":
         return Distribute(
@@ -289,6 +380,8 @@ def _pipetting_step(raw: dict[str, Any]) -> PipettingStep:
             ),
             volume_each=_volume(cast(dict[str, Any], raw["volume_each"])),
             fluid_path=FluidPathPolicy(cast(str, raw["fluid_path"])),
+            fluid_path_group=cast(str | None, raw.get("fluid_path_group")),
+            technique=_transfer_technique(cast(dict[str, Any], raw.get("technique", {}))),
         )
     if kind == "mix":
         return Mix(
@@ -299,10 +392,58 @@ def _pipetting_step(raw: dict[str, Any]) -> PipettingStep:
             cycles=cast(int, raw["cycles"]),
             volume=_volume(cast(dict[str, Any], raw["volume"])),
             fluid_path=FluidPathPolicy(cast(str, raw["fluid_path"])),
+            fluid_path_group=cast(str | None, raw.get("fluid_path_group")),
+            technique=_mix_technique(cast(dict[str, Any], raw.get("technique", {}))),
         )
     if kind == "barrier":
         return Barrier(id=cast(str, raw["id"]), reason=cast(str, raw["reason"]))
     raise ValueError(f"unknown canonical pipetting step {kind!r}")
+
+
+def _aspiration_strategy(raw: dict[str, Any]) -> AspirationStrategy:
+    kind = cast(str, raw.get("kind", "liquid"))
+    if kind == "liquid":
+        return LiquidAspiration()
+    if kind == "tracked_liquid_surface":
+        return TrackedLiquidSurfaceAspiration()
+    if kind == "vessel_bottom":
+        return VesselBottomAspiration(offset=_length(cast(dict[str, Any], raw["offset"])))
+    raise ValueError(f"unknown canonical aspiration strategy {kind!r}")
+
+
+def _dispense_strategy(raw: dict[str, Any]) -> DispenseStrategy:
+    kind = cast(str, raw.get("kind", "liquid"))
+    if kind == "liquid":
+        return LiquidDispense()
+    if kind == "above_liquid":
+        return AboveLiquidDispense()
+    if kind == "vessel_bottom":
+        return VesselBottomDispense(offset=_length(cast(dict[str, Any], raw["offset"])))
+    if kind == "vessel_top":
+        return VesselTopDispense(offset=_length(cast(dict[str, Any], raw["offset"])))
+    if kind == "material_surface":
+        return MaterialSurfaceDispense()
+    raise ValueError(f"unknown canonical dispense strategy {kind!r}")
+
+
+def _transfer_technique(raw: dict[str, Any]) -> TransferTechnique:
+    air_gap = raw.get("air_gap")
+    return TransferTechnique(
+        aspiration=_aspiration_strategy(cast(dict[str, Any], raw.get("aspiration", {}))),
+        dispense=_dispense_strategy(cast(dict[str, Any], raw.get("dispense", {}))),
+        air_gap=_volume(cast(dict[str, Any], air_gap)) if air_gap is not None else None,
+        blow_out=cast(bool, raw.get("blow_out", False)),
+        touch_tip=cast(bool, raw.get("touch_tip", False)),
+    )
+
+
+def _mix_technique(raw: dict[str, Any]) -> MixTechnique:
+    return MixTechnique(
+        aspiration=_aspiration_strategy(cast(dict[str, Any], raw.get("aspiration", {}))),
+        dispense=_dispense_strategy(cast(dict[str, Any], raw.get("dispense", {}))),
+        blow_out=cast(bool, raw.get("blow_out", False)),
+        touch_tip=cast(bool, raw.get("touch_tip", False)),
+    )
 
 
 def _thermal_program(raw: dict[str, Any]) -> ThermalProgramV1:
@@ -374,6 +515,10 @@ def _volume(raw: dict[str, Any]) -> Volume:
     return Volume(value)
 
 
+def _length(raw: dict[str, Any]) -> Length:
+    return Length(_exact_decimal(raw, MILLIMETRE, "length"))
+
+
 def _temperature(raw: dict[str, Any]) -> Temperature:
     return Temperature(_exact_decimal(raw, DEGREE_CELSIUS, "temperature"))
 
@@ -396,20 +541,28 @@ __all__ = [
     "DEGREE_CELSIUS",
     "DEGREE_CELSIUS_PER_SECOND",
     "MICROLITRE",
+    "MILLIMETRE",
     "PIPETTING_PROGRAM_V1",
     "SECOND",
     "THERMAL_PROGRAM_V1",
+    "AboveLiquidDispense",
+    "AspirationStrategy",
     "Barrier",
     "CanonicalProcedureBody",
     "Distribute",
     "Duration",
     "FluidPathPolicy",
     "IntermediateVesselRole",
+    "Length",
+    "LiquidAspiration",
+    "LiquidDispense",
     "Location",
     "MaterialInput",
     "MaterialOutput",
     "MaterialSourceVesselRole",
+    "MaterialSurfaceDispense",
     "Mix",
+    "MixTechnique",
     "PipettingConstraints",
     "PipettingProgramV1",
     "PipettingStep",
@@ -423,9 +576,14 @@ __all__ = [
     "ThermalProgramV1",
     "ThermalStage",
     "ThermalStep",
+    "TrackedLiquidSurfaceAspiration",
     "Transfer",
+    "TransferTechnique",
     "Vessel",
+    "VesselBottomAspiration",
+    "VesselBottomDispense",
     "VesselRole",
+    "VesselTopDispense",
     "Volume",
     "parse_program",
 ]

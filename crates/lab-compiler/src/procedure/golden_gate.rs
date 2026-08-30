@@ -138,6 +138,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 material: material_id,
             },
             positions: 1,
+            initial_volume_each: None,
         });
         steps.push(PipettingStep::Distribute {
             id: procedure_id(&format!("add-{index:04}"))?,
@@ -149,6 +150,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             volume_each: Volume::parse_microlitres(volume.to_string())
                 .map_err(|error| error.to_string())?,
             fluid_path: FluidPathPolicy::SharedSourceNoReentry,
+            fluid_path_group: None,
+            technique: Default::default(),
         });
     }
     vessels.push(Vessel {
@@ -157,6 +160,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             output: product.clone(),
         },
         positions: replicates,
+        initial_volume_each: None,
     });
     steps.push(PipettingStep::Mix {
         id: procedure_id("mix-reactions")?,
@@ -165,6 +169,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         volume: Volume::parse_microlitres(mix_volume.to_string())
             .map_err(|error| error.to_string())?,
         fluid_path: FluidPathPolicy::IsolatedDestinations,
+        fluid_path_group: None,
+        technique: Default::default(),
     });
 
     let program = PipettingProgramV1::new(

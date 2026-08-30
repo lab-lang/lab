@@ -15,13 +15,14 @@ pub mod vocabulary;
 pub use capability::{BindingScope, CapabilityClause, CapabilityFormula};
 pub use id::{ProcedureLocalId, ProcedureLocalIdError};
 pub use pipetting::{
-    FluidPathPolicy, Location, MaterialInput, MaterialOutput, PipettingConstraints,
-    PipettingProgramV1, PipettingProgramValidationError, PipettingStep,
-    ValidatedPipettingProgramV1, Vessel, VesselRole,
+    AspirationStrategy, DispenseStrategy, FluidPathPolicy, LiquidLedger, Location, MaterialInput,
+    MaterialOutput, MixTechnique, PipettingConstraints, PipettingProgramV1,
+    PipettingProgramValidationError, PipettingStep, TransferTechnique, ValidatedPipettingProgramV1,
+    Vessel, VesselRole,
 };
 pub use program::{ProcedureProgram, ProcedureProgramValidationError, ValidatedProcedureProgram};
 pub use quantity::{
-    Duration, QuantityError, Temperature, TemperatureRampRate, TemperatureRange, Volume,
+    Duration, Length, QuantityError, Temperature, TemperatureRampRate, TemperatureRange, Volume,
 };
 pub use thermal::{
     ThermalLoad, ThermalProgramV1, ThermalProgramValidationError, ThermalStage, ThermalStep,

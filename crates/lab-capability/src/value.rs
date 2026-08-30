@@ -195,6 +195,90 @@ impl ExactDecimal {
         value
     }
 
+    /// Adds two arbitrary-precision finite decimals without rounding.
+    pub fn added_to(&self, other: &Self) -> Self {
+        let scale = self.scale.max(other.scale);
+        let left = self.aligned_digits(scale);
+        let right = other.aligned_digits(scale);
+        if self.negative == other.negative {
+            return Self::from_coefficient(self.negative, add_unsigned(&left, &right), scale);
+        }
+        match compare_unsigned_integers(&left, &right) {
+            Ordering::Greater => {
+                Self::from_coefficient(self.negative, subtract_unsigned(&left, &right), scale)
+            }
+            Ordering::Less => {
+                Self::from_coefficient(other.negative, subtract_unsigned(&right, &left), scale)
+            }
+            Ordering::Equal => Self::zero(),
+        }
+    }
+
+    /// Subtracts another arbitrary-precision finite decimal without rounding.
+    pub fn subtracted_by(&self, other: &Self) -> Self {
+        self.added_to(&other.negated())
+    }
+
+    /// Multiplies this value by a non-negative integer without rounding.
+    pub fn multiplied_by_u32(&self, multiplier: u32) -> Self {
+        if multiplier == 0 || self.is_zero() {
+            return Self::zero();
+        }
+        let mut carry = 0_u64;
+        let mut reversed = Vec::with_capacity(self.digits.len() + 10);
+        for byte in self.digits.bytes().rev() {
+            let value = u64::from(byte - b'0') * u64::from(multiplier) + carry;
+            reversed.push((value % 10) as u8 + b'0');
+            carry = value / 10;
+        }
+        while carry > 0 {
+            reversed.push((carry % 10) as u8 + b'0');
+            carry /= 10;
+        }
+        reversed.reverse();
+        Self::from_coefficient(
+            self.negative,
+            String::from_utf8(reversed).expect("decimal arithmetic emits ASCII digits"),
+            self.scale,
+        )
+    }
+
+    /// Whether this value is strictly less than zero.
+    pub const fn is_negative(&self) -> bool {
+        self.negative
+    }
+
+    fn zero() -> Self {
+        Self {
+            negative: false,
+            digits: "0".to_owned(),
+            scale: 0,
+        }
+    }
+
+    fn aligned_digits(&self, scale: usize) -> String {
+        let mut digits = self.digits.clone();
+        digits.extend(std::iter::repeat_n('0', scale - self.scale));
+        digits
+    }
+
+    fn from_coefficient(negative: bool, digits: String, mut scale: usize) -> Self {
+        let digits = digits.trim_start_matches('0');
+        if digits.is_empty() {
+            return Self::zero();
+        }
+        let mut digits = digits.to_owned();
+        while scale > 0 && digits.ends_with('0') {
+            digits.pop();
+            scale -= 1;
+        }
+        Self {
+            negative,
+            digits,
+            scale,
+        }
+    }
+
     fn unsigned_integer_digits(&self) -> &str {
         if self.digits.len() > self.scale {
             &self.digits[..self.digits.len() - self.scale]
@@ -428,6 +512,52 @@ fn compare_unsigned_integers(left: &str, right: &str) -> Ordering {
     left.len().cmp(&right.len()).then_with(|| left.cmp(right))
 }
 
+fn add_unsigned(left: &str, right: &str) -> String {
+    let mut left = left.bytes().rev();
+    let mut right = right.bytes().rev();
+    let mut carry = 0_u8;
+    let mut reversed = Vec::with_capacity(left.len().max(right.len()) + 1);
+    loop {
+        let left = left.next().map(|digit| digit - b'0');
+        let right = right.next().map(|digit| digit - b'0');
+        if left.is_none() && right.is_none() {
+            break;
+        }
+        let sum = left.unwrap_or(0) + right.unwrap_or(0) + carry;
+        reversed.push(sum % 10 + b'0');
+        carry = sum / 10;
+    }
+    if carry > 0 {
+        reversed.push(carry + b'0');
+    }
+    reversed.reverse();
+    String::from_utf8(reversed).expect("decimal arithmetic emits ASCII digits")
+}
+
+fn subtract_unsigned(left: &str, right: &str) -> String {
+    debug_assert!(compare_unsigned_integers(left, right) != Ordering::Less);
+    let mut right = right.bytes().rev();
+    let mut borrow = 0_i8;
+    let mut reversed = Vec::with_capacity(left.len());
+    for left in left.bytes().rev() {
+        let mut value = (left - b'0') as i8 - borrow;
+        let right = right.next().map_or(0, |digit| (digit - b'0') as i8);
+        if value < right {
+            value += 10;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        reversed.push((value - right) as u8 + b'0');
+    }
+    debug_assert_eq!(borrow, 0);
+    while reversed.len() > 1 && reversed.last() == Some(&b'0') {
+        reversed.pop();
+    }
+    reversed.reverse();
+    String::from_utf8(reversed).expect("decimal arithmetic emits ASCII digits")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -465,6 +595,34 @@ mod tests {
                 .unwrap()
                 .cmp(&ExactDecimal::parse("0.00120").unwrap()),
             Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn decimal_arithmetic_is_exact_and_unbounded() {
+        let huge = ExactDecimal::parse("999999999999999999999999999999.999").unwrap();
+        let small = ExactDecimal::parse("0.001").unwrap();
+        assert_eq!(
+            huge.added_to(&small).to_string(),
+            "1000000000000000000000000000000"
+        );
+        assert_eq!(
+            small.subtracted_by(&huge).to_string(),
+            "-999999999999999999999999999999.998"
+        );
+        assert_eq!(
+            ExactDecimal::parse("-1.25")
+                .unwrap()
+                .added_to(&ExactDecimal::parse("2.5").unwrap())
+                .to_string(),
+            "1.25"
+        );
+        assert_eq!(
+            ExactDecimal::parse("1.25")
+                .unwrap()
+                .multiplied_by_u32(12)
+                .to_string(),
+            "15"
         );
     }
 
