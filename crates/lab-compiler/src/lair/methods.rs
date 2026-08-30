@@ -102,22 +102,18 @@ fn automated_golden_gate() -> MethodDefinition {
         "digest_minutes",
         "ligate_temperature_c",
         "ligate_minutes",
+        "lid_temperature_c",
+        "final_digest_temperature_c",
+        "final_digest_minutes",
+        "heat_inactivation_temperature_c",
+        "heat_inactivation_minutes",
+        "hold_temperature_c",
     ];
     let setup_task_parameters = with_integer_literals(
         select_parameters(&parameters, &setup_parameters),
         [("mix_cycles", 3), ("mix_volume_ul", 15)],
     );
-    let cycling_task_parameters = with_integer_literals(
-        select_parameters(&parameters, &cycling_parameters),
-        [
-            ("lid_temperature_c", 105),
-            ("final_digest_temperature_c", 50),
-            ("final_digest_minutes", 5),
-            ("heat_inactivation_temperature_c", 80),
-            ("heat_inactivation_minutes", 10),
-            ("hold_temperature_c", 4),
-        ],
-    );
+    let cycling_task_parameters = select_parameters(&parameters, &cycling_parameters);
     MethodDefinition {
         id: method("automated-golden-gate"),
         refines: intent("std.bio.build.realize"),
@@ -608,6 +604,12 @@ fn realization_parameters() -> Vec<MethodParameter> {
             "digest_minutes",
             "ligate_temperature_c",
             "ligate_minutes",
+            "lid_temperature_c",
+            "final_digest_temperature_c",
+            "final_digest_minutes",
+            "heat_inactivation_temperature_c",
+            "heat_inactivation_minutes",
+            "hold_temperature_c",
         ]
         .map(|name| parameter(name, ScalarType::Integer)),
     )

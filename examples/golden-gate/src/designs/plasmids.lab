@@ -39,8 +39,16 @@ build plasmid composite_plasmid_1:
   ligase_volume = 4 uL
   buffer_volume = 2 uL
   assembly_cycles = 75
+  digest_temperature = 42 C
+  digest_duration = 2 min
   ligate_temperature = 16 C
   ligate_duration = 5 min
+  lid_temperature = 42 C
+  final_digest_temperature = 60 C
+  final_digest_duration = 10 min
+  heat_inactivation_temperature = 80 C
+  heat_inactivation_duration = 10 min
+  hold_temperature = 4 C
 
   require topology == circular
   accept sequence == design.sequence
@@ -66,8 +74,16 @@ build plasmid composite_plasmid_2:
   ligase_volume = 4 uL
   buffer_volume = 2 uL
   assembly_cycles = 75
+  digest_temperature = 42 C
+  digest_duration = 2 min
   ligate_temperature = 16 C
   ligate_duration = 5 min
+  lid_temperature = 42 C
+  final_digest_temperature = 60 C
+  final_digest_duration = 10 min
+  heat_inactivation_temperature = 80 C
+  heat_inactivation_duration = 10 min
+  hold_temperature = 4 C
 
   require topology == circular
   accept sequence == design.sequence

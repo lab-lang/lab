@@ -17,6 +17,12 @@ pub(crate) const ASSEMBLY_CHEMISTRY_KEYS: &[&str] = &[
     "digest_minutes",
     "ligate_temperature_c",
     "ligate_minutes",
+    "lid_temperature_c",
+    "final_digest_temperature_c",
+    "final_digest_minutes",
+    "heat_inactivation_temperature_c",
+    "heat_inactivation_minutes",
+    "hold_temperature_c",
 ];
 
 /// Heat-shock transformation and plating parameters carried by a strain.

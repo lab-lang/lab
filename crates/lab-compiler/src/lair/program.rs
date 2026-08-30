@@ -480,6 +480,24 @@ fn assembly_chemistry(
                 chemistry.ligate_temperature_c.into(),
             ),
             ("ligate_minutes", chemistry.ligate_minutes.into()),
+            ("lid_temperature_c", chemistry.lid_temperature_c.into()),
+            (
+                "final_digest_temperature_c",
+                chemistry.final_digest_temperature_c.into(),
+            ),
+            (
+                "final_digest_minutes",
+                chemistry.final_digest_minutes.into(),
+            ),
+            (
+                "heat_inactivation_temperature_c",
+                chemistry.heat_inactivation_temperature_c.into(),
+            ),
+            (
+                "heat_inactivation_minutes",
+                chemistry.heat_inactivation_minutes.into(),
+            ),
+            ("hold_temperature_c", chemistry.hold_temperature_c.into()),
         ],
         context,
     )

@@ -188,6 +188,12 @@ pub(crate) struct AssemblyChemistryIntent {
     pub digest_minutes: u16,
     pub ligate_temperature_c: u16,
     pub ligate_minutes: u16,
+    pub lid_temperature_c: u16,
+    pub final_digest_temperature_c: u16,
+    pub final_digest_minutes: u16,
+    pub heat_inactivation_temperature_c: u16,
+    pub heat_inactivation_minutes: u16,
+    pub hold_temperature_c: u16,
 }
 
 impl AssemblyChemistryIntent {
@@ -374,6 +380,16 @@ fn lower_artifact(
                     digest_minutes: quantity("digest_duration", "min", 2)?,
                     ligate_temperature_c: quantity("ligate_temperature", "C", 16)?,
                     ligate_minutes: quantity("ligate_duration", "min", 5)?,
+                    lid_temperature_c: quantity("lid_temperature", "C", 105)?,
+                    final_digest_temperature_c: quantity("final_digest_temperature", "C", 50)?,
+                    final_digest_minutes: quantity("final_digest_duration", "min", 5)?,
+                    heat_inactivation_temperature_c: quantity(
+                        "heat_inactivation_temperature",
+                        "C",
+                        80,
+                    )?,
+                    heat_inactivation_minutes: quantity("heat_inactivation_duration", "min", 10)?,
+                    hold_temperature_c: quantity("hold_temperature", "C", 4)?,
                 };
                 // The backbone joins the reaction alongside every component.
                 if chemistry.water_volume_ul(1 + components.len()).is_none() {
