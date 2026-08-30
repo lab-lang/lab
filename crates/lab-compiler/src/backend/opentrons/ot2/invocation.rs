@@ -1664,6 +1664,7 @@ fn render_batch_manual(plan: &Ot2RunPlan) -> Doc {
         Ot2BatchExecution::Assembly {
             setups,
             thermal_programs,
+            ..
         } => (
             "Golden Gate assembly run",
             format!(

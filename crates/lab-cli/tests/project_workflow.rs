@@ -863,8 +863,16 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     let assembly_protocol = read_text(target_root.join("assembly_protocol.py"));
     assert!(
-        assembly_protocol.contains("temperature.set_temperature(setup[\"source_temperature_c\"]"),
+        assembly_protocol
+            .contains("temperature.set_temperature(execution[\"source_temperature_c\"]"),
         "{assembly_protocol}"
+    );
+    assert_eq!(
+        assembly_protocol
+            .matches("temperature.set_temperature(execution[\"source_temperature_c\"]")
+            .count(),
+        1,
+        "the shared staging setpoint is programmed once per batch"
     );
     assert!(
         assembly_protocol.contains("_execute_mix(pipette, source, source_mix, techniques)"),

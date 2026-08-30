@@ -38,6 +38,7 @@ pub(super) struct Ot2ScheduledTask {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum Ot2BatchExecution {
     Assembly {
+        source_temperature_c: Option<f64>,
         setups: Vec<Ot2ScheduledTask>,
         thermal_programs: Vec<Ot2ScheduledTask>,
     },
@@ -71,6 +72,7 @@ type TransformationTasks = (
     Vec<Ot2ScheduledTask>,
     Vec<Ot2ScheduledTask>,
 );
+type AssemblyTasks = (Vec<Ot2ScheduledTask>, Vec<Ot2ScheduledTask>, Option<f64>);
 type PlatingTasks = (Vec<Ot2ScheduledTask>, Vec<Ot2ScheduledTask>);
 
 struct PlannedTask<'a> {
@@ -368,7 +370,7 @@ pub(super) fn try_plan_golden_gate_batches(
 
     let mut locations = Vec::new();
     let mut product_wells = BTreeMap::<LocalId, (String, u32)>::new();
-    let (assembly_setups, assembly_thermal) = allocate_assembly(
+    let (assembly_setups, assembly_thermal, assembly_source_temperature_c) = allocate_assembly(
         profile,
         &graph,
         &mut tasks,
@@ -450,6 +452,7 @@ pub(super) fn try_plan_golden_gate_batches(
             id: "assembly",
             group: groups[0].clone(),
             execution: Ot2BatchExecution::Assembly {
+                source_temperature_c: assembly_source_temperature_c,
                 setups: assembly_setups,
                 thermal_programs: assembly_thermal,
             },
@@ -525,7 +528,7 @@ fn allocate_assembly(
     pairs: &[(usize, usize)],
     locations: &mut Vec<ScheduledPhysicalLocation>,
     product_wells: &mut BTreeMap<LocalId, (String, u32)>,
-) -> Result<(Vec<Ot2ScheduledTask>, Vec<Ot2ScheduledTask>), String> {
+) -> Result<AssemblyTasks, String> {
     let source_keys = pairs
         .iter()
         .flat_map(|(setup, _)| match &tasks[*setup].execution {
@@ -586,6 +589,7 @@ fn allocate_assembly(
 
     let mut cursor = 0;
     let mut shared_thermal = None;
+    let mut shared_source_temperature = None;
     for (setup_index, thermal_index) in pairs {
         let setup_id = tasks[*setup_index].task.id.clone();
         let setup_outputs = tasks[*setup_index].task.outputs.clone();
@@ -597,11 +601,14 @@ fn allocate_assembly(
             reaction_wells,
             additions,
             reaction_volume_ul,
+            source_temperature_c,
             ..
         } = &mut tasks[*setup_index].execution
         else {
             return Err("OT-2 assembly scheduler received a non-setup task".to_owned());
         };
+        shared_source_temperature =
+            merge_source_temperature(shared_source_temperature, *source_temperature_c)?;
         let count = reaction_wells.len();
         let reaction_volume = *reaction_volume_ul;
         let allocated = available_wells[cursor..cursor + count].to_vec();
@@ -692,7 +699,21 @@ fn allocate_assembly(
             .iter()
             .map(|(_, thermal)| scheduled_task(&tasks[*thermal]))
             .collect(),
+        shared_source_temperature,
     ))
+}
+
+fn merge_source_temperature(
+    shared: Option<f64>,
+    candidate: Option<f64>,
+) -> Result<Option<f64>, String> {
+    match (shared, candidate) {
+        (Some(shared), Some(candidate)) if shared != candidate => Err(
+            "OT-2 cannot batch Golden Gate reactions with different source temperatures".to_owned(),
+        ),
+        (None, Some(candidate)) => Ok(Some(candidate)),
+        (shared, _) => Ok(shared),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1515,7 +1536,7 @@ fn add_well_output_locations(
 
 #[cfg(test)]
 mod tests {
-    use super::required_source_loads;
+    use super::{merge_source_temperature, required_source_loads};
     use std::collections::BTreeMap;
 
     #[test]
@@ -1527,5 +1548,19 @@ mod tests {
 
         assert_eq!(loads["cells"], 80);
         assert_eq!(loads["dna"], 10);
+    }
+
+    #[test]
+    fn assembly_batch_requires_one_shared_source_temperature() {
+        let shared = merge_source_temperature(None, None).unwrap();
+        let shared = merge_source_temperature(shared, Some(4.0)).unwrap();
+        let shared = merge_source_temperature(shared, None).unwrap();
+        let shared = merge_source_temperature(shared, Some(4.0)).unwrap();
+
+        assert_eq!(shared, Some(4.0));
+        assert_eq!(
+            merge_source_temperature(shared, Some(8.0)).unwrap_err(),
+            "OT-2 cannot batch Golden Gate reactions with different source temperatures"
+        );
     }
 }

@@ -135,10 +135,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     thermocycler.set_block_temperature(4)
     thermocycler.open_lid()
+    if execution["source_temperature_c"] is not None:
+        temperature.set_temperature(execution["source_temperature_c"])
     for scheduled in execution["setups"]:
         setup = scheduled["execution"]
-        if setup["source_temperature_c"] is not None:
-            temperature.set_temperature(setup["source_temperature_c"])
         protocol.comment(f"Assembly task {scheduled['task']}: {setup['artifact']}")
         for destination_name in setup["reaction_wells"]:
             destination = reaction_plate[destination_name]
@@ -184,10 +184,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 _execute_mix(pipette, destination, setup["final_mix"], techniques)
                 pipette.drop_tip()
 
-    if any(
-        scheduled["execution"]["source_temperature_c"] is not None
-        for scheduled in execution["setups"]
-    ):
+    if execution["source_temperature_c"] is not None:
         protocol.comment("Assembly sources may now be removed from the temperature module.")
         temperature.deactivate()
 
