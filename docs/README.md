@@ -85,7 +85,7 @@ Decision records preserve the reasoning and status behind the language rather th
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
-- [BuildCompiler and PUDU equivalence](integrations/buildcompiler-pudu-equivalence.md) pins the historical Myers Research Group behavior the Golden Gate OT-2 slice must preserve and defines its acceptance gates.
+- [PUDU workflow equivalence](integrations/pudu-workflow-equivalence.md) defines and executes the output comparison between the Golden Gate example and PUDU's documented OT-2 workflow.
 
 ## Examples versus specimens
 

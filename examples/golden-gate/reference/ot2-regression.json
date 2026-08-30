@@ -1,17 +1,6 @@
 {
-  "schema_version": "lab.pudu-equivalence.v1",
-  "references": {
-    "buildcompiler": {
-      "revision": "cae798452450ec152881cfe447a83469202b5bed",
-      "fixture": "notebooks/results/buildcompiler_transformation_quickstart"
-    },
-    "pudu": {
-      "revision": "1214d2f9efd557aa84bc96502379554174355eae",
-      "assembly_implementation": "src/pudu/assembly.py:SBOLLoopAssembly",
-      "transformation_implementation": "src/pudu/transformation.py:HeatShockTransformation",
-      "plating_implementation": "src/pudu/plating.py:Plating"
-    }
-  },
+  "schema_version": "lab.golden-gate-ot2-regression.v1",
+  "purpose": "Internal assertions over Lab's generated OT-2 manifests and protocols; external PUDU equivalence is established by scripts/compare_pudu_golden_gate.py.",
   "hardware": {
     "robot_type": "OT-2",
     "api_level": "2.21",

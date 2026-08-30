@@ -618,12 +618,11 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         .join("../../examples/golden-gate")
         .canonicalize()
         .unwrap();
-    let equivalence = read_json(example.join("reference/pudu-equivalence.json"));
-    let number = |value: &Value| value.as_f64().expect("equivalence values are numeric");
-    assert_eq!(equivalence["schema_version"], "lab.pudu-equivalence.v1");
+    let regression = read_json(example.join("reference/ot2-regression.json"));
+    let number = |value: &Value| value.as_f64().expect("regression values are numeric");
     assert_eq!(
-        equivalence["references"]["pudu"]["revision"],
-        "1214d2f9efd557aa84bc96502379554174355eae"
+        regression["schema_version"],
+        "lab.golden-gate-ot2-regression.v1"
     );
     let out_dir = std::env::temp_dir().join(format!(
         "lab-golden-gate-facility-lowering-{}-{}",
@@ -736,7 +735,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     assert_eq!(
         manifest["deck"]["deck"]["thermocycler"]["model"],
-        equivalence["hardware"]["thermocycler_load_name"]
+        regression["hardware"]["thermocycler_load_name"]
     );
     assert!(
         manifest["execution"]["setups"][0]["execution"]["additions"]
@@ -748,19 +747,19 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     let setup = &manifest["execution"]["setups"][0]["execution"];
     assert_eq!(
         setup["reaction_wells"][0],
-        equivalence["lineage_exemplar"]["assembly_product_well"]
+        regression["lineage_exemplar"]["assembly_product_well"]
     );
     assert_eq!(
         number(&setup["source_temperature_c"]),
-        number(&equivalence["assembly"]["source_temperature_c"])
+        number(&regression["assembly"]["source_temperature_c"])
     );
     assert_eq!(
         number(&manifest["deck"]["techniques"]["aspiration_rate"]),
-        number(&equivalence["assembly"]["transfer"]["aspiration_rate"])
+        number(&regression["assembly"]["transfer"]["aspiration_rate"])
     );
     assert_eq!(
         number(&manifest["deck"]["techniques"]["dispense_rate"]),
-        number(&equivalence["assembly"]["transfer"]["dispense_rate"])
+        number(&regression["assembly"]["transfer"]["dispense_rate"])
     );
     let additions = setup["additions"].as_array().unwrap();
     let mut source_order = Vec::new();
@@ -774,7 +773,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     }
     assert_eq!(
         source_order,
-        equivalence["assembly"]["source_order"]
+        regression["assembly"]["source_order"]
             .as_array()
             .unwrap()
             .iter()
@@ -784,13 +783,12 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(additions[0]["role"], "water");
     assert!(additions[0].get("source_mix").is_none());
     assert!(additions.iter().all(|addition| {
-        addition["transfer_technique"]["blow_out"]
-            == equivalence["assembly"]["transfer"]["blow_out"]
+        addition["transfer_technique"]["blow_out"] == regression["assembly"]["transfer"]["blow_out"]
             && addition["transfer_technique"]["touch_tip"]
-                == equivalence["assembly"]["transfer"]["touch_tip"]
+                == regression["assembly"]["transfer"]["touch_tip"]
     }));
     assert!(additions[1..].iter().all(|addition| {
-        addition["source_mix"]["cycles"] == equivalence["assembly"]["source_mix"]["cycles"]
+        addition["source_mix"]["cycles"] == regression["assembly"]["source_mix"]["cycles"]
             && addition["source_mix"]["volume_ul"] == addition["volume_ul"]
     }));
     assert!(
@@ -800,66 +798,66 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     assert_eq!(
         additions.last().unwrap()["reuse_tip_for_final_mix"],
-        equivalence["assembly"]["bubble_clear"]["reuse_final_addition_tip"]
+        regression["assembly"]["bubble_clear"]["reuse_final_addition_tip"]
     );
     assert_eq!(
         setup["final_mix"]["cycles"],
-        equivalence["assembly"]["bubble_clear"]["cycles"]
+        regression["assembly"]["bubble_clear"]["cycles"]
     );
     assert_eq!(
         setup["final_mix"]["volume_ul"],
-        equivalence["assembly"]["bubble_clear"]["volume_ul"]
+        regression["assembly"]["bubble_clear"]["volume_ul"]
     );
     assert_eq!(
         setup["final_mix"]["technique"]["aspiration"]["offset"]["value"]["value"],
-        equivalence["assembly"]["bubble_clear"]["aspiration_bottom_offset_mm"]
+        regression["assembly"]["bubble_clear"]["aspiration_bottom_offset_mm"]
             .as_i64()
             .unwrap()
             .to_string()
     );
     assert_eq!(
         setup["final_mix"]["technique"]["dispense"]["offset"]["value"]["value"],
-        equivalence["assembly"]["bubble_clear"]["dispense_bottom_offset_mm"]
+        regression["assembly"]["bubble_clear"]["dispense_bottom_offset_mm"]
             .as_i64()
             .unwrap()
             .to_string()
     );
     assert_eq!(
         setup["final_mix"]["technique"]["blow_out"],
-        equivalence["assembly"]["bubble_clear"]["blow_out_each_cycle"]
+        regression["assembly"]["bubble_clear"]["blow_out_each_cycle"]
     );
     assert_eq!(
         setup["final_mix"]["technique"]["touch_tip"],
-        equivalence["assembly"]["bubble_clear"]["touch_tip_each_cycle"]
+        regression["assembly"]["bubble_clear"]["touch_tip_each_cycle"]
     );
     let thermal = &manifest["execution"]["thermal_programs"][0]["execution"];
     assert_eq!(
         number(&thermal["lid_temperature_c"]),
-        number(&equivalence["assembly"]["thermal"]["lid_temperature_c"])
+        number(&regression["assembly"]["thermal"]["lid_temperature_c"])
     );
     assert_eq!(
         thermal["profile"]["stages"][0]["repeats"],
-        equivalence["assembly"]["thermal"]["stages"][0]["repeats"]
+        regression["assembly"]["thermal"]["stages"][0]["repeats"]
     );
     for stage in 0..2 {
         for step in 0..2 {
             assert_eq!(
                 number(&thermal["profile"]["stages"][stage]["steps"][step]["celsius"]),
                 number(
-                    &equivalence["assembly"]["thermal"]["stages"][stage]["steps"][step]["temperature_c"]
+                    &regression["assembly"]["thermal"]["stages"][stage]["steps"][step]["temperature_c"]
                 )
             );
             assert_eq!(
                 number(&thermal["profile"]["stages"][stage]["steps"][step]["hold_seconds"]),
                 number(
-                    &equivalence["assembly"]["thermal"]["stages"][stage]["steps"][step]["hold_seconds"]
+                    &regression["assembly"]["thermal"]["stages"][stage]["steps"][step]["hold_seconds"]
                 )
             );
         }
     }
     assert_eq!(
         number(&thermal["final_hold_celsius"]),
-        number(&equivalence["assembly"]["thermal"]["final_hold_c"])
+        number(&regression["assembly"]["thermal"]["final_hold_c"])
     );
     let assembly_protocol = read_text(target_root.join("assembly_protocol.py"));
     assert!(
@@ -902,40 +900,40 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     let first_preparation = &transformation["execution"]["preparations"][0]["execution"];
     assert_eq!(
         first_preparation["cell_volume_ul"],
-        equivalence["transformation"]["competent_cells"]["volume_ul"]
+        regression["transformation"]["competent_cells"]["volume_ul"]
     );
     assert_eq!(
         first_preparation["cell_mix_cycles"],
-        equivalence["transformation"]["competent_cells"]["source_mix_cycles"]
+        regression["transformation"]["competent_cells"]["source_mix_cycles"]
     );
     assert_eq!(
         first_preparation["cell_mix_volume_ul"],
-        equivalence["transformation"]["competent_cells"]["source_mix_volume_ul"]
+        regression["transformation"]["competent_cells"]["source_mix_volume_ul"]
     );
     assert_eq!(first_preparation["cell_source_volume_ul"], 80);
     assert_eq!(
         first_preparation["dna_volume_ul"],
-        equivalence["transformation"]["dna"]["volume_ul"]
+        regression["transformation"]["dna"]["volume_ul"]
     );
     assert_eq!(
         first_preparation["dna_mix_cycles"],
-        equivalence["transformation"]["dna"]["source_mix_cycles"]
+        regression["transformation"]["dna"]["source_mix_cycles"]
     );
     assert_eq!(
         first_preparation["dna_mix_volume_ul"],
-        equivalence["transformation"]["dna"]["source_mix_volume_ul"]
+        regression["transformation"]["dna"]["source_mix_volume_ul"]
     );
     assert_eq!(
         first_preparation["dna_transfer_technique"]["blow_out"],
-        equivalence["transformation"]["dna"]["transfer_blow_out"]
+        regression["transformation"]["dna"]["transfer_blow_out"]
     );
     assert_eq!(
         first_preparation["bubble_clear_cycles"],
-        equivalence["transformation"]["dna"]["bubble_clear_cycles"]
+        regression["transformation"]["dna"]["bubble_clear_cycles"]
     );
     assert_eq!(
         first_preparation["bubble_clear_volume_ul"],
-        equivalence["transformation"]["dna"]["bubble_clear_volume_ul"]
+        regression["transformation"]["dna"]["bubble_clear_volume_ul"]
     );
     assert_eq!(
         first_preparation["bubble_clear_technique"]["dispense"]["offset"]["value"]["value"],
@@ -951,7 +949,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     assert_eq!(
         first_preparation["reaction_wells"],
-        equivalence["lineage_exemplar"]["transformation_wells"]
+        regression["lineage_exemplar"]["transformation_wells"]
     );
     assert_eq!(
         first_preparation["dna"][0]["source_well"],
@@ -984,11 +982,11 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     let heat_shock = &transformation["execution"]["heat_shocks"][0]["execution"];
     assert_eq!(
         number(&heat_shock["volume_each_ul"]),
-        number(&equivalence["transformation"]["heat_shock"]["volume_ul"])
+        number(&regression["transformation"]["heat_shock"]["volume_ul"])
     );
     assert_eq!(
         number(&heat_shock["profile"]["stages"][0]["steps"][1]["celsius"]),
-        number(&equivalence["transformation"]["heat_shock"]["steps"][1]["temperature_c"])
+        number(&regression["transformation"]["heat_shock"]["steps"][1]["temperature_c"])
     );
     assert!(
         transformation_protocol.contains("block_max_volume=execution[\"volume_each_ul\"]"),
@@ -1005,7 +1003,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     assert_eq!(
         recovery_medium["technique"]["air_gap"]["value"]["value"],
-        equivalence["transformation"]["recovery"]["air_gap_ul"]
+        regression["transformation"]["recovery"]["air_gap_ul"]
             .as_i64()
             .unwrap()
             .to_string()
@@ -1013,7 +1011,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     let recovery = &transformation["execution"]["recovery_incubations"][0]["execution"];
     assert_eq!(
         number(&recovery["volume_each_ul"]),
-        number(&equivalence["transformation"]["recovery"]["incubation_volume_ul"])
+        number(&regression["transformation"]["recovery"]["incubation_volume_ul"])
     );
 
     let plating = read_json(target_root.join("plating_manifest.json"));
@@ -1036,32 +1034,32 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(
         dilution["dilution_wells"],
         serde_json::json!([
-            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_1_wells"][0]},
-            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_1_wells"][1]},
-            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_2_wells"][0]},
-            {"plate": 0, "well": equivalence["lineage_exemplar"]["dilution_2_wells"][1]}
+            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_1_wells"][0]},
+            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_1_wells"][1]},
+            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_2_wells"][0]},
+            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_2_wells"][1]}
         ])
     );
     assert_eq!(
         dilution["medium_volume_ul"],
-        equivalence["plating"]["medium_volume_ul"]
+        regression["plating"]["medium_volume_ul"]
     );
     assert_eq!(
         dilution["culture_volume_ul"],
-        equivalence["plating"]["culture_volume_ul"]
+        regression["plating"]["culture_volume_ul"]
     );
-    assert_eq!(dilution["mix_cycles"], equivalence["plating"]["mix_cycles"]);
+    assert_eq!(dilution["mix_cycles"], regression["plating"]["mix_cycles"]);
     assert_eq!(
         dilution["mix_volume_ul"],
-        equivalence["plating"]["mix_volume_ul"]
+        regression["plating"]["mix_volume_ul"]
     );
     assert_eq!(
         plating["deck"]["techniques"]["distribution_disposal_volume_ul"],
-        equivalence["plating"]["medium_distribution_disposal_volume_ul"]
+        regression["plating"]["medium_distribution_disposal_volume_ul"]
     );
     assert_eq!(
         plating["deck"]["techniques"]["tracked_chunk_size"],
-        equivalence["plating"]["medium_distribution_chunk_size"]
+        regression["plating"]["medium_distribution_chunk_size"]
     );
     let plating_protocol = read_text(target_root.join("plating_protocol.py"));
     assert!(
@@ -1091,7 +1089,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(first_plating["plate_map"].as_array().unwrap().len(), 4);
     assert_eq!(
         first_plating["colony_volume_ul"],
-        equivalence["plating"]["colony_volume_ul"]
+        regression["plating"]["colony_volume_ul"]
     );
     assert_eq!(
         first_plating["technique"]["dispense"]["kind"],
@@ -1103,12 +1101,12 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(plate_map["entries"][0]["subject"], "composite_strain_1");
     assert_eq!(plate_map["entries"][0]["dilution_ratio"], "1/10");
     assert_eq!(plate_map["entries"][2]["dilution_ratio"], "1/100");
-    let expected_agar_wells = equivalence["lineage_exemplar"]["agar_dilution_1_wells"]
+    let expected_agar_wells = regression["lineage_exemplar"]["agar_dilution_1_wells"]
         .as_array()
         .unwrap()
         .iter()
         .chain(
-            equivalence["lineage_exemplar"]["agar_dilution_2_wells"]
+            regression["lineage_exemplar"]["agar_dilution_2_wells"]
                 .as_array()
                 .unwrap(),
         )

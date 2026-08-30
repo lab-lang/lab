@@ -24,6 +24,15 @@ This example is the Lab form of PUDU's documented `workflow_example`, not a reco
 
 PUDU's fixtures use SBOL 2 versioned identities ending in `/1`; Lab's SBOL 3 designs and inventory use the corresponding persistent identities without the terminal version segment. That is the only identity normalization needed to compare the program inputs.
 
+To run both complete toolchains and compare their generated handoffs, lineage, thermal intent, and normalized Opentrons actions, use:
+
+```bash
+cargo build -p lab-cli
+../../scripts/compare_pudu_golden_gate.py --pudu-repository ~/git/RudgeLab/PUDU
+```
+
+The comparison retains both raw output trees, writes every normalized facet and a machine-readable `comparison.json`, and exits nonzero if a required facet differs. See the [PUDU workflow equivalence audit](../../docs/integrations/pudu-workflow-equivalence.md) for the exact boundary and the explicitly reported upstream and facility differences.
+
 ## Check and build the experiment
 
 From `examples/golden-gate`, run:
