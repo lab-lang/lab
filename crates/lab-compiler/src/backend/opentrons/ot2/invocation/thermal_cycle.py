@@ -28,30 +28,22 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         "Cycle only the staged reactions in wells " + ", ".join(execution["reaction_wells"])
     )
     thermocycler.close_lid()
-    thermocycler.set_lid_temperature(execution["lid_temperature_c"])
-    thermocycler.execute_profile(
-        steps=[
-            {
-                "temperature": execution["digest_temperature_c"],
-                "hold_time_minutes": execution["digest_minutes"],
-            },
-            {
-                "temperature": execution["ligate_temperature_c"],
-                "hold_time_minutes": execution["ligate_minutes"],
-            },
-        ],
-        repetitions=execution["cycles"],
-        block_max_volume=execution["reaction_volume_ul"],
-    )
-    thermocycler.set_block_temperature(
-        execution["final_digest_temperature_c"],
-        hold_time_minutes=execution["final_digest_minutes"],
-    )
-    thermocycler.set_block_temperature(
-        execution["heat_inactivation_temperature_c"],
-        hold_time_minutes=execution["heat_inactivation_minutes"],
-    )
-    thermocycler.set_block_temperature(execution["hold_temperature_c"])
+    if execution["lid_temperature_c"] is not None:
+        thermocycler.set_lid_temperature(execution["lid_temperature_c"])
+    for stage in execution["profile"]["stages"]:
+        thermocycler.execute_profile(
+            steps=[
+                {
+                    "temperature": step["celsius"],
+                    "hold_time_seconds": step["hold_seconds"],
+                }
+                for step in stage["steps"]
+            ],
+            repetitions=stage["repeats"],
+            block_max_volume=execution["volume_each_ul"],
+        )
+    if execution["final_hold_celsius"] is not None:
+        thermocycler.set_block_temperature(execution["final_hold_celsius"])
     thermocycler.deactivate_lid()
     thermocycler.open_lid()
     protocol.comment("Thermal cycling complete. Recover the named Procedure output before continuing.")

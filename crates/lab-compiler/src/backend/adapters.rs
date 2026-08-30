@@ -10,7 +10,11 @@ use std::collections::BTreeSet;
 use lab_capability::{
     CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
 };
-use lab_procedure::vocabulary::{IN_WELL_MIXING, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1};
+use lab_procedure::vocabulary::{
+    CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
+    METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
+    THERMAL_PROGRAM_V1,
+};
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
 };
@@ -24,7 +28,7 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
-use crate::procedure::{SERIAL_DILUTION, SETUP_GOLDEN_GATE};
+use crate::procedure::{CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE};
 use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
@@ -145,19 +149,34 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
-                vec![pipetting_implementation(
-                    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
-                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
-                    [ControlMode::ReviewedFile],
-                    [],
-                    [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: false,
-                        runtime: false,
-                    },
-                )?],
+                vec![
+                    pipetting_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
+                        [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                    )?,
+                    thermal_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                        false,
+                    )?,
+                ],
                 schema_value::<Ot2AdapterProfile>()?,
             )?,
             descriptor(
@@ -175,19 +194,34 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
-                vec![pipetting_implementation(
-                    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
-                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
-                    [ControlMode::ReviewedFile],
-                    [],
-                    [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: false,
-                        runtime: false,
-                    },
-                )?],
+                vec![
+                    pipetting_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
+                        [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                    )?,
+                    thermal_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexThermalV1",
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                        false,
+                    )?,
+                ],
                 schema_value::<FlexAdapterProfile>()?,
             )?,
             descriptor(
@@ -231,11 +265,23 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [THERMOCYCLE_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: false,
+                    lowering: true,
                     simulation: true,
                     runtime: true,
                 },
-                Vec::new(),
+                vec![thermal_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#InhecoOdtcThermalV1",
+                    [ControlMode::Sila2],
+                    [THERMOCYCLE_RUN_FORMAT],
+                    [THERMOCYCLE_RUN_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: true,
+                        runtime: true,
+                    },
+                    true,
+                )?],
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
             descriptor(
@@ -276,19 +322,34 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: true,
                     runtime: false,
                 },
-                vec![pipetting_implementation(
-                    "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
-                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
-                    [ControlMode::ReviewedFile],
-                    [SIMULATION_RUN_FORMAT],
-                    [SIMULATION_RUN_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: true,
-                        runtime: false,
-                    },
-                )?],
+                vec![
+                    pipetting_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
+                        [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [ControlMode::ReviewedFile],
+                        [SIMULATION_RUN_FORMAT],
+                        [SIMULATION_RUN_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: true,
+                            runtime: false,
+                        },
+                    )?,
+                    thermal_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorThermalV1",
+                        [ControlMode::ReviewedFile],
+                        [SIMULATION_RUN_FORMAT],
+                        [SIMULATION_RUN_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: true,
+                            runtime: false,
+                        },
+                        true,
+                    )?,
+                ],
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
         ],
@@ -371,6 +432,54 @@ fn pipetting_implementation<const O: usize, const M: usize, const A: usize, cons
                 })
             })
             .collect::<Result<_, _>>()?,
+        control_modes: control_modes.into_iter().collect(),
+        accepted_run_formats: strings(accepted_run_formats),
+        emitted_run_formats: strings(emitted_run_formats),
+        services,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn thermal_implementation<const M: usize, const A: usize, const E: usize>(
+    id: &'static str,
+    control_modes: [ControlMode; M],
+    accepted_run_formats: [&'static str; A],
+    emitted_run_formats: [&'static str; E],
+    services: AdapterServices,
+    controlled_ramp: bool,
+) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
+    let mut capability_kinds = [
+        PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
+        HEATED_LID_TEMPERATURE_CONTROL,
+    ]
+    .into_iter()
+    .map(|kind| {
+        CapabilityKind::new(kind).map_err(|error| {
+            AdapterProfileContractError::Contract(format!(
+                "Procedure implementation '{id}' declares an invalid capability: {error}"
+            ))
+        })
+    })
+    .collect::<Result<BTreeSet<_>, _>>()?;
+    if controlled_ramp {
+        capability_kinds.insert(
+            CapabilityKind::new(CONTROLLED_TEMPERATURE_RAMP)
+                .expect("built-in capability is an absolute IRI"),
+        );
+    }
+    Ok(ProcedureImplementationDescriptor {
+        id: ProcedureImplementationId::new(id).map_err(|error| {
+            AdapterProfileContractError::Contract(format!(
+                "Procedure implementation '{id}' has an invalid identity: {error}"
+            ))
+        })?,
+        contract: ProcedureContractId::new(THERMAL_PROGRAM_V1)
+            .expect("built-in Procedure contract is an absolute IRI"),
+        operations: [OperationId::new(CYCLE_GOLDEN_GATE)
+            .expect("built-in Procedure operation is an absolute IRI")]
+        .into_iter()
+        .collect(),
+        capability_kinds,
         control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
@@ -518,6 +627,14 @@ pub fn lower_adapter_invocation_with_adapter(
                     driver: driver.to_owned(),
                     message,
                 })
+        }
+        "inheco.odtc" => {
+            crate::backend::inheco::odtc::lower_invocation(invocation_plan, invocation).map_err(
+                |message| AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                },
+            )
         }
         "lab.simulator" => lower_simulator_invocation(invocation_plan, invocation),
         _ => Err(AdapterLoweringError::UnsupportedInvocation {
@@ -876,6 +993,26 @@ mod tests {
             .unwrap();
         assert!(ot2.services.lowering);
         assert!(!ot2.services.runtime);
+        let ot2_thermal = ot2
+            .procedure_implementations
+            .iter()
+            .find(|implementation| implementation.contract.as_str() == THERMAL_PROGRAM_V1)
+            .expect("OT-2 implements the canonical thermal contract");
+        assert!(
+            ot2_thermal
+                .operations
+                .contains(&OperationId::new(CYCLE_GOLDEN_GATE).unwrap())
+        );
+        assert_eq!(
+            ot2_thermal.capability_kinds,
+            [
+                PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
+                HEATED_LID_TEMPERATURE_CONTROL,
+            ]
+            .into_iter()
+            .map(|kind| CapabilityKind::new(kind).unwrap())
+            .collect()
+        );
 
         let flex = catalog
             .adapters
@@ -888,6 +1025,26 @@ mod tests {
                 .contains(OPENTRONS_PROTOCOL_DESIGNER_FORMAT)
         );
         assert!(!flex.services.runtime);
+
+        let odtc = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "inheco.odtc")
+            .unwrap();
+        assert!(odtc.services.lowering);
+        assert!(odtc.services.runtime);
+        let odtc_thermal = &odtc.procedure_implementations[0];
+        assert_eq!(odtc_thermal.contract.as_str(), THERMAL_PROGRAM_V1);
+        assert!(
+            odtc_thermal
+                .capability_kinds
+                .contains(&CapabilityKind::new(CONTROLLED_TEMPERATURE_RAMP).unwrap())
+        );
+        assert!(
+            odtc_thermal
+                .emitted_run_formats
+                .contains(THERMOCYCLE_RUN_FORMAT)
+        );
 
         let simulator = catalog
             .adapters

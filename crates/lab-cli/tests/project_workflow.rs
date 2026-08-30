@@ -139,6 +139,58 @@ fn assert_serial_dilutions_use_pipetting(
     }
 }
 
+fn assert_golden_gate_uses_thermal_program(
+    invocations: &Value,
+    expected_asset: &str,
+    expected_driver: &str,
+    expected_implementation: &str,
+) {
+    let tasks = invocations["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|method| method["tasks"].as_array().unwrap())
+        .filter(|task| {
+            task["operation"]
+                == "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(tasks.len(), 2);
+    for task in tasks {
+        assert_eq!(
+            task["program"]["contract"],
+            "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1"
+        );
+        let program = &task["program"]["body"];
+        assert_eq!(program["load"]["input"], 0);
+        assert_eq!(program["load"]["output"], "product");
+        assert_eq!(program["load"]["volume_each"]["value"]["value"], "20");
+        assert_eq!(program["stages"][0]["id"], "digest-ligate-cycle");
+        assert_eq!(program["stages"][0]["steps"][0]["id"], "digest");
+        assert_eq!(program["stages"][0]["steps"][1]["id"], "ligate");
+        assert_eq!(program["stages"][1]["steps"][0]["id"], "final-digest");
+        assert_eq!(program["stages"][1]["steps"][1]["id"], "heat-inactivation");
+        assert_eq!(program["final_hold"]["value"]["value"], "4");
+        let requirements = task["requirements"].as_array().unwrap();
+        assert_eq!(requirements.len(), 2);
+        assert_eq!(
+            requirements
+                .iter()
+                .map(|requirement| requirement["capability_kind"].as_str().unwrap())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                "https://sbol.io/ns/capability#HeatedLidTemperatureControl",
+                "https://sbol.io/ns/capability#ProgrammedBlockTemperatureControl",
+            ])
+        );
+        assert!(requirements.iter().all(|requirement| {
+            requirement["asset"] == expected_asset
+                && requirement["adapter"]["driver"] == expected_driver
+                && requirement["procedure_implementation"] == expected_implementation
+        }));
+    }
+}
+
 #[test]
 fn new_check_build_and_metadata_form_one_project_loop() {
     let project = temporary_project();
@@ -916,7 +968,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     );
     assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 30);
+    assert_eq!(requirements.len(), 32);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -945,6 +997,12 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         "opentrons.ot2",
         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
     );
+    assert_golden_gate_uses_thermal_program(
+        &invocations,
+        "https://example.org/golden-gate/opentrons_ot2",
+        "opentrons.ot2",
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
+    );
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
     assert_eq!(lowering["schema_version"], "lab.facility-lowering.v4");
@@ -957,13 +1015,16 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     );
     assert_eq!(route["driver"], "opentrons.ot2");
     assert_eq!(
-        route["procedure_implementations"][0],
-        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1"
+        route["procedure_implementations"],
+        serde_json::json!([
+            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
+            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
+        ])
     );
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 14);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 16);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
@@ -1125,22 +1186,22 @@ asset = "https://example.org/golden-gate/opentrons_ot2"
 driver = "opentrons.ot2"
 profile = "adapters/opentrons-ot2.toml""#;
     assert!(manifest.contains(configured_ot2));
-    let star_and_simulator_bindings = r#"[[execution.adapters]]
+    let star_and_odtc_bindings = r#"[[execution.adapters]]
 asset = "https://example.org/golden-gate/hamilton_star"
 driver = "hamilton.star"
 profile = "adapters/hamilton-star.toml"
 
 [[execution.adapters]]
-asset = "https://example.org/golden-gate/thermal_simulator"
-driver = "lab.simulator"
-profile = "adapters/simulator.toml""#;
+asset = "https://example.org/golden-gate/inheco_odtc"
+driver = "inheco.odtc"
+profile = "adapters/inheco-odtc.toml""#;
     std::fs::write(
         &manifest_path,
-        manifest.replace(configured_ot2, star_and_simulator_bindings),
+        manifest.replace(configured_ot2, star_and_odtc_bindings),
     )
     .unwrap();
     std::fs::write(project.join("adapters/hamilton-star.toml"), "").unwrap();
-    std::fs::write(project.join("adapters/simulator.toml"), "").unwrap();
+    std::fs::write(project.join("adapters/inheco-odtc.toml"), "").unwrap();
 
     let inventory_path = project.join("inventory/facility.ttl");
     let inventory = std::fs::read_to_string(&inventory_path)
@@ -1150,24 +1211,49 @@ profile = "adapters/simulator.toml""#;
             "Opentrons OT-2 with Thermocycler Module",
             "Hamilton STAR liquid handler",
         )
-        .replace("OT-2 with Thermocycler Module Gen2", "STAR");
+        .replace("OT-2 with Thermocycler Module Gen2", "STAR")
+        .replace(
+            "hamilton_star_programmed_block_temperature_control",
+            "inheco_odtc_programmed_block_temperature_control",
+        )
+        .replace(
+            "hamilton_star_heated_lid_temperature_control",
+            "inheco_odtc_heated_lid_temperature_control",
+        )
+        .replace("hamilton_star_minimum_block_temperature", "inheco_odtc_minimum_block_temperature")
+        .replace("hamilton_star_maximum_block_temperature", "inheco_odtc_maximum_block_temperature")
+        .replace("hamilton_star_maximum_sample_count", "inheco_odtc_maximum_sample_count")
+        .replace("hamilton_star_minimum_thermal_sample_volume", "inheco_odtc_minimum_thermal_sample_volume")
+        .replace("hamilton_star_maximum_thermal_sample_volume", "inheco_odtc_maximum_thermal_sample_volume")
+        .replace("hamilton_star_minimum_lid_temperature", "inheco_odtc_minimum_lid_temperature")
+        .replace("hamilton_star_maximum_lid_temperature", "inheco_odtc_maximum_lid_temperature")
+        .replace(
+            "fac:capabilityKind cap:ProgrammedBlockTemperatureControl ;\n    fac:qualification fac:Plannable ;\n    fac:controlMode fac:ReviewedFileControl ;",
+            "fac:capabilityKind cap:ProgrammedBlockTemperatureControl ;\n    fac:qualification fac:Plannable ;\n    fac:controlMode fac:SiLA2Control ;",
+        )
+        .replace(
+            "fac:capabilityKind cap:HeatedLidTemperatureControl ;\n    fac:qualification fac:Plannable ;\n    fac:controlMode fac:ReviewedFileControl ;",
+            "fac:capabilityKind cap:HeatedLidTemperatureControl ;\n    fac:qualification fac:Plannable ;\n    fac:controlMode fac:SiLA2Control ;",
+        );
     let combined_offerings = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing,
-        ex:hamilton_star_thermal_cycling ."#;
+        ex:inheco_odtc_programmed_block_temperature_control,
+        ex:inheco_odtc_heated_lid_temperature_control ."#;
     assert!(inventory.contains(combined_offerings));
     let split_assets = r#"    fac:capability ex:hamilton_star_metered_liquid_transfer,
         ex:hamilton_star_in_well_mixing .
 
-ex:thermal_simulator
+ex:inheco_odtc
     a sbol:TopLevel, fac:Asset ;
-    sbol:displayId "thermal_simulator" ;
+    sbol:displayId "inheco_odtc" ;
     sbol:hasNamespace <https://example.org/golden-gate> ;
-    sbol:name "Thermal cycling semantic simulator" ;
+    sbol:name "Inheco ODTC thermocycler" ;
     fac:facility ex:facility ;
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:automation_bench ;
     fac:isActive true ;
-    fac:capability ex:hamilton_star_thermal_cycling ."#;
+    fac:capability ex:inheco_odtc_programmed_block_temperature_control,
+        ex:inheco_odtc_heated_lid_temperature_control ."#;
     std::fs::write(
         &inventory_path,
         inventory.replace(combined_offerings, split_assets),
@@ -1199,7 +1285,7 @@ ex:thermal_simulator
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         drivers,
-        std::collections::BTreeSet::from(["hamilton.star", "lab.simulator"])
+        std::collections::BTreeSet::from(["hamilton.star", "inheco.odtc"])
     );
     let assets = routes
         .iter()
@@ -1209,7 +1295,7 @@ ex:thermal_simulator
         assets,
         std::collections::BTreeSet::from([
             "https://example.org/golden-gate/hamilton_star",
-            "https://example.org/golden-gate/thermal_simulator",
+            "https://example.org/golden-gate/inheco_odtc",
         ])
     );
     let lowered_requirements = routes
@@ -1221,12 +1307,12 @@ ex:thermal_simulator
         .flat_map(|route| route["artifacts"].as_array().unwrap())
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(lowered_requirements, 14);
+    assert_eq!(lowered_requirements, 16);
     assert_eq!(automation_artifacts.len(), 8);
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
             artifact["format"].as_str(),
-            Some("lab.star-run.v0" | "lab.simulation-run.v1")
+            Some("lab.star-run.v0" | "lab.thermocycle-run.v0")
         ) && artifact["sha256"].as_str().unwrap().len() == 64
     }));
 
@@ -1250,7 +1336,7 @@ ex:thermal_simulator
         .collect::<Vec<_>>();
     assert_eq!(reviewed_documents.len(), automation_artifacts.len());
     let mut star_documents = 0;
-    let mut simulation_documents = 0;
+    let mut thermocycle_documents = 0;
     for document in reviewed_documents {
         let path = document["path"].as_str().unwrap();
         match document["format"].as_str().unwrap() {
@@ -1261,16 +1347,20 @@ ex:thermal_simulator
                 assert_eq!(run["format"], "lab.star-run.v0");
                 assert!(!run["steps"].as_array().unwrap().is_empty());
             }
-            "lab.simulation-run.v1" => {
-                simulation_documents += 1;
-                assert!(path.starts_with("assets/thermal_simulator/"));
+            "lab.thermocycle-run.v0" => {
+                thermocycle_documents += 1;
+                assert!(path.starts_with("assets/inheco_odtc/"));
+                let run = read_json(out_dir.join(path));
+                assert_eq!(run["format"], "lab.thermocycle-run.v0");
+                assert_eq!(run["profile"]["stages"][0]["repeats"], 75);
+                assert_eq!(run["fill_volume_ul"], 20.0);
             }
             format => panic!("unexpected invocation document format: {format}"),
         }
         assert!(out_dir.join(path).is_file());
     }
     assert!(star_documents > 0);
-    assert!(simulation_documents > 0);
+    assert!(thermocycle_documents > 0);
 
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
     assert_serial_dilutions_use_pipetting(
@@ -1278,6 +1368,12 @@ ex:thermal_simulator
         "https://example.org/golden-gate/hamilton_star",
         "hamilton.star",
         "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
+    );
+    assert_golden_gate_uses_thermal_program(
+        &invocations,
+        "https://example.org/golden-gate/inheco_odtc",
+        "inheco.odtc",
+        "https://www.lab-compiler.org/ns/adapter-implementation#InhecoOdtcThermalV1",
     );
 
     let star_route = routes
@@ -1312,6 +1408,7 @@ ex:thermal_simulator
         String::from_utf8_lossy(&dry_run.stderr)
     );
     assert!(String::from_utf8_lossy(&dry_run.stdout).contains("through hamilton.star"));
+    assert!(String::from_utf8_lossy(&dry_run.stdout).contains("through inheco.odtc"));
 
     let result: Value = serde_json::from_slice(&built.stdout).unwrap();
     assert_eq!(
@@ -1412,7 +1509,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 31);
+    assert_eq!(requirements.len(), 33);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1600,7 +1697,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
     assert_eq!(route["driver"], "opentrons.flex");
     assert!(route.get("scope").is_none());
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 14);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 16);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root
@@ -1645,6 +1742,12 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         "https://example.org/golden-gate/opentrons_flex",
         "opentrons.flex",
         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
+    );
+    assert_golden_gate_uses_thermal_program(
+        &invocations,
+        "https://example.org/golden-gate/opentrons_flex",
+        "opentrons.flex",
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexThermalV1",
     );
 
     let protocol: Value = serde_json::from_str(

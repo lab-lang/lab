@@ -7,21 +7,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lab_instruments::{ThermalProfile, ThermalStage, ThermalStep};
 use lab_procedure::{
     FluidPathPolicy, Location, PipettingStep, ValidatedProcedureProgram, VesselRole, Volume,
 };
 
-use crate::backend::invocation::{MICROLITRE, ProcedureTaskView, material_role};
+use crate::backend::invocation::{ProcedureTaskView, material_role};
 use crate::planning::{
     AllocatedProcedureTask, AllocatedRequirementBinding, PlanningValueSource,
     SelectedMaterialBinding,
 };
 
-pub(crate) use crate::procedure::{SERIAL_DILUTION, SETUP_GOLDEN_GATE};
-pub(crate) const CYCLE_GOLDEN_GATE: &str =
-    "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction";
-
-pub(crate) const THERMAL_CYCLING: &str = "https://sbol.io/ns/capability#ThermalCycling";
+pub(crate) use crate::procedure::{CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE};
 
 pub(crate) struct MaterialVolume<'a> {
     pub(crate) role: String,
@@ -38,21 +35,13 @@ pub(crate) struct SetupGoldenGate<'a> {
     pub(crate) mix_volume_ul: u32,
 }
 
-pub(crate) struct ThermalCycleGoldenGate {
+pub(crate) struct NormalizedThermalProgram {
     pub(crate) artifact: String,
-    pub(crate) replicates: usize,
-    pub(crate) reaction_volume_ul: u32,
-    pub(crate) cycles: u32,
-    pub(crate) digest_temperature_c: u32,
-    pub(crate) digest_minutes: u32,
-    pub(crate) ligate_temperature_c: u32,
-    pub(crate) ligate_minutes: u32,
-    pub(crate) lid_temperature_c: u32,
-    pub(crate) final_digest_temperature_c: u32,
-    pub(crate) final_digest_minutes: u32,
-    pub(crate) heat_inactivation_temperature_c: u32,
-    pub(crate) heat_inactivation_minutes: u32,
-    pub(crate) hold_temperature_c: u32,
+    pub(crate) sample_count: usize,
+    pub(crate) volume_each_ul: f64,
+    pub(crate) lid_temperature_c: Option<f64>,
+    pub(crate) profile: ThermalProfile,
+    pub(crate) final_hold_celsius: Option<f64>,
 }
 
 pub(crate) struct SerialDilution<'a> {
@@ -94,7 +83,12 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
         )
     })?;
     validate_normalized_requirements(adapter, task, requirements, &validated)?;
-    let ValidatedProcedureProgram::PipettingV1(program) = validated;
+    let ValidatedProcedureProgram::PipettingV1(program) = validated else {
+        return Err(format!(
+            "{adapter} Golden Gate task '{}' normalized to a non-pipetting contract",
+            task.id
+        ));
+    };
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
     let artifact = view.text_parameter("artifact")?;
@@ -335,63 +329,107 @@ fn normalized_material_role(role: &str) -> String {
     }
 }
 
-pub(crate) fn thermal_cycle_golden_gate(
+pub(crate) fn normalized_thermal_program(
     adapter: &str,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
-) -> Result<ThermalCycleGoldenGate, String> {
-    use crate::backend::invocation::{DEGREE_CELSIUS, MINUTE};
-
+    requirements: &[&AllocatedRequirementBinding],
+) -> Result<NormalizedThermalProgram, String> {
+    if task.operation.as_str() != CYCLE_GOLDEN_GATE {
+        return Err(format!(
+            "{adapter} expected normalized Golden Gate thermal cycling, found operation '{}' in task '{}'",
+            task.operation, task.id
+        ));
+    }
+    let document = task.program.as_ref().ok_or_else(|| {
+        format!(
+            "{adapter} Procedure task '{}' is missing its normalized thermal program",
+            task.id
+        )
+    })?;
+    let validated = document.validate().map_err(|error| {
+        format!(
+            "{adapter} Procedure task '{}' has an invalid normalized program: {error}",
+            task.id
+        )
+    })?;
+    validate_normalized_requirements(adapter, task, requirements, &validated)?;
+    let ValidatedProcedureProgram::ThermalV1(program) = validated else {
+        return Err(format!(
+            "{adapter} thermal task '{}' normalized to a non-thermal contract",
+            task.id
+        ));
+    };
+    let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
-    view.require_capability(requirement, THERMAL_CYCLING)?;
     view.require_material_roles(&[])?;
     let artifact = view.text_parameter("artifact")?;
-    let replicates = view.usize_parameter("assembly_replicates", None)?;
-    view.require_nonzero("assembly_replicates", replicates as u32)?;
-    let reaction_volume_ul = view.integer_parameter("reaction_volume_ul", Some(MICROLITRE))?;
-    let cycles = view.integer_parameter("cycles", None)?;
-    let digest_temperature_c =
-        view.integer_parameter("digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let digest_minutes = view.integer_parameter("digest_minutes", Some(MINUTE))?;
-    let ligate_temperature_c =
-        view.integer_parameter("ligate_temperature_c", Some(DEGREE_CELSIUS))?;
-    let ligate_minutes = view.integer_parameter("ligate_minutes", Some(MINUTE))?;
-    let lid_temperature_c = view.integer_parameter("lid_temperature_c", Some(DEGREE_CELSIUS))?;
-    let final_digest_temperature_c =
-        view.integer_parameter("final_digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let final_digest_minutes = view.integer_parameter("final_digest_minutes", Some(MINUTE))?;
-    let heat_inactivation_temperature_c =
-        view.integer_parameter("heat_inactivation_temperature_c", Some(DEGREE_CELSIUS))?;
-    let heat_inactivation_minutes =
-        view.integer_parameter("heat_inactivation_minutes", Some(MINUTE))?;
-    let hold_temperature_c = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
-    for (name, value) in [
-        ("reaction_volume_ul", reaction_volume_ul),
-        ("cycles", cycles),
-        ("digest_minutes", digest_minutes),
-        ("ligate_minutes", ligate_minutes),
-        ("lid_temperature_c", lid_temperature_c),
-        ("final_digest_minutes", final_digest_minutes),
-        ("heat_inactivation_minutes", heat_inactivation_minutes),
-    ] {
-        view.require_nonzero(name, value)?;
-    }
-
-    Ok(ThermalCycleGoldenGate {
+    let lid_temperature_c = program
+        .lid_temperature
+        .as_ref()
+        .map(|temperature| finite_f64(adapter, task, "lid temperature", temperature.value()))
+        .transpose()?;
+    let profile = ThermalProfile {
+        stages: program
+            .stages
+            .iter()
+            .map(|stage| {
+                Ok(ThermalStage {
+                    repeats: stage.repeats,
+                    steps: stage
+                        .steps
+                        .iter()
+                        .map(|step| {
+                            Ok(ThermalStep {
+                                celsius: finite_f64(
+                                    adapter,
+                                    task,
+                                    "block temperature",
+                                    step.temperature.value(),
+                                )?,
+                                hold_seconds: finite_f64(
+                                    adapter,
+                                    task,
+                                    "hold duration",
+                                    step.hold.value(),
+                                )?,
+                                ramp_c_per_s: step
+                                    .ramp_rate
+                                    .as_ref()
+                                    .map(|rate| {
+                                        finite_f64(adapter, task, "ramp rate", rate.value())
+                                    })
+                                    .transpose()?,
+                                lid_celsius: lid_temperature_c,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, String>>()?,
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+    };
+    Ok(NormalizedThermalProgram {
         artifact,
-        replicates,
-        reaction_volume_ul,
-        cycles,
-        digest_temperature_c,
-        digest_minutes,
-        ligate_temperature_c,
-        ligate_minutes,
+        sample_count: usize::try_from(program.load.sample_count).map_err(|_| {
+            format!(
+                "{adapter} Procedure task '{}' sample count does not fit this platform",
+                task.id
+            )
+        })?,
+        volume_each_ul: finite_f64(
+            adapter,
+            task,
+            "sample volume",
+            program.load.volume_each.value(),
+        )?,
         lid_temperature_c,
-        final_digest_temperature_c,
-        final_digest_minutes,
-        heat_inactivation_temperature_c,
-        heat_inactivation_minutes,
-        hold_temperature_c,
+        profile,
+        final_hold_celsius: program
+            .final_hold
+            .as_ref()
+            .map(|temperature| {
+                finite_f64(adapter, task, "final hold temperature", temperature.value())
+            })
+            .transpose()?,
     })
 }
 
@@ -424,7 +462,12 @@ pub(crate) fn normalized_serial_dilution<'a>(
         )
     })?;
     validate_normalized_requirements(adapter, task, requirements, &validated)?;
-    let ValidatedProcedureProgram::PipettingV1(program) = validated;
+    let ValidatedProcedureProgram::PipettingV1(program) = validated else {
+        return Err(format!(
+            "{adapter} serial-dilution task '{}' normalized to a non-pipetting contract",
+            task.id
+        ));
+    };
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
     view.require_material_roles(&["medium"])?;
@@ -621,4 +664,25 @@ pub(crate) fn normalized_serial_dilution<'a>(
         mix_cycles,
         mix_volume_ul,
     })
+}
+
+fn finite_f64(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    quantity: &str,
+    value: &lab_capability::ExactDecimal,
+) -> Result<f64, String> {
+    let parsed = value.to_string().parse::<f64>().map_err(|_| {
+        format!(
+            "{adapter} Procedure task '{}' {quantity} `{value}` cannot be represented by this adapter",
+            task.id
+        )
+    })?;
+    if !parsed.is_finite() {
+        return Err(format!(
+            "{adapter} Procedure task '{}' {quantity} `{value}` is outside this adapter's finite range",
+            task.id
+        ));
+    }
+    Ok(parsed)
 }

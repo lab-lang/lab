@@ -9,6 +9,7 @@ mod id;
 mod pipetting;
 mod program;
 mod quantity;
+mod thermal;
 pub mod vocabulary;
 
 pub use capability::{BindingScope, CapabilityClause, CapabilityFormula};
@@ -19,4 +20,10 @@ pub use pipetting::{
     ValidatedPipettingProgramV1, Vessel, VesselRole,
 };
 pub use program::{ProcedureProgram, ProcedureProgramValidationError, ValidatedProcedureProgram};
-pub use quantity::{QuantityError, Temperature, TemperatureRange, Volume};
+pub use quantity::{
+    Duration, QuantityError, Temperature, TemperatureRampRate, TemperatureRange, Volume,
+};
+pub use thermal::{
+    ThermalLoad, ThermalProgramV1, ThermalProgramValidationError, ThermalStage, ThermalStep,
+    ValidatedThermalProgramV1,
+};

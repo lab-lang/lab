@@ -7,6 +7,7 @@ mod constraints;
 mod document;
 mod error;
 pub mod hamilton;
+pub mod inheco;
 mod invocation;
 pub mod opentrons;
 mod procedure;

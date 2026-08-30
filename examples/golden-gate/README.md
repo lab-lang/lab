@@ -31,13 +31,13 @@ lab build
 
 ## Facility-derived outputs
 
-The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the laboratory's zones, exact stock MaterialLots, a manual workstation, and an Opentrons OT-2 Asset with plannable liquid-handling and thermal-cycling offerings. The local adapter binding states that Lab's `opentrons.ot2` implementation can operate that exact Asset.
+The package selects `inventory/facility.ttl`, a conformant SBOLInventory document containing the laboratory's zones, exact stock MaterialLots, a manual workstation, and an Opentrons OT-2 Asset with plannable metered-transfer, in-well-mixing, programmed-block-temperature, and heated-lid offerings. The thermal offering parameters state the installed module's 96-sample capacity, 10–100 µL working-volume range, 4–99 °C block range, and 37–110 °C lid range from the [Thermocycler Module GEN2 product description](https://insights.opentrons.com/hubfs/5383285/Products/Modules/Thermocycler%20GEN2%20White%20Paper.pdf). The local adapter binding states that Lab's `opentrons.ot2` implementation can operate that exact Asset.
 
 ```bash
 lab run .lab/build --dry-run
 ```
 
-The facility phase selects 22 Method instances and binds their 24 requirements to exact CapabilityOfferings and Assets. Because the allocated OT-2 has an installed lowering adapter, `lab build` emits independently reviewable Python protocols for the eight supported Procedure tasks without reading a package target. Manual provisioning, transformation, recovery, and plating remain explicit allocated work in the facility-wide plan without being misrepresented as OT-2 code. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
+The facility phase selects 22 Method instances and binds their 32 requirements to exact CapabilityOfferings and Assets. Sixteen fine-grained requirements belong to the eight normalized tasks allocated to the OT-2: each setup or dilution jointly requires transfer and mixing, and each thermal program jointly requires block and heated-lid control. Because the allocated OT-2 has an installed lowering adapter for both canonical contracts, `lab build` emits independently reviewable Python protocols for those eight tasks without reading a package target. Manual provisioning, transformation, recovery, and plating remain explicit allocated work in the facility-wide plan without being misrepresented as OT-2 code. `lab plan` remains available when only this facility phase should be written separately under `.lab/plan/`.
 
 | Path | Contents |
 | --- | --- |
@@ -54,7 +54,7 @@ The facility phase selects 22 Method instances and binds their 24 requirements t
 
 The Procedure graph preserves explicit typed edges between reaction setup and thermal cycling and from each built plasmid into its dependent strain workflows. The reviewed execution DAG is derived from those same selected values; an adapter does not reconstruct a separate wave or artifact graph.
 
-The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/build --dry-run` verifies the inventory, compiler evidence, adapter profile, every exact-task protocol and support-artifact digest, and the complete DAG before narrating the plan. Each generated protocol is tied to one exact allocated Requirement, but the example does not claim that this Asset is hardware-qualified for live execution.
+The OT-2 offerings are `Plannable` with `ReviewedFileControl`. `lab run .lab/build --dry-run` verifies the inventory, compiler evidence, adapter profile, every exact-task protocol and support-artifact digest, and the complete DAG before narrating the plan. Each generated protocol is tied to one exact allocated Procedure task and its complete atomic requirement set, but the example does not claim that this Asset is hardware-qualified for live execution.
 
 ## Use another instrument
 

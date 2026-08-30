@@ -153,7 +153,11 @@ fn automated_golden_gate() -> MethodDefinition {
                 vec![requirement(
                     "thermal-cycling",
                     "ThermalCycling",
-                    [ControlMode::ReviewedFile, ControlMode::Api],
+                    [
+                        ControlMode::ReviewedFile,
+                        ControlMode::Api,
+                        ControlMode::Sila2,
+                    ],
                     vec![],
                 )],
             ),

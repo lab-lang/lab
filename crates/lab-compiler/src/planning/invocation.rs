@@ -491,6 +491,32 @@ fn validate_program_bindings(
                 });
             }
         }
+        ValidatedProcedureProgram::ThermalV1(program) => {
+            let program = program.as_program();
+            if usize::try_from(program.load.input).map_or(true, |input| input >= task.inputs.len())
+            {
+                return Err(AdapterInvocationValidationError::ProcedureInputBindings {
+                    task: task.id.clone(),
+                });
+            }
+            if !task.materials.is_empty() {
+                return Err(
+                    AdapterInvocationValidationError::ProcedureMaterialBindings {
+                        task: task.id.clone(),
+                    },
+                );
+            }
+            let task_outputs = task
+                .outputs
+                .iter()
+                .map(|output| output.name.as_str())
+                .collect::<BTreeSet<_>>();
+            if task_outputs != BTreeSet::from([program.load.output.as_str()]) {
+                return Err(AdapterInvocationValidationError::ProcedureOutputBindings {
+                    task: task.id.clone(),
+                });
+            }
+        }
     }
     let formula = program.capability_formula();
     if task.requirements.len() != formula.all_of.len() {

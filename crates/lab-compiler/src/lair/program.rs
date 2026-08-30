@@ -846,7 +846,9 @@ workflow main() -> Material<Plasmid>:
             .expect("Golden Gate setup is normalized before facility planning")
             .validate()
             .expect("normalized program validates");
-        let ValidatedProcedureProgram::PipettingV1(program) = program;
+        let ValidatedProcedureProgram::PipettingV1(program) = program else {
+            panic!("Golden Gate setup must normalize to the pipetting contract")
+        };
         assert_eq!(program.as_program().materials.len(), 9);
         assert_eq!(program.as_program().steps.len(), 10);
         let capabilities = program
@@ -905,6 +907,47 @@ workflow main() -> Material<Plasmid>:
             PlanningValueSource::TaskOutput { ref task, ref output }
                 if task.as_str().ends_with("::setup-reaction") && output.as_str() == "reaction"
         ));
+        let thermal = automated.tasks[1]
+            .program
+            .as_ref()
+            .expect("Golden Gate cycling is normalized before facility planning")
+            .validate()
+            .expect("normalized thermal program validates");
+        let ValidatedProcedureProgram::ThermalV1(thermal) = thermal else {
+            panic!("Golden Gate cycling must normalize to the thermal contract")
+        };
+        let thermal = thermal.as_program();
+        assert_eq!(thermal.load.input, 0);
+        assert_eq!(thermal.load.output.as_str(), "product");
+        assert_eq!(thermal.load.sample_count, 1);
+        assert_eq!(thermal.load.volume_each.value().to_string(), "20");
+        assert_eq!(thermal.stages.len(), 2);
+        assert_eq!(thermal.stages[0].repeats, 75);
+        assert_eq!(thermal.stages[0].steps[0].id.as_str(), "digest");
+        assert_eq!(thermal.stages[0].steps[0].hold.value().to_string(), "120");
+        assert_eq!(thermal.stages[0].steps[1].id.as_str(), "ligate");
+        assert_eq!(thermal.stages[0].steps[1].hold.value().to_string(), "300");
+        assert_eq!(
+            thermal
+                .final_hold
+                .as_ref()
+                .expect("Golden Gate has a final hold")
+                .value()
+                .to_string(),
+            "4"
+        );
+        assert_eq!(automated.tasks[1].requirements.len(), 2);
+        assert_eq!(
+            automated.tasks[1]
+                .requirements
+                .iter()
+                .map(|requirement| requirement.capability_kind.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                vocabulary::HEATED_LID_TEMPERATURE_CONTROL,
+                vocabulary::PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
+            ])
+        );
 
         let dilution = problem
             .choices
@@ -918,7 +961,9 @@ workflow main() -> Material<Plasmid>:
             .expect("serial dilution is normalized before facility planning")
             .validate()
             .expect("normalized serial-dilution program validates");
-        let ValidatedProcedureProgram::PipettingV1(dilution_program) = dilution_program;
+        let ValidatedProcedureProgram::PipettingV1(dilution_program) = dilution_program else {
+            panic!("serial dilution must normalize to the pipetting contract")
+        };
         assert!(dilution_program.as_program().vessels.iter().any(|vessel| {
             matches!(
                 &vessel.role,

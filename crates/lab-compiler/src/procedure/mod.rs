@@ -2,6 +2,7 @@
 
 mod golden_gate;
 mod serial_dilution;
+mod thermal_cycle;
 mod view;
 
 use lab_capability::OperationId;
@@ -13,6 +14,8 @@ pub(crate) const SETUP_GOLDEN_GATE: &str =
     "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction";
 pub(crate) const SERIAL_DILUTION: &str =
     "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture";
+pub(crate) const CYCLE_GOLDEN_GATE: &str =
+    "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResolvedProcedureParameter {
@@ -41,6 +44,7 @@ pub(crate) fn normalize_task(
     let result = match task.operation.as_str() {
         SETUP_GOLDEN_GATE => Some(golden_gate::normalize(task)),
         SERIAL_DILUTION => Some(serial_dilution::normalize(task)),
+        CYCLE_GOLDEN_GATE => Some(thermal_cycle::normalize(task)),
         _ => None,
     };
     result

@@ -2,18 +2,19 @@
 
 use std::collections::BTreeSet;
 
+use lab_instruments::ThermalProfile;
 use lab_method::LocalId;
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
 use serde::Serialize;
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
-use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks, one_requirement};
+use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::ot2::BACKEND;
 use crate::backend::opentrons::ot2::profile::Ot2AdapterProfile;
 use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    normalized_serial_dilution, thermal_cycle_golden_gate,
+    normalized_serial_dilution, normalized_thermal_program,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -94,18 +95,10 @@ enum Ot2TaskExecution {
     ThermalCycleGoldenGateReaction {
         artifact: String,
         reaction_wells: Vec<String>,
-        reaction_volume_ul: u32,
-        cycles: u32,
-        digest_temperature_c: u32,
-        digest_minutes: u32,
-        ligate_temperature_c: u32,
-        ligate_minutes: u32,
-        lid_temperature_c: u32,
-        final_digest_temperature_c: u32,
-        final_digest_minutes: u32,
-        heat_inactivation_temperature_c: u32,
-        heat_inactivation_minutes: u32,
-        hold_temperature_c: u32,
+        volume_each_ul: f64,
+        lid_temperature_c: Option<f64>,
+        profile: ThermalProfile,
+        final_hold_celsius: Option<f64>,
     },
     SerialDilution {
         culture_source: PlanningValueSource,
@@ -232,7 +225,7 @@ fn plan_task(
         )),
         CYCLE_GOLDEN_GATE => Ok((
             "thermal-cycle-golden-gate-reaction",
-            plan_cycle(profile, task, one_requirement("OT-2", task, requirements)?)?,
+            plan_cycle(profile, task, requirements)?,
         )),
         SERIAL_DILUTION => Ok((
             "serial-dilution",
@@ -311,58 +304,75 @@ fn plan_setup(
 fn plan_cycle(
     profile: &Ot2AdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<Ot2TaskExecution, String> {
-    let procedure = thermal_cycle_golden_gate("OT-2", task, requirement)?;
+    let procedure = normalized_thermal_program("OT-2", task, requirements)?;
     let view = ProcedureTaskView::new("OT-2", task);
     let reaction_wells = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
-    if procedure.replicates > reaction_wells.len() {
+    if procedure.sample_count > reaction_wells.len() {
         return Err(view.capacity_error(
             "reaction plate",
-            procedure.replicates,
+            procedure.sample_count,
             reaction_wells.len(),
         ));
     }
-    for (name, value) in [
-        ("digest_temperature_c", procedure.digest_temperature_c),
-        ("ligate_temperature_c", procedure.ligate_temperature_c),
-        ("lid_temperature_c", procedure.lid_temperature_c),
-        (
-            "final_digest_temperature_c",
-            procedure.final_digest_temperature_c,
-        ),
-        (
-            "heat_inactivation_temperature_c",
-            procedure.heat_inactivation_temperature_c,
-        ),
-        ("hold_temperature_c", procedure.hold_temperature_c),
-    ] {
-        if value > 110 {
+    for (name, value) in procedure
+        .profile
+        .stages
+        .iter()
+        .flat_map(|stage| stage.steps.iter())
+        .map(|step| ("block temperature", step.celsius))
+        .chain(
+            procedure
+                .lid_temperature_c
+                .map(|value| ("lid temperature", value)),
+        )
+        .chain(
+            procedure
+                .final_hold_celsius
+                .map(|value| ("final hold temperature", value)),
+        )
+    {
+        let maximum = if name == "lid temperature" {
+            110.0
+        } else {
+            99.0
+        };
+        if value > maximum {
             return Err(format!(
-                "OT-2 Procedure task '{}' parameter '{name}' is {value} °C, above the adapter's 110 °C limit",
-                task.id
+                "OT-2 Procedure task '{}' {name} is {value} °C, above the adapter's {maximum} °C limit",
+                task.id,
             ));
         }
+    }
+    if !(10.0..=100.0).contains(&procedure.volume_each_ul) {
+        return Err(format!(
+            "OT-2 Procedure task '{}' sample volume {} µL is outside the Thermocycler Module's 10–100 µL working range",
+            task.id, procedure.volume_each_ul
+        ));
+    }
+    if procedure
+        .profile
+        .stages
+        .iter()
+        .any(|stage| stage.steps.iter().any(|step| step.ramp_c_per_s.is_some()))
+    {
+        return Err(format!(
+            "OT-2 Procedure task '{}' requests explicit ramp control, which this implementation does not claim",
+            task.id
+        ));
     }
 
     Ok(Ot2TaskExecution::ThermalCycleGoldenGateReaction {
         artifact: procedure.artifact,
         reaction_wells: reaction_wells
             .into_iter()
-            .take(procedure.replicates)
+            .take(procedure.sample_count)
             .collect(),
-        reaction_volume_ul: procedure.reaction_volume_ul,
-        cycles: procedure.cycles,
-        digest_temperature_c: procedure.digest_temperature_c,
-        digest_minutes: procedure.digest_minutes,
-        ligate_temperature_c: procedure.ligate_temperature_c,
-        ligate_minutes: procedure.ligate_minutes,
+        volume_each_ul: procedure.volume_each_ul,
         lid_temperature_c: procedure.lid_temperature_c,
-        final_digest_temperature_c: procedure.final_digest_temperature_c,
-        final_digest_minutes: procedure.final_digest_minutes,
-        heat_inactivation_temperature_c: procedure.heat_inactivation_temperature_c,
-        heat_inactivation_minutes: procedure.heat_inactivation_minutes,
-        hold_temperature_c: procedure.hold_temperature_c,
+        profile: procedure.profile,
+        final_hold_celsius: procedure.final_hold_celsius,
     })
 }
 
@@ -574,18 +584,10 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
         }
         Ot2TaskExecution::ThermalCycleGoldenGateReaction {
             reaction_wells,
-            reaction_volume_ul,
-            cycles,
-            digest_temperature_c,
-            digest_minutes,
-            ligate_temperature_c,
-            ligate_minutes,
+            volume_each_ul,
             lid_temperature_c,
-            final_digest_temperature_c,
-            final_digest_minutes,
-            heat_inactivation_temperature_c,
-            heat_inactivation_minutes,
-            hold_temperature_c,
+            profile,
+            final_hold_celsius,
             ..
         } => {
             doc.heading(1, [text("Stage the allocated reaction")]);
@@ -595,50 +597,47 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
                 text(" of the configured thermocycler plate."),
             ]);
             doc.heading(1, [text("Review the thermal program")]);
+            let mut rows = Vec::new();
+            if let Some(lid) = lid_temperature_c {
+                rows.push(vec![
+                    vec![text("Heated lid")],
+                    vec![text(format!("{lid} °C"))],
+                    vec![text("throughout program")],
+                ]);
+            }
+            for (stage_index, stage) in profile.stages.iter().enumerate() {
+                for (step_index, step) in stage.steps.iter().enumerate() {
+                    rows.push(vec![
+                        vec![text(format!(
+                            "Stage {} step {}",
+                            stage_index + 1,
+                            step_index + 1
+                        ))],
+                        vec![text(format!("{} °C", step.celsius))],
+                        vec![text(format!("{} s × {}", step.hold_seconds, stage.repeats))],
+                    ]);
+                }
+            }
+            if let Some(hold) = final_hold_celsius {
+                rows.push(vec![
+                    vec![text("Final hold")],
+                    vec![text(format!("{hold} °C"))],
+                    vec![text("until recovery")],
+                ]);
+            }
             doc.table(
                 [
                     Column::left("Step"),
                     Column::right("Temperature"),
                     Column::right("Duration / repeats"),
                 ],
-                [
-                    vec![
-                        vec![text("Lid")],
-                        vec![text(format!("{lid_temperature_c} °C"))],
-                        vec![text("during cycling")],
-                    ],
-                    vec![
-                        vec![text("Digest")],
-                        vec![text(format!("{digest_temperature_c} °C"))],
-                        vec![text(format!("{digest_minutes} min × {cycles}"))],
-                    ],
-                    vec![
-                        vec![text("Ligate")],
-                        vec![text(format!("{ligate_temperature_c} °C"))],
-                        vec![text(format!("{ligate_minutes} min × {cycles}"))],
-                    ],
-                    vec![
-                        vec![text("Final digest")],
-                        vec![text(format!("{final_digest_temperature_c} °C"))],
-                        vec![text(format!("{final_digest_minutes} min"))],
-                    ],
-                    vec![
-                        vec![text("Heat inactivation")],
-                        vec![text(format!("{heat_inactivation_temperature_c} °C"))],
-                        vec![text(format!("{heat_inactivation_minutes} min"))],
-                    ],
-                    vec![
-                        vec![text("Hold")],
-                        vec![text(format!("{hold_temperature_c} °C"))],
-                        vec![text("until recovery")],
-                    ],
-                ],
+                rows,
             );
             doc.para([
                 text("Import "),
                 code("automation_protocol.py"),
                 text(format!(
-                    " and verify a {reaction_volume_ul} µL block volume before starting."
+                    " and verify a {volume_each_ul} µL block volume before starting."
                 )),
             ]);
             doc.para_text("Remove and label the completed reaction before another independently allocated setup/cycle pair reuses the staging wells.");

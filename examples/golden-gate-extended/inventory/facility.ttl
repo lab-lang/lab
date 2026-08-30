@@ -57,7 +57,8 @@ ex:opentrons_ot2
     fac:isActive true ;
     fac:capability ex:opentrons_ot2_metered_liquid_transfer,
         ex:opentrons_ot2_in_well_mixing,
-        ex:opentrons_ot2_thermal_cycling .
+        ex:opentrons_ot2_programmed_block_temperature_control,
+        ex:opentrons_ot2_heated_lid_temperature_control .
 
 ex:opentrons_ot2_metered_liquid_transfer
     a sbol:Identified, fac:CapabilityOffering ;
@@ -99,13 +100,76 @@ ex:opentrons_ot2_maximum_mix_volume
     fac:realValue "300"^^xsd:double ;
     fac:unit <http://qudt.org/vocab/unit/MicroL> .
 
-ex:opentrons_ot2_thermal_cycling
+ex:opentrons_ot2_programmed_block_temperature_control
     a sbol:Identified, fac:CapabilityOffering ;
-    sbol:displayId "thermal_cycling" ;
-    fac:capabilityKind cap:ThermalCycling ;
+    sbol:displayId "programmed_block_temperature_control" ;
+    fac:capabilityKind cap:ProgrammedBlockTemperatureControl ;
     fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ;
-    fac:isActive true .
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_block_temperature,
+        ex:opentrons_ot2_maximum_block_temperature,
+        ex:opentrons_ot2_maximum_sample_count,
+        ex:opentrons_ot2_minimum_thermal_sample_volume,
+        ex:opentrons_ot2_maximum_thermal_sample_volume .
+
+ex:opentrons_ot2_minimum_block_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_block_temperature" ;
+    fac:propertyKind cap:MinimumBlockTemperature ;
+    fac:realValue "4"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_block_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_block_temperature" ;
+    fac:propertyKind cap:MaximumBlockTemperature ;
+    fac:realValue "99"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_sample_count
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_sample_count" ;
+    fac:propertyKind cap:MaximumSampleCount ;
+    fac:integerValue 96 .
+
+ex:opentrons_ot2_minimum_thermal_sample_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_thermal_sample_volume" ;
+    fac:propertyKind cap:MinimumThermalSampleVolume ;
+    fac:realValue "10"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_maximum_thermal_sample_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_thermal_sample_volume" ;
+    fac:propertyKind cap:MaximumThermalSampleVolume ;
+    fac:realValue "100"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_heated_lid_temperature_control
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "heated_lid_temperature_control" ;
+    fac:capabilityKind cap:HeatedLidTemperatureControl ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_lid_temperature,
+        ex:opentrons_ot2_maximum_lid_temperature .
+
+ex:opentrons_ot2_minimum_lid_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_lid_temperature" ;
+    fac:propertyKind cap:MinimumLidTemperature ;
+    fac:realValue "37"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_lid_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_lid_temperature" ;
+    fac:propertyKind cap:MaximumLidTemperature ;
+    fac:realValue "110"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
 
 ex:manual_workstation
     a sbol:TopLevel, fac:Asset ;

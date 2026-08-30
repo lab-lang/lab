@@ -16,10 +16,6 @@ use crate::planning::{
     PlanningProcedureParameter, SelectedMaterialBinding,
 };
 
-pub(crate) const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
-pub(crate) const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
-pub(crate) const MINUTE: &str = "http://qudt.org/vocab/unit/MIN";
-
 /// One Procedure task paired with every requirement this invocation implements atomically.
 ///
 /// The current built-in automation adapters lower independently executable documents. They must
@@ -79,21 +75,6 @@ pub(crate) fn exact_invocation_tasks<'a>(
     Ok(members)
 }
 
-pub(crate) fn one_requirement<'a>(
-    adapter: &str,
-    task: &AllocatedProcedureTask,
-    requirements: &[&'a AllocatedRequirementBinding],
-) -> Result<&'a AllocatedRequirementBinding, String> {
-    let [requirement] = requirements else {
-        return Err(format!(
-            "{adapter} legacy Procedure task '{}' requires exactly one capability binding, found {}",
-            task.id,
-            requirements.len()
-        ));
-    };
-    Ok(*requirement)
-}
-
 /// Typed access to one allocated Procedure task.
 ///
 /// IDs remain the authoritative schema. Parameter access uses their stable local suffixes because
@@ -106,24 +87,6 @@ pub(crate) struct ProcedureTaskView<'adapter, 'task> {
 impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
     pub(crate) fn new(adapter: &'adapter str, task: &'task AllocatedProcedureTask) -> Self {
         Self { adapter, task }
-    }
-
-    pub(crate) fn require_capability(
-        &self,
-        requirement: &AllocatedRequirementBinding,
-        expected: &str,
-    ) -> Result<(), String> {
-        if requirement.capability_kind.as_str() != expected {
-            return Err(format!(
-                "{} Procedure task '{}' operation '{}' requires capability '{}', but its exact allocation supplies '{}'",
-                self.adapter,
-                self.task.id,
-                self.task.operation,
-                expected,
-                requirement.capability_kind
-            ));
-        }
-        Ok(())
     }
 
     pub(crate) fn require_material_roles(&self, allowed: &[&str]) -> Result<(), String> {
@@ -177,48 +140,6 @@ impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
         Ok(materials[0])
     }
 
-    pub(crate) fn integer_parameter(
-        &self,
-        name: &str,
-        expected_unit: Option<&str>,
-    ) -> Result<u32, String> {
-        let parameter = self.parameter(name)?;
-        let ProcedureValue::Scalar { value } = &parameter.value else {
-            return Err(self.parameter_type_error(name, "an integer scalar"));
-        };
-        let ScalarValue::Integer(integer) = &value.value else {
-            return Err(self.parameter_type_error(name, "an integer scalar"));
-        };
-        if value.unit.as_ref().map(|unit| unit.as_str()) != expected_unit {
-            return Err(format!(
-                "{} Procedure task '{}' parameter '{name}' must use unit {:?}, found {:?}",
-                self.adapter,
-                self.task.id,
-                expected_unit,
-                value.unit.as_ref().map(|unit| unit.as_str())
-            ));
-        }
-        integer.as_str().parse::<u32>().map_err(|_| {
-            format!(
-                "{} Procedure task '{}' parameter '{name}' must fit the unsigned 32-bit range",
-                self.adapter, self.task.id
-            )
-        })
-    }
-
-    pub(crate) fn usize_parameter(
-        &self,
-        name: &str,
-        expected_unit: Option<&str>,
-    ) -> Result<usize, String> {
-        usize::try_from(self.integer_parameter(name, expected_unit)?).map_err(|_| {
-            format!(
-                "{} Procedure task '{}' parameter '{name}' does not fit this platform's address space",
-                self.adapter, self.task.id
-            )
-        })
-    }
-
     pub(crate) fn text_parameter(&self, name: &str) -> Result<String, String> {
         let parameter = self.parameter(name)?;
         let ProcedureValue::Scalar { value: property } = &parameter.value else {
@@ -231,17 +152,6 @@ impl<'adapter, 'task> ProcedureTaskView<'adapter, 'task> {
             return Err(self.parameter_type_error(name, "unitless non-empty text"));
         }
         Ok(value.clone())
-    }
-
-    pub(crate) fn require_nonzero(&self, parameter: &str, value: u32) -> Result<(), String> {
-        if value == 0 {
-            Err(format!(
-                "{} Procedure task '{}' parameter '{parameter}' must be greater than zero",
-                self.adapter, self.task.id
-            ))
-        } else {
-            Ok(())
-        }
     }
 
     pub(crate) fn capacity_error(

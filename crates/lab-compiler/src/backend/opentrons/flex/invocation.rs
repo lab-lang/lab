@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 
+use lab_instruments::ThermalProfile;
 use lab_method::LocalId;
 use lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT;
 use opentrons_protocol::schema::Metadata;
@@ -13,12 +14,12 @@ use serde::Serialize;
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
-use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks, one_requirement};
+use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::flex::BACKEND;
 use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, Pipette, TipRacks};
 use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    normalized_serial_dilution, thermal_cycle_golden_gate,
+    normalized_serial_dilution, normalized_thermal_program,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
@@ -93,18 +94,10 @@ enum FlexTaskExecution {
     ThermalCycleGoldenGateReaction {
         artifact: String,
         reaction_wells: Vec<String>,
-        reaction_volume_ul: u32,
-        cycles: u32,
-        digest_temperature_c: u32,
-        digest_minutes: u32,
-        ligate_temperature_c: u32,
-        ligate_minutes: u32,
-        lid_temperature_c: u32,
-        final_digest_temperature_c: u32,
-        final_digest_minutes: u32,
-        heat_inactivation_temperature_c: u32,
-        heat_inactivation_minutes: u32,
-        hold_temperature_c: u32,
+        volume_each_ul: f64,
+        lid_temperature_c: Option<f64>,
+        profile: ThermalProfile,
+        final_hold_celsius: Option<f64>,
     },
     SerialDilution {
         culture_source: PlanningValueSource,
@@ -223,7 +216,7 @@ fn plan_task(
         )),
         CYCLE_GOLDEN_GATE => Ok((
             "thermal-cycle-golden-gate-reaction",
-            plan_cycle(profile, task, one_requirement("Flex", task, requirements)?)?,
+            plan_cycle(profile, task, requirements)?,
         )),
         SERIAL_DILUTION => Ok((
             "serial-dilution",
@@ -321,58 +314,75 @@ fn plan_setup(
 fn plan_cycle(
     profile: &FlexAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirement: &AllocatedRequirementBinding,
+    requirements: &[&AllocatedRequirementBinding],
 ) -> Result<FlexTaskExecution, String> {
-    let procedure = thermal_cycle_golden_gate("Flex", task, requirement)?;
+    let procedure = normalized_thermal_program("Flex", task, requirements)?;
     let view = ProcedureTaskView::new("Flex", task);
     let reaction_wells = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
-    if procedure.replicates > reaction_wells.len() {
+    if procedure.sample_count > reaction_wells.len() {
         return Err(view.capacity_error(
             "reaction plate",
-            procedure.replicates,
+            procedure.sample_count,
             reaction_wells.len(),
         ));
     }
-    for (name, value) in [
-        ("digest_temperature_c", procedure.digest_temperature_c),
-        ("ligate_temperature_c", procedure.ligate_temperature_c),
-        ("lid_temperature_c", procedure.lid_temperature_c),
-        (
-            "final_digest_temperature_c",
-            procedure.final_digest_temperature_c,
-        ),
-        (
-            "heat_inactivation_temperature_c",
-            procedure.heat_inactivation_temperature_c,
-        ),
-        ("hold_temperature_c", procedure.hold_temperature_c),
-    ] {
-        if value > 110 {
+    for (name, value) in procedure
+        .profile
+        .stages
+        .iter()
+        .flat_map(|stage| stage.steps.iter())
+        .map(|step| ("block temperature", step.celsius))
+        .chain(
+            procedure
+                .lid_temperature_c
+                .map(|value| ("lid temperature", value)),
+        )
+        .chain(
+            procedure
+                .final_hold_celsius
+                .map(|value| ("final hold temperature", value)),
+        )
+    {
+        let maximum = if name == "lid temperature" {
+            110.0
+        } else {
+            99.0
+        };
+        if value > maximum {
             return Err(format!(
-                "Flex Procedure task '{}' parameter '{name}' is {value} °C, above the adapter's 110 °C limit",
-                task.id
+                "Flex Procedure task '{}' {name} is {value} °C, above the adapter's {maximum} °C limit",
+                task.id,
             ));
         }
+    }
+    if !(10.0..=100.0).contains(&procedure.volume_each_ul) {
+        return Err(format!(
+            "Flex Procedure task '{}' sample volume {} µL is outside the Thermocycler Module's 10–100 µL working range",
+            task.id, procedure.volume_each_ul
+        ));
+    }
+    if procedure
+        .profile
+        .stages
+        .iter()
+        .any(|stage| stage.steps.iter().any(|step| step.ramp_c_per_s.is_some()))
+    {
+        return Err(format!(
+            "Flex Procedure task '{}' requests explicit ramp control, which this implementation does not claim",
+            task.id
+        ));
     }
 
     Ok(FlexTaskExecution::ThermalCycleGoldenGateReaction {
         artifact: procedure.artifact,
         reaction_wells: reaction_wells
             .into_iter()
-            .take(procedure.replicates)
+            .take(procedure.sample_count)
             .collect(),
-        reaction_volume_ul: procedure.reaction_volume_ul,
-        cycles: procedure.cycles,
-        digest_temperature_c: procedure.digest_temperature_c,
-        digest_minutes: procedure.digest_minutes,
-        ligate_temperature_c: procedure.ligate_temperature_c,
-        ligate_minutes: procedure.ligate_minutes,
+        volume_each_ul: procedure.volume_each_ul,
         lid_temperature_c: procedure.lid_temperature_c,
-        final_digest_temperature_c: procedure.final_digest_temperature_c,
-        final_digest_minutes: procedure.final_digest_minutes,
-        heat_inactivation_temperature_c: procedure.heat_inactivation_temperature_c,
-        heat_inactivation_minutes: procedure.heat_inactivation_minutes,
-        hold_temperature_c: procedure.hold_temperature_c,
+        profile: procedure.profile,
+        final_hold_celsius: procedure.final_hold_celsius,
     })
 }
 
@@ -540,18 +550,10 @@ fn render_setup(plan: &FlexTaskPlan) -> Result<String, String> {
 
 fn render_cycle(plan: &FlexTaskPlan) -> Result<String, String> {
     let FlexTaskExecution::ThermalCycleGoldenGateReaction {
-        reaction_volume_ul,
-        cycles,
-        digest_temperature_c,
-        digest_minutes,
-        ligate_temperature_c,
-        ligate_minutes,
+        volume_each_ul,
         lid_temperature_c,
-        final_digest_temperature_c,
-        final_digest_minutes,
-        heat_inactivation_temperature_c,
-        heat_inactivation_minutes,
-        hold_temperature_c,
+        profile: thermal_profile,
+        final_hold_celsius,
         ..
     } = &plan.execution
     else {
@@ -566,42 +568,34 @@ fn render_cycle(plan: &FlexTaskPlan) -> Result<String, String> {
         .load_labware_on_module(&profile.deck.thermocycler.labware, thermocycler)
         .map_err(protocol_error)?;
     builder.thermocycler_close_lid(thermocycler);
-    builder
-        .thermocycler_set_lid_temperature(thermocycler, f64::from(*lid_temperature_c))
-        .map_err(protocol_error)?;
-    builder
-        .thermocycler_wait_for_lid_temperature(thermocycler)
-        .map_err(protocol_error)?;
-    let mut steps = Vec::with_capacity(*cycles as usize * 2 + 2);
-    for _ in 0..*cycles {
-        steps.push((
-            f64::from(*digest_temperature_c),
-            f64::from(*digest_minutes) * 60.0,
-        ));
-        steps.push((
-            f64::from(*ligate_temperature_c),
-            f64::from(*ligate_minutes) * 60.0,
-        ));
+    if let Some(lid_temperature_c) = lid_temperature_c {
+        builder
+            .thermocycler_set_lid_temperature(thermocycler, *lid_temperature_c)
+            .map_err(protocol_error)?;
+        builder
+            .thermocycler_wait_for_lid_temperature(thermocycler)
+            .map_err(protocol_error)?;
     }
-    steps.push((
-        f64::from(*final_digest_temperature_c),
-        f64::from(*final_digest_minutes) * 60.0,
-    ));
-    steps.push((
-        f64::from(*heat_inactivation_temperature_c),
-        f64::from(*heat_inactivation_minutes) * 60.0,
-    ));
+    let steps = thermal_profile
+        .stages
+        .iter()
+        .flat_map(|stage| {
+            (0..stage.repeats).flat_map(|_| {
+                stage
+                    .steps
+                    .iter()
+                    .map(|step| (step.celsius, step.hold_seconds))
+            })
+        })
+        .collect::<Vec<_>>();
     builder
-        .thermocycler_run_profile(thermocycler, &steps, Some(f64::from(*reaction_volume_ul)))
+        .thermocycler_run_profile(thermocycler, &steps, Some(*volume_each_ul))
         .map_err(protocol_error)?;
-    builder
-        .thermocycler_set_block_temperature(
-            thermocycler,
-            f64::from(*hold_temperature_c),
-            None,
-            None,
-        )
-        .map_err(protocol_error)?;
+    if let Some(final_hold_celsius) = final_hold_celsius {
+        builder
+            .thermocycler_set_block_temperature(thermocycler, *final_hold_celsius, None, None)
+            .map_err(protocol_error)?;
+    }
     builder.thermocycler_deactivate_lid(thermocycler);
     builder.thermocycler_open_lid(thermocycler);
     builder.comment("Allocated thermal cycle complete. Remove and label this reaction before another task reuses the staging wells.");
