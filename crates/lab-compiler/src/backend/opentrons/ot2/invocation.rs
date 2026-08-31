@@ -136,6 +136,8 @@ pub(super) enum Ot2TaskExecution {
         cell_source: PlanningValueSource,
         cell_source_well: String,
         cell_source_volume_ul: u32,
+        /// Volume this task draws from the shared aliquot, per the program's liquid ledger.
+        cell_withdrawal_ul: u32,
         /// Temperature the staged competent-cell aliquot is held at for the whole run.
         cell_staging_temperature_c: Option<f64>,
         dna: Vec<MaterialPlacement>,
@@ -810,6 +812,7 @@ fn plan_transformation(
     Ok(Ot2TaskExecution::PrepareChemicalTransformation {
         artifact: procedure.artifact,
         cell_staging_temperature_c: procedure.cell_staging_temperature_c,
+        cell_withdrawal_ul: procedure.cell_withdrawal_ul,
         cell_source: procedure.cell_source.clone(),
         cell_source_well,
         cell_source_volume_ul,

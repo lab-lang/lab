@@ -1064,6 +1064,9 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         regression["transformation"]["competent_cells"]["source_mix_volume_ul"]
     );
     assert_eq!(first_preparation["cell_source_volume_ul"], 80);
+    // Two reactions of 20 uL each, totalled by the canonical program's own liquid ledger rather
+    // than recomputed from parameters that could drift from the steps.
+    assert_eq!(first_preparation["cell_withdrawal_ul"], 40);
     assert_eq!(
         first_preparation["dna_volume_ul"],
         regression["transformation"]["dna"]["volume_ul"]

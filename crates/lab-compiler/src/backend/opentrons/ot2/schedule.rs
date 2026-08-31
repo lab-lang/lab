@@ -775,7 +775,7 @@ fn allocate_transformation(
         let Ot2TaskExecution::PrepareChemicalTransformation {
             cell_source,
             cell_staging_temperature_c,
-            cell_volume_ul,
+            cell_withdrawal_ul,
             cell_mix_volume_ul,
             reaction_wells,
             dna,
@@ -793,14 +793,11 @@ fn allocate_transformation(
             graph.physical_source_key(tasks[*prepare].task, cell_source)?
         );
         chilled_keys.insert(cell_key.clone());
-        let volume = cell_volume_ul
-            .checked_mul(u32::try_from(reaction_wells.len()).map_err(|_| {
-                "OT-2 transformation replicate count does not fit source arithmetic".to_owned()
-            })?)
-            .ok_or_else(|| "OT-2 competent-cell source volume overflows".to_owned())?;
+        // The canonical program's ledger already totalled this task's draw, so the batch adds
+        // those figures rather than multiplying parameters that could drift from the steps.
         let withdrawal = cell_withdrawals.entry(cell_key.clone()).or_default();
         *withdrawal = withdrawal
-            .checked_add(volume)
+            .checked_add(*cell_withdrawal_ul)
             .ok_or_else(|| "OT-2 competent-cell batch volume overflows".to_owned())?;
         cell_mix_requirements
             .entry(cell_key.clone())

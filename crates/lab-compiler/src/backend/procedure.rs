@@ -118,6 +118,9 @@ pub(crate) struct ChemicalTransformation<'a> {
     pub(crate) bubble_clear_technique: MixTechnique,
     /// Exact temperature the competent-cell aliquot must be staged at.
     pub(crate) cell_staging_temperature_c: Option<f64>,
+    /// Total volume this task draws from its competent-cell aliquot, taken from the program's own
+    /// liquid ledger rather than recomputed from parameters that could drift from the steps.
+    pub(crate) cell_withdrawal_ul: u32,
 }
 
 pub(crate) struct RecoveryMediumAddition<'a> {
@@ -165,6 +168,7 @@ pub(crate) fn normalized_chemical_transformation<'a>(
     let view = ProcedureTaskView::new(adapter, task);
     view.require_material_roles(&["dependencies"])?;
     let artifact = view.text_parameter("artifact")?;
+    let ledger = program.liquid_ledger().clone();
     let program = program.as_program();
     let [output] = program.outputs.as_slice() else {
         return Err(format!(
@@ -473,6 +477,26 @@ pub(crate) fn normalized_chemical_transformation<'a>(
         bubble_clear_volume_ul,
         bubble_clear_technique,
         cell_staging_temperature_c: exact_source_temperature(adapter, task, program)?,
+        cell_withdrawal_ul: whole_microlitres(
+            adapter,
+            task,
+            "competent-cell withdrawal",
+            &Volume::microlitres(
+                ledger
+                    .withdrawn(&Location {
+                        vessel: cells.id.clone(),
+                        position: 0,
+                    })
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "{adapter} transformation task '{}' draws nothing from its competent-cell aliquot",
+                            task.id
+                        )
+                    })?,
+            )
+            .map_err(|error| error.to_string())?,
+        )?,
     })
 }
 
