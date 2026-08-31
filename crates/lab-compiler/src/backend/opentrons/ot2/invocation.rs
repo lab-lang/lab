@@ -33,8 +33,8 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v4";
-const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v2";
+const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v1";
+const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v1";
 
 const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
 const CYCLE_TEMPLATE: &str = include_str!("invocation/thermal_cycle.py");
@@ -465,7 +465,7 @@ fn lower_batch_invocation(
     }
 
     let map = BatchPlateMapDocument {
-        schema_version: "lab.plate-map.v2",
+        schema_version: "lab.batch-plate-map.v1",
         facility: &invocation_plan.facility,
         asset: &invocation.asset,
         schedule_sha256: &schedule_sha256,

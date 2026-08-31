@@ -28,7 +28,7 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v2";
+const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v1";
 
 #[derive(Serialize)]
 struct StarTaskPlan {

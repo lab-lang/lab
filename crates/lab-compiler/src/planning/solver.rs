@@ -27,7 +27,7 @@ use super::{
     PlanningProcedureTask, ResolvedAdapterBinding,
 };
 
-pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v3";
+pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v1";
 
 /// Explicit choices that are allowed to turn an otherwise ambiguous solution space into a plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

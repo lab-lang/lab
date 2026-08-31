@@ -35,7 +35,7 @@ pub const OPENTRONS_PYTHON_PROTOCOL_FORMAT: &str = "opentrons.python-protocol";
 pub const OPENTRONS_PROTOCOL_DESIGNER_FORMAT: &str = "opentrons.protocol-designer-json";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v6";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v2";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -119,7 +119,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v6` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v2` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;

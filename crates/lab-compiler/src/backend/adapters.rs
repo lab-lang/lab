@@ -40,7 +40,7 @@ use lab_runfmt::{
     STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
 };
 
-pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v4";
+pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v2";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
 
 const KNOWN_ADAPTERS: [&str; 6] = [

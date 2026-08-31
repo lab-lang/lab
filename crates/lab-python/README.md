@@ -108,7 +108,7 @@ refined = lab.refine(program, methods=(sequence_synthesis,), include_standard=Fa
 print(refined.planning_problem)
 ```
 
-The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v6` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v1` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
 
 The same typed authoring surface writes a persistent package catalog:
 

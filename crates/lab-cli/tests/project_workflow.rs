@@ -270,7 +270,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert!(index.get("facility").is_none());
     assert!(project.join(".lab/build/compiler/refined.lair").is_file());
     let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
-    assert_eq!(problem["schema_version"], "lab.planning-problem.v6");
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v1");
     assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
         problem["choices"][0]["source_operation"],
@@ -380,7 +380,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     let solution = read_json(project.join(".lab/plan/compiler/facility-solution.json"));
     assert_eq!(
         solution["schema_version"],
-        "lab.facility-planning-solution.v3"
+        "lab.facility-planning-solution.v1"
     );
     assert_eq!(
         solution["selections"][0]["method"],
@@ -398,7 +398,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v6");
+    assert_eq!(plan["format"], "lab.execution-plan.v2");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -878,7 +878,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
 
     let manifest = read_json(target_root.join("assembly_manifest.json"));
-    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-run.v2");
+    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-run.v1");
     assert_eq!(manifest["group"]["id"], "assembly");
     assert_eq!(manifest["execution"]["kind"], "assembly");
     assert_eq!(manifest["execution"]["setups"].as_array().unwrap().len(), 2);
@@ -1262,7 +1262,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         "material_surface"
     );
     let plate_map = read_json(target_root.join("plate_map.json"));
-    assert_eq!(plate_map["schema_version"], "lab.plate-map.v2");
+    assert_eq!(plate_map["schema_version"], "lab.batch-plate-map.v1");
     assert_eq!(plate_map["entries"].as_array().unwrap().len(), 16);
     assert_eq!(plate_map["entries"][0]["subject"], "composite_strain_1");
     assert_eq!(plate_map["entries"][0]["dilution_ratio"], "1/10");
@@ -1387,7 +1387,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v8");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v1");
     assert_eq!(
         invocations["material_inventory"]["facility"],
         "https://example.org/golden-gate/facility"
@@ -1607,7 +1607,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     );
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v4");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
     assert_eq!(lowering["inventory_sha256"], solution["inventory_sha256"]);
     assert_eq!(lowering["routes"].as_array().unwrap().len(), 1);
     let route = &lowering["routes"][0];
@@ -1893,7 +1893,7 @@ ex:inheco_odtc
     );
 
     let lowering = read_json(out_dir.join("facility_lowering.json"));
-    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v4");
+    assert_eq!(lowering["schema_version"], "lab.facility-lowering.v2");
     let routes = lowering["routes"].as_array().unwrap();
     assert_eq!(routes.len(), 2);
     assert!(routes.iter().all(|route| route.get("scope").is_none()));
@@ -2164,7 +2164,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     }));
 
     let execution = read_json(plan_dir.join("plan.execution.json"));
-    assert_eq!(execution["format"], "lab.execution-plan.v6");
+    assert_eq!(execution["format"], "lab.execution-plan.v2");
     assert!(
         execution["materials"]
             .as_array()

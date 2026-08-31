@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use lab_capability::ProcedureImplementationId;
 use serde::{Deserialize, Serialize};
 
-pub const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v4";
+pub const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v2";
 
 /// Device artifacts emitted only after capability requirements have been allocated to a facility.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

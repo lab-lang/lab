@@ -33,7 +33,7 @@ use crate::planning::{
 };
 use crate::{ArtifactBundle, GeneratedArtifact};
 
-const TASK_PLAN_SCHEMA: &str = "lab.opentrons-flex-task.v2";
+const TASK_PLAN_SCHEMA: &str = "lab.opentrons-flex-task.v1";
 
 #[derive(Serialize)]
 struct FlexTaskPlan {

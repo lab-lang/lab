@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v6";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v1";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///

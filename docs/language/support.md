@@ -56,7 +56,7 @@ Support is tracked by compiler phase. `Lower` means verified portable module IR 
 | Explicit durable workflow `state` | yes | yes | yes | yes | no |
 | Built-in durable operations with `<-` | yes | yes | yes | yes | no |
 | Structured typed expression IR | n/a | yes | yes | yes | no |
-| Action ownership and Method refinement contracts | n/a | built-ins plus package-contributed `lab.method-catalog.v1` documents and Python authoring through one validated portable Method registry | ownership modes, exact Intent identities, typed Procedure graphs, absolute capability and property-kind IRIs, and canonical unit IRIs | `refined-alternatives`, `lab.planning-problem.v6`, and `allocated-procedure` | exact facility allocation and adapter invocation |
+| Action ownership and Method refinement contracts | n/a | built-ins plus package-contributed `lab.method-catalog.v1` documents and Python authoring through one validated portable Method registry | ownership modes, exact Intent identities, typed Procedure graphs, absolute capability and property-kind IRIs, and canonical unit IRIs | `refined-alternatives`, `lab.planning-problem.v1`, and `allocated-procedure` | exact facility allocation and adapter invocation |
 | Direct `return value, ...` and result checking | yes | yes | arity and per-result type | named result fields | no |
 | `match` / `case` with continuing-branch bindings | yes | yes | yes | yes | no |
 | `if` / `else` and `for` / `in` | yes | yes | yes | yes | no |

@@ -8,7 +8,7 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
     catalog = lab.adapter_catalog()
     ot2 = catalog.get("opentrons.ot2")
 
-    assert catalog.format == "lab.adapter-catalog.v4"
+    assert catalog.format == "lab.adapter-catalog.v2"
     assert "https://sbol.io/ns/capability#LiquidHandling" in ot2.capabilities
     assert "python-protocol-api" in ot2.features
     assert ot2.services.planning
