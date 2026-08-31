@@ -20,7 +20,7 @@ use crate::backend::hamilton::star::plan::execution::{
     ChannelLiquid, StarOperation, StarWell, TipClass, TipPickupPosition,
 };
 use crate::backend::hamilton::star::plan::liquids::{DeckIndex, LiquidState, wire_mm, wire_ul};
-use crate::backend::resources::plate_wells;
+use crate::backend::resources::{PlateCapacity, plate_wells};
 
 /// One logical transfer the choreographer lowers.
 #[derive(Clone, Debug, PartialEq)]
@@ -57,14 +57,19 @@ pub struct TipFeeder {
     /// The tip the racks feed.
     pub tip: TipType,
     rack_count: usize,
-    capacity: usize,
+    capacity: PlateCapacity,
     wells: Vec<String>,
     rows: usize,
     cursor: usize,
 }
 
 impl TipFeeder {
-    pub fn new(prefix: &str, deck: &DeckIndex, rack_count: usize, capacity: usize) -> TipFeeder {
+    pub fn new(
+        prefix: &str,
+        deck: &DeckIndex,
+        rack_count: usize,
+        capacity: PlateCapacity,
+    ) -> TipFeeder {
         let labware: &LabwareDefinition = deck.site(&format!("{prefix}/1")).labware;
         let tip = labware
             .tip()
@@ -86,14 +91,14 @@ impl TipFeeder {
 
     /// The stage resource key of the rack holding position `index`.
     fn rack_resource(&self, index: usize) -> String {
-        format!("{}/{}", self.prefix, index / self.capacity + 1)
+        format!("{}/{}", self.prefix, index / self.capacity.get() + 1)
     }
 
     /// Takes `count` tip positions as groups whose members sit in one rack
     /// column in consecutive rows — the arrangement a multi-channel pickup
     /// needs. Crossing a column or rack boundary starts a new group.
     fn take(&mut self, count: usize) -> Result<Vec<Vec<StarWell>>, StarPlanningError> {
-        let total = self.rack_count * self.capacity;
+        let total = self.rack_count * self.capacity.get();
         if self.cursor + count > total {
             return Err(AdapterConstraintError::CapacityExceeded {
                 adapter: BACKEND.into(),
@@ -109,7 +114,7 @@ impl TipFeeder {
         let mut groups: Vec<Vec<StarWell>> = Vec::new();
         for _ in 0..count {
             let rack = self.rack_resource(self.cursor);
-            let well = self.wells[self.cursor % self.capacity].clone();
+            let well = self.wells[self.cursor % self.capacity.get()].clone();
             let starts_group = match groups.last().and_then(|group| group.last()) {
                 Some(previous) => {
                     previous.resource != rack || self.cursor.is_multiple_of(self.rows)
@@ -132,8 +137,8 @@ impl TipFeeder {
     pub fn usage(&self) -> Vec<(String, usize)> {
         (0..self.rack_count)
             .map(|rack| {
-                let start = rack * self.capacity;
-                let used = self.cursor.saturating_sub(start).min(self.capacity);
+                let start = rack * self.capacity.get();
+                let used = self.cursor.saturating_sub(start).min(self.capacity.get());
                 (format!("{}/{}", self.prefix, rack + 1), used)
             })
             .collect()
@@ -420,7 +425,12 @@ mod tests {
     use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
     fn feeder(deck: &DeckIndex) -> TipFeeder {
-        TipFeeder::new("assembly_small_tips", deck, 1, 96)
+        TipFeeder::new(
+            "assembly_small_tips",
+            deck,
+            1,
+            PlateCapacity::new(96).unwrap(),
+        )
     }
 
     #[test]
@@ -476,7 +486,12 @@ mod tests {
     fn tip_exhaustion_names_the_rack_resource() {
         let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
-        let mut feeder = TipFeeder::new("assembly_small_tips", &deck, 1, 96);
+        let mut feeder = TipFeeder::new(
+            "assembly_small_tips",
+            &deck,
+            1,
+            PlateCapacity::new(96).unwrap(),
+        );
         feeder.take(96).expect("the rack holds 96 tips");
         let error = feeder.take(1).expect_err("the 97th tip does not exist");
         let message = error.to_string();
@@ -490,7 +505,12 @@ mod tests {
     fn multi_channel_pickups_split_at_rack_column_boundaries() {
         let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
-        let mut feeder = TipFeeder::new("assembly_small_tips", &deck, 1, 96);
+        let mut feeder = TipFeeder::new(
+            "assembly_small_tips",
+            &deck,
+            1,
+            PlateCapacity::new(96).unwrap(),
+        );
         feeder.take(6).expect("six tips leave two in the column");
         let groups = feeder.take(4).expect("four more tips exist");
         assert_eq!(

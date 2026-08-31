@@ -7,6 +7,8 @@
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
+
+use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -174,7 +176,7 @@ pub struct PlacedLabware {
     /// The catalog labware id.
     pub labware: String,
     #[serde(default = "default_plate_capacity")]
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 /// The deck: carriers on rails plus the two fixtures every stage shares.
@@ -391,11 +393,11 @@ impl StarAdapterProfile {
                 });
             }
             claimed.push((context.clone(), address.clone()));
-            if resolved.labware.capacity != capacity {
+            if resolved.labware.capacity != capacity.get() {
                 return Err(StarProfileError::CapacityMismatch {
                     context,
                     labware,
-                    declared: capacity,
+                    declared: capacity.get(),
                     actual: resolved.labware.capacity,
                 });
             }
@@ -465,7 +467,7 @@ impl StarAdapterProfile {
 
     /// Every stage resource's `(context, site address, labware, declared
     /// capacity, expects tips)`, for validation and deck summaries.
-    fn site_claims(&self) -> Vec<(String, String, String, usize, bool)> {
+    fn site_claims(&self) -> Vec<(String, String, String, PlateCapacity, bool)> {
         let mut claims = vec![
             (
                 "deck.source_rack".to_string(),
@@ -617,8 +619,8 @@ fn default_channels() -> usize {
     8
 }
 
-fn default_plate_capacity() -> usize {
-    96
+fn default_plate_capacity() -> PlateCapacity {
+    star_capacity(96)
 }
 
 fn default_traverse_height() -> f64 {
@@ -671,7 +673,7 @@ fn default_source_rack() -> PlacedLabware {
     PlacedLabware {
         site: "sources/1".into(),
         labware: "sample_tubes_24".into(),
-        capacity: 24,
+        capacity: star_capacity(24),
     }
 }
 
@@ -679,7 +681,7 @@ fn default_reaction_plate() -> PlacedLabware {
     PlacedLabware {
         site: "plates_a/1".into(),
         labware: "pcr_plate_96".into(),
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -687,7 +689,7 @@ fn default_assembly_small_tips() -> TipRacks {
     TipRacks {
         labware: "tip_rack_50ul_filter".into(),
         slots: vec!["tips/1".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -695,7 +697,7 @@ fn default_dna_plate() -> Plates {
     Plates {
         labware: "pcr_plate_96".into(),
         slots: vec!["plates_a/2".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -703,7 +705,7 @@ fn default_transformation_small_tips() -> TipRacks {
     TipRacks {
         labware: "tip_rack_50ul_filter".into(),
         slots: vec!["tips/2".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -711,7 +713,7 @@ fn default_transformation_large_tips() -> TipRacks {
     TipRacks {
         labware: "tip_rack_1000ul_filter".into(),
         slots: vec!["tips/3".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -719,7 +721,7 @@ fn default_dilution_plate() -> Plates {
     Plates {
         labware: "pcr_plate_96".into(),
         slots: vec!["plates_a/3".into(), "plates_a/4".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -727,7 +729,7 @@ fn default_agar_plate() -> Plates {
     Plates {
         labware: "pcr_plate_96".into(),
         slots: vec!["plates_b/1".into(), "plates_b/2".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -743,7 +745,7 @@ fn default_plating_small_tips() -> TipRacks {
     TipRacks {
         labware: "tip_rack_50ul_filter".into(),
         slots: vec!["tips/4".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
 }
 
@@ -751,8 +753,13 @@ fn default_plating_large_tips() -> TipRacks {
     TipRacks {
         labware: "tip_rack_1000ul_filter".into(),
         slots: vec!["tips/5".into()],
-        capacity: 96,
+        capacity: star_capacity(96),
     }
+}
+
+/// A literal geometry this compiler ships as a STAR default.
+fn star_capacity(capacity: usize) -> PlateCapacity {
+    PlateCapacity::new(capacity).expect("built-in STAR defaults declare addressable geometries")
 }
 
 #[cfg(test)]
@@ -865,7 +872,7 @@ mod tests {
     #[test]
     fn labware_capacity_must_match_the_catalog() {
         let mut profile = StarAdapterProfile::default();
-        profile.deck.source_rack.capacity = 96;
+        profile.deck.source_rack.capacity = star_capacity(96);
         let error = profile
             .validate()
             .expect_err("the tube strip holds 24 positions, not 96");

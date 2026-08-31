@@ -23,7 +23,7 @@ use crate::backend::procedure::{
     normalized_selective_plating, normalized_serial_dilution, normalized_thermal_program,
 };
 use crate::backend::profile::Plates;
-use crate::backend::resources::{Well, assign_source_wells, plate_wells};
+use crate::backend::resources::{PlateCapacity, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
 use crate::planning::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedExecutionGroup, AllocatedProcedureTask,
@@ -1153,13 +1153,13 @@ pub(super) fn layered_plate_layout(
     positions_per_layer: usize,
 ) -> Result<Vec<Well>, String> {
     let wells = plate_wells(plates.capacity);
-    if wells.len() != plates.capacity || layers == 0 || positions_per_layer == 0 {
+    if layers == 0 || positions_per_layer == 0 {
         return Err(format!(
             "OT-2 Procedure task '{}' cannot address {resource} with {} layers of {positions_per_layer} positions and declared per-plate capacity {}",
             task.id, layers, plates.capacity
         ));
     }
-    let shared_region = plates.capacity / layers;
+    let shared_region = plates.capacity.get() / layers;
     if positions_per_layer <= shared_region {
         return Ok((0..layers)
             .flat_map(|layer| {
@@ -1174,7 +1174,7 @@ pub(super) fn layered_plate_layout(
             })
             .collect());
     }
-    if layers <= plates.slots.len() && positions_per_layer <= plates.capacity {
+    if layers <= plates.slots.len() && positions_per_layer <= plates.capacity.get() {
         return Ok((0..layers)
             .flat_map(|layer| {
                 (0..positions_per_layer).map({
@@ -1930,17 +1930,9 @@ fn value_source(source: &PlanningValueSource) -> String {
 }
 
 fn known_wells(
-    task: &AllocatedProcedureTask,
-    resource: &str,
-    capacity: usize,
+    _task: &AllocatedProcedureTask,
+    _resource: &str,
+    capacity: PlateCapacity,
 ) -> Result<Vec<String>, String> {
-    let wells = plate_wells(capacity);
-    if wells.is_empty() {
-        Err(format!(
-            "OT-2 Procedure task '{}' cannot address {resource} with declared capacity {capacity}",
-            task.id
-        ))
-    } else {
-        Ok(wells)
-    }
+    Ok(plate_wells(capacity))
 }

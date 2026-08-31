@@ -1,6 +1,8 @@
 //! Deserializable shape of Flex adapter configuration: instruments, deck modules, the trash bin, and the labware each build stage claims.
 
 use schemars::JsonSchema;
+
+use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
@@ -70,7 +72,7 @@ pub struct TemperatureModule {
     pub slot: String,
     /// Rack of chilled source tubes carried on the module.
     pub labware: String,
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 /// The thermocycler installs across slots A1 and B1, so it declares no slot
@@ -80,7 +82,7 @@ pub struct TemperatureModule {
 pub struct Thermocycler {
     pub model: String,
     pub labware: String,
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 /// The movable trash bin, named by its addressable area. The bin occupies its

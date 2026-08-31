@@ -21,7 +21,9 @@ use crate::backend::procedure::{
     CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
     normalized_serial_dilution, normalized_thermal_program, require_basic_golden_gate_techniques,
 };
-use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
+use crate::backend::resources::{
+    PlateAllocator, PlateCapacity, Well, assign_source_wells, plate_wells,
+};
 use crate::backend::typst;
 use crate::planning::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,
@@ -983,19 +985,11 @@ fn protocol_error(error: ProtocolError) -> String {
 }
 
 fn known_wells(
-    task: &AllocatedProcedureTask,
-    resource: &str,
-    capacity: usize,
+    _task: &AllocatedProcedureTask,
+    _resource: &str,
+    capacity: PlateCapacity,
 ) -> Result<Vec<String>, String> {
-    let wells = plate_wells(capacity);
-    if wells.is_empty() {
-        Err(format!(
-            "Flex Procedure task '{}' cannot address {resource} with declared capacity {capacity}",
-            task.id
-        ))
-    } else {
-        Ok(wells)
-    }
+    Ok(plate_wells(capacity))
 }
 
 fn pretty_json(value: &impl Serialize) -> Result<String, String> {

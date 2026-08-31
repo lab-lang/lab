@@ -1,5 +1,7 @@
 //! Reference-bench default values for every profile field.
 
+use crate::backend::resources::PlateCapacity;
+
 use crate::backend::opentrons::ot2::profile::schema::{
     AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, SourceRack, TechniqueCalibration,
     TemperatureModule, Thermocycler, TipRacks, TransformationStage,
@@ -103,7 +105,7 @@ pub(super) fn default_temperature_module() -> TemperatureModule {
         model: "temperature module gen2".to_owned(),
         slot: "1".to_owned(),
         labware: "opentrons_24_aluminumblock_nest_1.5ml_snapcap".to_owned(),
-        capacity: 24,
+        capacity: plate_capacity(24),
     }
 }
 
@@ -111,12 +113,12 @@ pub(super) fn default_thermocycler() -> Thermocycler {
     Thermocycler {
         model: "thermocycler module gen2".to_owned(),
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        capacity: 96,
+        capacity: plate_capacity(96),
     }
 }
 
-pub(super) fn default_plate_capacity() -> usize {
-    96
+pub(super) fn default_plate_capacity() -> PlateCapacity {
+    plate_capacity(96)
 }
 
 pub(super) fn default_assembly_small_tips() -> TipRacks {
@@ -145,7 +147,7 @@ pub(super) fn default_transformation_source_rack() -> SourceRack {
     SourceRack {
         labware: "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap".to_owned(),
         slot: "3".to_owned(),
-        capacity: 24,
+        capacity: plate_capacity(24),
     }
 }
 
@@ -222,4 +224,9 @@ pub(super) fn default_plating_stage() -> PlatingStage {
         small_tips: default_plating_small_tips(),
         large_tips: default_plating_large_tips(),
     }
+}
+
+/// A literal geometry this compiler ships as a default.
+fn plate_capacity(capacity: usize) -> PlateCapacity {
+    PlateCapacity::new(capacity).expect("built-in defaults declare addressable geometries")
 }

@@ -1,6 +1,8 @@
 //! Deserializable shape of OT-2 adapter configuration: protocol options, instruments, deck modules, and the labware each build stage claims.
 
 use schemars::JsonSchema;
+
+use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backend::profile::{MediaRack, Plates, SourceRack, TipRacks};
@@ -117,7 +119,7 @@ pub struct TemperatureModule {
     pub slot: String,
     /// Rack of chilled source tubes carried on the module.
     pub labware: String,
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 /// The thermocycler occupies fixed slots, so it declares no slot of its own.
@@ -126,7 +128,7 @@ pub struct TemperatureModule {
 pub struct Thermocycler {
     pub model: String,
     pub labware: String,
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
