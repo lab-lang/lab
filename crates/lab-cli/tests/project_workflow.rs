@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -610,6 +611,36 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     );
 
     std::fs::remove_dir_all(&project).unwrap();
+}
+
+#[test]
+fn a_partly_stated_assembly_recipe_is_a_diagnostic_rather_than_a_manual_fallback() {
+    let project = temporary_project();
+    let _ = fs::remove_dir_all(&project);
+    copy_dir(Path::new("../../examples/golden-gate"), &project);
+
+    let plasmids = project.join("src/designs/plasmids.lab");
+    let source = fs::read_to_string(&plasmids).unwrap();
+    fs::write(
+        &plasmids,
+        source.replacen("  restriction_enzyme = BsaI\n", "", 1),
+    )
+    .unwrap();
+
+    let output = run(&["build", &project.to_string_lossy()]);
+    assert!(
+        !output.status.success(),
+        "an incomplete recipe must not build"
+    );
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains("composite_plasmid_1")
+            && message.contains("`restriction_enzyme`")
+            && message.contains("build it by another method"),
+        "the diagnostic names the artifact, the missing property, and the alternative: {message}"
+    );
+
+    let _ = fs::remove_dir_all(&project);
 }
 
 #[test]

@@ -52,6 +52,22 @@ struct BuildLoweringContext<'a> {
     bindings: &'a BTreeMap<(String, String), TypedExpression>,
 }
 
+/// The three properties a Golden Gate assembly recipe cannot be planned without.
+const ASSEMBLY_RECIPE_FIELDS: [&str; 3] = ["backbone", "components", "restriction_enzyme"];
+
+/// Renders field names for a diagnostic in the order they are declared.
+fn quoted_fields(fields: &[&str]) -> String {
+    let quoted = fields
+        .iter()
+        .map(|field| format!("`{field}`"))
+        .collect::<Vec<_>>();
+    match quoted.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
@@ -98,6 +114,15 @@ pub enum SourceLoweringError {
     UnbalancedReaction {
         artifact: String,
         reaction_volume_ul: u16,
+    },
+    #[error(
+        "artifact '{artifact}' states {present} but not {missing}, so its Golden Gate recipe is \
+incomplete; add {missing} to assemble it, or remove {present} to build it by another method"
+    )]
+    IncompleteAssemblyRecipe {
+        artifact: String,
+        present: String,
+        missing: String,
     },
     #[error("artifact '{0}' has no std.bio.build.realize workflow operation")]
     MissingRealization(String),
@@ -361,10 +386,21 @@ fn lower_artifact(
             // they are all named items to pipette. This list has to track the
             // schema, and reading the kinds' grounding instead of naming them
             // is what would stop it drifting.
-            let has_complete_recipe = ["backbone", "components", "restriction_enzyme"]
+            let stated = |field: &str| properties.iter().any(|property| property.name == field);
+            let (present, missing): (Vec<_>, Vec<_>) = ASSEMBLY_RECIPE_FIELDS
                 .iter()
-                .all(|field| properties.iter().any(|property| property.name == *field));
-            let recipe = if has_complete_recipe {
+                .copied()
+                .partition(|field| stated(field));
+            // A partly stated recipe is a mistake, not a request for manual assembly. Falling back
+            // silently would discard the stated chemistry and plan the artifact by hand instead.
+            if !present.is_empty() && !missing.is_empty() {
+                return Err(SourceLoweringError::IncompleteAssemblyRecipe {
+                    artifact: name.to_owned(),
+                    present: quoted_fields(&present),
+                    missing: quoted_fields(&missing),
+                });
+            }
+            let recipe = if missing.is_empty() {
                 let components = symbols(
                     "components",
                     &["Part", "Plasmid", "Promoter", "CDS", "Backbone"],
