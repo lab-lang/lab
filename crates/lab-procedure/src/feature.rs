@@ -49,8 +49,8 @@ pub enum ProgramFeature {
     FluidPathSharedSourceNoReentry,
     /// Ordered steps that must share one continuous fluid path.
     FluidPathGroup,
-    /// A source whose staging temperature the program constrains.
-    SourceTemperatureConstraint,
+    /// A vessel whose staging temperature the program constrains.
+    VesselTemperatureControl,
     ThermalStageRepeat,
     ThermalControlledRamp,
     ThermalHeatedLid,
@@ -81,7 +81,7 @@ impl ProgramFeature {
             Self::FluidPathIsolatedDestinations => "fluid_path_isolated_destinations",
             Self::FluidPathSharedSourceNoReentry => "fluid_path_shared_source_no_reentry",
             Self::FluidPathGroup => "fluid_path_group",
-            Self::SourceTemperatureConstraint => "source_temperature_constraint",
+            Self::VesselTemperatureControl => "vessel_temperature_control",
             Self::ThermalStageRepeat => "thermal_stage_repeat",
             Self::ThermalControlledRamp => "thermal_controlled_ramp",
             Self::ThermalHeatedLid => "thermal_heated_lid",
@@ -166,8 +166,12 @@ pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeatu
     if program.vessels.iter().any(|vessel| vessel.positions > 1) {
         features.insert(ProgramFeature::MultiPositionVessel);
     }
-    if program.constraints.source_temperature.is_some() {
-        features.insert(ProgramFeature::SourceTemperatureConstraint);
+    if program
+        .vessels
+        .iter()
+        .any(|vessel| vessel.temperature.is_some())
+    {
+        features.insert(ProgramFeature::VesselTemperatureControl);
     }
     for step in &program.steps {
         match step {
@@ -278,6 +282,7 @@ mod tests {
                 },
                 positions: 2,
                 initial_volume_each: None,
+                temperature: None,
             }],
             vec![PipettingStep::Mix {
                 id: id("mix"),
@@ -307,6 +312,9 @@ mod tests {
                     role: VesselRole::Intermediate,
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: Some(TemperatureRange::exact(
+                        Temperature::parse_degrees_celsius("4").unwrap(),
+                    )),
                 },
                 Vessel {
                     id: id("plate"),
@@ -315,6 +323,7 @@ mod tests {
                     },
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: None,
                 },
             ],
             vec![PipettingStep::Transfer {
@@ -332,11 +341,7 @@ mod tests {
                     touch_tip: true,
                 },
             }],
-            PipettingConstraints {
-                source_temperature: Some(TemperatureRange::exact(
-                    Temperature::parse_degrees_celsius("4").unwrap(),
-                )),
-            },
+            PipettingConstraints::default(),
         );
         let features = pipetting_features(&program);
         for expected in [
@@ -348,7 +353,7 @@ mod tests {
             ProgramFeature::TouchTip,
             ProgramFeature::FluidPathSharedSourceNoReentry,
             ProgramFeature::FluidPathGroup,
-            ProgramFeature::SourceTemperatureConstraint,
+            ProgramFeature::VesselTemperatureControl,
         ] {
             assert!(features.contains(&expected), "missing {expected}");
         }

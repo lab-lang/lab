@@ -53,12 +53,14 @@ pub(super) fn normalize_add_medium(
                 },
                 positions: 1,
                 initial_volume_each: None,
+                temperature: None,
             },
             Vessel {
                 id: culture_vessel,
                 role: VesselRole::InputOutput { input: 0, output },
                 positions: replicates,
                 initial_volume_each: Some(volume(initial_volume)?),
+                temperature: None,
             },
         ],
         vec![PipettingStep::Distribute {

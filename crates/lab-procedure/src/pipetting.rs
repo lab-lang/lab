@@ -67,6 +67,13 @@ pub struct Vessel {
     /// Material sources may omit this value so the adapter can calculate a sufficient source load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_volume_each: Option<Volume>,
+    /// Temperature this vessel's contents must be held at while the program runs.
+    ///
+    /// This is per vessel rather than per program because one program routinely stages materials
+    /// with different requirements: chemically competent cells must stay near 0 C while the
+    /// recovery medium they are later given must not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<TemperatureRange>,
 }
 
 /// One logical position in a Procedure vessel.
@@ -202,10 +209,7 @@ impl PipettingStep {
 
 /// Cross-cutting conditions that every realization of the program must preserve.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PipettingConstraints {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_temperature: Option<TemperatureRange>,
-}
+pub struct PipettingConstraints {}
 
 /// Version 1 of Lab's canonical, device-neutral pipetting contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -492,7 +496,7 @@ impl ValidatedPipettingProgramV1 {
                 )],
             });
         }
-        if let Some(temperature) = &self.program.constraints.source_temperature {
+        if let Some(temperature) = staged_temperature_envelope(&self.program.vessels) {
             all_of.push(CapabilityClause {
                 role: local("source-temperature"),
                 capability_kind: capability(TEMPERATURE_CONTROLLED_STAGING),
@@ -789,6 +793,35 @@ fn collect_technique(
     *touch_tip |= step_touch_tip;
 }
 
+/// The envelope a staging device must cover to satisfy every temperature-constrained vessel.
+///
+/// A device that stages several constrained vessels must reach the coldest stated minimum and the
+/// warmest stated maximum, so the clause widens to the union rather than picking one vessel.
+pub fn staged_temperature_envelope(vessels: &[Vessel]) -> Option<TemperatureRange> {
+    let mut envelope: Option<TemperatureRange> = None;
+    for vessel in vessels {
+        let Some(temperature) = &vessel.temperature else {
+            continue;
+        };
+        envelope = Some(match envelope {
+            None => temperature.clone(),
+            Some(current) => TemperatureRange {
+                minimum: if temperature.minimum.value() < current.minimum.value() {
+                    temperature.minimum.clone()
+                } else {
+                    current.minimum
+                },
+                maximum: if temperature.maximum.value() > current.maximum.value() {
+                    temperature.maximum.clone()
+                } else {
+                    current.maximum
+                },
+            },
+        });
+    }
+    envelope
+}
+
 fn feature_clause(role: &str, kind: &str) -> CapabilityClause {
     CapabilityClause {
         role: local(role),
@@ -898,6 +931,9 @@ mod tests {
                     },
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: Some(TemperatureRange::exact(
+                        Temperature::parse_degrees_celsius("4").unwrap(),
+                    )),
                 },
                 Vessel {
                     id: id("reactions"),
@@ -906,6 +942,7 @@ mod tests {
                     },
                     positions: 2,
                     initial_volume_each: None,
+                    temperature: None,
                 },
             ],
             vec![
@@ -937,11 +974,7 @@ mod tests {
                     technique: MixTechnique::default(),
                 },
             ],
-            PipettingConstraints {
-                source_temperature: Some(TemperatureRange::exact(
-                    Temperature::parse_degrees_celsius("4").unwrap(),
-                )),
-            },
+            PipettingConstraints::default(),
         )
     }
 

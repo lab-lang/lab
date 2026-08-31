@@ -136,6 +136,8 @@ pub(super) enum Ot2TaskExecution {
         cell_source: PlanningValueSource,
         cell_source_well: String,
         cell_source_volume_ul: u32,
+        /// Temperature the staged competent-cell aliquot is held at for the whole run.
+        cell_staging_temperature_c: Option<f64>,
         dna: Vec<MaterialPlacement>,
         reaction_wells: Vec<String>,
         cell_mix_cycles: u32,
@@ -807,6 +809,7 @@ fn plan_transformation(
 
     Ok(Ot2TaskExecution::PrepareChemicalTransformation {
         artifact: procedure.artifact,
+        cell_staging_temperature_c: procedure.cell_staging_temperature_c,
         cell_source: procedure.cell_source.clone(),
         cell_source_well,
         cell_source_volume_ul,
@@ -1678,6 +1681,7 @@ fn render_batch_manual(plan: &Ot2RunPlan) -> Doc {
             heat_shocks,
             recovery_additions,
             recovery_incubations,
+            ..
         } => (
             "Golden Gate transformation run",
             format!(

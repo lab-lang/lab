@@ -43,6 +43,8 @@ pub(super) enum Ot2BatchExecution {
         thermal_programs: Vec<Ot2ScheduledTask>,
     },
     Transformation {
+        /// Shared setpoint for the module holding every staged competent-cell aliquot.
+        cell_staging_temperature_c: f64,
         preparations: Vec<Ot2ScheduledTask>,
         heat_shocks: Vec<Ot2ScheduledTask>,
         recovery_additions: Vec<Ot2ScheduledTask>,
@@ -71,6 +73,7 @@ type TransformationTasks = (
     Vec<Ot2ScheduledTask>,
     Vec<Ot2ScheduledTask>,
     Vec<Ot2ScheduledTask>,
+    f64,
 );
 type AssemblyTasks = (Vec<Ot2ScheduledTask>, Vec<Ot2ScheduledTask>, Option<f64>);
 type PlatingTasks = (Vec<Ot2ScheduledTask>, Vec<Ot2ScheduledTask>);
@@ -461,6 +464,7 @@ pub(super) fn try_plan_golden_gate_batches(
             id: "transformation",
             group: groups[1].clone(),
             execution: Ot2BatchExecution::Transformation {
+                cell_staging_temperature_c: transformation.4,
                 preparations: transformation.0,
                 heat_shocks: transformation.1,
                 recovery_additions: transformation.2,
@@ -751,7 +755,9 @@ fn allocate_transformation(
     }
 
     let mut cell_keys = BTreeMap::<usize, String>::new();
+    let mut staging_temperature = None;
     let mut source_keys = BTreeSet::new();
+    let mut chilled_keys = BTreeSet::new();
     let mut cell_withdrawals = BTreeMap::<String, u32>::new();
     let mut cell_mix_requirements = BTreeMap::<String, u32>::new();
     let mut dna_withdrawals = BTreeMap::<String, u32>::new();
@@ -767,6 +773,7 @@ fn allocate_transformation(
         })?;
         let Ot2TaskExecution::PrepareChemicalTransformation {
             cell_source,
+            cell_staging_temperature_c,
             cell_volume_ul,
             cell_mix_volume_ul,
             reaction_wells,
@@ -778,11 +785,13 @@ fn allocate_transformation(
         else {
             return Err("OT-2 transformation scheduler received a non-preparation task".to_owned());
         };
+        staging_temperature =
+            merge_source_temperature(staging_temperature, *cell_staging_temperature_c)?;
         let cell_key = format!(
             "cells:{}",
             graph.physical_source_key(tasks[*prepare].task, cell_source)?
         );
-        source_keys.insert(cell_key.clone());
+        chilled_keys.insert(cell_key.clone());
         let volume = cell_volume_ul
             .checked_mul(u32::try_from(reaction_wells.len()).map_err(|_| {
                 "OT-2 transformation replicate count does not fit source arithmetic".to_owned()
@@ -882,6 +891,15 @@ fn allocate_transformation(
         profile.stages.transformation.source_rack.capacity,
     )
     .map_err(|error| error.to_string())?;
+    // Competent cells carry a staging temperature, so they are addressed on the rack the
+    // temperature module holds rather than on the ambient bench rack beside it.
+    let chilled_wells = assign_source_wells(
+        BACKEND,
+        "batched-transformation-chilled-sources",
+        chilled_keys,
+        profile.deck.temperature_module.capacity,
+    )
+    .map_err(|error| error.to_string())?;
     let small_tips = prepare_heat
         .iter()
         .map(|(prepare, _)| match &tasks[*prepare].execution {
@@ -952,7 +970,7 @@ fn allocate_transformation(
         cursor += count;
         *reaction_wells = allocated.clone();
         let cell_key = &cell_keys[prepare];
-        *cell_source_well = source_wells[cell_key].clone();
+        *cell_source_well = chilled_wells[cell_key].clone();
         *cell_source_volume_ul = cell_loads[cell_key];
         locations.push(ScheduledPhysicalLocation {
             value: graph.choice_input_ref(tasks[*prepare].task, &cell_input)?,
@@ -1150,7 +1168,18 @@ fn allocate_transformation(
         recoveries.push(scheduled_task(&tasks[recovery]));
         incubations.push(scheduled_task(&tasks[incubation]));
     }
-    Ok((preparations, heat_shocks, recoveries, incubations))
+    // Every fused preparation shares one module, so a batch without a stated setpoint would leave
+    // the aliquots at bench temperature. Refuse rather than guess.
+    let cell_staging_temperature_c = staging_temperature.ok_or_else(|| {
+        "OT-2 transformation batch stages competent cells without a stated temperature".to_owned()
+    })?;
+    Ok((
+        preparations,
+        heat_shocks,
+        recoveries,
+        incubations,
+        cell_staging_temperature_c,
+    ))
 }
 
 fn required_source_loads(

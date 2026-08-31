@@ -102,7 +102,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         deck["temperature_module"]["model"],
         deck["temperature_module"]["slot"],
     )
-    temperature.load_labware(deck["temperature_module"]["labware"])
+    cell_rack = temperature.load_labware(deck["temperature_module"]["labware"])
     dna_plate = protocol.load_labware(
         stage["dna_plate"]["labware"], stage["dna_plate"]["slots"][0]
     )
@@ -130,7 +130,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         tip_racks=large_tips,
     )
 
-    temperature.set_temperature(4)
+    temperature.set_temperature(execution["cell_staging_temperature_c"])
     thermocycler.set_block_temperature(4)
     thermocycler.open_lid()
 
@@ -167,7 +167,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         group["destinations"].extend(preparation["reaction_wells"])
 
     for ordinal, (source_name, group) in enumerate(cell_groups.items(), start=1):
-        source = source_rack[source_name]
+        source = cell_rack[source_name]
         cells = protocol.define_liquid(
             name=f"competent_cells_{ordinal}",
             description="Allocated competent-cell input",

@@ -110,7 +110,7 @@ const OT2_PIPETTING_FEATURES: &[ProgramFeature] = &[
     ProgramFeature::FluidPathIsolatedDestinations,
     ProgramFeature::FluidPathSharedSourceNoReentry,
     ProgramFeature::FluidPathGroup,
-    ProgramFeature::SourceTemperatureConstraint,
+    ProgramFeature::VesselTemperatureControl,
 ];
 
 /// Thermal features the Opentrons Thermocycler Module templates realize. Neither Opentrons

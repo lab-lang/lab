@@ -1,8 +1,8 @@
 use lab_procedure::{
     AspirationStrategy, DispenseStrategy, Duration, FluidPathPolicy, Length, Location,
     MaterialInput, MaterialOutput, MixTechnique, PipettingConstraints, PipettingProgramV1,
-    PipettingStep, ProcedureProgram, Temperature, ThermalLoad, ThermalProgramV1, ThermalStage,
-    ThermalStep, TransferTechnique, Vessel, VesselRole, Volume,
+    PipettingStep, ProcedureProgram, Temperature, TemperatureRange, ThermalLoad, ThermalProgramV1,
+    ThermalStage, ThermalStep, TransferTechnique, Vessel, VesselRole, Volume,
 };
 
 use super::ProcedureTaskInstance;
@@ -56,6 +56,11 @@ pub(super) fn normalize_prepare(
     let bubble_clear_volume = positive(&view, "bubble_clear_volume_ul", Some(MICROLITRE))?;
     let bubble_offset =
         view.integer_parameter("bubble_clear_dispense_offset_mm", Some(MILLIMETRE))?;
+    // Chemically competent cells lose transformation efficiency quickly at bench temperature, so
+    // the Method states the staging requirement and the facility must supply an offering that
+    // holds it. Without this the aliquot would be planned onto an ambient rack.
+    let cell_staging_temperature =
+        view.integer_parameter("cell_staging_temperature_c", Some(DEGREE_CELSIUS))?;
 
     let cells = procedure_id("competent-cells")?;
     let mixture = procedure_id(task.outputs[0].as_str())?;
@@ -74,6 +79,10 @@ pub(super) fn normalize_prepare(
         role: VesselRole::ProcedureInput { input: 1 },
         positions: 1,
         initial_volume_each: None,
+        temperature: Some(TemperatureRange::exact(
+            Temperature::parse_degrees_celsius(cell_staging_temperature.to_string())
+                .map_err(|error| error.to_string())?,
+        )),
     });
     vessels.push(Vessel {
         id: reactions.clone(),
@@ -82,6 +91,7 @@ pub(super) fn normalize_prepare(
         },
         positions: replicates,
         initial_volume_each: None,
+        temperature: None,
     });
     steps.push(PipettingStep::Mix {
         id: procedure_id("mix-competent-cells")?,
@@ -121,6 +131,7 @@ pub(super) fn normalize_prepare(
             },
             positions: 1,
             initial_volume_each: None,
+            temperature: None,
         });
         for (replicate, destination) in destinations.iter().enumerate() {
             let group = procedure_id(&format!("dna-{material_index:04}-{replicate:04}"))?;

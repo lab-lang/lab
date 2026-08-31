@@ -20,7 +20,7 @@ pub use pipetting::{
     AspirationStrategy, DispenseStrategy, FluidPathPolicy, LiquidLedger, Location, MaterialInput,
     MaterialOutput, MixTechnique, PipettingConstraints, PipettingProgramV1,
     PipettingProgramValidationError, PipettingStep, TransferTechnique, ValidatedPipettingProgramV1,
-    Vessel, VesselRole,
+    Vessel, VesselRole, staged_temperature_envelope,
 };
 pub use program::{ProcedureProgram, ProcedureProgramValidationError, ValidatedProcedureProgram};
 pub use quantity::{

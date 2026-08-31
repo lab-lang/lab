@@ -77,6 +77,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             role: VesselRole::ProcedureInput { input: 0 },
             positions: culture_replicates,
             initial_volume_each: Some(volume(remaining)?),
+            temperature: None,
         });
         for replicate in 0..culture_replicates {
             let destinations = (0..plating_replicates)
@@ -117,6 +118,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         },
         positions: spot_count,
         initial_volume_each: None,
+        temperature: None,
     });
     let program = PipettingProgramV1::new(
         vec![MaterialInput { id: selection_id }],

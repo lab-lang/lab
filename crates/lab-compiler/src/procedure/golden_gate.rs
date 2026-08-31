@@ -193,6 +193,17 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         .collect::<Vec<_>>();
 
     let mut materials = Vec::with_capacity(additions.len());
+    // Staged reagents are held at temperature for the whole program, so the requirement belongs to
+    // the source vessels rather than to the reaction they are pipetted into.
+    let staging_temperature = match &setup_strategy {
+        SetupStrategy::Basic { .. } => None,
+        SetupStrategy::TemperatureStaged {
+            source_temperature, ..
+        } => Some(TemperatureRange::exact(
+            Temperature::parse_degrees_celsius(source_temperature.to_string())
+                .map_err(|error| error.to_string())?,
+        )),
+    };
     let mut vessels = Vec::with_capacity(additions.len() + 1);
     let mut normalized_additions = Vec::with_capacity(additions.len());
     for (index, (material, volume, mix_source)) in additions.into_iter().enumerate() {
@@ -208,6 +219,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             },
             positions: 1,
             initial_volume_each: None,
+            temperature: staging_temperature.clone(),
         });
         normalized_additions.push((
             Location {
@@ -225,6 +237,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         },
         positions: replicates,
         initial_volume_each: None,
+        temperature: None,
     });
     let (steps, constraints) = match setup_strategy {
         SetupStrategy::Basic {
@@ -258,7 +271,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         }
         SetupStrategy::TemperatureStaged {
             source_mix_cycles,
-            source_temperature,
+            source_temperature: _,
             bubble_clear_cycles,
             bubble_clear_volume,
             bubble_clear_offset,
@@ -326,15 +339,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                     }
                 }
             }
-            (
-                steps,
-                PipettingConstraints {
-                    source_temperature: Some(TemperatureRange::exact(
-                        Temperature::parse_degrees_celsius(source_temperature.to_string())
-                            .map_err(|error| error.to_string())?,
-                    )),
-                },
-            )
+            (steps, PipettingConstraints::default())
         }
     };
 

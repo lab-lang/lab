@@ -116,6 +116,8 @@ pub(crate) struct ChemicalTransformation<'a> {
     pub(crate) bubble_clear_cycles: u32,
     pub(crate) bubble_clear_volume_ul: u32,
     pub(crate) bubble_clear_technique: MixTechnique,
+    /// Exact temperature the competent-cell aliquot must be staged at.
+    pub(crate) cell_staging_temperature_c: Option<f64>,
 }
 
 pub(crate) struct RecoveryMediumAddition<'a> {
@@ -470,6 +472,7 @@ pub(crate) fn normalized_chemical_transformation<'a>(
         bubble_clear_cycles,
         bubble_clear_volume_ul,
         bubble_clear_technique,
+        cell_staging_temperature_c: exact_source_temperature(adapter, task, program)?,
     })
 }
 
@@ -1305,7 +1308,7 @@ fn exact_source_temperature(
     task: &AllocatedProcedureTask,
     program: &PipettingProgramV1,
 ) -> Result<Option<f64>, String> {
-    let Some(temperature) = &program.constraints.source_temperature else {
+    let Some(temperature) = lab_procedure::staged_temperature_envelope(&program.vessels) else {
         return Ok(None);
     };
     if temperature.minimum != temperature.maximum {

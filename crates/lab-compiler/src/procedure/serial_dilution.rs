@@ -148,6 +148,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 role: VesselRole::ProcedureInput { input: 0 },
                 positions: replicates,
                 initial_volume_each: Some(volume(initial_volume)?),
+                temperature: None,
             },
             Vessel {
                 id: medium_vessel,
@@ -156,12 +157,14 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 },
                 positions: 1,
                 initial_volume_each: None,
+                temperature: None,
             },
             Vessel {
                 id: dilution_vessel,
                 role: VesselRole::Product { output },
                 positions: position_count,
                 initial_volume_each: None,
+                temperature: None,
             },
         ],
         steps,

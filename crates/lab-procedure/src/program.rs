@@ -134,6 +134,7 @@ mod tests {
                     },
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: None,
                 },
                 Vessel {
                     id: id("destination-vessel"),
@@ -142,6 +143,7 @@ mod tests {
                     },
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: None,
                 },
             ],
             vec![PipettingStep::Transfer {

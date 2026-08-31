@@ -614,6 +614,59 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
 }
 
 #[test]
+fn competent_cells_are_staged_on_a_temperature_controlled_position() {
+    let project = temporary_project();
+    let _ = fs::remove_dir_all(&project);
+    copy_dir(Path::new("../../examples/golden-gate"), &project);
+
+    let built = run(&["build", &project.to_string_lossy()]);
+    assert!(
+        built.status.success(),
+        "golden-gate build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let invocations = read_json(project.join(".lab/build/compiler/adapter-invocations.json"));
+    let prepare = invocations["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|method| method["tasks"].as_array().unwrap())
+        .find(|task| {
+            task["id"]
+                .as_str()
+                .unwrap()
+                .ends_with("::prepare-transformation")
+        })
+        .expect("the plan contains a transformation preparation");
+    assert!(
+        prepare["requirements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|requirement| {
+                requirement["capability_kind"]
+                    == "https://sbol.io/ns/capability#TemperatureControlledStaging"
+            }),
+        "chemically competent cells lose efficiency at bench temperature, so staging is a \
+         requirement the facility must satisfy rather than an adapter default"
+    );
+
+    // The emitted protocol must draw the aliquot from the labware the temperature module holds,
+    // not from an ambient rack standing beside it.
+    let protocol =
+        read_text(project.join(".lab/build/assets/opentrons_ot2/transformation_protocol.py"));
+    assert!(protocol.contains("cell_rack = temperature.load_labware("));
+    assert!(protocol.contains("source = cell_rack[source_name]"));
+    assert!(
+        protocol.contains("temperature.set_temperature(execution[\"cell_staging_temperature_c\"])"),
+        "the setpoint comes from the reviewed plan rather than a literal in the template"
+    );
+
+    let _ = fs::remove_dir_all(&project);
+}
+
+#[test]
 fn a_partly_stated_assembly_recipe_is_a_diagnostic_rather_than_a_manual_fallback() {
     let project = temporary_project();
     let _ = fs::remove_dir_all(&project);
@@ -1435,7 +1488,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     );
     assert_eq!(solution["selections"].as_array().unwrap().len(), 22);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 84);
+    assert_eq!(requirements.len(), 88);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1491,7 +1544,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 80);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 84);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
@@ -2007,7 +2060,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 85);
+    assert_eq!(requirements.len(), 89);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));

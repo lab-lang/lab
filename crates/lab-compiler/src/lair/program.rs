@@ -1043,13 +1043,20 @@ workflow main() -> Material<Plasmid>:
         let staged_program = staged_program.as_program();
         assert_eq!(staged_program.materials.len(), 9);
         assert_eq!(staged_program.steps.len(), 18);
-        let source_temperature = staged_program
-            .constraints
-            .source_temperature
-            .as_ref()
-            .expect("the Method requires controlled source staging");
+        let source_temperature =
+            lab_procedure::staged_temperature_envelope(&staged_program.vessels)
+                .expect("the Method requires controlled source staging");
         assert_eq!(source_temperature.minimum, source_temperature.maximum);
         assert_eq!(source_temperature.minimum.value().to_string(), "4");
+        assert!(
+            staged_program
+                .vessels
+                .iter()
+                .filter(|vessel| vessel.temperature.is_some())
+                .count()
+                > 1,
+            "every staged reagent source carries the requirement, not the program as a whole"
+        );
         let staged_capabilities = temperature_staged.tasks[0]
             .requirements
             .iter()
@@ -1249,7 +1256,15 @@ workflow main() -> Material<Plasmid>:
             panic!("transformation preparation must be pipetting")
         };
         assert_eq!(preparation.as_program().steps.len(), 8);
-        assert_eq!(automated_transformation.tasks[0].requirements.len(), 5);
+        assert_eq!(automated_transformation.tasks[0].requirements.len(), 6);
+        assert!(
+            preparation
+                .as_program()
+                .vessels
+                .iter()
+                .any(|vessel| vessel.temperature.is_some()),
+            "the competent-cell aliquot states the temperature it must be staged at"
+        );
         let heat_shock = automated_transformation.tasks[1]
             .program
             .as_ref()

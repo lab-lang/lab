@@ -1539,6 +1539,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     role: VesselRole::Intermediate,
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: None,
                 },
                 Vessel {
                     id: local("destination"),
@@ -1547,6 +1548,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     },
                     positions: 1,
                     initial_volume_each: None,
+                    temperature: None,
                 },
             ],
             vec![
