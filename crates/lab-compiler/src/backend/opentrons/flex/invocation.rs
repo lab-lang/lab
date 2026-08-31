@@ -6,6 +6,7 @@ use lab_instruments::ThermalProfile;
 use lab_method::LocalId;
 use lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT;
 use opentrons_protocol::schema::Metadata;
+use opentrons_protocol::v8::schema::{WellLocation, WellOrigin};
 use opentrons_protocol::{
     FlexPipetteName, FlexProtocolBuilder, FlexSlot, LabwareId, PipetteId, PipetteMount,
     ProtocolError, TemperatureModule, Thermocycler, standard_definition,
@@ -103,9 +104,13 @@ enum FlexTaskExecution {
     },
     SerialDilution {
         culture_source: PlanningValueSource,
-        culture_well: String,
+        /// One staged culture per biological replicate.
+        culture_wells: Vec<String>,
         medium: MaterialPlacement,
+        /// Dilution positions in dilution-major order, matching `dilution * replicates + replicate`.
         dilution_wells: Vec<Well>,
+        culture_replicates: usize,
+        serial_dilutions: usize,
         medium_volume_ul: u32,
         culture_volume_ul: u32,
         mix_cycles: u32,
@@ -417,18 +422,36 @@ fn plan_dilution(
         "dilution_plate",
         &profile.stages.plating.dilution_plate,
     );
+    let positions = procedure
+        .serial_dilutions
+        .checked_mul(procedure.culture_replicates)
+        .ok_or_else(|| {
+            format!(
+                "Flex Procedure task '{}' declares more dilution positions than can be addressed",
+                task.id
+            )
+        })?;
     let dilution_wells = allocator
-        .take(procedure.serial_dilutions)
+        .take(positions)
         .map_err(|error| error.to_string())?;
-    let culture_wells = known_wells(
+    let staging = known_wells(
         task,
         "culture staging plate",
         profile.deck.thermocycler.capacity,
     )?;
-    if procedure.serial_dilutions > profile.stages.plating.small_tips.total_capacity() {
+    if procedure.culture_replicates > staging.len() {
+        return Err(view.capacity_error(
+            "culture staging plate",
+            procedure.culture_replicates,
+            staging.len(),
+        ));
+    }
+    let culture_wells = staging[..procedure.culture_replicates].to_vec();
+    // One tip carries each replicate's whole dilution chain, so a replicate is one tip.
+    if procedure.culture_replicates > profile.stages.plating.small_tips.total_capacity() {
         return Err(view.capacity_error(
             "dilution small-tip racks",
-            procedure.serial_dilutions,
+            procedure.culture_replicates,
             profile.stages.plating.small_tips.total_capacity(),
         ));
     }
@@ -445,6 +468,12 @@ fn plan_dilution(
             task.id, procedure.mix_volume_ul
         ));
     }
+    if f64::from(procedure.culture_volume_ul) > small_working {
+        return Err(format!(
+            "Flex Procedure task '{}' transfers {} uL of culture, but the configured small pipette and tip provide {small_working} uL",
+            task.id, procedure.culture_volume_ul
+        ));
+    }
     let large_working = working_volume_ul(
         &profile.instruments.large,
         &profile.stages.plating.large_tips,
@@ -458,7 +487,7 @@ fn plan_dilution(
 
     Ok(FlexTaskExecution::SerialDilution {
         culture_source: procedure.culture_source.clone(),
-        culture_well: culture_wells[0].clone(),
+        culture_wells,
         medium: MaterialPlacement {
             role: "medium".to_owned(),
             input: procedure.medium.input.clone(),
@@ -467,6 +496,8 @@ fn plan_dilution(
             source_well: profile.stages.plating.media_rack.medium_well.clone(),
         },
         dilution_wells,
+        culture_replicates: procedure.culture_replicates,
+        serial_dilutions: procedure.serial_dilutions,
         medium_volume_ul: procedure.medium_volume_ul,
         culture_volume_ul: procedure.culture_volume_ul,
         mix_cycles: procedure.mix_cycles,
@@ -607,8 +638,10 @@ fn render_cycle(plan: &FlexTaskPlan) -> Result<String, String> {
 
 fn render_dilution(plan: &FlexTaskPlan) -> Result<String, String> {
     let FlexTaskExecution::SerialDilution {
-        culture_well,
+        culture_wells,
         dilution_wells,
+        culture_replicates,
+        serial_dilutions,
         medium_volume_ul,
         culture_volume_ul,
         mix_cycles,
@@ -647,21 +680,35 @@ fn render_dilution(plan: &FlexTaskPlan) -> Result<String, String> {
         .map_err(protocol_error)?;
     builder.thermocycler_open_lid(thermocycler);
 
-    let (rack, well) = large_tips.next();
-    builder
-        .pick_up_tip(large.id, rack, &well)
-        .map_err(protocol_error)?;
+    // `SharedSourceNoReentry` lets one loaded path serve several destinations but forbids
+    // returning to the source after a destination is touched, so each aspirate takes a fresh tip.
     let working = large.max_volume.min(large_tips.tip_volume);
     let wells_per_aspirate = ((working / f64::from(*medium_volume_ul)).floor() as usize).max(1);
+    // The canonical program requires aspiration to follow the medium's falling surface. The
+    // compiler owns that trajectory: every offset below is computed from the reviewed plan and the
+    // profile's measured geometry, so the run does not consult the instrument for liquid state.
+    let mut withdrawn = 0.0;
     for chunk in dilution_wells.chunks(wells_per_aspirate) {
+        let (rack, well) = large_tips.next();
+        builder
+            .pick_up_tip(large.id, rack, &well)
+            .map_err(protocol_error)?;
+        let load = f64::from(*medium_volume_ul) * chunk.len() as f64;
+        let offset = plan.deck.techniques.tracked_offset_mm(withdrawn);
+        withdrawn += load;
         builder
             .aspirate(
                 large.id,
                 media,
                 &stage.media_rack.medium_well,
-                f64::from(*medium_volume_ul) * chunk.len() as f64,
+                load,
                 large.flow_rate,
-                None,
+                Some(WellLocation::with_offset(
+                    WellOrigin::Bottom,
+                    0.0,
+                    0.0,
+                    offset,
+                )),
             )
             .map_err(protocol_error)?;
         for destination in chunk {
@@ -676,24 +723,58 @@ fn render_dilution(plan: &FlexTaskPlan) -> Result<String, String> {
                 )
                 .map_err(protocol_error)?;
         }
+        builder
+            .drop_tip_into_trash(large.id)
+            .map_err(protocol_error)?;
     }
-    builder
-        .drop_tip_into_trash(large.id)
-        .map_err(protocol_error)?;
 
-    let mut source = (cultures, culture_well.clone());
-    for destination in dilution_wells {
-        let target = (dilution_plates[destination.plate], destination.well.clone());
-        transfer(
-            &mut builder,
-            &mut small_tips,
-            &small,
-            (source.0, &source.1),
-            (target.0, &target.1),
-            f64::from(*culture_volume_ul),
-            Some((*mix_cycles, f64::from(*mix_volume_ul))),
-        )?;
-        source = target;
+    // Each biological replicate is an independent dilution series, and the steps of one series
+    // share a fluid path group, so one tip carries a replicate from its culture to its last
+    // dilution. Replicates never share a tip.
+    for (replicate, culture_well) in culture_wells.iter().enumerate() {
+        let (rack, well) = small_tips.next();
+        builder
+            .pick_up_tip(small.id, rack, &well)
+            .map_err(protocol_error)?;
+        let mut source = (cultures, culture_well.clone());
+        for dilution in 0..*serial_dilutions {
+            let destination = &dilution_wells[dilution * culture_replicates + replicate];
+            let target = (dilution_plates[destination.plate], destination.well.clone());
+            builder
+                .aspirate(
+                    small.id,
+                    source.0,
+                    &source.1,
+                    f64::from(*culture_volume_ul),
+                    small.flow_rate,
+                    None,
+                )
+                .map_err(protocol_error)?;
+            builder
+                .dispense(
+                    small.id,
+                    target.0,
+                    &target.1,
+                    f64::from(*culture_volume_ul),
+                    small.flow_rate,
+                    None,
+                )
+                .map_err(protocol_error)?;
+            builder
+                .mix(
+                    small.id,
+                    target.0,
+                    &target.1,
+                    *mix_cycles,
+                    f64::from(*mix_volume_ul),
+                    small.flow_rate,
+                )
+                .map_err(protocol_error)?;
+            source = target;
+        }
+        builder
+            .drop_tip_into_trash(small.id)
+            .map_err(protocol_error)?;
     }
     builder.comment("Allocated dilution complete. This protocol performs no plating; preserve the final dilution for its downstream Procedure task.");
     render(builder)
@@ -793,14 +874,15 @@ fn render_manual(plan: &FlexTaskPlan) -> Doc {
         }
         FlexTaskExecution::SerialDilution {
             culture_source,
-            culture_well,
+            culture_wells,
             medium,
             dilution_wells,
             ..
         } => {
             doc.para_text(format!(
-                "Stage {} in thermocycler well {culture_well}; load {} from {} in media-rack well {}; preserve dilution wells {} for the downstream task. No agar plate is used.",
+                "Stage {} in thermocycler wells {}; load {} from {} in media-rack well {}; preserve dilution wells {} for the downstream task. No agar plate is used.",
                 value_source(culture_source),
+                culture_wells.join(", "),
                 medium.symbol,
                 material_source(&medium.source),
                 medium.source_well,

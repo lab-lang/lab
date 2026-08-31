@@ -125,8 +125,9 @@ pub(in crate::backend::hamilton::star) fn plan_setup_invocation(
 #[allow(clippy::too_many_arguments)]
 pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
     profile: &StarAdapterProfile,
-    culture_well: String,
+    culture_wells: Vec<String>,
     dilution_wells: Vec<Well>,
+    serial_dilutions: usize,
     medium_volume_ul: f64,
     culture_volume_ul: f64,
     mix: (u32, f64),
@@ -144,7 +145,11 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
         "media_rack",
         profile.stages.plating.media_rack.medium_well.clone(),
     );
-    let culture = StarWell::new("reaction_plate", culture_well);
+    let cultures = culture_wells
+        .into_iter()
+        .map(|well| StarWell::new("reaction_plate", well))
+        .collect::<Vec<_>>();
+    let replicates = cultures.len();
     let targets = dilution_wells
         .into_iter()
         .map(|well| StarWell::new(format!("dilution_plate/{}", well.plate + 1), well.well))
@@ -172,35 +177,45 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
             .map(|target| Transfer::new(medium.clone(), target.clone(), medium_volume_ul))
             .collect::<Vec<_>>();
         builder.distribute(TipClass::Large, &medium_transfers)?;
-        let mut source = culture.clone();
-        for target in &targets {
-            builder.distribute(
-                TipClass::Small,
-                &[Transfer::new(source, target.clone(), culture_volume_ul).with_mix(mix)],
-            )?;
-            source = target.clone();
+        // Each biological replicate is its own dilution series carried on one tip; the series
+        // share a canonical fluid-path group, and replicates never share a path.
+        for (replicate, culture) in cultures.iter().enumerate() {
+            let mut source = culture.clone();
+            let mut series = Vec::with_capacity(serial_dilutions);
+            for dilution in 0..serial_dilutions {
+                let target = targets[dilution * replicates + replicate].clone();
+                series.push(
+                    Transfer::new(source.clone(), target.clone(), culture_volume_ul).with_mix(mix),
+                );
+                source = target;
+            }
+            builder.chain(TipClass::Small, &series)?;
         }
         Ok::<_, StarPlanningError>(builder.finish())
     };
 
     let mut discovery = LiquidState::new();
     choreograph(&mut discovery)?;
-    let source_fills = vec![
-        source_fill(
-            &deck,
-            &discovery,
-            "culture".to_owned(),
-            culture.clone(),
-            PLATE_DEAD_VOLUME_UL,
-        )?,
-        source_fill(
-            &deck,
-            &discovery,
-            "medium".to_owned(),
-            medium.clone(),
-            TROUGH_DEAD_VOLUME_UL,
-        )?,
-    ];
+    let mut source_fills = cultures
+        .iter()
+        .enumerate()
+        .map(|(replicate, culture)| {
+            source_fill(
+                &deck,
+                &discovery,
+                format!("culture-{replicate}"),
+                culture.clone(),
+                PLATE_DEAD_VOLUME_UL,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    source_fills.extend([source_fill(
+        &deck,
+        &discovery,
+        "medium".to_owned(),
+        medium.clone(),
+        TROUGH_DEAD_VOLUME_UL,
+    )?]);
     let mut liquids = seeded_liquids(&source_fills);
     let (operations, feeders) = choreograph(&mut liquids)?;
 

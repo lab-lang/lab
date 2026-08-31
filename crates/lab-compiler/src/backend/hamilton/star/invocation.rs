@@ -92,8 +92,10 @@ enum StarTaskExecution {
     },
     SerialDilution {
         culture_source: PlanningValueSource,
-        culture_well: String,
+        /// One staged culture per biological replicate.
+        culture_wells: Vec<String>,
         medium: MaterialPlacement,
+        /// Dilution positions in dilution-major order, matching `dilution * replicates + replicate`.
         dilution_wells: Vec<Well>,
         medium_volume_ul: u32,
         culture_volume_ul: u32,
@@ -336,18 +338,32 @@ fn plan_dilution(
         "dilution_plate",
         &profile.stages.plating.dilution_plate,
     );
+    let positions = procedure
+        .serial_dilutions
+        .checked_mul(procedure.culture_replicates)
+        .ok_or_else(|| {
+            format!(
+                "STAR Procedure task '{}' declares more dilution positions than can be addressed",
+                task.id
+            )
+        })?;
     let dilution_wells = allocator
-        .take(procedure.serial_dilutions)
+        .take(positions)
         .map_err(|error| error.to_string())?;
-    let culture_wells = plate_wells(profile.deck.reaction_plate.capacity);
-    if culture_wells.is_empty() {
-        return Err(view.capacity_error("culture staging plate", 1, 0));
+    let staging = plate_wells(profile.deck.reaction_plate.capacity);
+    if procedure.culture_replicates > staging.len() {
+        return Err(view.capacity_error(
+            "culture staging plate",
+            procedure.culture_replicates,
+            staging.len(),
+        ));
     }
-    let culture_well = culture_wells[0].clone();
+    let culture_wells = staging[..procedure.culture_replicates].to_vec();
     let device_plan = plan_dilution_invocation(
         profile,
-        culture_well.clone(),
+        culture_wells.clone(),
         dilution_wells.clone(),
+        procedure.serial_dilutions,
         f64::from(procedure.medium_volume_ul),
         f64::from(procedure.culture_volume_ul),
         (procedure.mix_cycles, f64::from(procedure.mix_volume_ul)),
@@ -357,7 +373,7 @@ fn plan_dilution(
         "serial-dilution",
         StarTaskExecution::SerialDilution {
             culture_source: procedure.culture_source.clone(),
-            culture_well,
+            culture_wells,
             medium: MaterialPlacement {
                 role: "medium".to_owned(),
                 input: procedure.medium.input.clone(),
@@ -478,14 +494,15 @@ fn render_manual(plan: &StarTaskPlan) -> Doc {
         }
         StarTaskExecution::SerialDilution {
             culture_source,
-            culture_well,
+            culture_wells,
             medium,
             dilution_wells,
             ..
         } => {
             doc.para_text(format!(
-                "Stage {} in reaction-plate well {culture_well}; load {} from {} in media-rack well {}; preserve dilution wells {} for downstream work. This run performs no plating.",
+                "Stage {} in reaction-plate wells {}; load {} from {} in media-rack well {}; preserve dilution wells {} for downstream work. This run performs no plating.",
                 value_source(culture_source),
+                culture_wells.join(", "),
                 medium.symbol,
                 material_source(&medium.source),
                 medium.source_well,

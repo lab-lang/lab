@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use lab_capability::{
     CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
 };
+use lab_procedure::ProgramFeature;
 use lab_procedure::vocabulary::{
     AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
     LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1,
@@ -85,6 +86,92 @@ pub struct AdapterDescriptor {
     pub default_profile: ValidatedAdapterProfile,
 }
 
+/// Canonical pipetting features the OT-2 Python templates realize.
+///
+/// Each entry is a claim that the emitted protocol preserves the semantic value, not merely that
+/// the planner parses it. This is the outer gate: the per-operation normalizers in
+/// [`crate::backend::procedure`] still reject a program shape a specific template cannot render.
+const OT2_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::AspirateVesselBottom,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::DispenseAboveLiquid,
+    ProgramFeature::DispenseVesselBottom,
+    ProgramFeature::DispenseVesselTop,
+    ProgramFeature::DispenseMaterialSurface,
+    ProgramFeature::AirGap,
+    ProgramFeature::PostDispenseBlowout,
+    ProgramFeature::TouchTip,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::SourceTemperatureConstraint,
+];
+
+/// Thermal features the Opentrons Thermocycler Module templates realize. Neither Opentrons
+/// application format expresses a controlled ramp rate.
+const OPENTRONS_THERMAL_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::ThermalStageRepeat,
+    ProgramFeature::ThermalHeatedLid,
+    ProgramFeature::ThermalFinalHold,
+    ProgramFeature::ThermalMultiSample,
+];
+
+/// Canonical pipetting features the Flex protocol builder realizes.
+const FLEX_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+];
+
+/// Canonical pipetting features the STAR choreographer realizes. It carries its own measured
+/// volume-to-height models, so it tracks a liquid surface the Flex builder cannot.
+const STAR_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+];
+
+/// Thermal features the Inheco ODTC realizes. It controls ramp rate, and it addresses one load at
+/// a time rather than an independently addressable sample count.
+const ODTC_THERMAL_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::ThermalStageRepeat,
+    ProgramFeature::ThermalHeatedLid,
+    ProgramFeature::ThermalControlledRamp,
+    ProgramFeature::ThermalFinalHold,
+];
+
+/// The semantic simulator preserves every canonical value because it emits meaning rather than
+/// motion.
+const SIMULATOR_PIPETTING_FEATURES: &[ProgramFeature] = OT2_PIPETTING_FEATURES;
+
+const SIMULATOR_THERMAL_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::ThermalStageRepeat,
+    ProgramFeature::ThermalHeatedLid,
+    ProgramFeature::ThermalControlledRamp,
+    ProgramFeature::ThermalFinalHold,
+    ProgramFeature::ThermalMultiSample,
+];
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcedureImplementationDescriptor {
     pub id: ProcedureImplementationId,
@@ -94,6 +181,11 @@ pub struct ProcedureImplementationDescriptor {
     pub control_modes: BTreeSet<ControlMode>,
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
+    /// Fine-grained canonical program features this implementation realizes faithfully.
+    ///
+    /// A program carrying a feature absent here is rejected before lowering. Declaring a feature
+    /// is a claim that the emitted device document preserves it, not that the value parses.
+    pub program_features: BTreeSet<ProgramFeature>,
     pub services: AdapterServices,
 }
 
@@ -176,6 +268,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                        OT2_PIPETTING_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -193,6 +286,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                        OPENTRONS_THERMAL_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -231,6 +325,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                        FLEX_PIPETTING_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -244,6 +339,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                        OPENTRONS_THERMAL_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -281,6 +377,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     [ControlMode::ReviewedFile, ControlMode::Api],
                     [STAR_RUN_FORMAT],
                     [STAR_RUN_FORMAT],
+                    STAR_PIPETTING_FEATURES,
                     AdapterServices {
                         planning: true,
                         lowering: true,
@@ -311,6 +408,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     [ControlMode::Sila2],
                     [THERMOCYCLE_RUN_FORMAT],
                     [THERMOCYCLE_RUN_FORMAT],
+                    ODTC_THERMAL_FEATURES,
                     AdapterServices {
                         planning: true,
                         lowering: true,
@@ -382,6 +480,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [SIMULATION_RUN_FORMAT],
                         [SIMULATION_RUN_FORMAT],
+                        SIMULATOR_PIPETTING_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -399,6 +498,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [SIMULATION_RUN_FORMAT],
                         [SIMULATION_RUN_FORMAT],
+                        SIMULATOR_THERMAL_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -467,6 +567,7 @@ fn pipetting_implementation<
     control_modes: [ControlMode; M],
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
+    program_features: &'static [ProgramFeature],
     services: AdapterServices,
 ) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
     Ok(ProcedureImplementationDescriptor {
@@ -500,6 +601,7 @@ fn pipetting_implementation<
         control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
+        program_features: program_features.iter().copied().collect(),
         services,
     })
 }
@@ -511,6 +613,7 @@ fn thermal_implementation<const O: usize, const M: usize, const A: usize, const 
     control_modes: [ControlMode; M],
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
+    program_features: &'static [ProgramFeature],
     services: AdapterServices,
     controlled_ramp: bool,
 ) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
@@ -555,6 +658,7 @@ fn thermal_implementation<const O: usize, const M: usize, const A: usize, const 
         control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
+        program_features: program_features.iter().copied().collect(),
         services,
     })
 }
@@ -781,6 +885,27 @@ fn validate_invocation_implementation(
                 return Err(format!(
                     "Procedure implementation '{}' does not implement task '{}' contract '{}' operation '{}'",
                     implementation.id, task.id, program.contract, task.operation
+                ));
+            }
+            // An implementation that does not declare a feature would otherwise render the program
+            // without it, emitting a plausible device document that performs different science.
+            let validated = program.clone().validate().map_err(|error| {
+                format!(
+                    "Procedure task '{}' has an invalid normalized program: {error}",
+                    task.id
+                )
+            })?;
+            let missing = validated
+                .features()
+                .difference(&implementation.program_features)
+                .map(ProgramFeature::to_string)
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                return Err(format!(
+                    "Procedure implementation '{}' cannot realize task '{}': its normalized program requires {}, which this implementation does not declare",
+                    implementation.id,
+                    task.id,
+                    missing.join(", ")
                 ));
             }
         }

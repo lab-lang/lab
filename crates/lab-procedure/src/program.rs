@@ -83,6 +83,14 @@ impl ValidatedProcedureProgram {
             Self::ThermalV1(program) => program.capability_formula(),
         }
     }
+
+    /// Every fine-grained feature an implementation must declare to realize this program.
+    pub fn features(&self) -> std::collections::BTreeSet<crate::ProgramFeature> {
+        match self {
+            Self::PipettingV1(program) => crate::pipetting_features(program.as_program()),
+            Self::ThermalV1(program) => crate::thermal_features(program.as_program()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]

@@ -5,6 +5,7 @@
 //! compiler IR, facility identities, adapter profiles, or vendor command models.
 
 mod capability;
+mod feature;
 mod id;
 mod pipetting;
 mod program;
@@ -13,6 +14,7 @@ mod thermal;
 pub mod vocabulary;
 
 pub use capability::{BindingScope, CapabilityClause, CapabilityFormula};
+pub use feature::{ProgramFeature, pipetting_features, thermal_features};
 pub use id::{ProcedureLocalId, ProcedureLocalIdError};
 pub use pipetting::{
     AspirationStrategy, DispenseStrategy, FluidPathPolicy, LiquidLedger, Location, MaterialInput,

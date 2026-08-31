@@ -148,3 +148,20 @@ pub(super) fn default_plating_stage() -> PlatingStage {
 fn plate_capacity(capacity: usize) -> PlateCapacity {
     PlateCapacity::new(capacity).expect("built-in defaults declare addressable geometries")
 }
+
+/// A 15 mL conical carrying 10 mL of medium, the reference Flex bench.
+pub(super) fn default_flex_tracked_source_volume_ul() -> u32 {
+    10_000
+}
+
+pub(super) fn default_flex_tracked_usable_depth_mm() -> f64 {
+    75.0
+}
+
+pub(super) fn default_flex_tracked_meniscus_offset_mm() -> f64 {
+    3.0
+}
+
+pub(super) fn default_flex_tracked_minimum_height_mm() -> f64 {
+    2.0
+}

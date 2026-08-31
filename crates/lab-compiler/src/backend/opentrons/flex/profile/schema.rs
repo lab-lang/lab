@@ -155,3 +155,65 @@ impl Default for PlatingStage {
         default_plating_stage()
     }
 }
+
+/// Calibrated Flex realization policy for canonical liquid-access techniques.
+///
+/// These are measured properties of one bench, not scientific quantities. The canonical program
+/// states that an aspiration must follow the liquid surface; this states the geometry that turns
+/// a planned volume into a millimetre offset.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FlexTechniqueCalibration {
+    /// Volume the operator loads into the tracked medium source before the run.
+    #[serde(default = "default_flex_tracked_source_volume_ul")]
+    pub tracked_source_volume_ul: u32,
+    /// Usable liquid depth of the tracked source at its declared load volume.
+    #[serde(default = "default_flex_tracked_usable_depth_mm")]
+    pub tracked_usable_depth_mm: f64,
+    /// How far below the computed meniscus the tip is placed.
+    #[serde(default = "default_flex_tracked_meniscus_offset_mm")]
+    pub tracked_meniscus_offset_mm: f64,
+    /// Floor for the computed offset, so the tip never reaches the vessel bottom.
+    #[serde(default = "default_flex_tracked_minimum_height_mm")]
+    pub tracked_minimum_height_mm: f64,
+}
+
+impl Default for FlexTechniqueCalibration {
+    fn default() -> Self {
+        Self {
+            tracked_source_volume_ul: default_flex_tracked_source_volume_ul(),
+            tracked_usable_depth_mm: default_flex_tracked_usable_depth_mm(),
+            tracked_meniscus_offset_mm: default_flex_tracked_meniscus_offset_mm(),
+            tracked_minimum_height_mm: default_flex_tracked_minimum_height_mm(),
+        }
+    }
+}
+
+impl FlexTechniqueCalibration {
+    /// Aspiration offset above the vessel bottom once `withdrawn_ul` has been removed.
+    pub fn tracked_offset_mm(&self, withdrawn_ul: f64) -> f64 {
+        let loaded = f64::from(self.tracked_source_volume_ul);
+        let remaining = (loaded - withdrawn_ul).max(0.0);
+        let meniscus = (remaining / loaded) * self.tracked_usable_depth_mm;
+        (meniscus - self.tracked_meniscus_offset_mm).max(self.tracked_minimum_height_mm)
+    }
+
+    pub(super) fn validate(&self) -> Result<(), &'static str> {
+        if self.tracked_source_volume_ul == 0 {
+            return Err("tracked_source_volume_ul must be greater than zero");
+        }
+        for value in [
+            self.tracked_usable_depth_mm,
+            self.tracked_meniscus_offset_mm,
+            self.tracked_minimum_height_mm,
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err("tracked technique offsets must be finite and greater than zero");
+            }
+        }
+        if self.tracked_minimum_height_mm > self.tracked_usable_depth_mm {
+            return Err("tracked_minimum_height_mm cannot exceed tracked_usable_depth_mm");
+        }
+        Ok(())
+    }
+}

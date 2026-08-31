@@ -396,6 +396,74 @@ impl<'a> RunBuilder<'a> {
         Ok(())
     }
 
+    /// Carries one continuous fluid path through an ordered series on a single tip.
+    ///
+    /// Canonical steps that share a `fluid_path_group` must not change tips between them, so this
+    /// is not `distribute`: each transfer's target becomes the next transfer's source, and the tip
+    /// is discarded only once the series ends.
+    pub fn chain(
+        &mut self,
+        class: TipClass,
+        transfers: &[Transfer],
+    ) -> Result<(), StarPlanningError> {
+        if transfers.is_empty() {
+            return Ok(());
+        }
+        let working = self.working_volume(class);
+        for transfer in transfers {
+            let corrected = self.curves.corrected(class, transfer.volume_ul);
+            if corrected > working {
+                return Err(AdapterConstraintError::CapacityExceeded {
+                    adapter: BACKEND.into(),
+                    operation: "chained_transfer".into(),
+                    subject: "automation_batch".into(),
+                    resource: "tip".into(),
+                    required: wire_ul(corrected).into(),
+                    capacity: wire_ul(working).into(),
+                    unit: "0.1 uL".into(),
+                }
+                .into());
+            }
+        }
+        let channels = self.pick_up(class, 1)?;
+        let channel = channels[0];
+        for transfer in transfers {
+            let corrected = wire_ul(self.curves.corrected(class, transfer.volume_ul));
+            let total_ul = f64::from(corrected) / 10.0;
+            let heights = self.liquids.aspirate(self.deck, &transfer.source, total_ul);
+            let aspirate = self.channel_liquid(
+                channel,
+                &transfer.source,
+                total_ul,
+                corrected,
+                heights,
+                None,
+            );
+            self.operations.push(StarOperation::Aspirate {
+                tip: class,
+                channels: vec![aspirate],
+            });
+            let heights =
+                self.liquids
+                    .dispense(self.deck, &transfer.target, transfer.volume_ul, None);
+            let liquid = self.channel_liquid(
+                channel,
+                &transfer.target,
+                transfer.volume_ul,
+                corrected,
+                heights,
+                transfer.mix_after,
+            );
+            self.operations.push(StarOperation::Dispense {
+                tip: class,
+                mode: 1,
+                channels: vec![liquid],
+            });
+        }
+        self.discard(vec![channel]);
+        Ok(())
+    }
+
     /// Mixes each well in place with a fresh tip: an aspirate of zero
     /// volume carrying the mix cycles.
     pub fn mix_wells(

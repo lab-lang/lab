@@ -1864,6 +1864,21 @@ ex:inheco_odtc
         .find(|route| route["driver"] == "hamilton.star")
         .unwrap();
     let star_output = out_dir.join(star_route["output"].as_str().unwrap());
+    // Two biological replicates through two dilutions each. Reading only the dilution count would
+    // silently emit half the experiment and report n=1.
+    let star_dilution =
+        read_json(star_output.join("tasks/003-serial-dilution/invocation_manifest.json"));
+    let star_execution = &star_dilution["execution"];
+    assert_eq!(
+        star_execution["culture_wells"].as_array().unwrap().len(),
+        2,
+        "the STAR adapter stages one culture per biological replicate"
+    );
+    assert_eq!(
+        star_execution["dilution_wells"].as_array().unwrap().len(),
+        4,
+        "two dilutions for each of two replicates"
+    );
     for manifest in star_route["artifacts"]
         .as_array()
         .unwrap()
@@ -2192,6 +2207,32 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
             !name.contains("transformation_protocol") && !name.contains("plating_protocol")
         }),
         "an exact Flex dilution must not absorb transformation or plating"
+    );
+
+    // The example runs two biological replicates through two dilutions each. An adapter that
+    // reads only the dilution count would emit half the experiment and silently report n=1.
+    let dilution: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            target_root.join("tasks/008-serial-dilution/invocation_manifest.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let execution = &dilution["execution"];
+    assert_eq!(
+        execution["culture_replicates"], 2,
+        "the Flex adapter preserves every biological replicate"
+    );
+    assert_eq!(execution["serial_dilutions"], 2);
+    assert_eq!(
+        execution["culture_wells"].as_array().unwrap().len(),
+        2,
+        "one staged culture per replicate"
+    );
+    assert_eq!(
+        execution["dilution_wells"].as_array().unwrap().len(),
+        4,
+        "two dilutions for each of two replicates"
     );
 
     let manifest: Value = serde_json::from_str(
