@@ -33,6 +33,10 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     let culture_volume = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
     let mix_cycles = view.integer_parameter("mix_cycles", None)?;
     let mix_volume = view.integer_parameter("mix_volume_ul", Some(MICROLITRE))?;
+    // The medium the operator loads before the run. Aspiration follows this source's falling
+    // surface, so the compiler must be able to follow it too.
+    let medium_source_volume =
+        view.integer_parameter("medium_source_volume_ul", Some(MICROLITRE))?;
     for (name, value) in [
         ("serial_dilutions", serial_dilutions),
         ("replicates", replicates),
@@ -41,6 +45,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         ("culture_volume_ul", culture_volume),
         ("mix_cycles", mix_cycles),
         ("mix_volume_ul", mix_volume),
+        ("medium_source_volume_ul", medium_source_volume),
     ] {
         if value == 0 {
             return Err(format!("parameter `{name}` must be greater than zero"));
@@ -147,6 +152,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 id: culture_vessel,
                 role: VesselRole::ProcedureInput { input: 0 },
                 positions: replicates,
+                working_capacity_each: None,
+                dead_volume_each: None,
                 initial_volume_each: Some(volume(initial_volume)?),
                 temperature: None,
             },
@@ -156,13 +163,17 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                     material: medium_id,
                 },
                 positions: 1,
-                initial_volume_each: None,
+                working_capacity_each: None,
+                dead_volume_each: None,
+                initial_volume_each: Some(volume(medium_source_volume)?),
                 temperature: None,
             },
             Vessel {
                 id: dilution_vessel,
                 role: VesselRole::Product { output },
                 positions: position_count,
+                working_capacity_each: None,
+                dead_volume_each: None,
                 initial_volume_each: None,
                 temperature: None,
             },

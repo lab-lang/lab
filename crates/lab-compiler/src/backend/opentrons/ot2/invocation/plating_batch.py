@@ -22,23 +22,28 @@ def _tracked_aspiration_location(
     protocol: protocol_api.ProtocolContext,
     source: Any,
     techniques: dict[str, Any],
+    remaining_ul: float,
 ) -> Any:
-    current_volume = source.current_liquid_volume()
-    if current_volume is None:
-        raise RuntimeError("The configured dilution-medium source has no tracked volume")
-    if current_volume < source.max_volume * techniques["tracked_low_volume_fraction"]:
+    """Aspiration position for a source whose falling surface the plan already accounts for.
+
+    `remaining_ul` is the reviewed plan's stated source load less the withdrawals this protocol has
+    made, so the position is a function of the plan and the calibrated geometry below. The
+    instrument is never asked what it currently holds: a run that consulted live state could reach
+    a different position than the one that was reviewed.
+    """
+    if remaining_ul < source.max_volume * techniques["tracked_low_volume_fraction"]:
         protocol.comment(
-            "Low dilution-medium volume; using the labware default aspiration location"
+            "Planned dilution-medium volume is low; using the labware default aspiration location"
         )
         return source
     usable_depth = source.depth - techniques["tracked_usable_depth_offset_mm"]
-    liquid_height = (current_volume / source.max_volume) * usable_depth
+    liquid_height = (remaining_ul / source.max_volume) * usable_depth
     aspiration_height = max(
         liquid_height - techniques["tracked_meniscus_offset_mm"],
         techniques["tracked_minimum_height_mm"],
     )
     protocol.comment(
-        f"Tracked dilution medium: {current_volume:.0f} uL remaining, aspirating at {aspiration_height:.1f} mm"
+        f"Tracked dilution medium: {remaining_ul:.0f} uL planned remaining, aspirating at {aspiration_height:.1f} mm"
     )
     return source.bottom(aspiration_height)
 
@@ -159,20 +164,27 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     all_dilution_wells = [
         _well(dilution_plates, allocation) for allocation in all_dilution_allocations
     ]
-    p300.pick_up_tip()
     chunk_size = techniques["tracked_chunk_size"]
+    disposal = techniques["distribution_disposal_volume_ul"]
+    # The plan states what the source is loaded with, so this run follows that number down rather
+    # than asking the instrument. A fresh tip per aspirate keeps the shared source uncontaminated.
+    remaining_ul = float(first_dilution["medium"]["load_volume_ul"])
     for offset in range(0, len(all_dilution_wells), chunk_size):
         chunk = all_dilution_wells[offset : offset + chunk_size]
+        p300.pick_up_tip()
         p300.distribute(
             first_dilution["medium_volume_ul"],
-            _tracked_aspiration_location(protocol, recovery_medium, techniques),
+            _tracked_aspiration_location(
+                protocol, recovery_medium, techniques, remaining_ul
+            ),
             chunk,
-            disposal_volume=techniques["distribution_disposal_volume_ul"],
+            disposal_volume=disposal,
             new_tip="never",
         )
+        p300.drop_tip()
+        remaining_ul -= first_dilution["medium_volume_ul"] * len(chunk) + disposal
         for well in chunk:
             well.load_liquid(liquid=medium, volume=first_dilution["medium_volume_ul"])
-    p300.drop_tip()
 
     culture_ordinal = 0
     for dilution_scheduled, plating_scheduled in zip(

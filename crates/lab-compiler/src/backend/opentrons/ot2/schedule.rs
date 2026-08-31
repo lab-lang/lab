@@ -762,6 +762,7 @@ fn allocate_transformation(
     let mut cell_mix_requirements = BTreeMap::<String, u32>::new();
     let mut dna_withdrawals = BTreeMap::<String, u32>::new();
     let mut dna_mix_requirements = BTreeMap::<String, u32>::new();
+    let mut dna_final_withdrawals = BTreeMap::<String, u32>::new();
     let mut external_dna_keys = BTreeSet::new();
     let mut recovery_loads = BTreeMap::<String, u32>::new();
     for (prepare, heat) in prepare_heat {
@@ -824,9 +825,14 @@ fn allocate_transformation(
                 .checked_add(volume)
                 .ok_or_else(|| "OT-2 DNA batch volume overflows".to_owned())?;
             dna_mix_requirements
-                .entry(key)
+                .entry(key.clone())
                 .and_modify(|required| *required = (*required).max(*dna_mix_volume_ul))
                 .or_insert(*dna_mix_volume_ul);
+            // The smallest single draw is the least this well can have left before its last mix.
+            dna_final_withdrawals
+                .entry(key)
+                .and_modify(|draw| *draw = (*draw).min(*dna_volume_ul))
+                .or_insert(*dna_volume_ul);
         }
         let Ot2TaskExecution::AddRecoveryMedium {
             medium,
@@ -852,8 +858,18 @@ fn allocate_transformation(
             .checked_add(volume)
             .ok_or_else(|| "OT-2 recovery batch volume overflows".to_owned())?;
     }
-    let cell_loads = required_source_loads(&cell_withdrawals, &cell_mix_requirements);
-    let dna_loads = required_source_loads(&dna_withdrawals, &dna_mix_requirements);
+    // One mix per competent-cell tube precedes its single distribute, while each DNA well is
+    // remixed before every transfer out of it.
+    let cell_loads = required_source_loads(
+        &cell_withdrawals,
+        &cell_mix_requirements,
+        MixCadence::BeforeFirstDraw,
+    );
+    let dna_loads = required_source_loads(
+        &dna_withdrawals,
+        &dna_mix_requirements,
+        MixCadence::BeforeEveryDraw(&dna_final_withdrawals),
+    );
     let dna_plate_wells = plate_wells(profile.stages.transformation.dna_plate.capacity);
     let product_positions = product_wells
         .values()
@@ -1182,16 +1198,43 @@ fn allocate_transformation(
     ))
 }
 
+/// When a shared source is remixed, which decides how much must still be in it at the end.
+enum MixCadence<'a> {
+    /// One mix before any liquid leaves, so the mix only has to fit the starting load.
+    BeforeFirstDraw,
+    /// A mix before every draw, keyed by the smallest single draw from each source. Before the
+    /// last mix the well is already down to `total - smallest draw`, and that remainder still has
+    /// to cover a full mix.
+    BeforeEveryDraw(&'a BTreeMap<String, u32>),
+}
+
+/// How much each shared source must hold for the whole batch.
+///
+/// The total withdrawal is one bound. The other depends on when the source is remixed: taking only
+/// the larger of the total and one mix understates the load when a mix precedes every draw and
+/// draws more than a single transfer does, which leaves the last mix short.
 fn required_source_loads(
     withdrawals: &BTreeMap<String, u32>,
     mix_requirements: &BTreeMap<String, u32>,
+    cadence: MixCadence<'_>,
 ) -> BTreeMap<String, u32> {
     withdrawals
         .iter()
         .map(|(source, withdrawal)| {
+            let mix = mix_requirements.get(source).copied().unwrap_or_default();
+            let before_last_mix = match &cadence {
+                MixCadence::BeforeFirstDraw => 0,
+                MixCadence::BeforeEveryDraw(final_withdrawals) => {
+                    let smallest = final_withdrawals
+                        .get(source)
+                        .copied()
+                        .unwrap_or(*withdrawal);
+                    withdrawal.saturating_sub(smallest)
+                }
+            };
             (
                 source.clone(),
-                (*withdrawal).max(mix_requirements.get(source).copied().unwrap_or_default()),
+                (*withdrawal).max(mix.saturating_add(before_last_mix)),
             )
         })
         .collect()
@@ -1565,18 +1608,37 @@ fn add_well_output_locations(
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_source_temperature, required_source_loads};
+    use super::{MixCadence, merge_source_temperature, required_source_loads};
     use std::collections::BTreeMap;
 
     #[test]
-    fn shared_source_load_is_total_withdrawal_or_largest_mix_not_both() {
-        let withdrawals = BTreeMap::from([("cells".to_owned(), 80), ("dna".to_owned(), 8)]);
-        let mix_requirements = BTreeMap::from([("cells".to_owned(), 50), ("dna".to_owned(), 10)]);
+    fn a_shared_source_holds_enough_for_its_last_mix_as_well_as_every_draw() {
+        // Four 2 uL draws with a 5 uL mix before each: the well is down to 2 uL before the final
+        // mix, so it must start with 5 + 3 x 2 = 11 uL rather than the 8 uL total withdrawal.
+        let withdrawals = BTreeMap::from([("dna".to_owned(), 8)]);
+        let mix_requirements = BTreeMap::from([("dna".to_owned(), 5)]);
+        let final_withdrawals = BTreeMap::from([("dna".to_owned(), 2)]);
 
-        let loads = required_source_loads(&withdrawals, &mix_requirements);
+        let loads = required_source_loads(
+            &withdrawals,
+            &mix_requirements,
+            MixCadence::BeforeEveryDraw(&final_withdrawals),
+        );
+
+        assert_eq!(loads["dna"], 11);
+    }
+
+    #[test]
+    fn a_source_mixed_once_only_has_to_hold_its_mix_at_the_start() {
+        // The competent-cell tube is remixed once before its single distribute, so a 50 uL mix
+        // needs no headroom beyond the 80 uL the batch draws.
+        let withdrawals = BTreeMap::from([("cells".to_owned(), 80)]);
+        let mix_requirements = BTreeMap::from([("cells".to_owned(), 50)]);
+
+        let loads =
+            required_source_loads(&withdrawals, &mix_requirements, MixCadence::BeforeFirstDraw);
 
         assert_eq!(loads["cells"], 80);
-        assert_eq!(loads["dna"], 10);
     }
 
     #[test]

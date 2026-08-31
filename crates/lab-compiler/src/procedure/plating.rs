@@ -76,6 +76,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             id: source_vessel.clone(),
             role: VesselRole::ProcedureInput { input: 0 },
             positions: culture_replicates,
+            working_capacity_each: None,
+            dead_volume_each: None,
             initial_volume_each: Some(volume(remaining)?),
             temperature: None,
         });
@@ -117,6 +119,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             output: output.clone(),
         },
         positions: spot_count,
+        working_capacity_each: None,
+        dead_volume_each: None,
         initial_volume_each: None,
         temperature: None,
     });

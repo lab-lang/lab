@@ -218,6 +218,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 material: material_id,
             },
             positions: 1,
+            working_capacity_each: None,
+            dead_volume_each: None,
             initial_volume_each: None,
             temperature: staging_temperature.clone(),
         });
@@ -236,6 +238,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
             output: product.clone(),
         },
         positions: replicates,
+        working_capacity_each: None,
+        dead_volume_each: None,
         initial_volume_each: None,
         temperature: None,
     });

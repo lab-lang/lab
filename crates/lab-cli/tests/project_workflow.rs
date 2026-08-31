@@ -1216,12 +1216,22 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     );
     let plating_protocol = read_text(target_root.join("plating_protocol.py"));
     assert!(
-        plating_protocol.contains("current_volume / source.max_volume"),
+        plating_protocol.contains("remaining_ul / source.max_volume"),
         "{plating_protocol}"
     );
     assert!(
         plating_protocol.contains("tracked_low_volume_fraction"),
         "{plating_protocol}"
+    );
+    // The reviewed plan states the source load, so the run follows that number down. Reading the
+    // instrument's own liquid state could put the tip somewhere the reviewer never saw.
+    assert!(
+        !plating_protocol.contains("current_liquid_volume"),
+        "the emitted protocol must not consult live instrument liquid state"
+    );
+    assert!(
+        plating_protocol.contains("remaining_ul -="),
+        "the emitted protocol carries the planned volume forward itself"
     );
     assert!(
         plating_protocol.contains("tracked_chunk_size"),

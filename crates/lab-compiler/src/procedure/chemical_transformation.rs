@@ -61,6 +61,9 @@ pub(super) fn normalize_prepare(
     // holds it. Without this the aliquot would be planned onto an ambient rack.
     let cell_staging_temperature =
         view.integer_parameter("cell_staging_temperature_c", Some(DEGREE_CELSIUS))?;
+    // The aliquot the operator thaws. Stating it lets the compiler prove the reactions this task
+    // sets up can actually be drawn from one tube.
+    let cell_aliquot_volume = positive(&view, "cell_aliquot_volume_ul", Some(MICROLITRE))?;
 
     let cells = procedure_id("competent-cells")?;
     let mixture = procedure_id(task.outputs[0].as_str())?;
@@ -78,7 +81,9 @@ pub(super) fn normalize_prepare(
         id: cells.clone(),
         role: VesselRole::ProcedureInput { input: 1 },
         positions: 1,
-        initial_volume_each: None,
+        working_capacity_each: None,
+        dead_volume_each: None,
+        initial_volume_each: Some(volume(cell_aliquot_volume)?),
         temperature: Some(TemperatureRange::exact(
             Temperature::parse_degrees_celsius(cell_staging_temperature.to_string())
                 .map_err(|error| error.to_string())?,
@@ -90,6 +95,8 @@ pub(super) fn normalize_prepare(
             output: mixture.clone(),
         },
         positions: replicates,
+        working_capacity_each: None,
+        dead_volume_each: None,
         initial_volume_each: None,
         temperature: None,
     });
@@ -130,6 +137,8 @@ pub(super) fn normalize_prepare(
                 material: material_id,
             },
             positions: 1,
+            working_capacity_each: None,
+            dead_volume_each: None,
             initial_volume_each: None,
             temperature: None,
         });

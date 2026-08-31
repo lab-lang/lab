@@ -298,6 +298,7 @@ fn automated_chemical_transformation() -> MethodDefinition {
                         ("bubble_clear_volume_ul", 20),
                         ("bubble_clear_dispense_offset_mm", 8),
                         ("cell_staging_temperature_c", 4),
+                        ("cell_aliquot_volume_ul", 50),
                     ],
                 ),
                 vec![material_parameter("dependencies", "dependencies")],
@@ -564,7 +565,11 @@ fn serial_dilution() -> MethodDefinition {
                         "culture_volume_ul",
                     ],
                 ),
-                [("mix_cycles", 5), ("mix_volume_ul", 19)],
+                [
+                    ("mix_cycles", 5),
+                    ("mix_volume_ul", 19),
+                    ("medium_source_volume_ul", 10_000),
+                ],
             ),
             vec![material_literal("medium", "recovery_medium")],
             vec![requirement(

@@ -67,6 +67,19 @@ pub struct Vessel {
     /// Material sources may omit this value so the adapter can calculate a sufficient source load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_volume_each: Option<Volume>,
+    /// Largest liquid volume one position of this vessel can hold.
+    ///
+    /// Stated when the Method knows the vessel it requires. A dispense that would exceed it is a
+    /// spill, which is cheaper to catch here than on the deck.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_capacity_each: Option<Volume>,
+    /// Volume in one position the program must not draw below.
+    ///
+    /// This is the Method's own floor, such as leaving residual above a pellet, not the labware's
+    /// unaspirable residual. An adapter knows the tube it will use and enforces its own dead volume
+    /// on top of this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_volume_each: Option<Volume>,
     /// Temperature this vessel's contents must be held at while the program runs.
     ///
     /// This is per vessel rather than per program because one program routinely stages materials
@@ -575,6 +588,22 @@ impl LiquidLedger {
     }
 }
 
+/// One position, the volume a step moves, what it already holds, and the bound that is crossed.
+///
+/// Boxed because carrying these inline makes every `Result` in the crate pay for the widest error.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VolumeConflict {
+    pub step: ProcedureLocalId,
+    pub vessel: ProcedureLocalId,
+    pub position: u32,
+    /// Volume the step moves into or out of the position.
+    pub moved: String,
+    /// Volume already present before the step.
+    pub present: String,
+    /// The dead volume or working capacity the step crosses.
+    pub limit: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PipettingProgramValidationError {
     #[error("pipetting program contains no logical vessels")]
@@ -642,6 +671,30 @@ pub enum PipettingProgramValidationError {
         available: String,
     },
     #[error(
+        "pipetting step `{}` withdraws {} uL from `{}` position {}, leaving less than its {} uL dead volume from {} uL",
+        .0.step, .0.moved, .0.vessel, .0.position, .0.limit, .0.present
+    )]
+    BelowDeadVolume(Box<VolumeConflict>),
+    #[error(
+        "pipetting step `{}` dispenses {} uL into `{}` position {}, taking it past its {} uL working capacity from {} uL",
+        .0.step, .0.moved, .0.vessel, .0.position, .0.limit, .0.present
+    )]
+    ExceedsWorkingCapacity(Box<VolumeConflict>),
+    #[error(
+        "pipetting step `{step}` aspirates from `{vessel}`, which states no initial volume; only a material source may leave its fill to the adapter"
+    )]
+    UnvaluedSourceAspiration {
+        step: ProcedureLocalId,
+        vessel: ProcedureLocalId,
+    },
+    #[error(
+        "pipetting step `{step}` tracks the liquid surface of `{vessel}`, which states no initial volume, so the planned surface cannot be computed"
+    )]
+    UntrackableSource {
+        step: ProcedureLocalId,
+        vessel: ProcedureLocalId,
+    },
+    #[error(
         "pipetting mix `{step}` requires {required} uL in `{vessel}` position {position}, which contains only {available} uL"
     )]
     InsufficientMixVolume {
@@ -656,20 +709,25 @@ pub enum PipettingProgramValidationError {
 fn build_liquid_ledger(
     program: &PipettingProgramV1,
 ) -> Result<LiquidLedger, PipettingProgramValidationError> {
+    validate_source_valuation(program)?;
     let zero = ExactDecimal::parse("0").expect("zero is a valid exact decimal");
+    let mut capacities = BTreeMap::new();
+    let mut dead_volumes = BTreeMap::new();
     let mut final_volumes = BTreeMap::new();
     for vessel in &program.vessels {
+        if let Some(capacity) = &vessel.working_capacity_each {
+            capacities.insert(vessel.id.clone(), capacity.value().clone());
+        }
+        if let Some(dead) = &vessel.dead_volume_each {
+            dead_volumes.insert(vessel.id.clone(), dead.value().clone());
+        }
+        // A vessel the program itself fills starts empty. Leaving it unknown would exempt it from
+        // every later check, including checks on liquid it has since received.
         let initial = vessel
             .initial_volume_each
             .as_ref()
             .map(|volume| volume.value().clone())
-            .or_else(|| {
-                matches!(
-                    vessel.role,
-                    VesselRole::Product { .. } | VesselRole::MaterialProduct { .. }
-                )
-                .then(|| zero.clone())
-            });
+            .or_else(|| ledger_can_value(vessel).then(|| zero.clone()));
         for position in 0..vessel.positions {
             final_volumes.insert(
                 Location {
@@ -696,6 +754,8 @@ fn build_liquid_ledger(
                 volume.value(),
                 &mut final_volumes,
                 &mut withdrawn,
+                &capacities,
+                &dead_volumes,
             )?,
             PipettingStep::Distribute {
                 id,
@@ -710,6 +770,8 @@ fn build_liquid_ledger(
                 volume_each.value(),
                 &mut final_volumes,
                 &mut withdrawn,
+                &capacities,
+                &dead_volumes,
             )?,
             PipettingStep::Mix {
                 id,
@@ -740,6 +802,7 @@ fn build_liquid_ledger(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn move_liquid(
     step: &ProcedureLocalId,
     source: &Location,
@@ -747,18 +810,37 @@ fn move_liquid(
     volume_each: &ExactDecimal,
     volumes: &mut BTreeMap<Location, Option<ExactDecimal>>,
     withdrawn: &mut BTreeMap<Location, ExactDecimal>,
+    capacities: &BTreeMap<ProcedureLocalId, ExactDecimal>,
+    dead_volumes: &BTreeMap<ProcedureLocalId, ExactDecimal>,
 ) -> Result<(), PipettingProgramValidationError> {
     let total = volume_each.multiplied_by_u32(
         u32::try_from(destinations.len()).expect("validated positions fit in u32"),
     );
     if let Some(Some(available)) = volumes.get(source) {
-        if available < &total {
-            return Err(PipettingProgramValidationError::InsufficientVolume {
-                step: step.clone(),
-                vessel: source.vessel.clone(),
-                position: source.position,
-                required: total.to_string(),
-                available: available.to_string(),
+        // Dead volume is liquid the tip cannot reach, so it is not available however much of it
+        // the vessel holds.
+        let dead = dead_volumes.get(&source.vessel);
+        let reachable =
+            dead.map_or_else(|| available.clone(), |dead| available.subtracted_by(dead));
+        if reachable < total {
+            return Err(match dead {
+                Some(dead) => {
+                    PipettingProgramValidationError::BelowDeadVolume(Box::new(VolumeConflict {
+                        step: step.clone(),
+                        vessel: source.vessel.clone(),
+                        position: source.position,
+                        moved: total.to_string(),
+                        present: available.to_string(),
+                        limit: dead.to_string(),
+                    }))
+                }
+                None => PipettingProgramValidationError::InsufficientVolume {
+                    step: step.clone(),
+                    vessel: source.vessel.clone(),
+                    position: source.position,
+                    required: total.to_string(),
+                    available: available.to_string(),
+                },
             });
         }
         volumes.insert(source.clone(), Some(available.subtracted_by(&total)));
@@ -769,7 +851,102 @@ fn move_liquid(
         .or_insert(total);
     for destination in destinations {
         if let Some(Some(current)) = volumes.get(destination) {
-            volumes.insert(destination.clone(), Some(current.added_to(volume_each)));
+            let filled = current.added_to(volume_each);
+            if let Some(capacity) = capacities.get(&destination.vessel)
+                && &filled > capacity
+            {
+                return Err(PipettingProgramValidationError::ExceedsWorkingCapacity(
+                    Box::new(VolumeConflict {
+                        step: step.clone(),
+                        vessel: destination.vessel.clone(),
+                        position: destination.position,
+                        moved: volume_each.to_string(),
+                        present: current.to_string(),
+                        limit: capacity.to_string(),
+                    }),
+                ));
+            }
+            volumes.insert(destination.clone(), Some(filled));
+        }
+    }
+    Ok(())
+}
+
+/// Whether the ledger can follow this vessel's volume from the program alone.
+///
+/// A stated fill is one way. The other is a vessel the program itself fills from empty, whose
+/// volume is therefore whatever the steps put into it.
+fn ledger_can_value(vessel: &Vessel) -> bool {
+    vessel.initial_volume_each.is_some()
+        || matches!(
+            vessel.role,
+            VesselRole::Product { .. }
+                | VesselRole::MaterialProduct { .. }
+                | VesselRole::Intermediate
+        )
+}
+
+/// Proves every aspiration draws from a position whose volume the compiler can follow.
+///
+/// A material source may leave its fill open, because the adapter computes a load that covers the
+/// planned withdrawals. Anything else arrived from an upstream task with a known volume, and
+/// leaving it unstated would exempt it from every volume check rather than merely leaving one
+/// number blank.
+fn validate_source_valuation(
+    program: &PipettingProgramV1,
+) -> Result<(), PipettingProgramValidationError> {
+    let vessels = program
+        .vessels
+        .iter()
+        .map(|vessel| (&vessel.id, vessel))
+        .collect::<BTreeMap<_, _>>();
+    for step in &program.steps {
+        let (id, source, tracked) = match step {
+            PipettingStep::Transfer {
+                id,
+                source,
+                technique,
+                ..
+            } => (
+                id,
+                source,
+                matches!(
+                    technique.aspiration,
+                    AspirationStrategy::TrackedLiquidSurface
+                ),
+            ),
+            PipettingStep::Distribute {
+                id,
+                source,
+                technique,
+                ..
+            } => (
+                id,
+                source,
+                matches!(
+                    technique.aspiration,
+                    AspirationStrategy::TrackedLiquidSurface
+                ),
+            ),
+            PipettingStep::Mix { .. } | PipettingStep::Barrier { .. } => continue,
+        };
+        let Some(vessel) = vessels.get(&source.vessel) else {
+            continue;
+        };
+        if ledger_can_value(vessel) {
+            continue;
+        }
+        if tracked {
+            return Err(PipettingProgramValidationError::UntrackableSource {
+                step: id.clone(),
+                vessel: source.vessel.clone(),
+            });
+        }
+        if !matches!(vessel.role, VesselRole::MaterialSource { .. }) {
+            return Err(PipettingProgramValidationError::UnvaluedSourceAspiration {
+                step: id.clone(),
+                vessel: source.vessel.clone(),
+            });
         }
     }
     Ok(())
@@ -930,6 +1107,8 @@ mod tests {
                         material: id("water"),
                     },
                     positions: 1,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
                     initial_volume_each: None,
                     temperature: Some(TemperatureRange::exact(
                         Temperature::parse_degrees_celsius("4").unwrap(),
@@ -941,6 +1120,8 @@ mod tests {
                         output: id("reaction"),
                     },
                     positions: 2,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
                     initial_volume_each: None,
                     temperature: None,
                 },
@@ -1065,6 +1246,8 @@ mod tests {
     #[test]
     fn techniques_derive_exact_additional_capabilities() {
         let mut program = example();
+        // Tracking a falling surface means the compiler must know where the surface starts.
+        program.vessels[0].initial_volume_each = Some(Volume::parse_microlitres("500").unwrap());
         let PipettingStep::Distribute { technique, .. } = &mut program.steps[0] else {
             unreachable!()
         };
@@ -1106,6 +1289,167 @@ mod tests {
             air_gap.constraints[0].property_kind.as_str(),
             vocabulary::MAXIMUM_AIR_GAP_VOLUME
         );
+    }
+
+    /// Builds a one-source, one-destination program with the given limits.
+    fn limited(
+        source_fill: Option<&str>,
+        dead: Option<&str>,
+        capacity: Option<&str>,
+        transfer_ul: &str,
+        aspiration: AspirationStrategy,
+    ) -> PipettingProgramV1 {
+        PipettingProgramV1::new(
+            Vec::new(),
+            vec![MaterialOutput { id: id("product") }],
+            vec![
+                Vessel {
+                    id: id("source"),
+                    role: VesselRole::Intermediate,
+                    positions: 1,
+                    working_capacity_each: None,
+                    dead_volume_each: dead.map(|value| Volume::parse_microlitres(value).unwrap()),
+                    initial_volume_each: source_fill
+                        .map(|value| Volume::parse_microlitres(value).unwrap()),
+                    temperature: None,
+                },
+                Vessel {
+                    id: id("destination"),
+                    role: VesselRole::Product {
+                        output: id("product"),
+                    },
+                    positions: 1,
+                    working_capacity_each: capacity
+                        .map(|value| Volume::parse_microlitres(value).unwrap()),
+                    dead_volume_each: None,
+                    initial_volume_each: None,
+                    temperature: None,
+                },
+            ],
+            vec![PipettingStep::Transfer {
+                id: id("transfer"),
+                source: location("source", 0),
+                destination: location("destination", 0),
+                volume: Volume::parse_microlitres(transfer_ul).unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: TransferTechnique {
+                    aspiration,
+                    ..TransferTechnique::default()
+                },
+            }],
+            PipettingConstraints::default(),
+        )
+    }
+
+    #[test]
+    fn a_source_cannot_be_drawn_into_its_dead_volume() {
+        // 100 uL present, 30 uL of it unreachable, so 80 uL is not available even though the
+        // vessel holds more than that.
+        let error = limited(
+            Some("100"),
+            Some("30"),
+            None,
+            "80",
+            AspirationStrategy::Liquid,
+        )
+        .validate()
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PipettingProgramValidationError::BelowDeadVolume(ref conflict)
+                    if conflict.moved == "80" && conflict.limit == "30"
+            ),
+            "{error}"
+        );
+
+        limited(
+            Some("100"),
+            Some("30"),
+            None,
+            "70",
+            AspirationStrategy::Liquid,
+        )
+        .validate()
+        .expect("drawing down to the dead volume is allowed");
+    }
+
+    #[test]
+    fn a_destination_cannot_be_filled_past_its_working_capacity() {
+        let error = limited(
+            Some("500"),
+            None,
+            Some("200"),
+            "300",
+            AspirationStrategy::Liquid,
+        )
+        .validate()
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PipettingProgramValidationError::ExceedsWorkingCapacity(ref conflict)
+                    if conflict.limit == "200" && conflict.moved == "300"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_unvalued_source_cannot_be_aspirated_unless_an_adapter_loads_it() {
+        // An unstated fill used to exempt a vessel from every volume check rather than leaving one
+        // number blank, so this is rejected outright.
+        let mut arrives_filled = limited(None, None, None, "10", AspirationStrategy::Liquid);
+        arrives_filled.vessels[0].role = VesselRole::ProcedureInput { input: 0 };
+        let error = arrives_filled.validate().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PipettingProgramValidationError::UnvaluedSourceAspiration { ref vessel, .. }
+                    if vessel.as_str() == "source"
+            ),
+            "a value arriving from an upstream task has a knowable volume: {error}"
+        );
+
+        // A material source is the exception: the adapter computes a load covering the plan.
+        let mut program = limited(None, None, None, "10", AspirationStrategy::Liquid);
+        program.materials.push(MaterialInput { id: id("water") });
+        program.vessels[0].role = VesselRole::MaterialSource {
+            material: id("water"),
+        };
+        program
+            .validate()
+            .expect("a material source may leave its fill to the adapter");
+    }
+
+    #[test]
+    fn a_tracked_surface_requires_a_source_the_plan_can_follow() {
+        let mut program = limited(
+            None,
+            None,
+            None,
+            "10",
+            AspirationStrategy::TrackedLiquidSurface,
+        );
+        program.materials.push(MaterialInput { id: id("water") });
+        program.vessels[0].role = VesselRole::MaterialSource {
+            material: id("water"),
+        };
+        let error = program.clone().validate().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PipettingProgramValidationError::UntrackableSource { ref vessel, .. }
+                    if vessel.as_str() == "source"
+            ),
+            "following a falling surface needs a stated starting volume: {error}"
+        );
+
+        program.vessels[0].initial_volume_each = Some(Volume::parse_microlitres("500").unwrap());
+        program
+            .validate()
+            .expect("a stated fill makes the surface followable");
     }
 
     #[test]
