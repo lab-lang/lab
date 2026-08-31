@@ -13,7 +13,23 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::Serialize;
 
+/// Renders an error with its whole cause chain.
+///
+/// `FacilityProjectError` and friends deliberately keep a terse summary at the top and the real
+/// explanation in `source`. Formatting only the outermost error hands a Python caller a verdict
+/// with no way to act on it.
+fn py_error(context: &str, error: &dyn std::error::Error) -> PyErr {
+    let mut message = format!("{context}: {error}");
+    let mut source = error.source();
+    while let Some(cause) = source {
+        message.push_str(&format!("\n  caused by: {cause}"));
+        source = cause.source();
+    }
+    PyValueError::new_err(message)
+}
+
 /// Parse, resolve, and type-check a Lab source module.
+
 #[pyfunction]
 fn compile_lab_module(source: &str) -> PyResult<String> {
     let module =
@@ -107,7 +123,7 @@ fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyR
 
 fn parse_method_definitions(definitions_json: &str) -> PyResult<Vec<MethodDefinition>> {
     serde_json::from_str::<Vec<MethodDefinition>>(definitions_json)
-        .map_err(|error| PyValueError::new_err(format!("invalid Method definitions: {error}")))
+        .map_err(|error| py_error("invalid Method definitions", &error))
 }
 
 fn validate_method_catalog(
@@ -115,7 +131,7 @@ fn validate_method_catalog(
 ) -> PyResult<Vec<MethodDefinition>> {
     definitions.sort_by(|left, right| left.id.cmp(&right.id));
     MethodRegistry::new(definitions.clone())
-        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))?;
+        .map_err(|error| py_error("invalid Method catalog", &error))?;
     Ok(definitions)
 }
 
@@ -134,7 +150,7 @@ fn method_definitions(
 
 fn method_registry(definitions_json: &str, include_standard: bool) -> PyResult<MethodRegistry> {
     MethodRegistry::new(method_definitions(definitions_json, include_standard)?)
-        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))
+        .map_err(|error| py_error("invalid Method catalog", &error))
 }
 
 fn project_method_registry(
@@ -147,12 +163,14 @@ fn project_method_registry(
     } else {
         Vec::new()
     };
-    definitions.extend(project.package_method_definitions().map_err(|error| {
-        PyValueError::new_err(format!("failed to load package Method catalogs: {error}"))
-    })?);
+    definitions.extend(
+        project
+            .package_method_definitions()
+            .map_err(|error| py_error("failed to load package Method catalogs", &error))?,
+    );
     definitions.extend(parse_method_definitions(definitions_json)?);
     MethodRegistry::new(validate_method_catalog(definitions)?)
-        .map_err(|error| PyValueError::new_err(format!("invalid Method catalog: {error}")))
+        .map_err(|error| py_error("invalid Method catalog", &error))
 }
 
 /// Validate Python-authored portable Method definitions against the Rust contract.
@@ -207,12 +225,12 @@ fn refine_lab_modules(
     let checked = compile_named_modules(&modules)?;
     let module_refs = checked.iter().collect::<Vec<_>>();
     let refined = PortableLairProgram::lower_program(&module_refs)
-        .map_err(|error| PyValueError::new_err(format!("failed to lower Lab Intent: {error}")))?
+        .map_err(|error| py_error("failed to lower Lab Intent", &error))?
         .refine_methods(&registry)
-        .map_err(|error| PyValueError::new_err(format!("failed to refine Lab Intent: {error}")))?;
+        .map_err(|error| py_error("failed to refine Lab Intent", &error))?;
     let planning_problem = refined
         .planning_problem()
-        .map_err(|error| PyValueError::new_err(format!("failed to project planning: {error}")))?;
+        .map_err(|error| py_error("failed to project planning", &error))?;
     serde_json::to_string(&RefinedProgram {
         schema_version: "lab.python-refinement.v1",
         refined_lair: refined.ir(),
@@ -270,14 +288,14 @@ fn plan_lab_project(
     include_standard: bool,
 ) -> PyResult<String> {
     let project = LabProject::discover(path)
-        .map_err(|error| PyValueError::new_err(format!("failed to load Lab project: {error}")))?;
-    let compiled = project.compile().map_err(|error| {
-        PyValueError::new_err(format!("failed to compile Lab project: {error}"))
-    })?;
+        .map_err(|error| py_error("failed to load Lab project", &error))?;
+    let compiled = project
+        .compile()
+        .map_err(|error| py_error("failed to compile Lab project", &error))?;
     let registry = project_method_registry(&project, definitions_json, include_standard)?;
     let planned = project
         .plan_facility(&compiled, &registry)
-        .map_err(|error| PyValueError::new_err(format!("failed to plan Lab project: {error}")))?;
+        .map_err(|error| py_error("failed to plan Lab project", &error))?;
     serialize_facility_plan(&planned)
 }
 
@@ -292,10 +310,10 @@ fn plan_lab_modules(
     let checked = compile_named_modules(&modules)?;
     let module_refs = checked.iter().collect::<Vec<_>>();
     let project = LabProject::discover(package_path)
-        .map_err(|error| PyValueError::new_err(format!("failed to load Lab project: {error}")))?;
+        .map_err(|error| py_error("failed to load Lab project", &error))?;
     let registry = project_method_registry(&project, definitions_json, include_standard)?;
     let planned = plan_modules_for_package(project.default_package(), &module_refs, &registry)
-        .map_err(|error| PyValueError::new_err(format!("failed to plan Lab program: {error}")))?;
+        .map_err(|error| py_error("failed to plan Lab program", &error))?;
     serialize_facility_plan(&planned)
 }
 

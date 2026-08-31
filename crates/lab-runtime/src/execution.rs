@@ -97,6 +97,10 @@ impl LoadedExecutionPlan {
                 LoadedExecutionAction::MoveMaterial { .. } => {}
             }
         }
+        // Several requirements on one node routinely share an offering, and repeating one identical
+        // sentence per requirement buries the distinct problems among the copies.
+        let mut seen = std::collections::BTreeSet::new();
+        issues.retain(|issue| seen.insert(issue.clone()));
         issues
     }
 
@@ -117,8 +121,9 @@ fn check_execution_qualification(
     );
     if !qualification.is_ok_and(|value| value >= minimum) {
         issues.push(format!(
-            "node '{}' is bound only at qualification '{}', below '{}' for {}",
+            "node '{}' binds offering '{}' at qualification '{}', below '{}' for {}",
             node,
+            requirement.offering,
             requirement.observed_qualification,
             minimum.iri(),
             mode.as_str()
@@ -327,9 +332,11 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
                     || "no reviewed run document".to_owned(),
                     |document| format!("{} ({})", document.title(), document.format()),
                 );
+                let mut seen = std::collections::BTreeSet::new();
                 let capabilities = requirements
                     .iter()
                     .map(|binding| binding.capability_kind.as_str())
+                    .filter(|kind| seen.insert(*kind))
                     .collect::<Vec<_>>()
                     .join(", ");
                 let adapter = requirement

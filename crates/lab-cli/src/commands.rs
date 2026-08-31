@@ -268,6 +268,7 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
             human_path(&facility.execution_plan)
         ));
         append_facility_artifacts(&mut human, facility);
+        append_unlowered_warning(&mut human, facility);
     }
     output.success(
         "built",
@@ -281,6 +282,23 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         },
         human,
     )
+}
+
+/// Says plainly when a plan allocated work to instruments but emitted nothing to run on them.
+///
+/// A build that reports success while lowering zero invocations looks finished. The requirements
+/// are still bound to Assets, so the plan claims the work happens on a robot, and only `lab run`
+/// would discover that no document exists.
+fn append_unlowered_warning(human: &mut String, facility: &PlanCompleted) {
+    if facility.adapter_lowerings > 0 || facility.allocated_requirements == 0 {
+        return;
+    }
+    human.push_str(
+        "\n\nNo device documents were emitted. Requirements are allocated to Assets, but no \
+configured adapter claimed them, so this plan has nothing to execute. Add an \
+`[[execution.adapters]]` entry for the bound Asset, or set `adapter-requirement = \"non-manual\"` \
+under `[planning]` to make this an error instead of a warning.",
+    );
 }
 
 /// Every biological artifact that the compiled program declares with `build`.
