@@ -95,6 +95,15 @@ def git_is_dirty(repository: Path) -> bool:
     )
 
 
+def git_tracked_source_is_dirty(repository: Path) -> bool:
+    return bool(
+        run_command(
+            ("git", "status", "--porcelain", "--untracked-files=no"),
+            cwd=repository,
+        ).stdout.strip()
+    )
+
+
 def strip_sbol2_version(value: Any, version: str = "1") -> Any:
     """Convert PUDU's SBOL 2 version URIs to their SBOL 3 persistent identities."""
 
@@ -371,7 +380,8 @@ def pudu_staging_map(trace: str) -> dict[str, str]:
             continue
         if isinstance(value, dict) and "Deionized Water" in value:
             return {
-                well: PUDU_STAGING_NAMES.get(name, name) for name, well in value.items()
+                f"temperature-module:{well}": PUDU_STAGING_NAMES.get(name, name)
+                for name, well in value.items()
             }
     raise ComparisonError("PUDU assembly trace has no staging material map")
 
@@ -383,9 +393,56 @@ def lab_staging_map(manifest_path: Path) -> dict[str, str]:
         for addition in setup["execution"]["additions"]:
             well = addition["source_well"]
             symbol = addition["symbol"]
-            previous = result.setdefault(well, symbol)
+            previous = result.setdefault(f"temperature-module:{well}", symbol)
             if previous != symbol:
                 raise ComparisonError(f"Lab staging well {well} names two materials")
+    return result
+
+
+def pudu_transformation_material_map(trace: str) -> dict[str, str]:
+    for line in trace.splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            value = ast.literal_eval(line)
+        except (SyntaxError, ValueError):
+            continue
+        if not isinstance(value, dict) or "Media_1" not in value:
+            continue
+        result = {}
+        for name, well in value.items():
+            if name == "Media_1":
+                material = "recovery_medium"
+            elif name.startswith("Competent Cell ") and name.endswith("_1"):
+                material = name.removeprefix("Competent Cell ").removesuffix("_1")
+            else:
+                raise ComparisonError(
+                    f"PUDU transformation trace has unknown source material {name}"
+                )
+            result[f"tube-rack:3:{well}"] = material
+        return result
+    raise ComparisonError("PUDU transformation trace has no source material map")
+
+
+def lab_transformation_material_map(
+    manifest_path: Path, module_root: Path
+) -> dict[str, str]:
+    manifest = read_json(manifest_path)
+    designs = project_lab_design_names(module_root)
+    result: dict[str, str] = {}
+    for preparation in manifest["execution"]["preparations"]:
+        execution = preparation["execution"]
+        material = designs[execution["artifact"]]["chassis"]
+        key = f"temperature-module:{execution['cell_source_well']}"
+        previous = result.setdefault(key, material)
+        if previous != material:
+            raise ComparisonError(f"Lab transformation position {key} names two materials")
+    for addition in manifest["execution"]["recovery_additions"]:
+        medium = addition["execution"]["medium"]
+        key = f"tube-rack:3:{medium['source_well']}"
+        previous = result.setdefault(key, medium["symbol"])
+        if previous != medium["symbol"]:
+            raise ComparisonError(f"Lab transformation position {key} names two materials")
     return result
 
 
@@ -411,17 +468,19 @@ def normalize_location(
     stage: str,
     staging: dict[str, str],
 ) -> str:
-    if "Temperature Module" in description:
-        try:
-            return f"staging:{staging[well]}"
-        except KeyError as error:
-            raise ComparisonError(
-                f"staging trace references unmapped well {well}"
-            ) from error
-    if "Thermocycler Module" in description:
-        return f"thermocycler:{well}"
     slot_match = SLOT.search(description)
     slot = slot_match.group(1) if slot_match else "unknown"
+    material_key = None
+    if "Temperature Module" in description:
+        material_key = f"temperature-module:{well}"
+    elif "Tube Rack" in description:
+        material_key = f"tube-rack:{slot}:{well}"
+    if material_key in staging:
+        return f"material:{staging[material_key]}"
+    if "Temperature Module" in description:
+        raise ComparisonError(f"staging trace references unmapped well {well}")
+    if "Thermocycler Module" in description:
+        return f"thermocycler:{well}"
     if "Tip Rack" in description:
         return f"tips:{slot}:{well}"
     if "Tube Rack" in description:
@@ -495,6 +554,47 @@ def normalize_liquid_trace(
         if DROP_TIP.match(line):
             events.append({"operation": "drop_tip"})
     return events
+
+
+def robot_action_semantics(events: list[dict[str, Any]]) -> dict[str, Any]:
+    liquid_actions: list[dict[str, Any]] = []
+    tip_change_boundaries: list[int] = []
+    tip_active = False
+    for event in events:
+        operation = event["operation"]
+        if operation == "pick_up_tip":
+            if tip_active or (
+                tip_change_boundaries
+                and tip_change_boundaries[-1] == len(liquid_actions)
+            ):
+                raise ComparisonError("robot trace picks up a tip without using the prior one")
+            tip_active = True
+            tip_change_boundaries.append(len(liquid_actions))
+        elif operation == "drop_tip":
+            if not tip_active or tip_change_boundaries[-1] == len(liquid_actions):
+                raise ComparisonError("robot trace drops a tip that carried no liquid actions")
+            tip_active = False
+        else:
+            if not tip_active:
+                raise ComparisonError(
+                    f"robot trace performs {operation} without an active tip"
+                )
+            liquid_actions.append(event)
+    if tip_active:
+        raise ComparisonError("robot trace ends with an attached tip")
+    return {
+        "liquid_actions": liquid_actions,
+        "tip_change_boundaries": tip_change_boundaries,
+        "tips_used": len(tip_change_boundaries),
+    }
+
+
+def robot_actions_equivalent(
+    pudu: dict[str, Any], lab: dict[str, Any]
+) -> bool:
+    return pudu["liquid_actions"] == lab["liquid_actions"] and set(
+        pudu["tip_change_boundaries"]
+    ).issubset(lab["tip_change_boundaries"])
 
 
 THERMAL_PROFILE = re.compile(
@@ -656,25 +756,33 @@ def lab_transformation_configuration(manifest_path: Path) -> dict[str, Any]:
     }
 
 
-THERMOCYCLER_LABWARE = re.compile(
-    r"(?:from|into) [A-H][0-9]+ of (.+) on Thermocycler Module GEN[12] on slot 7"
-)
 TEMPERATURE_MODULE_GENERATION = re.compile(r"on Temperature Module GEN([12]) on slot")
 
 
 def trace_hardware(trace: str) -> dict[str, Any]:
-    thermocycler_labware = sorted(set(THERMOCYCLER_LABWARE.findall(trace)))
+    thermocycler_labware = set()
+    for raw_line in trace.splitlines():
+        line = raw_line.strip()
+        command = LIQUID_COMMAND.match(line)
+        description = command.group(4) if command else None
+        if description is None:
+            blow_out = BLOW_OUT.match(line)
+            description = blow_out.group(2) if blow_out else None
+        if description and " on Thermocycler Module " in description:
+            thermocycler_labware.add(
+                description.split(" on Thermocycler Module ", maxsplit=1)[0]
+            )
     temperature_module_generations = sorted(
         {int(generation) for generation in TEMPERATURE_MODULE_GENERATION.findall(trace)}
     )
     return {
-        "thermocycler_labware": thermocycler_labware,
+        "thermocycler_labware": sorted(thermocycler_labware),
         "temperature_module_generations": temperature_module_generations,
     }
 
 
 # Fewest leaf operations a robot-action facet can contain and still be comparing anything. The
-# shipped example produces 220 in assembly, 175 in transformation and 292 in dilution/plating.
+# shipped example produces 184 in assembly, 153 in transformation and 258 in dilution/plating.
 MINIMUM_ROBOT_ACTIONS_PER_FACET = 50
 
 
@@ -707,12 +815,68 @@ def compare_facet(
     }
 
 
+def compare_robot_action_facet(
+    identifier: str,
+    pudu: dict[str, Any],
+    lab: dict[str, Any],
+    *,
+    basis: str,
+    normalized_root: Path,
+) -> dict[str, Any]:
+    pudu_path = normalized_root / f"{identifier}.pudu.json"
+    lab_path = normalized_root / f"{identifier}.lab.json"
+    write_json(pudu_path, pudu)
+    write_json(lab_path, lab)
+    return {
+        "id": identifier,
+        "status": "equivalent" if robot_actions_equivalent(pudu, lab) else "different",
+        "basis": basis,
+        "pudu": {
+            "path": str(pudu_path.relative_to(normalized_root.parent)),
+            "sha256": canonical_sha256(pudu),
+            "items": len(pudu["liquid_actions"]),
+        },
+        "lab": {
+            "path": str(lab_path.relative_to(normalized_root.parent)),
+            "sha256": canonical_sha256(lab),
+            "items": len(lab["liquid_actions"]),
+        },
+    }
+
+
+def tip_refinement_observations(
+    actions: dict[str, tuple[dict[str, Any], dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    result = []
+    for stage, (pudu, lab) in actions.items():
+        if pudu["tip_change_boundaries"] == lab["tip_change_boundaries"]:
+            continue
+        result.append(
+            {
+                "id": f"{stage}-fresh-tip-refinement",
+                "classification": "contamination-safety-refinement",
+                "pudu": {
+                    "tips_used": pudu["tips_used"],
+                    "boundaries": pudu["tip_change_boundaries"],
+                },
+                "lab": {
+                    "tips_used": lab["tips_used"],
+                    "boundaries": lab["tip_change_boundaries"],
+                },
+                "explanation": "Lab introduces additional fresh-tip boundaries while preserving every PUDU boundary and every liquid action.",
+            }
+        )
+    return result
+
+
 def validate_reference(pudu_repository: Path, reference: dict[str, Any]) -> None:
     actual_revision = git_revision(pudu_repository)
     if actual_revision != reference["revision"]:
         raise ComparisonError(
             f"PUDU checkout is {actual_revision}, expected pinned revision {reference['revision']}"
         )
+    if git_tracked_source_is_dirty(pudu_repository):
+        raise ComparisonError("PUDU checkout has tracked changes from the pinned revision")
     for item in reference["inputs"].values():
         upstream = pudu_repository / item["upstream_path"]
         actual_sha256 = file_sha256(upstream)
@@ -888,6 +1052,23 @@ def observations(
                 "explanation": "PUDU's generic module load resolves to GEN1; the Golden Gate facility explicitly configures a GEN2 staging module. The Thermocycler is GEN1 in both outputs.",
             }
         )
+    if (
+        pudu_hardware["transformation"]["temperature_module_generations"]
+        != lab_hardware["transformation"]["temperature_module_generations"]
+    ):
+        result.append(
+            {
+                "id": "competent-cell-temperature-control",
+                "classification": "facility-safety-improvement",
+                "pudu": pudu_hardware["transformation"][
+                    "temperature_module_generations"
+                ],
+                "lab": lab_hardware["transformation"][
+                    "temperature_module_generations"
+                ],
+                "explanation": "PUDU's simulated transformation stages competent cells in a passive tube rack; Lab uses the facility's GEN2 Temperature Module at the required 4 C setpoint.",
+            }
+        )
 
     for stage in ("assembly", "transformation"):
         pudu_state = normalize_thermal_trace(pudu_traces[stage].read_text())
@@ -1005,23 +1186,41 @@ def compare(
 
     pudu_assembly_trace = pudu_traces["assembly"].read_text()
     lab_assembly_trace = lab_traces["assembly"].read_text()
-    pudu_staging = pudu_staging_map(pudu_assembly_trace)
-    lab_staging = lab_staging_map(lab_bundle / "assembly_manifest.json")
+    pudu_materials = {
+        "assembly": pudu_staging_map(pudu_assembly_trace),
+        "transformation": pudu_transformation_material_map(
+            pudu_traces["transformation"].read_text()
+        ),
+    }
+    lab_materials = {
+        "assembly": lab_staging_map(lab_bundle / "assembly_manifest.json"),
+        "transformation": lab_transformation_material_map(
+            lab_bundle / "transformation_manifest.json", module_root
+        ),
+    }
+    robot_actions: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for stage in STAGES:
+        pudu_actions = robot_action_semantics(
+            normalize_liquid_trace(
+                pudu_traces[stage].read_text(),
+                stage=stage,
+                staging=pudu_materials.get(stage),
+            )
+        )
+        lab_actions = robot_action_semantics(
+            normalize_liquid_trace(
+                lab_traces[stage].read_text(),
+                stage=stage,
+                staging=lab_materials.get(stage),
+            )
+        )
+        robot_actions[stage] = (pudu_actions, lab_actions)
         facets.append(
-            compare_facet(
+            compare_robot_action_facet(
                 f"robot-actions.{stage}",
-                normalize_liquid_trace(
-                    pudu_traces[stage].read_text(),
-                    stage=stage,
-                    staging=pudu_staging if stage == "assembly" else None,
-                ),
-                normalize_liquid_trace(
-                    lab_traces[stage].read_text(),
-                    stage=stage,
-                    staging=lab_staging if stage == "assembly" else None,
-                ),
-                basis="Leaf Opentrons aspirate, dispense, blowout, touch-tip, and tip-handling actions; staging wells are compared by the material they contain.",
+                pudu_actions,
+                lab_actions,
+                basis="Exact leaf Opentrons aspirate, dispense, blowout, and touch-tip actions; Lab may only refine PUDU's contamination boundaries by taking a fresh tip sooner.",
                 normalized_root=normalized,
             )
         )
@@ -1070,6 +1269,7 @@ def compare(
             "lab_revision": git_revision(ROOT),
             "lab_worktree_dirty": git_is_dirty(ROOT),
             "pudu_worktree_dirty": git_is_dirty(pudu_repository),
+            "pudu_tracked_source_dirty": git_tracked_source_is_dirty(pudu_repository),
             "opentrons_simulator": run_command(
                 (simulator, "--version"), cwd=output
             ).stdout.strip(),
@@ -1081,7 +1281,8 @@ def compare(
             "normalized": str(normalized.relative_to(output)),
         },
         "facets": facets,
-        "observations": observations(pudu_traces=pudu_traces, lab_traces=lab_traces),
+        "observations": observations(pudu_traces=pudu_traces, lab_traces=lab_traces)
+        + tip_refinement_observations(robot_actions),
         "summary": {
             "equivalent_facets": len(facets) - len(different),
             "total_facets": len(facets),

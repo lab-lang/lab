@@ -54,14 +54,92 @@ Dropping tip into Trash Bin on slot 12
             comparison.normalize_liquid_trace(
                 pudu,
                 stage="assembly",
-                staging={"A1": "nuclease_free_water"},
+                staging={"temperature-module:A1": "nuclease_free_water"},
             ),
             comparison.normalize_liquid_trace(
                 lab,
                 stage="assembly",
-                staging={"B3": "nuclease_free_water"},
+                staging={"temperature-module:B3": "nuclease_free_water"},
             ),
         )
+
+    def test_transformation_cell_sources_compare_by_role_and_well(self) -> None:
+        pudu = """\
+Picking up tip from A1 of Opentrons OT-2 96 Filter Tip Rack 200 µL on slot 6
+Aspirating 20.0 uL from B1 of Opentrons 24 Tube Rack with Eppendorf 1.5 mL Safe-Lock Snapcap on slot 3 at 92.86 uL/sec
+Dispensing 20.0 uL into A1 of NEST 96 Well Plate 100 µL PCR Full Skirt on Thermocycler Module GEN1 on slot 7 at 92.86 uL/sec
+Dropping tip into Trash Bin on slot 12
+"""
+        lab = pudu.replace(
+            "Opentrons 24 Tube Rack with Eppendorf 1.5 mL Safe-Lock Snapcap on slot 3",
+            "Opentrons 24 Well Aluminum Block with NEST 1.5 mL Snapcap on Temperature Module GEN2 on slot 1",
+        )
+
+        self.assertEqual(
+            comparison.normalize_liquid_trace(
+                pudu,
+                stage="transformation",
+                staging={"tube-rack:3:B1": "DH5alpha"},
+            ),
+            comparison.normalize_liquid_trace(
+                lab,
+                stage="transformation",
+                staging={"temperature-module:B1": "DH5alpha"},
+            ),
+        )
+
+    def test_transformation_source_wells_compare_by_material(self) -> None:
+        trace = """\
+Picking up tip from A1 of Opentrons OT-2 96 Filter Tip Rack 200 µL on slot 6
+Aspirating 60.0 uL from C1 of Opentrons 24 Tube Rack with Eppendorf 1.5 mL Safe-Lock Snapcap on slot 3 at 92.86 uL/sec
+Dispensing 60.0 uL into A1 of NEST 96 Well Plate 100 µL PCR Full Skirt on Thermocycler Module GEN1 on slot 7 at 92.86 uL/sec
+Dropping tip into Trash Bin on slot 12
+"""
+        relocated = trace.replace("from C1 of Opentrons 24", "from A1 of Opentrons 24")
+
+        self.assertEqual(
+            comparison.normalize_liquid_trace(
+                trace,
+                stage="transformation",
+                staging={"tube-rack:3:C1": "recovery_medium"},
+            ),
+            comparison.normalize_liquid_trace(
+                relocated,
+                stage="transformation",
+                staging={"tube-rack:3:A1": "recovery_medium"},
+            ),
+        )
+
+    def test_additional_fresh_tip_boundary_is_a_safe_refinement(self) -> None:
+        pudu = """\
+Picking up tip from A1 of Opentrons OT-2 96 Filter Tip Rack 200 µL on slot 1
+Aspirating 20.0 uL from A1 of Opentrons 15 Tube Rack with Falcon 15 mL Conical on slot 4 at 92.86 uL/sec
+Dispensing 20.0 uL into A1 of NEST 96 Well Plate 100 µL PCR Full Skirt on slot 2 at 92.86 uL/sec
+Aspirating 20.0 uL from A1 of Opentrons 15 Tube Rack with Falcon 15 mL Conical on slot 4 at 92.86 uL/sec
+Dispensing 20.0 uL into B1 of NEST 96 Well Plate 100 µL PCR Full Skirt on slot 2 at 92.86 uL/sec
+Dropping tip into Trash Bin on slot 12
+"""
+        lab = """\
+Picking up tip from A1 of Opentrons OT-2 96 Filter Tip Rack 200 µL on slot 6
+Aspirating 20.0 uL from A1 of Opentrons 15 Tube Rack with Falcon 15 mL Conical on slot 4 at 92.86 uL/sec
+Dispensing 20.0 uL into A1 of NEST 96 Well Plate 100 µL PCR Full Skirt on slot 2 at 92.86 uL/sec
+Dropping tip into Trash Bin on slot 12
+Picking up tip from B1 of Opentrons OT-2 96 Filter Tip Rack 200 µL on slot 6
+Aspirating 20.0 uL from A1 of Opentrons 15 Tube Rack with Falcon 15 mL Conical on slot 4 at 92.86 uL/sec
+Dispensing 20.0 uL into B1 of NEST 96 Well Plate 100 µL PCR Full Skirt on slot 2 at 92.86 uL/sec
+Dropping tip into Trash Bin on slot 12
+"""
+        pudu_actions = comparison.robot_action_semantics(
+            comparison.normalize_liquid_trace(pudu, stage="plating")
+        )
+        lab_actions = comparison.robot_action_semantics(
+            comparison.normalize_liquid_trace(lab, stage="plating")
+        )
+
+        self.assertTrue(comparison.robot_actions_equivalent(pudu_actions, lab_actions))
+        self.assertFalse(comparison.robot_actions_equivalent(lab_actions, pudu_actions))
+        self.assertEqual(pudu_actions["tips_used"], 1)
+        self.assertEqual(lab_actions["tips_used"], 2)
 
     def test_thermal_trace_normalizes_seconds_and_minutes(self) -> None:
         trace = """\
