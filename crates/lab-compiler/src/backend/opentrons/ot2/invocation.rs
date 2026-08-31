@@ -180,6 +180,8 @@ pub(super) enum Ot2TaskExecution {
         culture_source: PlanningValueSource,
         culture_wells: Vec<String>,
         medium: MaterialPlacement,
+        /// What this task asks of the recovery-medium source.
+        medium_demand: SourceDemand,
         initial_volume_ul: u32,
         recovery_volume_ul: u32,
         technique: TransferTechnique,
@@ -189,6 +191,8 @@ pub(super) enum Ot2TaskExecution {
         culture_source: PlanningValueSource,
         culture_wells: Vec<String>,
         medium: MaterialPlacement,
+        /// What this task asks of the dilution-medium source.
+        medium_demand: SourceDemand,
         dilution_wells: Vec<Well>,
         initial_volume_ul: u32,
         medium_volume_ul: u32,
@@ -236,6 +240,8 @@ pub(super) struct MaterialPlacement {
 pub(super) struct MaterialAddition {
     #[serde(flatten)]
     pub(super) placement: MaterialPlacement,
+    /// What this task asks of the tube this reagent is drawn from.
+    pub(super) demand: SourceDemand,
     pub(super) volume_ul: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) source_mix: Option<GoldenGateMixExecution>,
@@ -665,8 +671,9 @@ fn plan_setup(
             placement: MaterialPlacement {
                 material: material_review(addition.role, addition.material),
                 source_well: source_wells[&addition.material.symbol].clone(),
-                load_volume_ul: None,
+                load_volume_ul: Some(addition.demand.required_initial_ul),
             },
+            demand: addition.demand,
             volume_ul: addition.volume_ul,
             source_mix: addition.source_mix.map(|mixing| GoldenGateMixExecution {
                 cycles: mixing.cycles,
@@ -891,6 +898,7 @@ fn plan_recovery_medium(
     .into_iter()
     .next()
     .expect("known wells is non-empty");
+    let medium_demand = procedure.medium_demand;
     let load_volume_ul = procedure
         .recovery_volume_ul
         .checked_mul(u32::try_from(procedure.replicates).map_err(|_| {
@@ -907,6 +915,7 @@ fn plan_recovery_medium(
         })?;
 
     Ok(Ot2TaskExecution::AddRecoveryMedium {
+        medium_demand,
         artifact: procedure.subject,
         culture_source: procedure.culture_source.clone(),
         culture_wells: culture_wells
@@ -1067,6 +1076,7 @@ fn plan_dilution(
     }
 
     Ok(Ot2TaskExecution::SerialDilution {
+        medium_demand: procedure.medium_demand,
         artifact: procedure.subject,
         culture_source: procedure.culture_source.clone(),
         culture_wells: culture_wells
@@ -1076,7 +1086,7 @@ fn plan_dilution(
         medium: MaterialPlacement {
             material: material_review("medium".to_owned(), procedure.medium),
             source_well: profile.stages.plating.media_rack.medium_well.clone(),
-            load_volume_ul: Some(profile.techniques.tracked_source_volume_ul),
+            load_volume_ul: Some(procedure.medium_demand.required_initial_ul),
         },
         dilution_wells,
         initial_volume_ul: procedure.initial_volume_ul,

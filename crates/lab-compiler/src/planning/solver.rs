@@ -64,6 +64,15 @@ pub enum AssetPinSelector {
 }
 
 impl AssetPin {
+    /// Lower is narrower.
+    fn specificity(&self) -> u8 {
+        match &self.selector {
+            AssetPinSelector::Requirement { .. } => 0,
+            AssetPinSelector::CapabilityKind { .. } => 1,
+            AssetPinSelector::AnyRequirement => 2,
+        }
+    }
+
     fn matches(&self, requirement: &PlanningCapabilityRequirement) -> bool {
         match &self.selector {
             AssetPinSelector::AnyRequirement => true,
@@ -943,9 +952,12 @@ fn requirement_candidates(
     adapter_requirement: AdapterRequirement,
     asset_pins: &[AssetPin],
 ) -> (Vec<RequirementCandidate>, Vec<PlanningRejectedOffering>) {
+    // A pin naming one requirement beats one naming a capability kind, which beats a facility-wide
+    // preference. Declaration order is not specificity, and the manifest documents narrowing.
     let pinned = asset_pins
         .iter()
-        .find(|pin| pin.matches(requirement))
+        .filter(|pin| pin.matches(requirement))
+        .min_by_key(|pin| pin.specificity())
         .map(|pin| pin.asset.as_str());
     let minimum = inventory_qualification(requirement.minimum_qualification);
     let accepted = requirement
@@ -1948,6 +1960,35 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                 })
             })
         }));
+    }
+
+    #[test]
+    fn a_narrower_asset_pin_wins_over_a_facility_wide_one() {
+        let broad = AssetPin {
+            selector: AssetPinSelector::AnyRequirement,
+            asset: "https://example.org/asset/everything".to_owned(),
+        };
+        let narrow = AssetPin {
+            selector: AssetPinSelector::CapabilityKind {
+                capability_kind: CapabilityKind::new(
+                    "https://sbol.io/ns/capability#LiquidTransfer",
+                )
+                .unwrap(),
+            },
+            asset: "https://example.org/asset/transfer".to_owned(),
+        };
+        // Declaration order is not specificity, so the narrower pin wins from either position.
+        assert!(narrow.specificity() < broad.specificity());
+        assert!(
+            AssetPin {
+                selector: AssetPinSelector::Requirement {
+                    requirement: id("build-0::automated::handle::liquid")
+                },
+                asset: "https://example.org/asset/exact".to_owned(),
+            }
+            .specificity()
+                < narrow.specificity()
+        );
     }
 
     #[test]

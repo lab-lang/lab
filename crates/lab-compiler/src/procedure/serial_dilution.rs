@@ -37,6 +37,9 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     // surface, so the compiler must be able to follow it too.
     let medium_source_volume =
         view.integer_parameter("medium_source_volume_ul", Some(MICROLITRE))?;
+    // Liquid the tip cannot reach in the medium tube. Planning a draw that ignores it aspirates air
+    // part-way through the run.
+    let medium_dead_volume = view.integer_parameter("medium_dead_volume_ul", Some(MICROLITRE))?;
     for (name, value) in [
         ("serial_dilutions", serial_dilutions),
         ("replicates", replicates),
@@ -46,6 +49,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         ("mix_cycles", mix_cycles),
         ("mix_volume_ul", mix_volume),
         ("medium_source_volume_ul", medium_source_volume),
+        ("medium_dead_volume_ul", medium_dead_volume),
     ] {
         if value == 0 {
             return Err(format!("parameter `{name}` must be greater than zero"));
@@ -164,7 +168,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
                 },
                 positions: 1,
                 working_capacity_each: None,
-                dead_volume_each: None,
+                dead_volume_each: Some(volume(medium_dead_volume)?),
                 initial_volume_each: Some(volume(medium_source_volume)?),
                 temperature: None,
             },

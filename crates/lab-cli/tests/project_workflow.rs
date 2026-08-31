@@ -683,6 +683,44 @@ fn a_second_instrument_is_planned_once_the_package_names_which_to_use() {
 }
 
 #[test]
+fn every_shared_source_states_the_volume_the_batch_draws() {
+    let project = temporary_project();
+    let _ = fs::remove_dir_all(&project);
+    copy_dir(Path::new("../../examples/golden-gate"), &project);
+
+    let built = run(&["build", &project.to_string_lossy()]);
+    assert!(
+        built.status.success(),
+        "golden-gate build failed: {}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+
+    let schedule_root = project.join(".lab/build/assets/opentrons_ot2");
+
+    // Assembly reagent tubes previously carried no load volume at all, so an operator was told
+    // which well to use but not what to put in it.
+    let assembly = read_text(schedule_root.join("assembly_protocol.py"));
+    assert!(
+        !assembly.contains("\"load_volume_ul\": null"),
+        "every assembly reagent states the volume the batch draws"
+    );
+
+    // The dilution medium is drawn by every fused dilution from one tube, so its load is the fold
+    // of all of them rather than whatever one task needed.
+    let plating = read_text(schedule_root.join("plating_protocol.py"));
+    assert!(
+        plating.contains("remaining_ul -="),
+        "the plating run follows the planned medium volume down"
+    );
+    assert!(
+        !plating.contains("\"load_volume_ul\": null"),
+        "the dilution medium states its load"
+    );
+
+    let _ = fs::remove_dir_all(&project);
+}
+
+#[test]
 fn competent_cells_are_staged_on_a_temperature_controlled_position() {
     let project = temporary_project();
     let _ = fs::remove_dir_all(&project);

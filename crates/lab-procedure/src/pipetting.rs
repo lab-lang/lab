@@ -996,7 +996,39 @@ fn validate_source_valuation(
                     AspirationStrategy::TrackedLiquidSurface
                 ),
             ),
-            PipettingStep::Mix { .. } | PipettingStep::Barrier { .. } => continue,
+            PipettingStep::Mix {
+                id,
+                targets,
+                technique,
+                ..
+            } => {
+                let tracked = matches!(
+                    technique.aspiration,
+                    AspirationStrategy::TrackedLiquidSurface
+                );
+                for target in targets {
+                    let Some(vessel) = vessels.get(&target.vessel) else {
+                        continue;
+                    };
+                    if ledger_can_value(vessel) {
+                        continue;
+                    }
+                    if tracked {
+                        return Err(PipettingProgramValidationError::UntrackableSource {
+                            step: id.clone(),
+                            vessel: target.vessel.clone(),
+                        });
+                    }
+                    if !matches!(vessel.role, VesselRole::MaterialSource { .. }) {
+                        return Err(PipettingProgramValidationError::UnvaluedSourceAspiration {
+                            step: id.clone(),
+                            vessel: target.vessel.clone(),
+                        });
+                    }
+                }
+                continue;
+            }
+            PipettingStep::Barrier { .. } => continue,
         };
         let Some(vessel) = vessels.get(&source.vessel) else {
             continue;
@@ -1603,6 +1635,58 @@ mod tests {
         program
             .validate()
             .expect("a material source may leave its fill to the adapter");
+    }
+
+    #[test]
+    fn a_mix_cannot_draw_from_a_source_the_plan_cannot_follow() {
+        // A mix draws and returns liquid in place, so its target needs a volume the ledger can
+        // follow just as an aspiration source does.
+        let program = PipettingProgramV1::new(
+            Vec::new(),
+            vec![MaterialOutput { id: id("product") }],
+            vec![
+                Vessel {
+                    id: id("source"),
+                    role: VesselRole::ProcedureInput { input: 0 },
+                    positions: 1,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    initial_volume_each: None,
+                    temperature: None,
+                },
+                Vessel {
+                    id: id("plate"),
+                    role: VesselRole::Product {
+                        output: id("product"),
+                    },
+                    positions: 1,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    initial_volume_each: None,
+                    temperature: None,
+                },
+            ],
+            vec![PipettingStep::Mix {
+                id: id("mix-source"),
+                targets: vec![location("source", 0)],
+                cycles: 2,
+                volume: Volume::parse_microlitres("5").unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: MixTechnique::default(),
+            }],
+            PipettingConstraints::default(),
+        );
+
+        let error = program.validate().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PipettingProgramValidationError::UnvaluedSourceAspiration { ref vessel, .. }
+                    if vessel.as_str() == "source"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

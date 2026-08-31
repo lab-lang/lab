@@ -569,6 +569,7 @@ fn serial_dilution() -> MethodDefinition {
                     ("mix_cycles", 5),
                     ("mix_volume_ul", 19),
                     ("medium_source_volume_ul", 10_000),
+                    ("medium_dead_volume_ul", 1_000),
                 ],
             ),
             vec![material_literal("medium", "recovery_medium")],

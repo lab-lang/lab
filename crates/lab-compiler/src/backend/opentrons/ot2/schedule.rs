@@ -544,6 +544,8 @@ fn allocate_assembly(
             _ => Vec::new(),
         })
         .collect::<BTreeSet<_>>();
+    let mut assembly_loads = BTreeMap::<String, u32>::new();
+    let mut assembly_consumed = BTreeMap::<String, u32>::new();
     let source_wells = assign_source_wells(
         BACKEND,
         "batched-golden-gate-assembly",
@@ -620,8 +622,14 @@ fn allocate_assembly(
         cursor += count;
         *reaction_wells = allocated.clone();
         for addition in additions {
-            addition.placement.source_well =
-                source_wells[&addition.placement.material.symbol].clone();
+            let symbol = addition.placement.material.symbol.clone();
+            addition.placement.source_well = source_wells[&symbol].clone();
+            let consumed = assembly_consumed.entry(symbol.clone()).or_default();
+            let needed = assembly_loads.entry(symbol).or_default();
+            addition
+                .demand
+                .fold(consumed, needed)
+                .map_err(|error| format!("OT-2 assembly batch: {error}"))?;
         }
         for material in setup_materials {
             let source_well = source_wells[&material.symbol].clone();
@@ -694,6 +702,18 @@ fn allocate_assembly(
             ));
         }
         product_wells.insert(choice, (allocated[0].clone(), reaction_volume));
+    }
+    // Every setup task has now been folded, so each shared reagent tube gets the load the whole
+    // batch requires rather than whatever the last task alone needed.
+    for (setup_index, _) in pairs {
+        if let Ot2TaskExecution::SetupGoldenGateReaction(setup) = &mut tasks[*setup_index].execution
+        {
+            for addition in &mut setup.additions {
+                addition.placement.load_volume_ul = assembly_loads
+                    .get(&addition.placement.material.symbol)
+                    .copied();
+            }
+        }
     }
     Ok((
         pairs
@@ -769,6 +789,7 @@ fn allocate_transformation(
     let mut dna_requirements = BTreeMap::<String, u32>::new();
     let mut external_dna_keys = BTreeSet::new();
     let mut recovery_loads = BTreeMap::<String, u32>::new();
+    let mut recovery_consumed = BTreeMap::<String, u32>::new();
     for (prepare, heat) in prepare_heat {
         let recovery = *recovery_by_heat.get(heat).ok_or_else(|| {
             format!(
@@ -831,8 +852,7 @@ fn allocate_transformation(
         }
         let Ot2TaskExecution::AddRecoveryMedium {
             medium,
-            recovery_volume_ul,
-            culture_wells,
+            medium_demand,
             ..
         } = &tasks[recovery].execution
         else {
@@ -843,15 +863,11 @@ fn allocate_transformation(
             serde_json::to_string(&medium.material.source).map_err(|error| error.to_string())?
         );
         source_keys.insert(recovery_key.clone());
-        let volume = recovery_volume_ul
-            .checked_mul(u32::try_from(culture_wells.len()).map_err(|_| {
-                "OT-2 recovery replicate count does not fit source arithmetic".to_owned()
-            })?)
-            .ok_or_else(|| "OT-2 recovery source volume overflows".to_owned())?;
+        let consumed = recovery_consumed.entry(recovery_key.clone()).or_default();
         let load = recovery_loads.entry(recovery_key).or_default();
-        *load = load
-            .checked_add(volume)
-            .ok_or_else(|| "OT-2 recovery batch volume overflows".to_owned())?;
+        medium_demand
+            .fold(consumed, load)
+            .map_err(|error| format!("OT-2 recovery batch: {error}"))?;
     }
     // A competent-cell aliquot is a physical tube of a stated size. Fusing more work onto one
     // than it holds is not a load the operator can perform, so it is refused rather than printed.
@@ -1242,6 +1258,8 @@ fn allocate_plating(
             "OT-2 interleaved dilution/plating scheduling requires exactly two serial dilutions, found {serial_dilutions}"
         ));
     }
+    let mut dilution_medium_load = 0_u32;
+    let mut dilution_medium_consumed = 0_u32;
     let dilution_layout = layered_plate_layout(
         tasks[first_dilution].task,
         "batched dilution plates",
@@ -1315,11 +1333,17 @@ fn allocate_plating(
             medium_technique,
             transfer_technique,
             mix_technique,
+            medium_demand,
             ..
         } = &mut tasks[*dilution].execution
         else {
             unreachable!("plating pair begins with dilution")
         };
+        // Every fused dilution draws from the same medium tube, so its load is the fold of all of
+        // them. Checking each task against the tube independently would let the batch overdraw it.
+        medium_demand
+            .fold(&mut dilution_medium_consumed, &mut dilution_medium_load)
+            .map_err(|error| format!("OT-2 plating batch: {error}"))?;
         if culture_wells.len() != count {
             return Err(format!(
                 "OT-2 dilution task '{dilution_id}' does not preserve recovered-culture replicates"

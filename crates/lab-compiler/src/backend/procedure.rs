@@ -102,6 +102,8 @@ pub(crate) struct MaterialVolume<'a> {
     pub(crate) role: String,
     pub(crate) material: &'a SelectedMaterialBinding,
     pub(crate) volume_ul: u32,
+    /// What this task asks of the tube this reagent is drawn from.
+    pub(crate) demand: SourceDemand,
     pub(crate) source_mix: Option<GoldenGateMix>,
     pub(crate) transfer_technique: TransferTechnique,
     pub(crate) reuse_tip_for_final_mix: bool,
@@ -158,6 +160,8 @@ pub(crate) struct SerialDilution<'a> {
     pub(crate) subject: String,
     pub(crate) culture_source: &'a PlanningValueSource,
     pub(crate) medium: &'a SelectedMaterialBinding,
+    /// What this task asks of the dilution-medium source.
+    pub(crate) medium_demand: SourceDemand,
     pub(crate) culture_replicates: usize,
     pub(crate) serial_dilutions: usize,
     pub(crate) initial_volume_ul: u32,
@@ -201,6 +205,8 @@ pub(crate) struct RecoveryMediumAddition<'a> {
     pub(crate) subject: String,
     pub(crate) culture_source: &'a PlanningValueSource,
     pub(crate) medium: &'a SelectedMaterialBinding,
+    /// What this task asks of the recovery-medium source.
+    pub(crate) medium_demand: SourceDemand,
     pub(crate) replicates: usize,
     pub(crate) initial_volume_ul: u32,
     pub(crate) recovery_volume_ul: u32,
@@ -607,6 +613,7 @@ pub(crate) fn normalized_recovery_medium<'a>(
     let subject = view.text_parameter("subject")?;
     view.require_material_roles(&["medium"])?;
     let medium = view.one_material("medium")?;
+    let ledger = program.liquid_ledger().clone();
     let program = program.as_program();
     let [material] = program.materials.as_slice() else {
         return Err(format!(
@@ -698,6 +705,15 @@ pub(crate) fn normalized_recovery_medium<'a>(
         ));
     }
     Ok(RecoveryMediumAddition {
+        medium_demand: source_demand(
+            adapter,
+            task,
+            &ledger,
+            &source_vessel.id,
+            0,
+            "recovery medium",
+            source_vessel.initial_volume_each.as_ref(),
+        )?,
         subject,
         culture_source: &task.inputs[0].source,
         medium,
@@ -1011,6 +1027,7 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
             task.id
         ));
     };
+    let ledger = program.liquid_ledger().clone();
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
     let artifact = view.text_parameter("artifact")?;
@@ -1039,19 +1056,21 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
             position,
         })
         .collect::<Vec<_>>();
-    let (additions, reaction_volume_ul, final_mix) =
-        match view.text_parameter("setup_strategy")?.as_str() {
-            "basic_v1" => project_basic_golden_gate(adapter, task, program, &destinations)?,
-            "temperature_staged_v1" => {
-                project_temperature_staged_golden_gate(adapter, task, program, &destinations)?
-            }
-            value => {
-                return Err(format!(
-                    "{adapter} Golden Gate task '{}' uses unsupported setup strategy '{value}'",
-                    task.id
-                ));
-            }
-        };
+    let (additions, reaction_volume_ul, final_mix) = match view
+        .text_parameter("setup_strategy")?
+        .as_str()
+    {
+        "basic_v1" => project_basic_golden_gate(adapter, task, program, &ledger, &destinations)?,
+        "temperature_staged_v1" => {
+            project_temperature_staged_golden_gate(adapter, task, program, &ledger, &destinations)?
+        }
+        value => {
+            return Err(format!(
+                "{adapter} Golden Gate task '{}' uses unsupported setup strategy '{value}'",
+                task.id
+            ));
+        }
+    };
     if additions.is_empty() {
         return Err(format!(
             "{adapter} Golden Gate task '{}' has no normalized reagent additions",
@@ -1088,10 +1107,36 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
     })
 }
 
+/// Reads the demand at an exact program location, resolving the vessel's stated fill.
+fn source_demand_at(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    ledger: &lab_procedure::LiquidLedger,
+    program: &PipettingProgramV1,
+    at: &Location,
+    label: &str,
+) -> Result<SourceDemand, String> {
+    let stated = program
+        .vessels
+        .iter()
+        .find(|vessel| vessel.id == at.vessel)
+        .and_then(|vessel| vessel.initial_volume_each.as_ref());
+    source_demand(
+        adapter,
+        task,
+        ledger,
+        &at.vessel,
+        at.position,
+        label,
+        stated,
+    )
+}
+
 fn project_basic_golden_gate<'a>(
     adapter: &str,
     task: &'a AllocatedProcedureTask,
     program: &PipettingProgramV1,
+    ledger: &lab_procedure::LiquidLedger,
     destinations: &[Location],
 ) -> Result<(Vec<MaterialVolume<'a>>, u32, GoldenGateMix), String> {
     let mut additions = Vec::new();
@@ -1127,6 +1172,7 @@ fn project_basic_golden_gate<'a>(
                     role,
                     material,
                     volume_ul,
+                    demand: source_demand_at(adapter, task, ledger, program, source, "reagent")?,
                     source_mix: None,
                     transfer_technique: technique.clone(),
                     reuse_tip_for_final_mix: false,
@@ -1168,6 +1214,7 @@ fn project_temperature_staged_golden_gate<'a>(
     adapter: &str,
     task: &'a AllocatedProcedureTask,
     program: &PipettingProgramV1,
+    ledger: &lab_procedure::LiquidLedger,
     destinations: &[Location],
 ) -> Result<(Vec<MaterialVolume<'a>>, u32, GoldenGateMix), String> {
     let sources = program
@@ -1285,6 +1332,7 @@ fn project_temperature_staged_golden_gate<'a>(
                 role: role.clone(),
                 material,
                 volume_ul,
+                demand: source_demand_at(adapter, task, ledger, program, source, "reagent")?,
                 source_mix: source_mix.map(|(mix, _)| mix),
                 transfer_technique: technique.clone(),
                 reuse_tip_for_final_mix,
@@ -1670,6 +1718,7 @@ pub(crate) fn normalized_serial_dilution<'a>(
             task.id
         ));
     };
+    let ledger = program.liquid_ledger().clone();
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
     let subject = view.text_parameter("subject")?;
@@ -1922,6 +1971,15 @@ pub(crate) fn normalized_serial_dilution<'a>(
     let (mix_cycles, mix_volume_ul) = mixing.expect("a validated product vessel is non-empty");
 
     Ok(SerialDilution {
+        medium_demand: source_demand(
+            adapter,
+            task,
+            &ledger,
+            &medium_vessel.id,
+            0,
+            "dilution medium",
+            medium_vessel.initial_volume_each.as_ref(),
+        )?,
         subject,
         culture_source: &task.inputs[0].source,
         medium,

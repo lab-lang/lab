@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, InvocationAdapter,
-    SelectedMaterialSource,
+    AdapterInvocation, AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask,
+    InvocationAdapter,
 };
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
@@ -280,17 +280,21 @@ fn validate_locations(
             });
         }
     }
-    validate_material_addresses(schedule, &tasks)
+    validate_material_addresses(schedule, &tasks, &methods)
 }
 
 /// Proves no two different materials are sent to the same physical position in one device run.
 ///
-/// Addresses legitimately repeat across execution groups, because the plates change between runs,
-/// and they legitimately repeat within a group when several tasks draw the same reagent from one
-/// shared tube. Two *different* materials in one tube is neither of those.
+/// The check covers what an operator physically places: a reagent lot and an aliquot arriving from
+/// upstream. Addresses legitimately repeat across execution groups, because the plates change
+/// between runs, and within a group when several tasks draw the same reagent from one tube or
+/// several Methods share one aliquot. Two *different* loaded things in one position is neither of
+/// those. Task outputs do not participate: a position's contents are renamed as the program
+/// transforms them, and a substrate such as agar is both a loaded material and its own product.
 fn validate_material_addresses(
     schedule: &AllocatedProcedureSchedule,
     tasks: &BTreeMap<LocalId, &AllocatedProcedureTask>,
+    methods: &BTreeMap<LocalId, &AllocatedMethod>,
 ) -> Result<(), AllocatedProcedureScheduleError> {
     let group_of = schedule
         .groups
@@ -302,26 +306,56 @@ fn validate_material_addresses(
                 .map(|task| (task.clone(), group.id.clone()))
         })
         .collect::<BTreeMap<_, _>>();
-    let mut occupants: BTreeMap<(String, String, String), &SelectedMaterialSource> =
-        BTreeMap::new();
+    let mut occupants: BTreeMap<(String, String, String), String> = BTreeMap::new();
     for location in &schedule.locations {
-        let ScheduledValueRef::MaterialInput { task, input } = &location.value else {
-            continue;
+        // Identity of whatever occupies the position. Two values may share an address only when
+        // they are the same physical contents: one reagent lot several tasks draw from, or one
+        // vessel named by both the port that fills it and the port that carries it onward.
+        let (task, occupant) = match &location.value {
+            ScheduledValueRef::MaterialInput { task, input } => {
+                let Some(owner) = tasks.get(task) else {
+                    continue;
+                };
+                let Some(material) = owner
+                    .materials
+                    .iter()
+                    .find(|material| &material.input == input)
+                else {
+                    continue;
+                };
+                let identity = serde_json::to_string(&material.source)
+                    .unwrap_or_else(|_| material.symbol.clone());
+                (task, format!("material:{identity}"))
+            }
+            // A task output is not something an operator places. A position's contents are
+            // renamed as the program transforms them, and a substrate such as selective agar is
+            // both a loaded material and the product it becomes, so outputs are not occupants.
+            ScheduledValueRef::TaskOutput { .. } => continue,
+            ScheduledValueRef::ChoiceInput { choice, input } => {
+                // A choice input is staged for the whole selected Method, so it belongs to the
+                // group holding that Method's tasks. Several Methods legitimately draw one shared
+                // aliquot, so every choice input shares an identity here; it still conflicts with a
+                // reagent the operator loads into the same position.
+                let Some(task) = methods
+                    .get(choice)
+                    .into_iter()
+                    .flat_map(|method| &method.tasks)
+                    .map(|task| &task.id)
+                    .find(|task| group_of.contains_key(*task))
+                else {
+                    continue;
+                };
+                let _ = input;
+                (task, "choice-input".to_owned())
+            }
         };
-        let (Some(group), Some(owner)) = (group_of.get(task), tasks.get(task)) else {
-            continue;
-        };
-        let Some(material) = owner
-            .materials
-            .iter()
-            .find(|material| &material.input == input)
-        else {
+        let Some(group) = group_of.get(task) else {
             continue;
         };
         for address in &location.positions {
             let key = (group.clone(), location.resource.clone(), address.clone());
             match occupants.get(&key) {
-                Some(existing) if *existing != &material.source => {
+                Some(existing) if existing != &occupant => {
                     return Err(
                         AllocatedProcedureScheduleError::ConflictingMaterialLocation {
                             group: group.clone(),
@@ -332,11 +366,12 @@ fn validate_material_addresses(
                 }
                 Some(_) => {}
                 None => {
-                    occupants.insert(key, &material.source);
+                    occupants.insert(key, occupant.clone());
                 }
             }
         }
     }
+
     Ok(())
 }
 
@@ -426,6 +461,7 @@ mod tests {
 
     use super::super::model::MaterialLotCandidates;
     use super::super::solver::SelectedMaterialBinding;
+    use super::super::solver::SelectedMaterialSource;
     use lab_capability::{
         AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
     };

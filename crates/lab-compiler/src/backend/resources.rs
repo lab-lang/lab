@@ -131,8 +131,18 @@ pub struct UnknownPlateGeometry {
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
 #[serde(try_from = "usize", into = "usize")]
-#[schemars(with = "usize")]
+#[schemars(schema_with = "plate_capacity_schema")]
 pub struct PlateCapacity(usize);
+
+/// Publishes the exact well counts this compiler can address, so a consumer of the adapter-profile
+/// schema rejects the same capacities the compiler does.
+fn plate_capacity_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    let mut schema = generator.subschema_for::<usize>();
+    schema
+        .ensure_object()
+        .insert("enum".to_owned(), supported_plate_capacities().into());
+    schema
+}
 
 impl PlateCapacity {
     pub fn new(capacity: usize) -> Result<Self, UnknownPlateGeometry> {
