@@ -75,6 +75,12 @@ def test_pipetting_program_exposes_portable_techniques() -> None:
                     "role": {"kind": "material_source", "material": "lb"},
                     "positions": 1,
                     "initial_volume_each": quantity("10000", procedures.MICROLITRE),
+                    "working_capacity_each": quantity("15000", procedures.MICROLITRE),
+                    "dead_volume_each": quantity("500", procedures.MICROLITRE),
+                    "temperature": {
+                        "minimum": quantity("4", procedures.DEGREE_CELSIUS),
+                        "maximum": quantity("4", procedures.DEGREE_CELSIUS),
+                    },
                 },
                 {
                     "id": "dilutions",
@@ -117,6 +123,11 @@ def test_pipetting_program_exposes_portable_techniques() -> None:
     assert isinstance(parsed.body, procedures.PipettingProgramV1)
     vessel = parsed.body.vessels[0]
     assert vessel.initial_volume_each == procedures.Volume(Decimal("10000"))
+    assert vessel.working_capacity_each == procedures.Volume(Decimal("15000"))
+    assert vessel.dead_volume_each == procedures.Volume(Decimal("500"))
+    assert vessel.temperature is not None
+    assert vessel.temperature.minimum == procedures.Temperature(Decimal("4"))
+    assert parsed.body.vessels[1].temperature is None
     assert parsed.body.vessels[1].role == procedures.InputOutputVesselRole(0, "culture")
     assert parsed.body.vessels[2].role == procedures.MaterialProductVesselRole("agar", "plate")
     step = parsed.body.steps[0]

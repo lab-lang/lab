@@ -20,12 +20,14 @@ use crate::{
 
 /// One material made available to a canonical pipetting program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MaterialInput {
     pub id: ProcedureLocalId,
 }
 
 /// One material state produced by a canonical pipetting program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MaterialOutput {
     pub id: ProcedureLocalId,
 }
@@ -33,6 +35,7 @@ pub struct MaterialOutput {
 /// The semantic role of one logical vessel before any deck or well allocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum VesselRole {
     /// A liquid value arriving through the enclosing Procedure task's zero-based input list.
     ProcedureInput {
@@ -59,6 +62,7 @@ pub enum VesselRole {
 
 /// A logical vessel with zero-based addressable positions.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Vessel {
     pub id: ProcedureLocalId,
     pub role: VesselRole,
@@ -91,6 +95,7 @@ pub struct Vessel {
 
 /// One logical position in a Procedure vessel.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct Location {
     pub vessel: ProcedureLocalId,
     pub position: u32,
@@ -99,6 +104,7 @@ pub struct Location {
 /// The strongest fluid-path reuse a realization may perform for one semantic operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum FluidPathPolicy {
     /// Each destination must use an isolated fluid path.
     IsolatedDestinations,
@@ -110,6 +116,7 @@ pub enum FluidPathPolicy {
 /// Where a realization must aspirate relative to the vessel and liquid state.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum AspirationStrategy {
     /// Ordinary submerged aspiration; the implementation chooses a qualified default position.
     #[default]
@@ -123,6 +130,7 @@ pub enum AspirationStrategy {
 /// Where a realization must dispense relative to the vessel, liquid, or receiving material.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum DispenseStrategy {
     /// Ordinary in-liquid dispense; the implementation chooses a qualified default position.
     #[default]
@@ -139,6 +147,7 @@ pub enum DispenseStrategy {
 
 /// Portable technique constraints on a transfer or distribution.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TransferTechnique {
     #[serde(default)]
     pub aspiration: AspirationStrategy,
@@ -154,6 +163,7 @@ pub struct TransferTechnique {
 
 /// Portable liquid-access constraints on an in-place mix.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MixTechnique {
     #[serde(default)]
     pub aspiration: AspirationStrategy,
@@ -168,6 +178,7 @@ pub struct MixTechnique {
 /// One stable, observable liquid operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum PipettingStep {
     Transfer {
         id: ProcedureLocalId,
@@ -222,10 +233,12 @@ impl PipettingStep {
 
 /// Cross-cutting conditions that every realization of the program must preserve.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PipettingConstraints {}
 
 /// Version 1 of Lab's canonical, device-neutral pipetting contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PipettingProgramV1 {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<MaterialInput>,
@@ -1340,6 +1353,26 @@ mod tests {
             }],
             PipettingConstraints::default(),
         )
+    }
+
+    #[test]
+    fn a_canonical_vessel_rejects_keys_it_does_not_know() {
+        // A writer still emitting a field this contract has moved or removed must be told, not
+        // quietly trimmed. `source_temperature` used to live on the program's constraints.
+        let stale_constraints = r#"{"source_temperature": {"minimum": 4, "maximum": 4}}"#;
+        assert!(serde_json::from_str::<PipettingConstraints>(stale_constraints).is_err());
+
+        let stale_vessel = r#"{
+            "id": "cells",
+            "role": {"kind": "intermediate"},
+            "positions": 1,
+            "initial_volume": {"value": {"type": "real", "value": "50"}, "unit": "http://qudt.org/vocab/unit/MicroL"}
+        }"#;
+        let error = serde_json::from_str::<Vessel>(stale_vessel).unwrap_err();
+        assert!(
+            error.to_string().contains("initial_volume"),
+            "the unknown key is named: {error}"
+        );
     }
 
     #[test]

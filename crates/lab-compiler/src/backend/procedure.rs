@@ -1337,7 +1337,7 @@ fn exact_source_temperature(
     };
     if temperature.minimum != temperature.maximum {
         return Err(format!(
-            "{adapter} Golden Gate task '{}' requires a source-temperature range, but this operation needs one exact staging setpoint",
+            "{adapter} Procedure task '{}' stages vessels at more than one temperature, but this operation controls one exact staging setpoint",
             task.id
         ));
     }

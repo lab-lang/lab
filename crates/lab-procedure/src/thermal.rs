@@ -21,6 +21,7 @@ use crate::{
 
 /// The material state carried through one canonical thermal program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ThermalLoad {
     /// Zero-based input of the enclosing Procedure task that is loaded into the instrument.
     pub input: u32,
@@ -38,6 +39,7 @@ pub struct ThermalLoad {
 
 /// One repeated group of ordered thermal plateaus.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ThermalStage {
     pub id: ProcedureLocalId,
     /// Total executions of this group; one means execute it once.
@@ -47,6 +49,7 @@ pub struct ThermalStage {
 
 /// One plateau: reach a block temperature at an optional controlled rate, then hold it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ThermalStep {
     pub id: ProcedureLocalId,
     pub temperature: Temperature,
@@ -58,6 +61,7 @@ pub struct ThermalStep {
 
 /// Version 1 of Lab's canonical, device-neutral thermal-program contract.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ThermalProgramV1 {
     pub load: ThermalLoad,
     /// One lid setpoint applied across the program. `None` means no heated-lid requirement.

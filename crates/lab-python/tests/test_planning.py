@@ -88,6 +88,7 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
         for method in planned.solution.selections
         for task in method.tasks
         for material in task.materials
+        if material.interchangeable_alternatives == ()
     )
     assert "allocated-procedure" in planned.allocated_lair
     assert planned.material_inventory.facility == planned.inventory.facility

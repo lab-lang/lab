@@ -62,6 +62,7 @@ class MaterialBinding:
     input: str
     symbol: str
     source: SelectedMaterialSource
+    interchangeable_alternatives: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,6 +405,9 @@ def _material(raw: dict[str, Any]) -> MaterialBinding:
         input=cast(str, raw["input"]),
         symbol=cast(str, raw["symbol"]),
         source=selected,
+        interchangeable_alternatives=tuple(
+            cast(list[str], raw.get("interchangeable_alternatives", []))
+        ),
     )
 
 

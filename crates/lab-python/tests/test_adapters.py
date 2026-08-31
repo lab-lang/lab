@@ -19,6 +19,13 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
     pipetting = next(
         implementation
         for implementation in ot2.procedure_implementations
+        if implementation.id.endswith("OpentronsOt2PipettingV1")
+    )
+    assert "multi_position_vessel" in pipetting.program_features
+    assert "aspirate_tracked_surface" in pipetting.program_features
+    pipetting = next(
+        implementation
+        for implementation in ot2.procedure_implementations
         if implementation.contract.endswith("#PipettingProgramV1")
     )
     assert pipetting.contract.endswith("#PipettingProgramV1")

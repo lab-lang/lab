@@ -121,6 +121,9 @@ class Vessel:
     role: VesselRole
     positions: int
     initial_volume_each: Volume | None = None
+    working_capacity_each: Volume | None = None
+    dead_volume_each: Volume | None = None
+    temperature: TemperatureRange | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +252,8 @@ PipettingStep = Transfer | Distribute | Mix | Barrier
 
 @dataclass(frozen=True, slots=True)
 class PipettingConstraints:
-    source_temperature: TemperatureRange | None = None
+    """Cross-cutting conditions every realization must preserve. Staging temperature is a property
+    of each vessel rather than of the program, so this carries nothing today."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -322,8 +326,6 @@ def parse_program(raw: dict[str, Any]) -> ProcedureProgram:
 
 
 def _pipetting_program(raw: dict[str, Any]) -> PipettingProgramV1:
-    constraints = cast(dict[str, Any], raw.get("constraints", {}))
-    source_temperature = constraints.get("source_temperature")
     return PipettingProgramV1(
         materials=tuple(
             MaterialInput(id=cast(str, item["id"]))
@@ -337,13 +339,7 @@ def _pipetting_program(raw: dict[str, Any]) -> PipettingProgramV1:
         steps=tuple(
             _pipetting_step(item) for item in cast(list[dict[str, Any]], raw.get("steps", []))
         ),
-        constraints=PipettingConstraints(
-            source_temperature=(
-                _temperature_range(cast(dict[str, Any], source_temperature))
-                if source_temperature is not None
-                else None
-            )
-        ),
+        constraints=PipettingConstraints(),
     )
 
 
@@ -372,12 +368,20 @@ def _vessel(raw: dict[str, Any]) -> Vessel:
         id=cast(str, raw["id"]),
         role=parsed_role,
         positions=cast(int, raw["positions"]),
-        initial_volume_each=(
-            _volume(cast(dict[str, Any], raw["initial_volume_each"]))
-            if raw.get("initial_volume_each") is not None
+        initial_volume_each=_optional_volume(raw, "initial_volume_each"),
+        working_capacity_each=_optional_volume(raw, "working_capacity_each"),
+        dead_volume_each=_optional_volume(raw, "dead_volume_each"),
+        temperature=(
+            _temperature_range(cast(dict[str, Any], raw["temperature"]))
+            if raw.get("temperature") is not None
             else None
         ),
     )
+
+
+def _optional_volume(raw: dict[str, Any], key: str) -> Volume | None:
+    value = raw.get(key)
+    return _volume(cast(dict[str, Any], value)) if value is not None else None
 
 
 def _location(raw: dict[str, Any]) -> Location:

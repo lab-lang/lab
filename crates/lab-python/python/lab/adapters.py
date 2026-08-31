@@ -35,6 +35,7 @@ class ProcedureImplementation:
     control_modes: tuple[str, ...]
     accepted_run_formats: tuple[str, ...]
     emitted_run_formats: tuple[str, ...]
+    program_features: tuple[str, ...]
     services: AdapterServices
 
 
@@ -121,6 +122,9 @@ def catalog() -> AdapterCatalog:
                     ),
                     emitted_run_formats=tuple(
                         cast(list[str], implementation["emitted_run_formats"])
+                    ),
+                    program_features=tuple(
+                        cast(list[str], implementation.get("program_features", []))
                     ),
                     services=AdapterServices(
                         planning=cast(bool, implementation_services["planning"]),
