@@ -26,6 +26,78 @@ pub(crate) use crate::procedure::{
     PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
 };
 
+/// What one task asks of a source an operator loads.
+///
+/// Both numbers come from the program's own liquid ledger. `required_initial_ul` is not simply the
+/// total draw: a mix partway through a series has to fit whatever is left at that point, and a
+/// stated dead volume has to remain unreachable underneath.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct SourceDemand {
+    pub(crate) withdrawn_ul: u32,
+    pub(crate) required_initial_ul: u32,
+    /// Fill the Method states for one position, when it states one. A source the adapter loads
+    /// leaves this open; a stated fill is a physical limit the schedule must respect.
+    pub(crate) stated_initial_ul: Option<u32>,
+}
+
+impl SourceDemand {
+    /// Folds this task's demand into a running total for a source several tasks share.
+    ///
+    /// Tasks run in order out of one tube, so a later task's requirement sits on top of whatever
+    /// earlier tasks already consumed.
+    pub(crate) fn fold(self, consumed: &mut u32, needed: &mut u32) -> Result<(), String> {
+        let at_this_point = consumed
+            .checked_add(self.required_initial_ul)
+            .ok_or_else(|| "shared source volume overflows".to_owned())?;
+        *needed = (*needed).max(at_this_point);
+        *consumed = consumed
+            .checked_add(self.withdrawn_ul)
+            .ok_or_else(|| "shared source volume overflows".to_owned())?;
+        Ok(())
+    }
+}
+
+/// Reads one position's demand out of a validated program's ledger.
+fn source_demand(
+    adapter: &str,
+    task: &AllocatedProcedureTask,
+    ledger: &lab_procedure::LiquidLedger,
+    vessel: &lab_procedure::ProcedureLocalId,
+    position: u32,
+    label: &str,
+    stated: Option<&Volume>,
+) -> Result<SourceDemand, String> {
+    let at = lab_procedure::Location {
+        vessel: vessel.clone(),
+        position,
+    };
+    let whole = |value: &lab_capability::ExactDecimal, what: &str| -> Result<u32, String> {
+        whole_microlitres(
+            adapter,
+            task,
+            what,
+            &Volume::microlitres(value.clone()).map_err(|error| error.to_string())?,
+        )
+    };
+    let withdrawn_ul = match ledger.withdrawn(&at) {
+        Some(value) => whole(value, label)?,
+        None => 0,
+    };
+    let required_initial_ul = match ledger.required_initial_volume(&at) {
+        Some(value) => whole(value, label)?,
+        None => withdrawn_ul,
+    };
+    let stated_initial_ul = match stated {
+        Some(volume) => Some(whole_microlitres(adapter, task, label, volume)?),
+        None => None,
+    };
+    Ok(SourceDemand {
+        withdrawn_ul,
+        required_initial_ul,
+        stated_initial_ul,
+    })
+}
+
 pub(crate) struct MaterialVolume<'a> {
     pub(crate) role: String,
     pub(crate) material: &'a SelectedMaterialBinding,
@@ -102,6 +174,8 @@ pub(crate) struct ChemicalTransformation<'a> {
     pub(crate) artifact: String,
     pub(crate) cell_source: &'a PlanningValueSource,
     pub(crate) dna: Vec<&'a SelectedMaterialBinding>,
+    /// What this task asks of each DNA source, in the same order as `dna`.
+    pub(crate) dna_demands: Vec<SourceDemand>,
     pub(crate) replicates: usize,
     pub(crate) cell_mix_cycles: u32,
     pub(crate) cell_mix_volume_ul: u32,
@@ -118,9 +192,9 @@ pub(crate) struct ChemicalTransformation<'a> {
     pub(crate) bubble_clear_technique: MixTechnique,
     /// Exact temperature the competent-cell aliquot must be staged at.
     pub(crate) cell_staging_temperature_c: Option<f64>,
-    /// Total volume this task draws from its competent-cell aliquot, taken from the program's own
-    /// liquid ledger rather than recomputed from parameters that could drift from the steps.
-    pub(crate) cell_withdrawal_ul: u32,
+    /// What this task asks of its competent-cell aliquot, from the program's own liquid ledger
+    /// rather than recomputed from parameters that could drift from the steps.
+    pub(crate) cells: SourceDemand,
 }
 
 pub(crate) struct RecoveryMediumAddition<'a> {
@@ -223,6 +297,27 @@ pub(crate) fn normalized_chemical_transformation<'a>(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // Each normalized DNA material has its own source vessel; the ledger knows what each is asked
+    // for, including the mix that precedes every draw out of it.
+    let dna_demands = program
+        .vessels
+        .iter()
+        .filter(|vessel| {
+            matches!(&vessel.role, VesselRole::MaterialSource { material }
+                if program.materials.iter().any(|input| &input.id == material))
+        })
+        .map(|vessel| {
+            source_demand(
+                adapter,
+                task,
+                &ledger,
+                &vessel.id,
+                0,
+                "DNA source",
+                vessel.initial_volume_each.as_ref(),
+            )
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     if dna.is_empty() || dna.len() != materials.len() {
         return Err(format!(
             "{adapter} transformation task '{}' must consume every allocated DNA exactly once",
@@ -457,6 +552,7 @@ pub(crate) fn normalized_chemical_transformation<'a>(
         artifact,
         cell_source: &task.inputs[1].source,
         dna,
+        dna_demands,
         replicates,
         cell_mix_cycles: *cell_mix_cycles,
         cell_mix_volume_ul: whole_microlitres(
@@ -477,25 +573,14 @@ pub(crate) fn normalized_chemical_transformation<'a>(
         bubble_clear_volume_ul,
         bubble_clear_technique,
         cell_staging_temperature_c: exact_source_temperature(adapter, task, program)?,
-        cell_withdrawal_ul: whole_microlitres(
+        cells: source_demand(
             adapter,
             task,
-            "competent-cell withdrawal",
-            &Volume::microlitres(
-                ledger
-                    .withdrawn(&Location {
-                        vessel: cells.id.clone(),
-                        position: 0,
-                    })
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!(
-                            "{adapter} transformation task '{}' draws nothing from its competent-cell aliquot",
-                            task.id
-                        )
-                    })?,
-            )
-            .map_err(|error| error.to_string())?,
+            &ledger,
+            &cells.id,
+            0,
+            "competent-cell aliquot",
+            cells.initial_volume_each.as_ref(),
         )?,
     })
 }

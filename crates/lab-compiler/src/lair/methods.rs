@@ -298,7 +298,7 @@ fn automated_chemical_transformation() -> MethodDefinition {
                         ("bubble_clear_volume_ul", 20),
                         ("bubble_clear_dispense_offset_mm", 8),
                         ("cell_staging_temperature_c", 4),
-                        ("cell_aliquot_volume_ul", 50),
+                        ("cell_aliquot_volume_ul", 100),
                     ],
                 ),
                 vec![material_parameter("dependencies", "dependencies")],

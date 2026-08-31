@@ -11,8 +11,8 @@ use serde::Serialize;
 
 use super::BACKEND;
 use super::invocation::{
-    MaterialPlacement, Ot2TaskExecution, PlateMapEntry, dilution_ratio, layered_plate_layout,
-    plan_task,
+    MaterialPlacement, Ot2TaskExecution, PlateMapEntry, PrepareTransformation,
+    SetupGoldenGateReaction, dilution_ratio, layered_plate_layout, plan_task,
 };
 use super::profile::Ot2AdapterProfile;
 use crate::backend::invocation::exact_invocation_tasks;
@@ -536,7 +536,8 @@ fn allocate_assembly(
     let source_keys = pairs
         .iter()
         .flat_map(|(setup, _)| match &tasks[*setup].execution {
-            Ot2TaskExecution::SetupGoldenGateReaction { additions, .. } => additions
+            Ot2TaskExecution::SetupGoldenGateReaction(setup) => setup
+                .additions
                 .iter()
                 .map(|addition| addition.placement.material.symbol.clone())
                 .collect::<Vec<_>>(),
@@ -554,9 +555,7 @@ fn allocate_assembly(
     let required_wells = pairs
         .iter()
         .map(|(setup, _)| match &tasks[*setup].execution {
-            Ot2TaskExecution::SetupGoldenGateReaction { reaction_wells, .. } => {
-                reaction_wells.len()
-            }
+            Ot2TaskExecution::SetupGoldenGateReaction(setup) => setup.reaction_wells.len(),
             _ => 0,
         })
         .sum::<usize>();
@@ -569,11 +568,12 @@ fn allocate_assembly(
     let required_tips = pairs
         .iter()
         .map(|(setup, _)| match &tasks[*setup].execution {
-            Ot2TaskExecution::SetupGoldenGateReaction {
-                additions,
-                reaction_wells,
-                ..
-            } => {
+            Ot2TaskExecution::SetupGoldenGateReaction(setup) => {
+                let SetupGoldenGateReaction {
+                    additions,
+                    reaction_wells,
+                    ..
+                } = setup.as_ref();
                 let final_mix_tips = usize::from(
                     !additions
                         .last()
@@ -601,16 +601,17 @@ fn allocate_assembly(
         let thermal_id = tasks[*thermal_index].task.id.clone();
         let thermal_outputs = tasks[*thermal_index].task.outputs.clone();
         let choice = graph.choice_for_task(&thermal_id)?;
-        let Ot2TaskExecution::SetupGoldenGateReaction {
+        let Ot2TaskExecution::SetupGoldenGateReaction(setup) = &mut tasks[*setup_index].execution
+        else {
+            return Err("OT-2 assembly scheduler received a non-setup task".to_owned());
+        };
+        let SetupGoldenGateReaction {
             reaction_wells,
             additions,
             reaction_volume_ul,
             source_temperature_c,
             ..
-        } = &mut tasks[*setup_index].execution
-        else {
-            return Err("OT-2 assembly scheduler received a non-setup task".to_owned());
-        };
+        } = setup.as_mut();
         shared_source_temperature =
             merge_source_temperature(shared_source_temperature, *source_temperature_c)?;
         let count = reaction_wells.len();
@@ -742,7 +743,8 @@ fn allocate_transformation(
     let required_wells = prepare_heat
         .iter()
         .map(|(prepare, _)| match &tasks[*prepare].execution {
-            Ot2TaskExecution::PrepareChemicalTransformation { reaction_wells, .. } => {
+            Ot2TaskExecution::PrepareChemicalTransformation(preparation) => {
+                let reaction_wells = &preparation.reaction_wells;
                 reaction_wells.len()
             }
             _ => 0,
@@ -760,10 +762,11 @@ fn allocate_transformation(
     let mut source_keys = BTreeSet::new();
     let mut chilled_keys = BTreeSet::new();
     let mut cell_withdrawals = BTreeMap::<String, u32>::new();
+    let mut cell_requirements = BTreeMap::<String, u32>::new();
+    let mut cell_aliquots = BTreeMap::<String, u32>::new();
     let mut cell_mix_requirements = BTreeMap::<String, u32>::new();
     let mut dna_withdrawals = BTreeMap::<String, u32>::new();
-    let mut dna_mix_requirements = BTreeMap::<String, u32>::new();
-    let mut dna_final_withdrawals = BTreeMap::<String, u32>::new();
+    let mut dna_requirements = BTreeMap::<String, u32>::new();
     let mut external_dna_keys = BTreeSet::new();
     let mut recovery_loads = BTreeMap::<String, u32>::new();
     for (prepare, heat) in prepare_heat {
@@ -773,20 +776,20 @@ fn allocate_transformation(
                 tasks[*heat].task.id
             )
         })?;
-        let Ot2TaskExecution::PrepareChemicalTransformation {
-            cell_source,
-            cell_staging_temperature_c,
-            cell_withdrawal_ul,
-            cell_mix_volume_ul,
-            reaction_wells,
-            dna,
-            dna_volume_ul,
-            dna_mix_volume_ul,
-            ..
-        } = &tasks[*prepare].execution
+        let Ot2TaskExecution::PrepareChemicalTransformation(preparation) =
+            &tasks[*prepare].execution
         else {
             return Err("OT-2 transformation scheduler received a non-preparation task".to_owned());
         };
+        let PrepareTransformation {
+            cell_source,
+            cell_staging_temperature_c,
+            cells,
+            dna_demands,
+            cell_mix_volume_ul,
+            dna,
+            ..
+        } = preparation.as_ref();
         staging_temperature =
             merge_source_temperature(staging_temperature, *cell_staging_temperature_c)?;
         let cell_key = format!(
@@ -794,18 +797,22 @@ fn allocate_transformation(
             graph.physical_source_key(tasks[*prepare].task, cell_source)?
         );
         chilled_keys.insert(cell_key.clone());
-        // The canonical program's ledger already totalled this task's draw, so the batch adds
-        // those figures rather than multiplying parameters that could drift from the steps.
-        let withdrawal = cell_withdrawals.entry(cell_key.clone()).or_default();
-        *withdrawal = withdrawal
-            .checked_add(*cell_withdrawal_ul)
-            .ok_or_else(|| "OT-2 competent-cell batch volume overflows".to_owned())?;
+        // Tasks draw from one tube in order, so a later task's requirement sits on top of what
+        // earlier ones already took. The ledger supplies both figures.
+        let consumed = cell_withdrawals.entry(cell_key.clone()).or_default();
+        let needed = cell_requirements.entry(cell_key.clone()).or_default();
+        cells
+            .fold(consumed, needed)
+            .map_err(|error| format!("OT-2 competent-cell batch: {error}"))?;
+        if let Some(stated) = cells.stated_initial_ul {
+            cell_aliquots.insert(cell_key.clone(), stated);
+        }
         cell_mix_requirements
             .entry(cell_key.clone())
             .and_modify(|required| *required = (*required).max(*cell_mix_volume_ul))
             .or_insert(*cell_mix_volume_ul);
         cell_keys.insert(*prepare, cell_key);
-        for placement in dna {
+        for (placement_index, placement) in dna.iter().enumerate() {
             let key = dna_source_key(placement)?;
             if matches!(
                 &placement.material.source,
@@ -813,24 +820,14 @@ fn allocate_transformation(
             ) {
                 external_dna_keys.insert(key.clone());
             }
-            let volume = dna_volume_ul
-                .checked_mul(u32::try_from(reaction_wells.len()).map_err(|_| {
-                    "OT-2 transformation replicate count does not fit DNA arithmetic".to_owned()
-                })?)
-                .ok_or_else(|| "OT-2 DNA source volume overflows".to_owned())?;
-            let withdrawal = dna_withdrawals.entry(key.clone()).or_default();
-            *withdrawal = withdrawal
-                .checked_add(volume)
-                .ok_or_else(|| "OT-2 DNA batch volume overflows".to_owned())?;
-            dna_mix_requirements
-                .entry(key.clone())
-                .and_modify(|required| *required = (*required).max(*dna_mix_volume_ul))
-                .or_insert(*dna_mix_volume_ul);
-            // The smallest single draw is the least this well can have left before its last mix.
-            dna_final_withdrawals
-                .entry(key)
-                .and_modify(|draw| *draw = (*draw).min(*dna_volume_ul))
-                .or_insert(*dna_volume_ul);
+            let demand = dna_demands.get(placement_index).copied().ok_or_else(|| {
+                "OT-2 transformation task has no ledger demand for one DNA source".to_owned()
+            })?;
+            let consumed = dna_withdrawals.entry(key.clone()).or_default();
+            let needed = dna_requirements.entry(key).or_default();
+            demand
+                .fold(consumed, needed)
+                .map_err(|error| format!("OT-2 DNA batch: {error}"))?;
         }
         let Ot2TaskExecution::AddRecoveryMedium {
             medium,
@@ -856,18 +853,19 @@ fn allocate_transformation(
             .checked_add(volume)
             .ok_or_else(|| "OT-2 recovery batch volume overflows".to_owned())?;
     }
-    // One mix per competent-cell tube precedes its single distribute, while each DNA well is
-    // remixed before every transfer out of it.
-    let cell_loads = required_source_loads(
-        &cell_withdrawals,
-        &cell_mix_requirements,
-        MixCadence::BeforeFirstDraw,
-    );
-    let dna_loads = required_source_loads(
-        &dna_withdrawals,
-        &dna_mix_requirements,
-        MixCadence::BeforeEveryDraw(&dna_final_withdrawals),
-    );
+    // A competent-cell aliquot is a physical tube of a stated size. Fusing more work onto one
+    // than it holds is not a load the operator can perform, so it is refused rather than printed.
+    for (key, needed) in &cell_requirements {
+        if let Some(stated) = cell_aliquots.get(key)
+            && needed > stated
+        {
+            return Err(format!(
+                "OT-2 transformation batch draws {needed} uL from one competent-cell aliquot, but the Method states a {stated} uL aliquot; raise `cell_aliquot_volume_ul` or plan fewer transformations against one aliquot"
+            ));
+        }
+    }
+    let cell_loads = cell_requirements.clone();
+    let dna_loads = dna_requirements.clone();
     let dna_plate_wells = plate_wells(profile.stages.transformation.dna_plate.capacity);
     let product_positions = product_wells
         .values()
@@ -917,11 +915,9 @@ fn allocate_transformation(
     let small_tips = prepare_heat
         .iter()
         .map(|(prepare, _)| match &tasks[*prepare].execution {
-            Ot2TaskExecution::PrepareChemicalTransformation {
-                reaction_wells,
-                dna,
-                ..
-            } => reaction_wells.len() * dna.len(),
+            Ot2TaskExecution::PrepareChemicalTransformation(preparation) => {
+                preparation.reaction_wells.len() * preparation.dna.len()
+            }
             _ => 0,
         })
         .sum::<usize>();
@@ -969,16 +965,18 @@ fn allocate_transformation(
         let recovery_outputs = tasks[recovery].task.outputs.clone();
         let incubation_id = tasks[incubation].task.id.clone();
         let incubation_outputs = tasks[incubation].task.outputs.clone();
-        let Ot2TaskExecution::PrepareChemicalTransformation {
+        let Ot2TaskExecution::PrepareChemicalTransformation(preparation) =
+            &mut tasks[*prepare].execution
+        else {
+            unreachable!("transformation pair begins with preparation")
+        };
+        let PrepareTransformation {
             cell_source_well,
             cell_source_volume_ul,
             dna,
             reaction_wells,
             ..
-        } = &mut tasks[*prepare].execution
-        else {
-            unreachable!("transformation pair begins with preparation")
-        };
+        } = preparation.as_mut();
         let count = reaction_wells.len();
         let allocated = available_wells[cursor..cursor + count].to_vec();
         cursor += count;
@@ -991,7 +989,7 @@ fn allocate_transformation(
             resource: "transformation-chilled-rack".to_owned(),
             positions: vec![cell_source_well.clone()],
         });
-        for placement in dna {
+        for placement in dna.iter_mut() {
             let key = dna_source_key(placement)?;
             let (well, available_volume) = match &placement.material.source {
                 SelectedMaterialSource::ChoiceOutput { choice } => {
@@ -1194,48 +1192,6 @@ fn allocate_transformation(
         incubations,
         cell_staging_temperature_c,
     ))
-}
-
-/// When a shared source is remixed, which decides how much must still be in it at the end.
-enum MixCadence<'a> {
-    /// One mix before any liquid leaves, so the mix only has to fit the starting load.
-    BeforeFirstDraw,
-    /// A mix before every draw, keyed by the smallest single draw from each source. Before the
-    /// last mix the well is already down to `total - smallest draw`, and that remainder still has
-    /// to cover a full mix.
-    BeforeEveryDraw(&'a BTreeMap<String, u32>),
-}
-
-/// How much each shared source must hold for the whole batch.
-///
-/// The total withdrawal is one bound. The other depends on when the source is remixed: taking only
-/// the larger of the total and one mix understates the load when a mix precedes every draw and
-/// draws more than a single transfer does, which leaves the last mix short.
-fn required_source_loads(
-    withdrawals: &BTreeMap<String, u32>,
-    mix_requirements: &BTreeMap<String, u32>,
-    cadence: MixCadence<'_>,
-) -> BTreeMap<String, u32> {
-    withdrawals
-        .iter()
-        .map(|(source, withdrawal)| {
-            let mix = mix_requirements.get(source).copied().unwrap_or_default();
-            let before_last_mix = match &cadence {
-                MixCadence::BeforeFirstDraw => 0,
-                MixCadence::BeforeEveryDraw(final_withdrawals) => {
-                    let smallest = final_withdrawals
-                        .get(source)
-                        .copied()
-                        .unwrap_or(*withdrawal);
-                    withdrawal.saturating_sub(smallest)
-                }
-            };
-            (
-                source.clone(),
-                (*withdrawal).max(mix.saturating_add(before_last_mix)),
-            )
-        })
-        .collect()
 }
 
 fn dna_source_key(placement: &MaterialPlacement) -> Result<String, String> {
@@ -1606,38 +1562,7 @@ fn add_well_output_locations(
 
 #[cfg(test)]
 mod tests {
-    use super::{MixCadence, merge_source_temperature, required_source_loads};
-    use std::collections::BTreeMap;
-
-    #[test]
-    fn a_shared_source_holds_enough_for_its_last_mix_as_well_as_every_draw() {
-        // Four 2 uL draws with a 5 uL mix before each: the well is down to 2 uL before the final
-        // mix, so it must start with 5 + 3 x 2 = 11 uL rather than the 8 uL total withdrawal.
-        let withdrawals = BTreeMap::from([("dna".to_owned(), 8)]);
-        let mix_requirements = BTreeMap::from([("dna".to_owned(), 5)]);
-        let final_withdrawals = BTreeMap::from([("dna".to_owned(), 2)]);
-
-        let loads = required_source_loads(
-            &withdrawals,
-            &mix_requirements,
-            MixCadence::BeforeEveryDraw(&final_withdrawals),
-        );
-
-        assert_eq!(loads["dna"], 11);
-    }
-
-    #[test]
-    fn a_source_mixed_once_only_has_to_hold_its_mix_at_the_start() {
-        // The competent-cell tube is remixed once before its single distribute, so a 50 uL mix
-        // needs no headroom beyond the 80 uL the batch draws.
-        let withdrawals = BTreeMap::from([("cells".to_owned(), 80)]);
-        let mix_requirements = BTreeMap::from([("cells".to_owned(), 50)]);
-
-        let loads =
-            required_source_loads(&withdrawals, &mix_requirements, MixCadence::BeforeFirstDraw);
-
-        assert_eq!(loads["cells"], 80);
-    }
+    use super::merge_source_temperature;
 
     #[test]
     fn assembly_batch_requires_one_shared_source_temperature() {

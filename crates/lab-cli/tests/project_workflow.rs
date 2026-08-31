@@ -1063,10 +1063,13 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         first_preparation["cell_mix_volume_ul"],
         regression["transformation"]["competent_cells"]["source_mix_volume_ul"]
     );
-    assert_eq!(first_preparation["cell_source_volume_ul"], 80);
-    // Two reactions of 20 uL each, totalled by the canonical program's own liquid ledger rather
-    // than recomputed from parameters that could drift from the steps.
-    assert_eq!(first_preparation["cell_withdrawal_ul"], 40);
+    // Two fused preparations draw 40 uL each, but the second remixes 50 uL before drawing, so the
+    // tube must start with 40 + 50 rather than the 80 uL the draws total. The ledger derives this
+    // from the step order; the earlier figure of 80 would have left the last mix short.
+    assert_eq!(first_preparation["cell_source_volume_ul"], 90);
+    assert_eq!(first_preparation["cells"]["withdrawn_ul"], 40);
+    assert_eq!(first_preparation["cells"]["required_initial_ul"], 50);
+    assert_eq!(first_preparation["cells"]["stated_initial_ul"], 100);
     assert_eq!(
         first_preparation["dna_volume_ul"],
         regression["transformation"]["dna"]["volume_ul"]

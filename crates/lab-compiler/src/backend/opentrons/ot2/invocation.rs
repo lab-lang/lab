@@ -19,8 +19,9 @@ use crate::backend::opentrons::ot2::schedule::{
 use crate::backend::procedure::{
     ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
     PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
-    normalized_chemical_transformation, normalized_golden_gate_setup, normalized_recovery_medium,
-    normalized_selective_plating, normalized_serial_dilution, normalized_thermal_program,
+    SourceDemand, normalized_chemical_transformation, normalized_golden_gate_setup,
+    normalized_recovery_medium, normalized_selective_plating, normalized_serial_dilution,
+    normalized_thermal_program,
 };
 use crate::backend::profile::Plates;
 use crate::backend::resources::{PlateCapacity, Well, assign_source_wells, plate_wells};
@@ -112,17 +113,59 @@ struct TaskReview {
     materials: Vec<SelectedMaterialBinding>,
 }
 
+/// One allocated Golden Gate reaction setup. Boxed inside `Ot2TaskExecution` for the same
+/// reason as the transformation arm: the enum should not cost its widest variant everywhere.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) struct SetupGoldenGateReaction {
+    pub(super) artifact: String,
+    pub(super) reaction_wells: Vec<String>,
+    pub(super) additions: Vec<MaterialAddition>,
+    pub(super) reaction_volume_ul: u32,
+    pub(super) final_mix: GoldenGateMixExecution,
+    pub(super) source_temperature_c: Option<f64>,
+}
+
+/// One allocated competent-cell preparation. Boxed inside `Ot2TaskExecution` so the enum does
+/// not pay for its widest arm everywhere a task execution is moved.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) struct PrepareTransformation {
+    pub(super) artifact: String,
+    pub(super) cell_source: PlanningValueSource,
+    pub(super) cell_source_well: String,
+    pub(super) cell_source_volume_ul: u32,
+    /// What this task asks of the shared aliquot, per the program's liquid ledger.
+    pub(super) cells: SourceDemand,
+    /// Temperature the staged competent-cell aliquot is held at for the whole run.
+    pub(super) cell_staging_temperature_c: Option<f64>,
+    pub(super) dna: Vec<MaterialPlacement>,
+    /// What this task asks of each DNA source, in the same order as `dna`.
+    pub(super) dna_demands: Vec<SourceDemand>,
+    pub(super) reaction_wells: Vec<String>,
+    pub(super) cell_mix_cycles: u32,
+    pub(super) cell_mix_volume_ul: u32,
+    pub(super) cell_mix_technique: MixTechnique,
+    pub(super) cell_volume_ul: u32,
+    pub(super) cell_transfer_technique: TransferTechnique,
+    pub(super) dna_mix_cycles: u32,
+    pub(super) dna_mix_volume_ul: u32,
+    pub(super) dna_mix_technique: MixTechnique,
+    pub(super) dna_volume_ul: u32,
+    pub(super) dna_transfer_technique: TransferTechnique,
+    pub(super) bubble_clear_cycles: u32,
+    pub(super) bubble_clear_volume_ul: u32,
+    pub(super) bubble_clear_technique: MixTechnique,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+// One value per allocated task, built once and matched immediately, so the enum's width is not on
+// any hot path. The two widest records are boxed because they are outliers; the rest are records of
+// comparable size and boxing each would add indirection without making anything clearer.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum Ot2TaskExecution {
-    SetupGoldenGateReaction {
-        artifact: String,
-        reaction_wells: Vec<String>,
-        additions: Vec<MaterialAddition>,
-        reaction_volume_ul: u32,
-        final_mix: GoldenGateMixExecution,
-        source_temperature_c: Option<f64>,
-    },
+    SetupGoldenGateReaction(Box<SetupGoldenGateReaction>),
     ThermalProgram {
         title: String,
         sample_wells: Vec<String>,
@@ -131,31 +174,7 @@ pub(super) enum Ot2TaskExecution {
         profile: ThermalProfile,
         final_hold_celsius: Option<f64>,
     },
-    PrepareChemicalTransformation {
-        artifact: String,
-        cell_source: PlanningValueSource,
-        cell_source_well: String,
-        cell_source_volume_ul: u32,
-        /// Volume this task draws from the shared aliquot, per the program's liquid ledger.
-        cell_withdrawal_ul: u32,
-        /// Temperature the staged competent-cell aliquot is held at for the whole run.
-        cell_staging_temperature_c: Option<f64>,
-        dna: Vec<MaterialPlacement>,
-        reaction_wells: Vec<String>,
-        cell_mix_cycles: u32,
-        cell_mix_volume_ul: u32,
-        cell_mix_technique: MixTechnique,
-        cell_volume_ul: u32,
-        cell_transfer_technique: TransferTechnique,
-        dna_mix_cycles: u32,
-        dna_mix_volume_ul: u32,
-        dna_mix_technique: MixTechnique,
-        dna_volume_ul: u32,
-        dna_transfer_technique: TransferTechnique,
-        bubble_clear_cycles: u32,
-        bubble_clear_volume_ul: u32,
-        bubble_clear_technique: MixTechnique,
-    },
+    PrepareChemicalTransformation(Box<PrepareTransformation>),
     AddRecoveryMedium {
         artifact: String,
         culture_source: PlanningValueSource,
@@ -695,21 +714,23 @@ fn plan_setup(
         return Err(view.capacity_error("assembly small-tip racks", required_tips, tip_capacity));
     }
 
-    Ok(Ot2TaskExecution::SetupGoldenGateReaction {
-        artifact: procedure.artifact,
-        reaction_wells: reaction_plate
-            .into_iter()
-            .take(procedure.replicates)
-            .collect(),
-        additions,
-        reaction_volume_ul: procedure.reaction_volume_ul,
-        final_mix: GoldenGateMixExecution {
-            cycles: procedure.final_mix.cycles,
-            volume_ul: procedure.final_mix.volume_ul,
-            technique: procedure.final_mix.technique,
+    Ok(Ot2TaskExecution::SetupGoldenGateReaction(Box::new(
+        SetupGoldenGateReaction {
+            artifact: procedure.artifact,
+            reaction_wells: reaction_plate
+                .into_iter()
+                .take(procedure.replicates)
+                .collect(),
+            additions,
+            reaction_volume_ul: procedure.reaction_volume_ul,
+            final_mix: GoldenGateMixExecution {
+                cycles: procedure.final_mix.cycles,
+                volume_ul: procedure.final_mix.volume_ul,
+                technique: procedure.final_mix.technique,
+            },
+            source_temperature_c: procedure.source_temperature_c,
         },
-        source_temperature_c: procedure.source_temperature_c,
-    })
+    )))
 }
 
 fn plan_transformation(
@@ -809,32 +830,35 @@ fn plan_transformation(
             )
         })?;
 
-    Ok(Ot2TaskExecution::PrepareChemicalTransformation {
-        artifact: procedure.artifact,
-        cell_staging_temperature_c: procedure.cell_staging_temperature_c,
-        cell_withdrawal_ul: procedure.cell_withdrawal_ul,
-        cell_source: procedure.cell_source.clone(),
-        cell_source_well,
-        cell_source_volume_ul,
-        dna,
-        reaction_wells: reaction_wells
-            .into_iter()
-            .take(procedure.replicates)
-            .collect(),
-        cell_mix_cycles: procedure.cell_mix_cycles,
-        cell_mix_volume_ul: procedure.cell_mix_volume_ul,
-        cell_mix_technique: procedure.cell_mix_technique,
-        cell_volume_ul: procedure.cell_volume_ul,
-        cell_transfer_technique: procedure.cell_transfer_technique,
-        dna_mix_cycles: procedure.dna_mix_cycles,
-        dna_mix_volume_ul: procedure.dna_mix_volume_ul,
-        dna_mix_technique: procedure.dna_mix_technique,
-        dna_volume_ul: procedure.dna_volume_ul,
-        dna_transfer_technique: procedure.dna_transfer_technique,
-        bubble_clear_cycles: procedure.bubble_clear_cycles,
-        bubble_clear_volume_ul: procedure.bubble_clear_volume_ul,
-        bubble_clear_technique: procedure.bubble_clear_technique,
-    })
+    Ok(Ot2TaskExecution::PrepareChemicalTransformation(Box::new(
+        PrepareTransformation {
+            artifact: procedure.artifact,
+            cell_staging_temperature_c: procedure.cell_staging_temperature_c,
+            cells: procedure.cells,
+            cell_source: procedure.cell_source.clone(),
+            cell_source_well,
+            cell_source_volume_ul,
+            dna,
+            dna_demands: procedure.dna_demands,
+            reaction_wells: reaction_wells
+                .into_iter()
+                .take(procedure.replicates)
+                .collect(),
+            cell_mix_cycles: procedure.cell_mix_cycles,
+            cell_mix_volume_ul: procedure.cell_mix_volume_ul,
+            cell_mix_technique: procedure.cell_mix_technique,
+            cell_volume_ul: procedure.cell_volume_ul,
+            cell_transfer_technique: procedure.cell_transfer_technique,
+            dna_mix_cycles: procedure.dna_mix_cycles,
+            dna_mix_volume_ul: procedure.dna_mix_volume_ul,
+            dna_mix_technique: procedure.dna_mix_technique,
+            dna_volume_ul: procedure.dna_volume_ul,
+            dna_transfer_technique: procedure.dna_transfer_technique,
+            bubble_clear_cycles: procedure.bubble_clear_cycles,
+            bubble_clear_volume_ul: procedure.bubble_clear_volume_ul,
+            bubble_clear_technique: procedure.bubble_clear_technique,
+        },
+    )))
 }
 
 fn plan_recovery_medium(
@@ -1234,9 +1258,9 @@ fn greatest_common_divisor(mut left: u32, mut right: u32) -> u32 {
 
 fn render_python_protocol(plan: &Ot2TaskPlan) -> Result<String, String> {
     let template = match &plan.execution {
-        Ot2TaskExecution::SetupGoldenGateReaction { .. } => SETUP_TEMPLATE,
+        Ot2TaskExecution::SetupGoldenGateReaction(_) => SETUP_TEMPLATE,
         Ot2TaskExecution::ThermalProgram { .. } => CYCLE_TEMPLATE,
-        Ot2TaskExecution::PrepareChemicalTransformation { .. } => TRANSFORMATION_TEMPLATE,
+        Ot2TaskExecution::PrepareChemicalTransformation(_) => TRANSFORMATION_TEMPLATE,
         Ot2TaskExecution::AddRecoveryMedium { .. } => RECOVERY_TEMPLATE,
         Ot2TaskExecution::SerialDilution { .. } => DILUTION_TEMPLATE,
         Ot2TaskExecution::PlateDilutedCulture { .. } => PLATING_TEMPLATE,
@@ -1302,11 +1326,13 @@ fn replace_once(source: &str, needle: &str, replacement: &str) -> Result<String,
 
 fn render_manual(plan: &Ot2TaskPlan) -> Doc {
     let title = match &plan.execution {
-        Ot2TaskExecution::SetupGoldenGateReaction { artifact, .. } => {
+        Ot2TaskExecution::SetupGoldenGateReaction(setup) => {
+            let artifact = &setup.artifact;
             format!("Set up Golden Gate reaction for {artifact}")
         }
         Ot2TaskExecution::ThermalProgram { title, .. } => title.clone(),
-        Ot2TaskExecution::PrepareChemicalTransformation { artifact, .. } => {
+        Ot2TaskExecution::PrepareChemicalTransformation(prepare) => {
+            let artifact = &prepare.artifact;
             format!("Prepare chemical transformation for {artifact}")
         }
         Ot2TaskExecution::AddRecoveryMedium { artifact, .. } => {
@@ -1362,13 +1388,14 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
     );
 
     match &plan.execution {
-        Ot2TaskExecution::SetupGoldenGateReaction {
-            reaction_wells,
-            additions,
-            reaction_volume_ul,
-            final_mix,
-            ..
-        } => {
+        Ot2TaskExecution::SetupGoldenGateReaction(setup) => {
+            let SetupGoldenGateReaction {
+                reaction_wells,
+                additions,
+                reaction_volume_ul,
+                final_mix,
+                ..
+            } = setup.as_ref();
             doc.heading(1, [text("Load sources")]);
             doc.para_text("Place the exact materials below into the stated chilled-rack wells. The physical source column preserves the reviewed MaterialLot or upstream Method output binding.");
             doc.table(
@@ -1468,17 +1495,18 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
             ]);
             doc.para_text("Remove and label the completed reaction before another independently allocated setup/cycle pair reuses the staging wells.");
         }
-        Ot2TaskExecution::PrepareChemicalTransformation {
-            cell_source,
-            cell_source_well,
-            dna,
-            reaction_wells,
-            cell_volume_ul,
-            dna_volume_ul,
-            bubble_clear_cycles,
-            bubble_clear_volume_ul,
-            ..
-        } => {
+        Ot2TaskExecution::PrepareChemicalTransformation(prepare) => {
+            let PrepareTransformation {
+                cell_source,
+                cell_source_well,
+                dna,
+                reaction_wells,
+                cell_volume_ul,
+                dna_volume_ul,
+                bubble_clear_cycles,
+                bubble_clear_volume_ul,
+                ..
+            } = prepare.as_ref();
             doc.heading(1, [text("Stage transformation inputs")]);
             let mut rows = vec![vec![
                 vec![text("Competent cells")],

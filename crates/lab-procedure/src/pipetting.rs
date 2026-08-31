@@ -587,6 +587,8 @@ impl AsRef<PipettingProgramV1> for ValidatedPipettingProgramV1 {
 pub struct LiquidLedger {
     final_volumes: BTreeMap<Location, Option<ExactDecimal>>,
     withdrawn: BTreeMap<Location, ExactDecimal>,
+    required_initial: BTreeMap<Location, ExactDecimal>,
+    credited: BTreeSet<Location>,
 }
 
 impl LiquidLedger {
@@ -598,6 +600,21 @@ impl LiquidLedger {
     /// Total volume withdrawn from one logical location in microlitres.
     pub fn withdrawn(&self, location: &Location) -> Option<&ExactDecimal> {
         self.withdrawn.get(location)
+    }
+
+    /// Smallest starting volume that satisfies every precondition this program places on one
+    /// position, in microlitres.
+    ///
+    /// This is what a source whose fill the Method leaves open must actually be loaded with. It is
+    /// derived by replaying the ordered steps rather than reasoning about how often a source is
+    /// remixed: a mix partway through has to fit whatever is left at that point, so a large mix
+    /// late in a long series demands more than the total draw does. `None` for a position the
+    /// program dispenses into, whose contents come from the program rather than from a load.
+    pub fn required_initial_volume(&self, location: &Location) -> Option<&ExactDecimal> {
+        if self.credited.contains(location) {
+            return None;
+        }
+        self.required_initial.get(location)
     }
 }
 
@@ -752,6 +769,8 @@ fn build_liquid_ledger(
         }
     }
     let mut withdrawn = BTreeMap::<Location, ExactDecimal>::new();
+    let mut required_initial = BTreeMap::<Location, ExactDecimal>::new();
+    let mut credited = BTreeSet::<Location>::new();
     for step in &program.steps {
         match step {
             PipettingStep::Transfer {
@@ -767,6 +786,8 @@ fn build_liquid_ledger(
                 volume.value(),
                 &mut final_volumes,
                 &mut withdrawn,
+                &mut required_initial,
+                &mut credited,
                 &capacities,
                 &dead_volumes,
             )?,
@@ -783,6 +804,8 @@ fn build_liquid_ledger(
                 volume_each.value(),
                 &mut final_volumes,
                 &mut withdrawn,
+                &mut required_initial,
+                &mut credited,
                 &capacities,
                 &dead_volumes,
             )?,
@@ -793,6 +816,17 @@ fn build_liquid_ledger(
                 ..
             } => {
                 for target in targets {
+                    let consumed = withdrawn
+                        .get(target)
+                        .cloned()
+                        .unwrap_or_else(|| zero.clone());
+                    let needed = consumed.added_to(volume.value());
+                    let entry = required_initial
+                        .entry(target.clone())
+                        .or_insert_with(|| zero.clone());
+                    if *entry < needed {
+                        *entry = needed;
+                    }
                     if let Some(Some(available)) = final_volumes.get(target)
                         && available < volume.value()
                     {
@@ -812,6 +846,8 @@ fn build_liquid_ledger(
     Ok(LiquidLedger {
         final_volumes,
         withdrawn,
+        required_initial,
+        credited,
     })
 }
 
@@ -823,6 +859,8 @@ fn move_liquid(
     volume_each: &ExactDecimal,
     volumes: &mut BTreeMap<Location, Option<ExactDecimal>>,
     withdrawn: &mut BTreeMap<Location, ExactDecimal>,
+    required_initial: &mut BTreeMap<Location, ExactDecimal>,
+    credited: &mut BTreeSet<Location>,
     capacities: &BTreeMap<ProcedureLocalId, ExactDecimal>,
     dead_volumes: &BTreeMap<ProcedureLocalId, ExactDecimal>,
 ) -> Result<(), PipettingProgramValidationError> {
@@ -858,11 +896,28 @@ fn move_liquid(
         }
         volumes.insert(source.clone(), Some(available.subtracted_by(&total)));
     }
+    // Everything drawn so far plus this draw is a lower bound on the starting fill, and a dead
+    // volume is liquid that has to remain on top of it.
+    let consumed = withdrawn
+        .get(source)
+        .cloned()
+        .unwrap_or_else(|| ExactDecimal::parse("0").expect("zero is a valid exact decimal"));
+    let mut needed = consumed.added_to(&total);
+    if let Some(dead) = dead_volumes.get(&source.vessel) {
+        needed = needed.added_to(dead);
+    }
+    let entry = required_initial
+        .entry(source.clone())
+        .or_insert_with(|| ExactDecimal::parse("0").expect("zero is a valid exact decimal"));
+    if *entry < needed {
+        *entry = needed;
+    }
     withdrawn
         .entry(source.clone())
         .and_modify(|current| *current = current.added_to(&total))
         .or_insert(total);
     for destination in destinations {
+        credited.insert(destination.clone());
         if let Some(Some(current)) = volumes.get(destination) {
             let filled = current.added_to(volume_each);
             if let Some(capacity) = capacities.get(&destination.vessel)
@@ -1372,6 +1427,100 @@ mod tests {
         assert!(
             error.to_string().contains("initial_volume"),
             "the unknown key is named: {error}"
+        );
+    }
+
+    #[test]
+    fn required_initial_volume_accounts_for_a_mix_partway_through() {
+        // Four 2 uL draws with a 5 uL mix before each. The tube is down to 2 uL before the last
+        // mix, so it has to start with 5 + 3 x 2 = 11 uL, not the 8 uL the draws total.
+        let mut steps = Vec::new();
+        for index in 0..4u32 {
+            steps.push(PipettingStep::Mix {
+                id: id(&format!("mix-{index}")),
+                targets: vec![location("source", 0)],
+                cycles: 1,
+                volume: Volume::parse_microlitres("5").unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: MixTechnique::default(),
+            });
+            steps.push(PipettingStep::Transfer {
+                id: id(&format!("draw-{index}")),
+                source: location("source", 0),
+                destination: location("plate", index),
+                volume: Volume::parse_microlitres("2").unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: TransferTechnique::default(),
+            });
+        }
+        let program = PipettingProgramV1::new(
+            vec![MaterialInput { id: id("dna") }],
+            vec![MaterialOutput { id: id("product") }],
+            vec![
+                Vessel {
+                    id: id("source"),
+                    role: VesselRole::MaterialSource {
+                        material: id("dna"),
+                    },
+                    positions: 1,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    initial_volume_each: None,
+                    temperature: None,
+                },
+                Vessel {
+                    id: id("plate"),
+                    role: VesselRole::Product {
+                        output: id("product"),
+                    },
+                    positions: 4,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    initial_volume_each: None,
+                    temperature: None,
+                },
+            ],
+            steps,
+            PipettingConstraints::default(),
+        )
+        .validate()
+        .unwrap();
+
+        let ledger = program.liquid_ledger();
+        let source = location("source", 0);
+        assert_eq!(ledger.withdrawn(&source).unwrap().to_string(), "8");
+        assert_eq!(
+            ledger.required_initial_volume(&source).unwrap().to_string(),
+            "11",
+            "a mix late in the series needs more than the total draw"
+        );
+        // A position the program fills is not something an operator loads.
+        assert!(
+            ledger
+                .required_initial_volume(&location("plate", 0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn required_initial_volume_reserves_the_dead_volume() {
+        let program = limited(None, Some("30"), None, "70", AspirationStrategy::Liquid);
+        let mut program = program;
+        program.materials.push(MaterialInput { id: id("water") });
+        program.vessels[0].role = VesselRole::MaterialSource {
+            material: id("water"),
+        };
+        let validated = program.validate().unwrap();
+        assert_eq!(
+            validated
+                .liquid_ledger()
+                .required_initial_volume(&location("source", 0))
+                .unwrap()
+                .to_string(),
+            "100",
+            "70 uL drawn on top of 30 uL that cannot be reached"
         );
     }
 
