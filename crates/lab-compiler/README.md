@@ -19,7 +19,7 @@ checked modules
 
 `PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `FacilityPlanningSolution::solve` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `AllocatedLairProgram::adapter_invocations` is the only production backend projection.
 
-The fixed Protocol dialect and its pre-facility `select_protocol` conversion have been retired. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
+Verifier-valid Allocated Procedure LAIR is the only input device lowering is projected from. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
 
 The source tree follows semantic ownership and dependency direction:
 
@@ -42,11 +42,12 @@ OT-2, Flex, and STAR lower through the same invocation boundary. Shared Procedur
 
 For the complete package path, exact SBOLInventory facility, adapter binding, allocated Procedure evidence, and emitted OT-2 protocols, see the [Golden Gate example](../../examples/golden-gate/README.md).
 
-Generated Opentrons protocols can be checked with the optional official simulator when `LAB_OPENTRONS_SIMULATOR` points at its executable:
+Generated Opentrons protocols lint and type-check with `scripts/check-opentrons-bundle.sh <bundle>`.
+To run them under the official simulator, build it once and pass it to `scripts/simulate-opentrons.sh`:
 
 ```sh
 uv venv .lab/opentrons-venv --python 3.12
 uv pip install --python .lab/opentrons-venv/bin/python 'opentrons>=8.4.1,<9'
-LAB_OPENTRONS_SIMULATOR=.lab/opentrons-venv/bin/opentrons_simulate \
-  cargo test -p lab-compiler --test opentrons_build
+scripts/simulate-opentrons.sh examples/golden-gate/.lab/build/assets/opentrons_ot2 \
+  .lab/opentrons-venv/bin/opentrons_simulate
 ```

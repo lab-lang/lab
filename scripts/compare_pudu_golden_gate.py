@@ -673,6 +673,11 @@ def trace_hardware(trace: str) -> dict[str, Any]:
     }
 
 
+# Fewest leaf operations a robot-action facet can contain and still be comparing anything. The
+# shipped example produces 220 in assembly, 175 in transformation and 292 in dilution/plating.
+MINIMUM_ROBOT_ACTIONS_PER_FACET = 50
+
+
 def compare_facet(
     identifier: str,
     pudu: Any,
@@ -1046,6 +1051,16 @@ def compare(
     )
 
     different = [facet["id"] for facet in facets if facet["status"] != "equivalent"]
+    # Two empty traces compare equal. If a normalizer stops recognizing the simulator's output,
+    # every robot-action facet would report "equivalent" while comparing nothing at all, so each
+    # one has to carry the operations it is supposed to be comparing.
+    vacuous = [
+        facet["id"]
+        for facet in facets
+        if facet["id"].startswith("robot-actions.")
+        and (facet["lab"]["items"] or 0) < MINIMUM_ROBOT_ACTIONS_PER_FACET
+    ]
+    different.extend(vacuous)
     report = {
         "schema_version": "lab.pudu-differential.v1",
         "status": "equivalent" if not different else "different",
@@ -1071,6 +1086,7 @@ def compare(
             "equivalent_facets": len(facets) - len(different),
             "total_facets": len(facets),
             "different_facets": different,
+            "vacuous_facets": vacuous,
             "normalized_robot_actions": sum(
                 facet["lab"]["items"]
                 for facet in facets

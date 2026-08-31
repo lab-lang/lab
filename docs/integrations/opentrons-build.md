@@ -15,7 +15,7 @@ The production path has six mandatory boundaries:
 5. `lab.adapter-invocations.v1` projects immutable selected Methods, exact value edges, and Procedure tasks plus exact Procedure implementation, requirement, offering, Asset, profile, material, inventory, and allocated-LAIR digests. An adapter receives only the tasks and requirements assigned to its exact invocation.
 6. The OT-2 adapter validates every assigned task and its complete requirement set against the canonical program and checked operational profile, constructs `lab.allocated-procedure-schedule.v1` with persistent physical locations and dependency-preserving execution groups, and emits one standalone reviewed Python protocol, manifest, and operator document for each group.
 
-The fixed Protocol dialect and the pre-facility Golden Gate selector no longer exist. OT-2 lowering cannot accept `CheckedModule`, portable LAIR, refined alternatives, or an entire source program. It therefore cannot select a scientific Method, re-query inventory, substitute an Asset, or reconstruct work that allocation did not assign to it.
+OT-2 lowering accepts one exact adapter invocation projected from Allocated Procedure LAIR. It cannot accept `CheckedModule`, portable LAIR, refined alternatives, or an entire source program. It therefore cannot select a scientific Method, re-query inventory, substitute an Asset, or reconstruct work that allocation did not assign to it.
 
 ## Exact Procedure semantics
 
@@ -49,7 +49,7 @@ For the bundled two-plasmid/four-strain example, the facility route contains thr
 
 `plan.execution.json` references each independently executable run by the union of its exact task requirement sets and by its document digest. Runtime preflight validates the inventory, planning evidence, adapter profile, child documents, schedule, and dependency DAG before narration or dispatch. An offering's SBOLInventory qualification still determines whether planning, simulation, or live execution is allowed; the presence of generated Python does not promote it.
 
-Run `scripts/check-opentrons-bundle.sh <bundle>` to byte-compile every emitted Python protocol. Set `LAB_OPENTRONS_SIMULATOR` and run `scripts/simulate-opentrons.sh <bundle>` to exercise them with the official simulator.
+Run `scripts/check-opentrons-bundle.sh <bundle>` to lint and type-check every emitted Python protocol. Run `scripts/simulate-opentrons.sh <bundle> <opentrons_simulate>` to exercise them with the official simulator, which defaults to `.lab/opentrons-venv/bin/opentrons_simulate` when the second argument is omitted.
 
 ## Opening a protocol in the Opentrons app
 

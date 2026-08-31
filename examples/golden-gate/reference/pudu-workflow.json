@@ -1,7 +1,7 @@
 {
   "schema_version": "lab.pudu-workflow-reference.v1",
   "guide": "https://pudu.readthedocs.io/en/latest/guide/workflow.html",
-  "repository": "https://github.com/MyersResearchGroup/PUDU",
+  "repository": "https://github.com/RudgeLab/PUDU",
   "revision": "1214d2f9efd557aa84bc96502379554174355eae",
   "inputs": {
     "assembly": {

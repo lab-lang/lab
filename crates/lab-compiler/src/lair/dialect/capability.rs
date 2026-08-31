@@ -1,7 +1,6 @@
 //! First-class semantic capability requirements inside method candidate regions.
 
 // Construction APIs are consumed by the forthcoming method-refinement pass.
-#![allow(dead_code)]
 
 use std::cell::Ref;
 use std::collections::BTreeSet;

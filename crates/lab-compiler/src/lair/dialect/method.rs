@@ -1,7 +1,6 @@
 //! Facility-independent method alternatives and candidate-region termination.
 
 // Construction APIs are consumed by the forthcoming method-refinement pass.
-#![allow(dead_code)]
 
 use std::collections::BTreeSet;
 
