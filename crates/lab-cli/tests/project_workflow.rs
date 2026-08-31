@@ -885,7 +885,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert!(deactivate_sources < execute_thermal);
     assert_eq!(
         manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
-        serde_json::json!(["5", "6"]),
+        serde_json::json!(["5"]),
         "the allocated adapter emits the concrete deck plan"
     );
     let transformation = read_json(target_root.join("transformation_manifest.json"));

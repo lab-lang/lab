@@ -179,7 +179,7 @@ pub(super) fn default_transformation_stage() -> TransformationStage {
 pub(super) fn default_dilution_plate() -> Plates {
     Plates {
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        slots: vec!["2".to_owned(), "3".to_owned()],
+        slots: vec!["2".to_owned()],
         capacity: default_plate_capacity(),
     }
 }
@@ -187,7 +187,7 @@ pub(super) fn default_dilution_plate() -> Plates {
 pub(super) fn default_agar_plate() -> Plates {
     Plates {
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        slots: vec!["5".to_owned(), "6".to_owned()],
+        slots: vec!["5".to_owned()],
         capacity: default_plate_capacity(),
     }
 }
@@ -211,7 +211,7 @@ pub(super) fn default_plating_small_tips() -> TipRacks {
 pub(super) fn default_plating_large_tips() -> TipRacks {
     TipRacks {
         labware: "opentrons_96_filtertiprack_200ul".to_owned(),
-        slots: vec!["1".to_owned()],
+        slots: vec!["6".to_owned()],
         capacity: default_plate_capacity(),
     }
 }

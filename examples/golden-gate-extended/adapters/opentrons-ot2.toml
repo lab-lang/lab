@@ -51,16 +51,18 @@ labware = "opentrons_96_filtertiprack_200ul"
 slots = ["6"]
 capacity = 96
 
-# Two dilution and two agar plates. Declaring a second slot raises the batch
-# size this bench can hold without editing a single program.
+# The temperature module holds slot 1 for the whole run, and the Thermocycler
+# Module GEN1 holds 7, 8, 10, and 11, so plating has slots 2, 3, 4, 5, 6, and 9
+# to work with. Declaring a second slot for either plate raises the batch size
+# this bench can hold without editing a program, when a slot is free.
 [stages.plating.dilution_plate]
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["2", "3"]
+slots = ["2"]
 capacity = 96
 
 [stages.plating.agar_plate]
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["5", "6"]
+slots = ["5"]
 capacity = 96
 
 [stages.plating.media_rack]
@@ -75,5 +77,5 @@ capacity = 96
 
 [stages.plating.large_tips]
 labware = "opentrons_96_filtertiprack_200ul"
-slots = ["1"]
+slots = ["6"]
 capacity = 96

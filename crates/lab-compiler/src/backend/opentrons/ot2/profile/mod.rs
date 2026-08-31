@@ -74,7 +74,7 @@ impl Ot2AdapterProfile {
             ("plating", self.plating_claims()),
         ] {
             let mut seen: Vec<(String, String)> = Vec::new();
-            for (context, slots) in claims {
+            for (context, slots) in self.fixture_claims().into_iter().chain(claims) {
                 if slots.is_empty() {
                     return Err(Ot2ProfileError::NoSlots { context });
                 }
@@ -173,27 +173,26 @@ impl Ot2AdapterProfile {
         Ok(())
     }
 
-    fn temperature_claim(&self) -> (String, Vec<String>) {
-        (
+    /// Slots occupied by bolted-down hardware for the whole run, whichever stage is executing.
+    /// Every stage's claims are checked against these, so a stage cannot quietly place labware
+    /// on a module's slot.
+    fn fixture_claims(&self) -> Vec<(String, Vec<String>)> {
+        vec![(
             "the temperature module".to_owned(),
             vec![self.deck.temperature_module.slot.clone()],
-        )
+        )]
     }
 
     fn assembly_claims(&self) -> Vec<(String, Vec<String>)> {
-        vec![
-            self.temperature_claim(),
-            (
-                "assembly small tips".to_owned(),
-                self.stages.assembly.small_tips.slots.clone(),
-            ),
-        ]
+        vec![(
+            "assembly small tips".to_owned(),
+            self.stages.assembly.small_tips.slots.clone(),
+        )]
     }
 
     fn transformation_claims(&self) -> Vec<(String, Vec<String>)> {
         let stage = &self.stages.transformation;
         vec![
-            self.temperature_claim(),
             ("the DNA plate".to_owned(), stage.dna_plate.slots.clone()),
             (
                 "the transformation source rack".to_owned(),
@@ -264,10 +263,37 @@ mod tests {
         assert_eq!(profile.name, "reference-bench");
         assert_eq!(profile.protocol.api_level, "2.21");
         assert_eq!(profile.deck.temperature_module.slot, "1");
-        assert_eq!(profile.stages.plating.agar_plate.slots, ["5", "6"]);
-        assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 192);
+        assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
+        assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 96);
         assert_eq!(profile.techniques.tracked_chunk_size, 8);
         assert_eq!(profile.techniques.touch_tip_vertical_offset_mm, -14.0);
+    }
+
+    #[test]
+    fn a_deck_fixture_holds_its_slot_during_every_stage() {
+        let error = Ot2AdapterProfile::parse(
+            "bench-three",
+            r#"
+[deck.temperature_module]
+model = "temperature module gen2"
+slot = "4"
+labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
+capacity = 24
+
+[stages.plating.large_tips]
+labware = "opentrons_96_filtertiprack_200ul"
+slots = ["4"]
+capacity = 96
+"#,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("deck slot '4'")
+                && message.contains("the temperature module")
+                && message.contains("plating"),
+            "the temperature module is bolted down for the whole run, so plating cannot claim its slot: {message}"
+        );
     }
 
     #[test]
@@ -285,7 +311,7 @@ capacity = 96
         assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
         assert_eq!(
             profile.stages.plating.dilution_plate.slots,
-            ["2", "3"],
+            ["2"],
             "an unstated stage keeps the reference layout"
         );
     }
