@@ -74,6 +74,8 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0047: Packages contribute versioned Method catalogs](language/decisions/0047-packages-contribute-versioned-method-catalogs.md) | portable packages extend Method, Procedure, and Capability semantics through one shared validated document contract |
 | [0048: Canonical Procedure programs derive atomic capability formulas](language/decisions/0048-canonical-procedures-derive-capabilities.md) | device-neutral operational programs derive fine-grained requirements that one Asset and implementation realize atomically |
 | [0049: Pipetting techniques cross device boundaries](language/decisions/0049-pipetting-techniques-cross-device.md) | portable liquid-access constraints remain distinct from calibrated adapter realizations |
+| [0050: Allocated Procedure schedules make device batching explicit](language/decisions/0050-allocated-procedure-schedules.md) | fusing complete tasks into one device run is a checked artifact that preserves every identity |
+| [0051: Interchangeable physical resources resolve without a pin](language/decisions/0051-interchangeable-resources-resolve-without-a-pin.md) | equally usable MaterialLots bind deterministically and reviewably; Assets stay an explicit choice |
 
 ## Implementation and embedding
 

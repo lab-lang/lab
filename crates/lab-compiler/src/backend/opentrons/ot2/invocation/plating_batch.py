@@ -5,6 +5,11 @@ from typing import Any
 
 from opentrons import protocol_api
 
+# The block is brought to a known cold state before the lid opens and plates are handled.
+# This is a device state transition, not a scientific setpoint: every temperature the
+# science requires comes from the reviewed plan below.
+_BLOCK_IDLE_CELSIUS = 4
+
 metadata = {
     "protocolName": "Lab Golden Gate dilution and plating",
     "author": "Lab Compiler",
@@ -130,7 +135,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         tip_racks=large_tips,
     )
 
-    thermocycler.set_block_temperature(4)
+    thermocycler.set_block_temperature(_BLOCK_IDLE_CELSIUS)
     thermocycler.open_lid()
     first_dilution = dilution_programs[0]["execution"]
     for scheduled in dilution_programs[1:]:

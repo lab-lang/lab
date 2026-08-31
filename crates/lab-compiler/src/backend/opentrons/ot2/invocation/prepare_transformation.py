@@ -5,6 +5,11 @@ from typing import Any
 
 from opentrons import protocol_api
 
+# The block is brought to a known cold state before the lid opens and plates are handled.
+# This is a device state transition, not a scientific setpoint: every temperature the
+# science requires comes from the reviewed plan below.
+_BLOCK_IDLE_CELSIUS = 4
+
 metadata = {
     "protocolName": "Lab chemical-transformation setup",
     "author": "Lab Compiler",
@@ -101,8 +106,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         tip_racks=large_tips,
     )
 
-    temperature.set_temperature(4)
-    thermocycler.set_block_temperature(4)
+    temperature.set_temperature(execution["cell_staging_temperature_c"])
+    thermocycler.set_block_temperature(_BLOCK_IDLE_CELSIUS)
     thermocycler.open_lid()
     reactions = [reaction_plate[name] for name in execution["reaction_wells"]]
     cells = cell_rack[execution["cell_source_well"]]

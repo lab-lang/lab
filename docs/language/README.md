@@ -92,3 +92,6 @@ The latest accepted design records are:
 - [`0046`](decisions/0046-allocated-procedure-is-the-device-boundary.md): verifier-valid Allocated Procedure is the only production input to immutable adapter invocations and device lowering; and
 - [`0047`](decisions/0047-packages-contribute-versioned-method-catalogs.md): packages contribute versioned portable Method documents that Rust and Python compose through one authoritative registry; and
 - [`0048`](decisions/0048-canonical-procedures-derive-capabilities.md): canonical device-neutral Procedure programs derive fine-grained capability formulas that one Asset and implementation realize atomically.
+- [`0049`](decisions/0049-pipetting-techniques-cross-device.md): pipetting technique is a portable constraint whose numeric realization belongs to the adapter profile.
+- [`0050`](decisions/0050-allocated-procedure-schedules.md): fusing complete allocated tasks into one device run is a checked schedule that preserves task, requirement, and material identity.
+- [`0051`](decisions/0051-interchangeable-resources-resolve-without-a-pin.md): interchangeable MaterialLots resolve deterministically and reviewably, while choosing between Assets stays explicit.

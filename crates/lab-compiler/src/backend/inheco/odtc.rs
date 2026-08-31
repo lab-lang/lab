@@ -23,15 +23,23 @@ pub(in crate::backend) fn lower_invocation(
             ));
         }
         let program = normalized_thermal_program("Inheco ODTC", member.task, &member.requirements)?;
-        program
-            .profile
-            .validate(&lab_instruments::odtc_thermal_limits())
-            .map_err(|error| {
-                format!(
-                    "Inheco ODTC Procedure task '{}' is outside the device envelope: {error}",
-                    member.task.id
-                )
-            })?;
+        let limits = lab_instruments::odtc_thermal_limits();
+        program.profile.validate(&limits).map_err(|error| {
+            format!(
+                "Inheco ODTC Procedure task '{}' is outside the device envelope: {error}",
+                member.task.id
+            )
+        })?;
+        // The profile check walks the finite stages only. An indefinite hold is the temperature the
+        // block sits at once the run ends, and it has to be reachable too.
+        if let Some(hold) = program.final_hold_celsius
+            && (hold < limits.block_min_celsius || hold > limits.block_max_celsius)
+        {
+            return Err(format!(
+                "Inheco ODTC Procedure task '{}' holds at {hold} C after cycling, outside the device block range {} C to {} C",
+                member.task.id, limits.block_min_celsius, limits.block_max_celsius
+            ));
+        }
         let input = member
             .task
             .inputs

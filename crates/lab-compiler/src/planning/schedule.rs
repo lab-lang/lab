@@ -12,7 +12,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{AdapterInvocation, AdapterInvocationPlan, InvocationAdapter};
+use super::{
+    AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, InvocationAdapter,
+    SelectedMaterialSource,
+};
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
 
@@ -277,6 +280,63 @@ fn validate_locations(
             });
         }
     }
+    validate_material_addresses(schedule, &tasks)
+}
+
+/// Proves no two different materials are sent to the same physical position in one device run.
+///
+/// Addresses legitimately repeat across execution groups, because the plates change between runs,
+/// and they legitimately repeat within a group when several tasks draw the same reagent from one
+/// shared tube. Two *different* materials in one tube is neither of those.
+fn validate_material_addresses(
+    schedule: &AllocatedProcedureSchedule,
+    tasks: &BTreeMap<LocalId, &AllocatedProcedureTask>,
+) -> Result<(), AllocatedProcedureScheduleError> {
+    let group_of = schedule
+        .groups
+        .iter()
+        .flat_map(|group| {
+            group
+                .tasks
+                .iter()
+                .map(|task| (task.clone(), group.id.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut occupants: BTreeMap<(String, String, String), &SelectedMaterialSource> =
+        BTreeMap::new();
+    for location in &schedule.locations {
+        let ScheduledValueRef::MaterialInput { task, input } = &location.value else {
+            continue;
+        };
+        let (Some(group), Some(owner)) = (group_of.get(task), tasks.get(task)) else {
+            continue;
+        };
+        let Some(material) = owner
+            .materials
+            .iter()
+            .find(|material| &material.input == input)
+        else {
+            continue;
+        };
+        for address in &location.positions {
+            let key = (group.clone(), location.resource.clone(), address.clone());
+            match occupants.get(&key) {
+                Some(existing) if *existing != &material.source => {
+                    return Err(
+                        AllocatedProcedureScheduleError::ConflictingMaterialLocation {
+                            group: group.clone(),
+                            resource: location.resource.clone(),
+                            address: address.clone(),
+                        },
+                    );
+                }
+                Some(_) => {}
+                None => {
+                    occupants.insert(key, &material.source);
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -350,12 +410,22 @@ pub enum AllocatedProcedureScheduleError {
     CyclicGroups,
     #[error("allocated Procedure schedule contains invalid physical location `{value:?}`")]
     InvalidLocation { value: ScheduledValueRef },
+    #[error(
+        "execution group `{group}` places two different materials at `{resource}` position `{address}`"
+    )]
+    ConflictingMaterialLocation {
+        group: String,
+        resource: String,
+        address: String,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use super::super::model::MaterialLotCandidates;
+    use super::super::solver::SelectedMaterialBinding;
     use lab_capability::{
         AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
     };
@@ -513,6 +583,129 @@ mod tests {
             schedule.schema_version,
             ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION
         );
+        schedule.validate_against(&plan, &invocation).unwrap();
+    }
+
+    /// Names a material lot binding for one task input.
+    fn material(input: &str, lot: &str) -> SelectedMaterialBinding {
+        SelectedMaterialBinding {
+            input: id(input),
+            symbol: input.to_owned(),
+            source: SelectedMaterialSource::MaterialLot {
+                component: format!("https://example.org/component/{input}"),
+                material_lot: lot.to_owned(),
+            },
+            interchangeable_alternatives: Vec::new(),
+        }
+    }
+
+    /// Registers a lot so the plan's own material validation accepts the binding.
+    fn with_material_inventory(plan: &mut AdapterInvocationPlan, inputs: &[(&str, &str)]) {
+        for (input, lot) in inputs {
+            plan.material_inventory.materials.insert(
+                (*input).to_owned(),
+                MaterialLotCandidates::Identified {
+                    component: format!("https://example.org/component/{input}"),
+                    material_lots: vec![(*lot).to_owned()],
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_two_different_materials_in_one_position() {
+        let (mut plan, invocation) = fixture();
+        for method in &mut plan.methods {
+            for task in &mut method.tasks {
+                if task.id == invocation.tasks[0] {
+                    task.materials = vec![
+                        material("buffer", "https://example.org/lots/buffer"),
+                        material("enzyme", "https://example.org/lots/enzyme"),
+                    ];
+                }
+            }
+        }
+        with_material_inventory(
+            &mut plan,
+            &[
+                ("buffer", "https://example.org/lots/buffer"),
+                ("enzyme", "https://example.org/lots/enzyme"),
+            ],
+        );
+        // One tube cannot hold two different reagents, however the adapter arrived at the layout.
+        let collide = |input: &str| ScheduledPhysicalLocation {
+            value: ScheduledValueRef::MaterialInput {
+                task: invocation.tasks[0].clone(),
+                input: id(input),
+            },
+            resource: "source-rack".to_owned(),
+            positions: vec!["A1".to_owned()],
+        };
+
+        let error = AllocatedProcedureSchedule::new(
+            &plan,
+            &invocation,
+            groups(&invocation),
+            vec![collide("buffer"), collide("enzyme")],
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(
+                error,
+                AllocatedProcedureScheduleError::ConflictingMaterialLocation { .. }
+            ),
+            "two reagents sharing one address must be rejected: {error}"
+        );
+    }
+
+    #[test]
+    fn accepts_one_material_shared_by_several_tasks_in_a_position() {
+        let (mut plan, invocation) = fixture();
+        // Material input identities are unique per invocation, so two tasks drawing the same
+        // reagent name it separately while pointing at one lot. That is one tube, not a conflict.
+        for method in &mut plan.methods {
+            for task in &mut method.tasks {
+                let input = if task.id == invocation.tasks[0] {
+                    "buffer-a"
+                } else {
+                    "buffer-b"
+                };
+                task.materials = vec![SelectedMaterialBinding {
+                    input: id(input),
+                    symbol: "buffer".to_owned(),
+                    source: SelectedMaterialSource::MaterialLot {
+                        component: "https://example.org/component/buffer".to_owned(),
+                        material_lot: "https://example.org/lots/buffer".to_owned(),
+                    },
+                    interchangeable_alternatives: Vec::new(),
+                }];
+            }
+        }
+        plan.material_inventory.materials.insert(
+            "buffer".to_owned(),
+            MaterialLotCandidates::Identified {
+                component: "https://example.org/component/buffer".to_owned(),
+                material_lots: vec!["https://example.org/lots/buffer".to_owned()],
+            },
+        );
+        let shared = |task: usize, input: &str| ScheduledPhysicalLocation {
+            value: ScheduledValueRef::MaterialInput {
+                task: invocation.tasks[task].clone(),
+                input: id(input),
+            },
+            resource: "source-rack".to_owned(),
+            positions: vec!["A1".to_owned()],
+        };
+
+        let schedule = AllocatedProcedureSchedule::new(
+            &plan,
+            &invocation,
+            groups(&invocation),
+            vec![shared(0, "buffer-a"), shared(1, "buffer-b")],
+        )
+        .expect("one reagent shared by two tasks occupies one tube");
+
         schedule.validate_against(&plan, &invocation).unwrap();
     }
 

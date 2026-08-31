@@ -5,6 +5,11 @@ from typing import Any
 
 from opentrons import protocol_api
 
+# The block is brought to a known cold state before the lid opens and plates are handled.
+# This is a device state transition, not a scientific setpoint: every temperature the
+# science requires comes from the reviewed plan below.
+_BLOCK_IDLE_CELSIUS = 4
+
 metadata = {
     "protocolName": "Lab serial dilution",
     "author": "Lab Compiler",
@@ -57,7 +62,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
     thermocycler = protocol.load_module(deck["thermocycler"]["model"])
     cultures = thermocycler.load_labware(deck["thermocycler"]["labware"])
-    thermocycler.set_block_temperature(4)
+    thermocycler.set_block_temperature(_BLOCK_IDLE_CELSIUS)
     thermocycler.open_lid()
     dilution_plate_count = 1 + max(
         well["plate"] for well in execution["dilution_wells"]
