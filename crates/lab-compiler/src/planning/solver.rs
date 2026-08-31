@@ -248,6 +248,9 @@ pub enum PlanningCandidateRejectionReason {
     AtomicBindingConflict {
         binding_scope: BindingScope,
     },
+    ExcludedByExactAssetPin {
+        pinned_asset: String,
+    },
     MissingPlanningAdapter,
 }
 
@@ -957,8 +960,7 @@ fn requirement_candidates(
     let pinned = asset_pins
         .iter()
         .filter(|pin| pin.matches(requirement))
-        .min_by_key(|pin| pin.specificity())
-        .map(|pin| pin.asset.as_str());
+        .min_by_key(|pin| pin.specificity());
     let minimum = inventory_qualification(requirement.minimum_qualification);
     let accepted = requirement
         .accepted_control_modes
@@ -1053,15 +1055,39 @@ fn requirement_candidates(
             }],
         });
     }
-    // A pin narrows the field only where the named Asset can actually serve. A requirement it
-    // cannot satisfy, such as manual provisioning at a workstation, is left alone rather than made
-    // infeasible by a preference stated for the instruments.
-    if let Some(pin) = pinned
-        && eligible
-            .iter()
-            .any(|candidate| candidate.binding.asset == pin)
-    {
-        eligible.retain(|candidate| candidate.binding.asset == pin);
+    // Broad and capability pins are preferences over requirements the named Asset can serve, so
+    // they do not make unrelated manual work infeasible. An exact requirement pin is a hard
+    // constraint: silently selecting another Asset would contradict the reviewed policy.
+    if let Some(pin) = pinned {
+        let exact = matches!(pin.selector, AssetPinSelector::Requirement { .. });
+        if exact
+            || eligible
+                .iter()
+                .any(|candidate| candidate.binding.asset == pin.asset)
+        {
+            if exact {
+                rejected.extend(
+                    eligible
+                        .iter()
+                        .filter(|candidate| candidate.binding.asset != pin.asset)
+                        .map(|candidate| PlanningRejectedOffering {
+                            offering: candidate.binding.offering.clone(),
+                            asset: candidate.binding.asset.clone(),
+                            observed_qualification: candidate
+                                .binding
+                                .observed_qualification
+                                .clone(),
+                            control_mode: candidate.binding.control_mode.clone(),
+                            reasons: vec![
+                                PlanningCandidateRejectionReason::ExcludedByExactAssetPin {
+                                    pinned_asset: pin.asset.clone(),
+                                },
+                            ],
+                        }),
+                );
+            }
+            eligible.retain(|candidate| candidate.binding.asset == pin.asset);
+        }
     }
     eligible.sort_by(|left, right| binding_key(&left.binding).cmp(&binding_key(&right.binding)));
     rejected
@@ -1989,6 +2015,53 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             .specificity()
                 < narrow.specificity()
         );
+    }
+
+    #[test]
+    fn an_exact_asset_pin_cannot_fall_back_to_another_asset() {
+        let (_directory, inventory) = inventory(true);
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        let requirement = id("build-0::automated::handle::liquid");
+
+        let error = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            None,
+            FacilityPlanningPolicy {
+                method_pins: Vec::new(),
+                asset_pins: vec![AssetPin {
+                    selector: AssetPinSelector::Requirement {
+                        requirement: requirement.clone(),
+                    },
+                    asset: "https://example.org/facility/operator".to_owned(),
+                }],
+                adapter_requirement: AdapterRequirement::Optional,
+            },
+        )
+        .unwrap_err();
+
+        let FacilityPlanningError::NoFeasibleMethod { candidates, .. } = error else {
+            panic!("expected the exact Asset pin to make the Method infeasible")
+        };
+        assert!(candidates.iter().any(|candidate| {
+            candidate.rejected_requirements.iter().any(|rejected| {
+                rejected.requirement == requirement
+                    && rejected.candidates.iter().any(|offering| {
+                        offering.reasons.iter().any(|reason| {
+                            matches!(
+                                reason,
+                                PlanningCandidateRejectionReason::ExcludedByExactAssetPin {
+                                    pinned_asset
+                                } if pinned_asset == "https://example.org/facility/operator"
+                            )
+                        })
+                    })
+            })
+        }));
     }
 
     #[test]

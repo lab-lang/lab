@@ -32,9 +32,10 @@ and a plan that silently moved work between them would not be reproducible. When
 can satisfy a requirement, planning refuses and the package names the one to use.
 
 `[[planning.assets]]` states that choice. With only an `asset`, it binds every requirement that
-Asset can serve; `capability-kind` or `requirement` narrow it. A pin restricts the field only where
-the named Asset is genuinely eligible, so a preference stated for the instruments does not make
-manual work at a workstation infeasible.
+Asset can serve; `capability-kind` narrows that preference. Those preferences restrict the field
+only where the named Asset is genuinely eligible, so one stated for the instruments does not make
+manual work at a workstation infeasible. A `requirement` pin is an exact reviewed binding and makes
+its Method infeasible when the named Asset cannot serve it; it never silently selects another Asset.
 
 An ambiguity that is refused explains itself: it names the choices, materials, or requirements on
 which two complete plans disagree, and prints the policy entry that resolves it.

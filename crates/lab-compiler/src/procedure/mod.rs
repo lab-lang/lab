@@ -15,6 +15,8 @@ use thiserror::Error;
 
 pub(crate) const SETUP_GOLDEN_GATE: &str =
     "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction";
+pub(crate) const PROVISION_MATERIAL: &str =
+    "https://www.lab-compiler.org/ns/procedure#ProvisionMaterial";
 pub(crate) const SERIAL_DILUTION: &str =
     "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture";
 pub(crate) const CYCLE_GOLDEN_GATE: &str =

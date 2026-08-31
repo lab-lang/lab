@@ -1,4 +1,4 @@
-builtin.module @allocated_acceptance 
+builtin.module @allocated_acceptance
 {
   ^block1v1():
     lair.stage () [] [stage: builtin.string "allocated-procedure"]: <() -> ()>;

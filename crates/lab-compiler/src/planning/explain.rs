@@ -67,6 +67,10 @@ fn describe_offering_rejection(reason: &PlanningCandidateRejectionReason) -> Str
         PlanningCandidateRejectionReason::MissingPlanningAdapter => {
             "no configured adapter can plan it".to_owned()
         }
+        PlanningCandidateRejectionReason::ExcludedByExactAssetPin { pinned_asset } => format!(
+            "the exact policy pins this requirement to {}",
+            short(pinned_asset)
+        ),
         PlanningCandidateRejectionReason::AtomicBindingConflict { binding_scope } => format!(
             "this task's capabilities must be provided together ({binding_scope:?}), and no single \
              Asset and adapter provides all of them"

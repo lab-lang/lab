@@ -14,8 +14,9 @@ use thiserror::Error;
 
 use super::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask,
-    InvocationAdapter,
+    InvocationAdapter, PlanningValueSource,
 };
+use crate::procedure::PROVISION_MATERIAL;
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
 
@@ -238,6 +239,11 @@ fn validate_locations(
         })
         .map(|method| (method.choice.clone(), method))
         .collect::<BTreeMap<_, _>>();
+    let lineage_methods = plan
+        .methods
+        .iter()
+        .map(|method| (method.choice.clone(), method))
+        .collect::<BTreeMap<_, _>>();
     let tasks = methods
         .values()
         .flat_map(|method| &method.tasks)
@@ -280,7 +286,7 @@ fn validate_locations(
             });
         }
     }
-    validate_material_addresses(schedule, &tasks, &methods)
+    validate_material_addresses(schedule, &tasks, &methods, &lineage_methods)
 }
 
 /// Proves no two different materials are sent to the same physical position in one device run.
@@ -295,6 +301,7 @@ fn validate_material_addresses(
     schedule: &AllocatedProcedureSchedule,
     tasks: &BTreeMap<LocalId, &AllocatedProcedureTask>,
     methods: &BTreeMap<LocalId, &AllocatedMethod>,
+    lineage_methods: &BTreeMap<LocalId, &AllocatedMethod>,
 ) -> Result<(), AllocatedProcedureScheduleError> {
     let group_of = schedule
         .groups
@@ -333,9 +340,9 @@ fn validate_material_addresses(
             ScheduledValueRef::TaskOutput { .. } => continue,
             ScheduledValueRef::ChoiceInput { choice, input } => {
                 // A choice input is staged for the whole selected Method, so it belongs to the
-                // group holding that Method's tasks. Several Methods legitimately draw one shared
-                // aliquot, so every choice input shares an identity here; it still conflicts with a
-                // reagent the operator loads into the same position.
+                // group holding that Method's tasks. Its identity follows known upstream lineage,
+                // so two Methods may share one provisioned lot without making unrelated inputs
+                // indistinguishable.
                 let Some(task) = methods
                     .get(choice)
                     .into_iter()
@@ -345,8 +352,7 @@ fn validate_material_addresses(
                 else {
                     continue;
                 };
-                let _ = input;
-                (task, "choice-input".to_owned())
+                (task, choice_input_occupant(lineage_methods, choice, input))
             }
         };
         let Some(group) = group_of.get(task) else {
@@ -373,6 +379,86 @@ fn validate_material_addresses(
     }
 
     Ok(())
+}
+
+fn choice_input_occupant(
+    methods: &BTreeMap<LocalId, &AllocatedMethod>,
+    choice: &LocalId,
+    input: &LocalId,
+) -> String {
+    method_input_occupant(methods, choice, input, &mut BTreeSet::new())
+}
+
+fn method_input_occupant(
+    methods: &BTreeMap<LocalId, &AllocatedMethod>,
+    choice: &LocalId,
+    input: &LocalId,
+    visiting: &mut BTreeSet<(LocalId, LocalId)>,
+) -> String {
+    let fallback = || format!("choice-input:{choice}:{input}");
+    let Some(method) = methods.get(choice) else {
+        return fallback();
+    };
+    let Some(port) = method.inputs.iter().find(|port| &port.name == input) else {
+        return fallback();
+    };
+    let Some(PlanningValueSource::ChoiceOutput {
+        choice: producer,
+        output,
+    }) = &port.source
+    else {
+        return fallback();
+    };
+    choice_output_occupant(methods, producer, output, visiting)
+}
+
+fn choice_output_occupant(
+    methods: &BTreeMap<LocalId, &AllocatedMethod>,
+    choice: &LocalId,
+    output: &LocalId,
+    visiting: &mut BTreeSet<(LocalId, LocalId)>,
+) -> String {
+    let fallback = || format!("choice-output:{choice}:{output}");
+    if !visiting.insert((choice.clone(), output.clone())) {
+        return fallback();
+    }
+    let Some(method) = methods.get(choice) else {
+        return fallback();
+    };
+    let Some(source) = method
+        .yields
+        .iter()
+        .find(|method_yield| &method_yield.output == output)
+        .map(|method_yield| &method_yield.source)
+    else {
+        return fallback();
+    };
+    let occupant = match source {
+        PlanningValueSource::ChoiceInput { input } => {
+            method_input_occupant(methods, choice, input, visiting)
+        }
+        PlanningValueSource::ChoiceOutput { choice, output } => {
+            choice_output_occupant(methods, choice, output, visiting)
+        }
+        PlanningValueSource::TaskOutput { task, .. } => method
+            .tasks
+            .iter()
+            .find(|candidate| &candidate.id == task)
+            .filter(|task| task.operation.as_str() == PROVISION_MATERIAL)
+            .and_then(|task| {
+                let [material] = task.materials.as_slice() else {
+                    return None;
+                };
+                Some(material)
+            })
+            .map_or_else(fallback, |material| {
+                let identity = serde_json::to_string(&material.source)
+                    .expect("selected material sources serialize infallibly");
+                format!("material:{identity}")
+            }),
+    };
+    visiting.remove(&(choice.clone(), output.clone()));
+    occupant
 }
 
 fn validate_acyclic(
@@ -471,7 +557,7 @@ mod tests {
     use crate::planning::{
         ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocationPlan, AllocatedMethod,
         AllocatedProcedureTask, AllocatedRequirementBinding, MaterialLotBuildInventory,
-        PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+        PlanningPort, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
     };
 
     fn id(value: &str) -> LocalId {
@@ -743,6 +829,49 @@ mod tests {
         .expect("one reagent shared by two tasks occupies one tube");
 
         schedule.validate_against(&plan, &invocation).unwrap();
+    }
+
+    #[test]
+    fn rejects_two_different_choice_inputs_in_one_position() {
+        let (mut plan, invocation) = fixture();
+        plan.methods[0].inputs = vec![
+            PlanningPort {
+                name: id("cells-a"),
+                port_type: PortType::Material {
+                    state: AbsoluteIri::new("https://example.org/material/cells").unwrap(),
+                },
+                source: None,
+            },
+            PlanningPort {
+                name: id("cells-b"),
+                port_type: PortType::Material {
+                    state: AbsoluteIri::new("https://example.org/material/cells").unwrap(),
+                },
+                source: None,
+            },
+        ];
+        plan.validate().unwrap();
+        let collide = |input: &str| ScheduledPhysicalLocation {
+            value: ScheduledValueRef::ChoiceInput {
+                choice: plan.methods[0].choice.clone(),
+                input: id(input),
+            },
+            resource: "chilled-rack".to_owned(),
+            positions: vec!["A1".to_owned()],
+        };
+
+        let error = AllocatedProcedureSchedule::new(
+            &plan,
+            &invocation,
+            groups(&invocation),
+            vec![collide("cells-a"), collide("cells-b")],
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            AllocatedProcedureScheduleError::ConflictingMaterialLocation { .. }
+        ));
     }
 
     #[test]
