@@ -12,6 +12,7 @@ use crate::{IntentOperationId, LocalId};
 /// The semantic type of one method or Procedure port.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum PortType {
     /// Reusable biological design information retained in the Design dialect.
     Design,
@@ -23,6 +24,7 @@ pub enum PortType {
 
 /// One named input accepted by every candidate refining the same Intent operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MethodInput {
     pub name: LocalId,
     pub port_type: PortType,
@@ -34,6 +36,7 @@ pub struct MethodInput {
 /// typed value inputs and outputs form the common interface; a candidate is applicable only when
 /// every parameter it declares is present with the declared semantic value type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MethodParameter {
     pub name: LocalId,
     pub value_type: ParameterType,
@@ -46,6 +49,7 @@ pub struct MethodParameter {
 /// JSON values into the compiler ABI.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ParameterType {
     Scalar { scalar_type: ScalarType },
     List { element_type: ScalarType },
@@ -81,6 +85,7 @@ impl ScalarType {
 /// A reference to a Procedure value available at a task or method output.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ValueReference {
     Input { input: LocalId },
     TaskOutput { task: LocalId, output: LocalId },
@@ -88,6 +93,7 @@ pub enum ValueReference {
 
 /// One typed result produced by a Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TaskOutput {
     pub name: LocalId,
     pub port_type: PortType,
@@ -95,6 +101,7 @@ pub struct TaskOutput {
 
 /// One result yielded from a complete method candidate.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MethodOutput {
     pub name: LocalId,
     pub source: ValueReference,
@@ -103,6 +110,7 @@ pub struct MethodOutput {
 /// A literal value or a reference to a scalar supplied by the refined Intent operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ScalarValueExpression {
     Literal {
         value: PropertyValue,
@@ -120,6 +128,7 @@ pub enum ScalarValueExpression {
 /// needs ordered recipe data such as component or dependency lists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ProcedureValue {
     Scalar {
         value: PropertyValue,
@@ -158,6 +167,7 @@ impl ProcedureValue {
 /// A literal Procedure value or a reference to a value supplied by the refined Intent operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum ProcedureValueExpression {
     Literal {
         value: ProcedureValue,
@@ -171,6 +181,7 @@ pub enum ProcedureValueExpression {
 
 /// One typed offering-property constraint template in a portable method definition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityConstraintDefinition {
     pub property_kind: PropertyKind,
     pub relation: ConstraintRelation,
@@ -179,6 +190,7 @@ pub struct CapabilityConstraintDefinition {
 
 /// One exact semantic parameter carried by a Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProcedureParameterDefinition {
     pub id: LocalId,
     pub property_kind: PropertyKind,
@@ -193,6 +205,7 @@ pub struct ProcedureParameterDefinition {
 /// material input per element during refinement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
 pub enum MaterialSourceExpression {
     Literal { symbol: String },
     IntentParameter { parameter: LocalId },
@@ -200,6 +213,7 @@ pub enum MaterialSourceExpression {
 
 /// One external material source required by a Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MaterialInputDefinition {
     pub id: LocalId,
     pub source: MaterialSourceExpression,
@@ -207,6 +221,7 @@ pub struct MaterialInputDefinition {
 
 /// One semantic capability requirement owned by its enclosing Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CapabilityRequirementDefinition {
     pub id: LocalId,
     pub capability_kind: CapabilityKind,
@@ -218,6 +233,7 @@ pub struct CapabilityRequirementDefinition {
 
 /// One task in topological order within a facility-independent Procedure graph.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ProcedureTaskDefinition {
     pub id: LocalId,
     pub operation: OperationId,
@@ -234,6 +250,7 @@ pub struct ProcedureTaskDefinition {
 
 /// A portable method definition that refines one Intent operation without selecting a facility.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct MethodDefinition {
     pub id: MethodId,
     pub refines: IntentOperationId,
@@ -254,4 +271,63 @@ pub struct MethodDefinition {
 pub struct MethodSignature {
     pub inputs: Vec<MethodInput>,
     pub outputs: Vec<TaskOutput>,
+}
+
+#[cfg(test)]
+mod strictness_tests {
+    use super::{
+        CapabilityRequirementDefinition, MaterialInputDefinition, MaterialSourceExpression,
+        ProcedureTaskDefinition,
+    };
+
+    /// A misspelled collection key must not silently deserialize as an empty collection. Dropping
+    /// `materials` would plan a task that never allocates its reagent, and dropping `constraints`
+    /// would bind an offering whose envelope was never checked.
+    #[test]
+    fn a_misspelled_key_is_rejected_rather_than_dropped() {
+        let task = r#"{
+            "id": "setup",
+            "operation": "https://example.org/procedure#Setup",
+            "materialz": [{"id": "buffer", "source": {"kind": "literal", "symbol": "T4"}}],
+            "requirements": []
+        }"#;
+        let error = serde_json::from_str::<ProcedureTaskDefinition>(task).unwrap_err();
+        assert!(
+            error.to_string().contains("materialz"),
+            "the unknown key must be named: {error}"
+        );
+
+        let requirement = r#"{
+            "id": "transfer",
+            "capability_kind": "https://sbol.io/ns/capability#MeteredLiquidTransfer",
+            "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+            "accepted_control_modes": ["https://sbol.io/ns/facility#ReviewedFileControl"],
+            "constraintz": []
+        }"#;
+        let error =
+            serde_json::from_str::<CapabilityRequirementDefinition>(requirement).unwrap_err();
+        assert!(error.to_string().contains("constraintz"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_key_inside_a_tagged_expression_is_rejected() {
+        let material = r#"{
+            "id": "buffer",
+            "source": {"kind": "literal", "symbol": "T4", "symbal": "T5"}
+        }"#;
+        let error = serde_json::from_str::<MaterialInputDefinition>(material).unwrap_err();
+        assert!(error.to_string().contains("symbal"), "{error}");
+    }
+
+    #[test]
+    fn a_well_formed_record_still_round_trips() {
+        let source: MaterialSourceExpression =
+            serde_json::from_str(r#"{"kind": "literal", "symbol": "T4"}"#).unwrap();
+        assert_eq!(
+            source,
+            MaterialSourceExpression::Literal {
+                symbol: "T4".to_owned()
+            }
+        );
+    }
 }
