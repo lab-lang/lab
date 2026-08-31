@@ -9,13 +9,14 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
 use lab_compiler::backend::{AdapterProfileContractError, validate_adapter_profile};
 use lab_compiler::planning::{
     AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterRequirement, BuildInventory, BuildInventoryError,
-    FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
-    MaterialLotBuildInventory, MethodPin, MethodPinSelector,
+    AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, BuildInventory,
+    BuildInventoryError, FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
+    MaterialLotBuildInventory, MethodPin, MethodPinSelector, explain_facility_planning_error,
 };
 use lab_compiler::{
     AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
@@ -115,8 +116,10 @@ pub enum FacilityProjectError {
     RefinedLair(#[source] RefinedLairError),
     #[error("failed to project the verified Method graph into a planning problem")]
     PlanningProblem(#[source] PlanningProblemExtractionError),
-    #[error("failed to solve Method, material, and facility choices as one complete plan")]
-    FacilityPlanning(#[source] FacilityPlanningError),
+    // The rendered message already contains the solver's full explanation, so this variant does
+    // not also expose a `source`; printing the chain would repeat the summary after the detail.
+    #[error("{}", facility_planning_message(.0))]
+    FacilityPlanning(FacilityPlanningError),
     #[error("failed to apply the facility solution to refined LAIR")]
     Allocation(#[source] AllocatedLairError),
     #[error("failed to project allocated LAIR into adapter invocations")]
@@ -356,11 +359,49 @@ fn facility_planning_policy(
         })
         .collect::<Result<Vec<_>, String>>()
         .map_err(FacilityProjectError::InvalidPlanningPolicy)?;
+    let asset_pins = package
+        .manifest
+        .planning
+        .assets
+        .iter()
+        .map(|pin| {
+            let selector = match (&pin.capability_kind, &pin.requirement) {
+                (Some(capability_kind), None) => AssetPinSelector::CapabilityKind {
+                    capability_kind: CapabilityKind::new(capability_kind.clone())
+                        .map_err(|error| error.to_string())?,
+                },
+                (None, Some(requirement)) => AssetPinSelector::Requirement {
+                    requirement: LocalId::new(requirement.clone())
+                        .map_err(|error| error.to_string())?,
+                },
+                (None, None) => AssetPinSelector::AnyRequirement,
+                _ => unreachable!("package validation rejects two asset selectors"),
+            };
+            Ok(AssetPin {
+                selector,
+                asset: pin.asset.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(FacilityProjectError::InvalidPlanningPolicy)?;
     Ok(FacilityPlanningPolicy {
         method_pins,
+        asset_pins,
         adapter_requirement: match package.manifest.planning.adapter_requirement {
             PlanningAdapterRequirement::Optional => AdapterRequirement::Optional,
             PlanningAdapterRequirement::NonManual => AdapterRequirement::NonManual,
         },
+    })
+}
+
+/// Prefers the solver's full explanation over its one-line summary.
+///
+/// The solver records why every candidate was rejected and how two complete plans differ. Printing
+/// only the summary leaves a user with a verdict and no way to act on it.
+fn facility_planning_message(error: &FacilityPlanningError) -> String {
+    explain_facility_planning_error(error).unwrap_or_else(|| {
+        format!(
+            "failed to solve Method, material, and facility choices as one complete plan: {error}"
+        )
     })
 }

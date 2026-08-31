@@ -106,6 +106,23 @@ pub struct PlanningMetadata {
     pub adapter_requirement: PlanningAdapterRequirement,
     #[serde(default)]
     pub methods: Vec<MethodPinMetadata>,
+    /// Which Asset satisfies a requirement when a facility offers more than one that could.
+    #[serde(default)]
+    pub assets: Vec<AssetPinMetadata>,
+}
+
+/// Selects one Asset for a capability kind or for one exact requirement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetPinMetadata {
+    /// Pin every requirement demanding this capability kind.
+    #[serde(default, rename = "capability-kind")]
+    pub capability_kind: Option<String>,
+    /// Pin one exact requirement ID from the emitted planning problem.
+    #[serde(default)]
+    pub requirement: Option<String>,
+    /// Exact Asset IRI selected for the matching requirement or requirements.
+    pub asset: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -357,6 +374,41 @@ impl PlanningMetadata {
             if !selectors.insert(selector.clone()) {
                 return Err(PackageError::InvalidPlanning(format!(
                     "method selector '{selector}' is declared more than once"
+                )));
+            }
+        }
+        let mut asset_selectors = BTreeSet::new();
+        for pin in &self.assets {
+            let selector = match (&pin.capability_kind, &pin.requirement) {
+                (Some(capability_kind), None) if valid_absolute_iri(capability_kind) => {
+                    format!("capability-kind:{capability_kind}")
+                }
+                (None, Some(requirement)) if valid_local_id(requirement) => {
+                    format!("requirement:{requirement}")
+                }
+                (Some(_), Some(_)) => {
+                    return Err(PackageError::InvalidPlanning(
+                        "an asset pin must declare exactly one of 'capability-kind' or 'requirement'"
+                            .to_owned(),
+                    ));
+                }
+                (None, None) => "any-requirement".to_owned(),
+                _ => {
+                    return Err(PackageError::InvalidPlanning(
+                        "an asset pin needs an absolute 'capability-kind' IRI or a non-empty 'requirement', or neither to bind every requirement the Asset can serve"
+                            .to_owned(),
+                    ));
+                }
+            };
+            if !valid_absolute_iri(&pin.asset) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "asset '{}' must be an absolute IRI",
+                    pin.asset
+                )));
+            }
+            if !asset_selectors.insert(selector.clone()) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "asset selector '{selector}' is declared more than once"
                 )));
             }
         }

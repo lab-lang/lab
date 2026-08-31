@@ -614,6 +614,75 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
 }
 
 #[test]
+fn a_second_instrument_is_planned_once_the_package_names_which_to_use() {
+    let project = temporary_project();
+    let _ = fs::remove_dir_all(&project);
+    copy_dir(Path::new("../../examples/golden-gate"), &project);
+
+    // A laboratory with two of the same instrument is ordinary. They are not interchangeable, so
+    // Lab asks which to use rather than choosing, but it must say so in a way that can be acted on.
+    let inventory_path = project.join("inventory/facility.ttl");
+    let inventory = fs::read_to_string(&inventory_path).unwrap();
+    let duplicate = inventory
+        .lines()
+        .skip_while(|line| !line.starts_with("ex:opentrons_ot2"))
+        .take_while(|line| !line.trim().is_empty() || false)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!duplicate.is_empty(), "the example declares an OT-2 Asset");
+
+    let second = inventory
+        .replace("ex:opentrons_ot2", "ex:otwo_b")
+        .replace("\"opentrons_ot2", "\"otwo_b");
+    let second_assets = second
+        .lines()
+        .filter(|line| line.starts_with("ex:otwo_b"))
+        .count();
+    assert!(second_assets > 0);
+    fs::write(
+        &inventory_path,
+        format!(
+            "{inventory}\n{}",
+            second
+                .split("\n\n")
+                .filter(|block| block.trim_start().starts_with("ex:otwo_b"))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        ),
+    )
+    .unwrap();
+
+    let ambiguous = run(&["build", &project.to_string_lossy()]);
+    assert!(!ambiguous.status.success());
+    let message = String::from_utf8_lossy(&ambiguous.stderr);
+    assert!(
+        message.contains("more than one complete plan")
+            && message.contains("[[planning.assets]]")
+            && message.contains("asset = "),
+        "the ambiguity names a pin the user can paste: {message}"
+    );
+
+    let manifest_path = project.join("lab.toml");
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    fs::write(
+        &manifest_path,
+        format!(
+            "{manifest}\n[[planning.assets]]\nasset = \"https://example.org/golden-gate/opentrons_ot2\"\n"
+        ),
+    )
+    .unwrap();
+
+    let pinned = run(&["build", &project.to_string_lossy()]);
+    assert!(
+        pinned.status.success(),
+        "the suggested pin resolves the ambiguity: {}",
+        String::from_utf8_lossy(&pinned.stderr)
+    );
+
+    let _ = fs::remove_dir_all(&project);
+}
+
+#[test]
 fn competent_cells_are_staged_on_a_temperature_controlled_position() {
     let project = temporary_project();
     let _ = fs::remove_dir_all(&project);

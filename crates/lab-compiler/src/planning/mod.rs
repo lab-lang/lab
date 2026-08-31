@@ -2,6 +2,7 @@
 
 mod adapters;
 mod execution;
+mod explain;
 mod inventory;
 mod invocation;
 mod lowering;
@@ -19,6 +20,7 @@ pub use adapters::{
 pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
 };
+pub use explain::explain_facility_planning_error;
 pub use inventory::BuildInventoryError;
 pub(crate) use invocation::hex_sha256;
 pub use invocation::{
@@ -49,11 +51,12 @@ pub use schedule::{
 };
 pub use solver::{
     AdapterRequirement, AlternativeMaterialBinding, AlternativeMethod,
-    AlternativeRequirementBinding, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
-    FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
-    FacilityPlanningSolutionValidationError, MethodPin, MethodPinSelector, PlanningAlternative,
-    PlanningCandidateRejectionReason, PlanningMaterialRejectionReason, PlanningRejectedOffering,
-    RejectedMethodCandidate, RejectedPlanningMaterial, RejectedPlanningRequirement,
-    SelectedAdapter, SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
-    SelectedMethod, SelectedProcedureTask, SelectedRequirementBinding,
+    AlternativeRequirementBinding, AssetPin, AssetPinSelector,
+    FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningError, FacilityPlanningPolicy,
+    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MethodPin,
+    MethodPinSelector, PlanningAlternative, PlanningCandidateRejectionReason,
+    PlanningMaterialRejectionReason, PlanningRejectedOffering, RejectedMethodCandidate,
+    RejectedPlanningMaterial, RejectedPlanningRequirement, SelectedAdapter,
+    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod,
+    SelectedProcedureTask, SelectedRequirementBinding,
 };

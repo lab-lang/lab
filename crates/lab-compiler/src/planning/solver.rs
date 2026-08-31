@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use lab_capability::{
-    AbsoluteIri, ConstraintRelation, ControlMode, MethodId, ProcedureImplementationId,
-    PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
+    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId,
+    ProcedureImplementationId, PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel,
+    ScalarValue, UnitIri,
 };
 use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
@@ -33,8 +34,47 @@ pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planni
 pub struct FacilityPlanningPolicy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub method_pins: Vec<MethodPin>,
+    /// Restricts which Asset may satisfy a requirement.
+    ///
+    /// Two instruments of the same model are not interchangeable: they carry their own calibration
+    /// and sit in their own place. When a facility offers more than one, choosing is the
+    /// laboratory's call, and this is how it states it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asset_pins: Vec<AssetPin>,
     #[serde(default)]
     pub adapter_requirement: AdapterRequirement,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+pub struct AssetPin {
+    #[serde(flatten)]
+    pub selector: AssetPinSelector,
+    pub asset: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "scope", rename_all = "snake_case")]
+pub enum AssetPinSelector {
+    /// Every requirement the named Asset can satisfy binds it.
+    AnyRequirement,
+    /// Every requirement demanding this capability kind binds the named Asset.
+    CapabilityKind { capability_kind: CapabilityKind },
+    /// One exact requirement from the emitted planning problem binds the named Asset.
+    Requirement { requirement: LocalId },
+}
+
+impl AssetPin {
+    fn matches(&self, requirement: &PlanningCapabilityRequirement) -> bool {
+        match &self.selector {
+            AssetPinSelector::AnyRequirement => true,
+            AssetPinSelector::CapabilityKind { capability_kind } => {
+                capability_kind == &requirement.capability_kind
+            }
+            AssetPinSelector::Requirement {
+                requirement: pinned,
+            } => pinned == &requirement.id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
@@ -95,6 +135,13 @@ pub struct SelectedMaterialBinding {
     pub input: LocalId,
     pub symbol: String,
     pub source: SelectedMaterialSource,
+    /// Equally usable MaterialLots the solver did not take, in review order.
+    ///
+    /// Choosing between two active lots of the same component is inventory management rather than
+    /// a scientific decision, so the solver picks one and records the rest here instead of
+    /// refusing to plan. A reviewer can see exactly what else was on the shelf.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interchangeable_alternatives: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -160,6 +207,10 @@ pub struct PlanningRejectedOffering {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case")]
 pub enum PlanningCandidateRejectionReason {
+    /// No Asset in the facility offers this capability kind at all.
+    NoOfferingOfKind {
+        assets_considered: usize,
+    },
     Inactive,
     InsufficientQualification {
         required: String,
@@ -249,6 +300,9 @@ pub struct AlternativeRequirementBinding {
     pub asset: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub adapter: Option<String>,
+    /// Two alternatives can share every other binding and differ only here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedure_implementation: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -334,6 +388,7 @@ impl FacilityPlanningSolution {
                     &assets,
                     adapters,
                     policy.adapter_requirement,
+                    &policy.asset_pins,
                 ) {
                     MethodAllocation::Feasible(mut selections) => {
                         candidate_selections.append(&mut selections)
@@ -562,6 +617,7 @@ fn allocate_method(
     assets: &[FacilityAsset],
     adapters: Option<&AdapterBindingSnapshot>,
     adapter_requirement: AdapterRequirement,
+    asset_pins: &[AssetPin],
 ) -> MethodAllocation {
     let mut tasks = Vec::new();
     let mut rejected = MethodRejections::default();
@@ -575,8 +631,14 @@ fn allocate_method(
         }
         let mut task_requirements = Vec::new();
         for requirement in &task.requirements {
-            let (bindings, rejections) =
-                requirement_candidates(task, requirement, assets, adapters, adapter_requirement);
+            let (bindings, rejections) = requirement_candidates(
+                task,
+                requirement,
+                assets,
+                adapters,
+                adapter_requirement,
+                asset_pins,
+            );
             if bindings.is_empty() {
                 rejected.requirements.push(RejectedPlanningRequirement {
                     requirement: requirement.id.clone(),
@@ -602,6 +664,7 @@ fn allocate_method(
     for (task, binding_scope, materials, requirements) in tasks {
         let mut material_alternatives = vec![Vec::<SelectedMaterialBinding>::new()];
         for candidates in materials {
+            let candidates = collapse_interchangeable_materials(candidates);
             let mut combined = Vec::new();
             'outer: for prefix in &material_alternatives {
                 for candidate in &candidates {
@@ -767,6 +830,7 @@ fn material_candidates(
             source: SelectedMaterialSource::ChoiceOutput {
                 choice: choice.clone(),
             },
+            interchangeable_alternatives: Vec::new(),
         }]);
     }
     let candidates = inventory
@@ -803,8 +867,42 @@ fn material_candidates(
                 component: component.clone(),
                 material_lot: material_lot.clone(),
             },
+            interchangeable_alternatives: Vec::new(),
         })
         .collect())
+}
+
+/// Collapses equally usable MaterialLots into one recorded choice.
+///
+/// Two active lots built from the same component satisfy the same input identically, so treating
+/// them as competing plans makes an ordinary shelf unplannable. The pick is by lot identity so it
+/// is stable across runs, and the alternatives ride along on the binding for review.
+fn collapse_interchangeable_materials(
+    candidates: Vec<SelectedMaterialBinding>,
+) -> Vec<SelectedMaterialBinding> {
+    let mut lots: Vec<String> = Vec::new();
+    let mut selected: Option<SelectedMaterialBinding> = None;
+    for candidate in candidates {
+        let SelectedMaterialSource::MaterialLot { material_lot, .. } = &candidate.source else {
+            // A choice output is a dependency edge, not a shelf item; never collapse it.
+            return vec![candidate];
+        };
+        lots.push(material_lot.clone());
+        match &selected {
+            Some(current) if current.symbol == candidate.symbol => {}
+            Some(_) => return Vec::new(),
+            None => selected = Some(candidate),
+        }
+    }
+    let Some(mut binding) = selected else {
+        return Vec::new();
+    };
+    let SelectedMaterialSource::MaterialLot { material_lot, .. } = &binding.source else {
+        return vec![binding];
+    };
+    let taken = material_lot.clone();
+    binding.interchangeable_alternatives = lots.into_iter().filter(|lot| lot != &taken).collect();
+    vec![binding]
 }
 
 fn rejected_material(
@@ -843,7 +941,12 @@ fn requirement_candidates(
     assets: &[FacilityAsset],
     adapters: Option<&AdapterBindingSnapshot>,
     adapter_requirement: AdapterRequirement,
+    asset_pins: &[AssetPin],
 ) -> (Vec<RequirementCandidate>, Vec<PlanningRejectedOffering>) {
+    let pinned = asset_pins
+        .iter()
+        .find(|pin| pin.matches(requirement))
+        .map(|pin| pin.asset.as_str());
     let minimum = inventory_qualification(requirement.minimum_qualification);
     let accepted = requirement
         .accepted_control_modes
@@ -852,11 +955,13 @@ fn requirement_candidates(
         .collect::<BTreeSet<_>>();
     let mut eligible = Vec::new();
     let mut rejected = Vec::new();
+    let mut offerings_of_kind = 0;
     for asset in assets {
         for offering in &asset.offerings {
             if offering.capability_kind.as_str() != requirement.capability_kind.as_str() {
                 continue;
             }
+            offerings_of_kind += 1;
             let mut reasons = Vec::new();
             if !offering.effectively_active {
                 reasons.push(PlanningCandidateRejectionReason::Inactive);
@@ -922,6 +1027,29 @@ fn requirement_candidates(
                 rejected.push(rejected_offering(asset, offering, reasons));
             }
         }
+    }
+    // Without this the commonest failure, a facility that simply does not own the equipment,
+    // reports an empty candidate list and explains nothing.
+    if offerings_of_kind == 0 {
+        rejected.push(PlanningRejectedOffering {
+            offering: String::new(),
+            asset: String::new(),
+            observed_qualification: String::new(),
+            control_mode: String::new(),
+            reasons: vec![PlanningCandidateRejectionReason::NoOfferingOfKind {
+                assets_considered: assets.len(),
+            }],
+        });
+    }
+    // A pin narrows the field only where the named Asset can actually serve. A requirement it
+    // cannot satisfy, such as manual provisioning at a workstation, is left alone rather than made
+    // infeasible by a preference stated for the instruments.
+    if let Some(pin) = pinned
+        && eligible
+            .iter()
+            .any(|candidate| candidate.binding.asset == pin)
+    {
+        eligible.retain(|candidate| candidate.binding.asset == pin);
     }
     eligible.sort_by(|left, right| binding_key(&left.binding).cmp(&binding_key(&right.binding)));
     rejected
@@ -1296,6 +1424,11 @@ fn summarize_alternative(selection: &[SelectedMethod]) -> PlanningAlternative {
                             .adapter
                             .as_ref()
                             .map(|adapter| adapter.driver.clone()),
+                        procedure_implementation: binding
+                            .adapter
+                            .as_ref()
+                            .and_then(|adapter| adapter.procedure_implementation.clone())
+                            .map(|implementation| implementation.as_str().to_owned()),
                     })
                     .collect(),
             })
@@ -1676,6 +1809,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                 },
                 method: method("automated"),
             }],
+            asset_pins: Vec::new(),
             adapter_requirement: AdapterRequirement::Optional,
         };
         let selected = FacilityPlanningSolution::solve(
@@ -1699,6 +1833,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             None,
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
+                asset_pins: Vec::new(),
                 adapter_requirement: AdapterRequirement::NonManual,
             },
         )
@@ -1738,6 +1873,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             Some(&adapters),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
+                asset_pins: Vec::new(),
                 adapter_requirement: AdapterRequirement::NonManual,
             },
         )
@@ -1790,6 +1926,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             Some(&adapters),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
+                asset_pins: Vec::new(),
                 adapter_requirement: AdapterRequirement::NonManual,
             },
         )
@@ -1810,7 +1947,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
     }
 
     #[test]
-    fn material_lot_ambiguity_is_a_global_plan_ambiguity() {
+    fn interchangeable_material_lots_resolve_without_a_pin() {
         let (_directory, inventory) = inventory(false);
         let mut problem = problem();
         problem.choices[0].candidates.retain(|candidate| {
@@ -1835,27 +1972,26 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             },
         );
 
-        let error = FacilityPlanningSolution::solve(
+        // Two active lots of the same component satisfy the input identically, so treating them as
+        // competing plans would make an ordinary shelf unplannable. The solver takes one and says
+        // which it did not take.
+        let solution = FacilityPlanningSolution::solve(
             &problem,
             &inventory,
             &materials,
             None,
             FacilityPlanningPolicy::default(),
         )
-        .unwrap_err();
-        let FacilityPlanningError::AmbiguousPlan { alternatives } = error else {
-            panic!("expected exact MaterialLot ambiguity")
+        .expect("interchangeable lots do not make a plan ambiguous");
+        let binding = &solution.selections[0].tasks[0].materials[0];
+        let SelectedMaterialSource::MaterialLot { material_lot, .. } = &binding.source else {
+            panic!("expected an external lot")
         };
-        assert_eq!(alternatives.len(), 2);
-        let lots = alternatives
-            .iter()
-            .map(
-                |alternative| match &alternative.methods[0].materials[0].source {
-                    SelectedMaterialSource::MaterialLot { material_lot, .. } => material_lot,
-                    SelectedMaterialSource::ChoiceOutput { .. } => panic!("expected external lot"),
-                },
-            )
-            .collect::<BTreeSet<_>>();
-        assert_eq!(lots.len(), 2);
+        assert_eq!(material_lot, "https://example.org/material/sample-lot-a");
+        assert_eq!(
+            binding.interchangeable_alternatives,
+            vec!["https://example.org/material/sample-lot-b".to_owned()],
+            "the lot that was not taken stays on the record for review"
+        );
     }
 }

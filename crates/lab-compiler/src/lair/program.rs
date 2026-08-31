@@ -1371,6 +1371,7 @@ workflow main() -> Material<Plasmid>:
                 method: lab_capability::MethodId::new(method).unwrap(),
             })
             .collect(),
+            asset_pins: Vec::new(),
             adapter_requirement: AdapterRequirement::Optional,
         };
         let adapters = AdapterBindingSnapshot::resolve(
