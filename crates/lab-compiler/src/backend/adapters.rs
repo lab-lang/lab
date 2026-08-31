@@ -5,7 +5,7 @@
 //! and control modes that implementation can use. Product features stay separate from semantic
 //! capability kinds so neither manufacturer nor model can silently select a driver.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lab_capability::{
     CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
@@ -86,32 +86,80 @@ pub struct AdapterDescriptor {
     pub default_profile: ValidatedAdapterProfile,
 }
 
-/// Canonical pipetting features the OT-2 Python templates realize.
-///
-/// Each entry is a claim that the emitted protocol preserves the semantic value, not merely that
-/// the planner parses it. This is the outer gate: the per-operation normalizers in
-/// [`crate::backend::procedure`] still reject a program shape a specific template cannot render.
-const OT2_PIPETTING_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::VesselVolumeLimits,
-    ProgramFeature::MultiPositionVessel,
+/// Reaction setup dispatches on every canonical liquid-access strategy and both finishing actions,
+/// and stages its reagents at a stated temperature. It carries no air gap.
+const OT2_SETUP_FEATURES: &[ProgramFeature] = &[
     ProgramFeature::Transfer,
     ProgramFeature::Distribute,
     ProgramFeature::Mix,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::VesselTemperatureControl,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
     ProgramFeature::AspirateLiquid,
-    ProgramFeature::AspirateTrackedSurface,
     ProgramFeature::AspirateVesselBottom,
     ProgramFeature::DispenseLiquid,
     ProgramFeature::DispenseAboveLiquid,
     ProgramFeature::DispenseVesselBottom,
     ProgramFeature::DispenseVesselTop,
-    ProgramFeature::DispenseMaterialSurface,
-    ProgramFeature::AirGap,
     ProgramFeature::PostDispenseBlowout,
     ProgramFeature::TouchTip,
+];
+
+/// Transformation preparation dispatches the same strategies and stages competent cells cold. The
+/// single-task emitter carries no air gap, so neither does the operation.
+const OT2_PREPARE_FEATURES: &[ProgramFeature] = OT2_SETUP_FEATURES;
+
+/// Recovery addition dispatches dispense strategies and carries an air gap, but always aspirates at
+/// the labware default. One tip serves the whole distribution, so its steps share a fluid path.
+const OT2_RECOVERY_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
     ProgramFeature::FluidPathIsolatedDestinations,
     ProgramFeature::FluidPathSharedSourceNoReentry,
     ProgramFeature::FluidPathGroup,
-    ProgramFeature::VesselTemperatureControl,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::DispenseAboveLiquid,
+    ProgramFeature::DispenseVesselBottom,
+    ProgramFeature::DispenseVesselTop,
+    ProgramFeature::AirGap,
+];
+
+/// Serial dilution follows the medium's falling surface and otherwise works at the labware default.
+/// Its emitters dispatch no other strategy, so no other strategy may reach them.
+const OT2_DILUTION_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::DispenseLiquid,
+];
+
+/// Plating spots onto a material surface at a calibrated offset and blows out. That is the only
+/// dispense it performs. One tip serves each dilution's spots, so those steps share a fluid path.
+const OT2_PLATING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::DispenseMaterialSurface,
+    ProgramFeature::PostDispenseBlowout,
 ];
 
 /// Thermal features the Opentrons Thermocycler Module templates realize. Neither Opentrons
@@ -165,7 +213,29 @@ const ODTC_THERMAL_FEATURES: &[ProgramFeature] = &[
 
 /// The semantic simulator preserves every canonical value because it emits meaning rather than
 /// motion.
-const SIMULATOR_PIPETTING_FEATURES: &[ProgramFeature] = OT2_PIPETTING_FEATURES;
+const SIMULATOR_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::Barrier,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::VesselTemperatureControl,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::AspirateVesselBottom,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::DispenseAboveLiquid,
+    ProgramFeature::DispenseVesselBottom,
+    ProgramFeature::DispenseVesselTop,
+    ProgramFeature::DispenseMaterialSurface,
+    ProgramFeature::AirGap,
+    ProgramFeature::PostDispenseBlowout,
+    ProgramFeature::TouchTip,
+];
 
 const SIMULATOR_THERMAL_FEATURES: &[ProgramFeature] = &[
     ProgramFeature::ThermalStageRepeat,
@@ -184,11 +254,14 @@ pub struct ProcedureImplementationDescriptor {
     pub control_modes: BTreeSet<ControlMode>,
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
-    /// Fine-grained canonical program features this implementation realizes faithfully.
+    /// Fine-grained canonical program features this implementation realizes, per operation.
     ///
-    /// A program carrying a feature absent here is rejected before lowering. Declaring a feature
+    /// Keyed by operation because one implementation lowers several of them through different
+    /// emitters: a plating run spots onto agar while a reaction setup cannot, and an aspiration
+    /// strategy one emitter dispatches is one another would silently ignore. A program carrying a
+    /// feature absent from its operation's entry is rejected before lowering. Declaring a feature
     /// is a claim that the emitted device document preserves it, not that the value parses.
-    pub program_features: BTreeSet<ProgramFeature>,
+    pub program_features: BTreeMap<OperationId, BTreeSet<ProgramFeature>>,
     pub services: AdapterServices,
 }
 
@@ -252,11 +325,11 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     pipetting_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
                         [
-                            SETUP_GOLDEN_GATE,
-                            PREPARE_CHEMICAL_TRANSFORMATION,
-                            ADD_RECOVERY_MEDIUM,
-                            SERIAL_DILUTION,
-                            PLATE_DILUTED_CULTURE,
+                            (SETUP_GOLDEN_GATE, OT2_SETUP_FEATURES),
+                            (PREPARE_CHEMICAL_TRANSFORMATION, OT2_PREPARE_FEATURES),
+                            (ADD_RECOVERY_MEDIUM, OT2_RECOVERY_FEATURES),
+                            (SERIAL_DILUTION, OT2_DILUTION_FEATURES),
+                            (PLATE_DILUTED_CULTURE, OT2_PLATING_FEATURES),
                         ],
                         [
                             METERED_LIQUID_TRANSFER,
@@ -271,7 +344,6 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
-                        OT2_PIPETTING_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -282,14 +354,13 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     thermal_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
                         [
-                            CYCLE_GOLDEN_GATE,
-                            HEAT_SHOCK_TRANSFORMATION,
-                            INCUBATE_RECOVERY_CULTURE,
+                            (CYCLE_GOLDEN_GATE, OPENTRONS_THERMAL_FEATURES),
+                            (HEAT_SHOCK_TRANSFORMATION, OPENTRONS_THERMAL_FEATURES),
+                            (INCUBATE_RECOVERY_CULTURE, OPENTRONS_THERMAL_FEATURES),
                         ],
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
-                        OPENTRONS_THERMAL_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -319,7 +390,10 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 vec![
                     pipetting_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
-                        [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                        [
+                            (SETUP_GOLDEN_GATE, FLEX_PIPETTING_FEATURES),
+                            (SERIAL_DILUTION, FLEX_PIPETTING_FEATURES),
+                        ],
                         [
                             METERED_LIQUID_TRANSFER,
                             IN_WELL_MIXING,
@@ -328,7 +402,6 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
-                        FLEX_PIPETTING_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -338,11 +411,10 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     )?,
                     thermal_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexThermalV1",
-                        [CYCLE_GOLDEN_GATE],
+                        [(CYCLE_GOLDEN_GATE, OPENTRONS_THERMAL_FEATURES)],
                         [ControlMode::ReviewedFile],
                         [],
                         [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
-                        OPENTRONS_THERMAL_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -371,7 +443,10 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![pipetting_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
-                    [SETUP_GOLDEN_GATE, SERIAL_DILUTION],
+                    [
+                        (SETUP_GOLDEN_GATE, STAR_PIPETTING_FEATURES),
+                        (SERIAL_DILUTION, STAR_PIPETTING_FEATURES),
+                    ],
                     [
                         METERED_LIQUID_TRANSFER,
                         IN_WELL_MIXING,
@@ -380,7 +455,6 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     [ControlMode::ReviewedFile, ControlMode::Api],
                     [STAR_RUN_FORMAT],
                     [STAR_RUN_FORMAT],
-                    STAR_PIPETTING_FEATURES,
                     AdapterServices {
                         planning: true,
                         lowering: true,
@@ -407,11 +481,10 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 },
                 vec![thermal_implementation(
                     "https://www.lab-compiler.org/ns/adapter-implementation#InhecoOdtcThermalV1",
-                    [CYCLE_GOLDEN_GATE],
+                    [(CYCLE_GOLDEN_GATE, ODTC_THERMAL_FEATURES)],
                     [ControlMode::Sila2],
                     [THERMOCYCLE_RUN_FORMAT],
                     [THERMOCYCLE_RUN_FORMAT],
-                    ODTC_THERMAL_FEATURES,
                     AdapterServices {
                         planning: true,
                         lowering: true,
@@ -464,11 +537,14 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     pipetting_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
                         [
-                            SETUP_GOLDEN_GATE,
-                            PREPARE_CHEMICAL_TRANSFORMATION,
-                            ADD_RECOVERY_MEDIUM,
-                            SERIAL_DILUTION,
-                            PLATE_DILUTED_CULTURE,
+                            (SETUP_GOLDEN_GATE, SIMULATOR_PIPETTING_FEATURES),
+                            (
+                                PREPARE_CHEMICAL_TRANSFORMATION,
+                                SIMULATOR_PIPETTING_FEATURES,
+                            ),
+                            (ADD_RECOVERY_MEDIUM, SIMULATOR_PIPETTING_FEATURES),
+                            (SERIAL_DILUTION, SIMULATOR_PIPETTING_FEATURES),
+                            (PLATE_DILUTED_CULTURE, SIMULATOR_PIPETTING_FEATURES),
                         ],
                         [
                             METERED_LIQUID_TRANSFER,
@@ -483,7 +559,6 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                         [ControlMode::ReviewedFile],
                         [SIMULATION_RUN_FORMAT],
                         [SIMULATION_RUN_FORMAT],
-                        SIMULATOR_PIPETTING_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -494,14 +569,13 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     thermal_implementation(
                         "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorThermalV1",
                         [
-                            CYCLE_GOLDEN_GATE,
-                            HEAT_SHOCK_TRANSFORMATION,
-                            INCUBATE_RECOVERY_CULTURE,
+                            (CYCLE_GOLDEN_GATE, SIMULATOR_THERMAL_FEATURES),
+                            (HEAT_SHOCK_TRANSFORMATION, SIMULATOR_THERMAL_FEATURES),
+                            (INCUBATE_RECOVERY_CULTURE, SIMULATOR_THERMAL_FEATURES),
                         ],
                         [ControlMode::ReviewedFile],
                         [SIMULATION_RUN_FORMAT],
                         [SIMULATION_RUN_FORMAT],
-                        SIMULATOR_THERMAL_FEATURES,
                         AdapterServices {
                             planning: true,
                             lowering: true,
@@ -565,12 +639,11 @@ fn pipetting_implementation<
     const E: usize,
 >(
     id: &'static str,
-    operations: [&'static str; O],
+    operations: [(&'static str, &'static [ProgramFeature]); O],
     capability_kinds: [&'static str; C],
     control_modes: [ControlMode; M],
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
-    program_features: &'static [ProgramFeature],
     services: AdapterServices,
 ) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
     Ok(ProcedureImplementationDescriptor {
@@ -583,7 +656,7 @@ fn pipetting_implementation<
             .expect("built-in Procedure contract is an absolute IRI"),
         operations: operations
             .into_iter()
-            .map(|operation| {
+            .map(|(operation, _)| {
                 OperationId::new(operation).map_err(|error| {
                     AdapterProfileContractError::Contract(format!(
                         "Procedure implementation '{id}' declares an invalid operation: {error}"
@@ -604,7 +677,17 @@ fn pipetting_implementation<
         control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
-        program_features: program_features.iter().copied().collect(),
+        program_features: operations
+            .into_iter()
+            .map(|(operation, features)| {
+                let operation = OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })?;
+                Ok((operation, features.iter().copied().collect()))
+            })
+            .collect::<Result<_, AdapterProfileContractError>>()?,
         services,
     })
 }
@@ -612,11 +695,10 @@ fn pipetting_implementation<
 #[allow(clippy::too_many_arguments)]
 fn thermal_implementation<const O: usize, const M: usize, const A: usize, const E: usize>(
     id: &'static str,
-    operations: [&'static str; O],
+    operations: [(&'static str, &'static [ProgramFeature]); O],
     control_modes: [ControlMode; M],
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
-    program_features: &'static [ProgramFeature],
     services: AdapterServices,
     controlled_ramp: bool,
 ) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
@@ -649,7 +731,7 @@ fn thermal_implementation<const O: usize, const M: usize, const A: usize, const 
             .expect("built-in Procedure contract is an absolute IRI"),
         operations: operations
             .into_iter()
-            .map(|operation| {
+            .map(|(operation, _)| {
                 OperationId::new(operation).map_err(|error| {
                     AdapterProfileContractError::Contract(format!(
                         "Procedure implementation '{id}' declares an invalid operation: {error}"
@@ -661,7 +743,17 @@ fn thermal_implementation<const O: usize, const M: usize, const A: usize, const 
         control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
-        program_features: program_features.iter().copied().collect(),
+        program_features: operations
+            .into_iter()
+            .map(|(operation, features)| {
+                let operation = OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })?;
+                Ok((operation, features.iter().copied().collect()))
+            })
+            .collect::<Result<_, AdapterProfileContractError>>()?,
         services,
     })
 }
@@ -898,16 +990,29 @@ fn validate_invocation_implementation(
                     task.id
                 )
             })?;
+            // Features are matched against this exact operation. One implementation lowers several
+            // operations through different emitters, and what one of them dispatches another would
+            // silently ignore.
+            let realized = implementation
+                .program_features
+                .get(&task.operation)
+                .ok_or_else(|| {
+                    format!(
+                        "Procedure implementation '{}' declares operation '{}' without stating the program features it realizes",
+                        implementation.id, task.operation
+                    )
+                })?;
             let missing = validated
                 .features()
-                .difference(&implementation.program_features)
+                .difference(realized)
                 .map(ProgramFeature::to_string)
                 .collect::<Vec<_>>();
             if !missing.is_empty() {
                 return Err(format!(
-                    "Procedure implementation '{}' cannot realize task '{}': its normalized program requires {}, which this implementation does not declare",
+                    "Procedure implementation '{}' cannot realize task '{}' operation '{}': its normalized program requires {}, which this implementation does not realize for that operation",
                     implementation.id,
                     task.id,
+                    task.operation,
                     missing.join(", ")
                 ));
             }
@@ -1122,6 +1227,136 @@ fn unknown_driver(found: &str) -> AdapterProfileContractError {
             .map(|driver| format!("'{driver}'"))
             .collect::<Vec<_>>()
             .join(", "),
+    }
+}
+
+#[cfg(test)]
+mod feature_scope_tests {
+    use super::*;
+
+    fn implementation(driver: &str, suffix: &str) -> ProcedureImplementationDescriptor {
+        adapter_catalog()
+            .expect("the built-in catalog is valid")
+            .adapters
+            .into_iter()
+            .find(|adapter| adapter.id == driver)
+            .expect("adapter is present")
+            .procedure_implementations
+            .into_iter()
+            .find(|implementation| implementation.id.as_str().ends_with(suffix))
+            .expect("implementation is present")
+    }
+
+    fn realizes(
+        implementation: &ProcedureImplementationDescriptor,
+        operation: &str,
+        feature: ProgramFeature,
+    ) -> bool {
+        implementation
+            .program_features
+            .get(&OperationId::new(operation).unwrap())
+            .expect("every declared operation states its features")
+            .contains(&feature)
+    }
+
+    /// One implementation lowers several operations through different emitters, so a feature one of
+    /// them dispatches is not a feature the implementation realizes everywhere.
+    #[test]
+    fn ot2_features_are_scoped_to_the_operation_that_realizes_them() {
+        let ot2 = implementation("opentrons.ot2", "OpentronsOt2PipettingV1");
+
+        // Only the recovery emitter reads an air gap; the assembly emitter would drop it.
+        assert!(realizes(&ot2, ADD_RECOVERY_MEDIUM, ProgramFeature::AirGap));
+        assert!(!realizes(&ot2, SETUP_GOLDEN_GATE, ProgramFeature::AirGap));
+
+        // Only plating spots onto a material surface; asking dilution for it would be ignored.
+        assert!(realizes(
+            &ot2,
+            PLATE_DILUTED_CULTURE,
+            ProgramFeature::DispenseMaterialSurface
+        ));
+        assert!(!realizes(
+            &ot2,
+            SERIAL_DILUTION,
+            ProgramFeature::DispenseMaterialSurface
+        ));
+
+        // Only dilution follows a falling surface; the setup emitter raises on that strategy.
+        assert!(realizes(
+            &ot2,
+            SERIAL_DILUTION,
+            ProgramFeature::AspirateTrackedSurface
+        ));
+        assert!(!realizes(
+            &ot2,
+            SETUP_GOLDEN_GATE,
+            ProgramFeature::AspirateTrackedSurface
+        ));
+
+        // Only setup and preparation dispatch a vessel-relative aspiration.
+        assert!(realizes(
+            &ot2,
+            SETUP_GOLDEN_GATE,
+            ProgramFeature::AspirateVesselBottom
+        ));
+        assert!(!realizes(
+            &ot2,
+            PLATE_DILUTED_CULTURE,
+            ProgramFeature::AspirateVesselBottom
+        ));
+    }
+
+    /// The gate refuses the program rather than letting an emitter that never reads the value
+    /// render a plausible protocol that performs different science.
+    #[test]
+    fn a_feature_absent_from_an_operation_is_refused_for_that_operation() {
+        let ot2 = implementation("opentrons.ot2", "OpentronsOt2PipettingV1");
+        let setup = ot2
+            .program_features
+            .get(&OperationId::new(SETUP_GOLDEN_GATE).unwrap())
+            .unwrap();
+        let recovery = ot2
+            .program_features
+            .get(&OperationId::new(ADD_RECOVERY_MEDIUM).unwrap())
+            .unwrap();
+
+        // Take a program the recovery emitter fully realizes, including its air gap.
+        let requested = recovery.clone();
+        assert!(requested.contains(&ProgramFeature::AirGap));
+        assert!(
+            requested.difference(recovery).next().is_none(),
+            "recovery realizes its own program"
+        );
+
+        // The identical program offered to reaction setup asks for an air gap that emitter never
+        // reads, and the gate reports exactly that.
+        let missing = requested.difference(setup).copied().collect::<Vec<_>>();
+        assert_eq!(missing, vec![ProgramFeature::AirGap]);
+    }
+
+    /// An implementation cannot gain an operation without saying what it realizes for it.
+    #[test]
+    fn every_declared_operation_states_its_features() {
+        for adapter in adapter_catalog()
+            .expect("the built-in catalog is valid")
+            .adapters
+        {
+            for implementation in adapter.procedure_implementations {
+                for operation in &implementation.operations {
+                    assert!(
+                        implementation.program_features.contains_key(operation),
+                        "{} declares operation {operation} without stating its features",
+                        implementation.id
+                    );
+                }
+                assert_eq!(
+                    implementation.program_features.len(),
+                    implementation.operations.len(),
+                    "{} states features for operations it does not declare",
+                    implementation.id
+                );
+            }
+        }
     }
 }
 

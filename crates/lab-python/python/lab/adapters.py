@@ -8,8 +8,10 @@ validator to canonicalize profiles; it does not maintain a parallel device regis
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from ._native import lab_adapter_catalog as _lab_adapter_catalog
@@ -35,7 +37,7 @@ class ProcedureImplementation:
     control_modes: tuple[str, ...]
     accepted_run_formats: tuple[str, ...]
     emitted_run_formats: tuple[str, ...]
-    program_features: tuple[str, ...]
+    program_features: Mapping[str, tuple[str, ...]]
     services: AdapterServices
 
 
@@ -123,8 +125,14 @@ def catalog() -> AdapterCatalog:
                     emitted_run_formats=tuple(
                         cast(list[str], implementation["emitted_run_formats"])
                     ),
-                    program_features=tuple(
-                        cast(list[str], implementation.get("program_features", []))
+                    program_features=MappingProxyType(
+                        {
+                            operation: tuple(features)
+                            for operation, features in cast(
+                                dict[str, list[str]],
+                                implementation.get("program_features", {}),
+                            ).items()
+                        }
                     ),
                     services=AdapterServices(
                         planning=cast(bool, implementation_services["planning"]),

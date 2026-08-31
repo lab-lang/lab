@@ -21,8 +21,17 @@ def test_catalog_exposes_semantic_support_separately_from_features() -> None:
         for implementation in ot2.procedure_implementations
         if implementation.id.endswith("OpentronsOt2PipettingV1")
     )
-    assert "multi_position_vessel" in pipetting.program_features
-    assert "aspirate_tracked_surface" in pipetting.program_features
+    # Features are stated per operation, because one implementation lowers several of them through
+    # different emitters.
+    setup = pipetting.program_features[
+        "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction"
+    ]
+    dilution = pipetting.program_features[
+        "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture"
+    ]
+    assert "multi_position_vessel" in setup
+    assert "aspirate_tracked_surface" in dilution
+    assert "aspirate_tracked_surface" not in setup
     pipetting = next(
         implementation
         for implementation in ot2.procedure_implementations
