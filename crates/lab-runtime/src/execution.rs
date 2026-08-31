@@ -12,12 +12,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use hamilton_star::RawCommand;
+use lab_capability::{
+    AbsoluteIri, ExactDecimal, ExactInteger, PropertyConstraint, PropertyKind, PropertyValue,
+    ScalarValue, UnitIri,
+};
 use lab_inventory::{FacilityScalarValue, InventorySnapshot};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
-    ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding, PLATE_READ_FORMAT,
-    PlateReadDocument, ReviewedLoweringArtifactRole, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
-    SimulationRunDocument, StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
+    ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding,
+    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT,
+    PlateReadDocument, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument,
+    StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
 };
 use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
@@ -56,37 +61,73 @@ impl LoadedExecutionPlan {
             );
         }
         for node in &self.nodes {
-            let LoadedExecutionAction::Execute {
-                requirement,
-                document,
-            } = &node.action
-            else {
-                continue;
-            };
-            let qualification = sbol_inventory::vocabulary::Qualification::try_from(
-                requirement.observed_qualification.as_str(),
-            );
-            if !qualification.is_ok_and(|value| value >= minimum) {
-                issues.push(format!(
-                    "node '{}' is bound only at qualification '{}', below '{}' for {}",
-                    node.id,
-                    requirement.observed_qualification,
-                    minimum.iri(),
-                    mode.as_str()
-                ));
-            }
-            if requirement.adapter.is_none() {
-                issues.push(format!("node '{}' has no frozen runtime adapter", node.id));
-            }
-            if document.is_none() {
-                issues.push(format!("node '{}' has no reviewed run document", node.id));
+            match &node.action {
+                LoadedExecutionAction::Execute {
+                    requirements,
+                    document,
+                } => {
+                    for requirement in requirements {
+                        check_execution_qualification(
+                            &mut issues,
+                            &node.id,
+                            requirement,
+                            minimum,
+                            mode,
+                        );
+                    }
+                    let requirement = requirements
+                        .first()
+                        .expect("execution-plan validation requires a non-empty binding set");
+                    if requirement.adapter.is_none() {
+                        issues.push(format!("node '{}' has no frozen runtime adapter", node.id));
+                    }
+                    if document.is_none() {
+                        issues.push(format!("node '{}' has no reviewed run document", node.id));
+                    }
+                }
+                LoadedExecutionAction::Manual { requirement, .. } => {
+                    check_execution_qualification(
+                        &mut issues,
+                        &node.id,
+                        requirement,
+                        minimum,
+                        mode,
+                    );
+                }
+                LoadedExecutionAction::MoveMaterial { .. } => {}
             }
         }
+        // Several requirements on one node routinely share an offering, and repeating one identical
+        // sentence per requirement buries the distinct problems among the copies.
+        let mut seen = std::collections::BTreeSet::new();
+        issues.retain(|issue| seen.insert(issue.clone()));
         issues
     }
 
     pub fn is_ready(&self, mode: ExecutionMode) -> bool {
         self.readiness_issues(mode).is_empty()
+    }
+}
+
+fn check_execution_qualification(
+    issues: &mut Vec<String>,
+    node: &str,
+    requirement: &ExecutionRequirementBinding,
+    minimum: sbol_inventory::vocabulary::Qualification,
+    mode: ExecutionMode,
+) {
+    let qualification = sbol_inventory::vocabulary::Qualification::try_from(
+        requirement.observed_qualification.as_str(),
+    );
+    if !qualification.is_ok_and(|value| value >= minimum) {
+        issues.push(format!(
+            "node '{}' binds offering '{}' at qualification '{}', below '{}' for {}",
+            node,
+            requirement.offering,
+            requirement.observed_qualification,
+            minimum.iri(),
+            mode.as_str()
+        ));
     }
 }
 
@@ -100,7 +141,7 @@ pub struct LoadedExecutionNode {
 #[derive(Debug)]
 pub enum LoadedExecutionAction {
     Execute {
-        requirement: Box<ExecutionRequirementBinding>,
+        requirements: Vec<ExecutionRequirementBinding>,
         document: Option<LoadedReviewedDocument>,
     },
     MoveMaterial {
@@ -110,6 +151,7 @@ pub enum LoadedExecutionAction {
         instructions: String,
     },
     Manual {
+        requirement: Box<ExecutionRequirementBinding>,
         title: String,
         instructions: String,
     },
@@ -124,15 +166,23 @@ pub enum LoadedReviewedDocument {
     Thermocycle(ThermocycleRunDocument),
     PlateRead(PlateReadDocument),
     Simulation(SimulationRunDocument),
+    /// A reviewed file whose execution is delegated to an external device application.
+    /// The runtime validates and narrates it, but does not claim a live connector.
+    ExternalFile {
+        format: String,
+        title: String,
+        contents: Vec<u8>,
+    },
 }
 
 impl LoadedReviewedDocument {
-    pub fn format(&self) -> &'static str {
+    pub fn format(&self) -> &str {
         match self {
             Self::Star { .. } => STAR_RUN_FORMAT,
             Self::Thermocycle(_) => THERMOCYCLE_RUN_FORMAT,
             Self::PlateRead(_) => PLATE_READ_FORMAT,
             Self::Simulation(_) => SIMULATION_RUN_FORMAT,
+            Self::ExternalFile { format, .. } => format,
         }
     }
 
@@ -142,6 +192,7 @@ impl LoadedReviewedDocument {
             Self::Thermocycle(document) => &document.title,
             Self::PlateRead(document) => &document.title,
             Self::Simulation(document) => &document.title,
+            Self::ExternalFile { title, .. } => title,
         }
     }
 }
@@ -268,43 +319,26 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
             let _ = writeln!(text, "  - {issue}");
         }
     }
-    if !loaded.plan.lowerings.is_empty() {
-        let _ = writeln!(text, "reviewed adapter lowerings:");
-        for lowering in &loaded.plan.lowerings {
-            let protocols = lowering
-                .artifacts
-                .iter()
-                .filter(|artifact| artifact.role == ReviewedLoweringArtifactRole::DeviceProtocol)
-                .collect::<Vec<_>>();
-            let _ = writeln!(
-                text,
-                "  - {}: {} device protocol(s) jointly cover {} requirement(s) on {} through {}",
-                lowering.id,
-                protocols.len(),
-                lowering.requirements.len(),
-                lowering.asset,
-                lowering.adapter.driver
-            );
-            for protocol in protocols {
-                let _ = writeln!(
-                    text,
-                    "    {} ({})",
-                    protocol.path,
-                    protocol.format.as_deref().unwrap_or("unknown format")
-                );
-            }
-        }
-    }
     for (index, node) in loaded.nodes.iter().enumerate() {
         match &node.action {
             LoadedExecutionAction::Execute {
-                requirement,
+                requirements,
                 document,
             } => {
+                let requirement = requirements
+                    .first()
+                    .expect("execution-plan validation requires a non-empty binding set");
                 let description = document.as_ref().map_or_else(
                     || "no reviewed run document".to_owned(),
                     |document| format!("{} ({})", document.title(), document.format()),
                 );
+                let mut seen = std::collections::BTreeSet::new();
+                let capabilities = requirements
+                    .iter()
+                    .map(|binding| binding.capability_kind.as_str())
+                    .filter(|kind| seen.insert(*kind))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let adapter = requirement
                     .adapter
                     .as_ref()
@@ -314,7 +348,7 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
                     "\n[{}] {} - {} on {} through {}: {}",
                     index + 1,
                     node.id,
-                    requirement.capability_kind,
+                    capabilities,
                     requirement.asset,
                     adapter,
                     description
@@ -338,14 +372,17 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
                 );
             }
             LoadedExecutionAction::Manual {
+                requirement,
                 title,
                 instructions,
             } => {
                 let _ = writeln!(
                     text,
-                    "\n[{}] {} - by hand: {}: {}",
+                    "\n[{}] {} - by hand on {} for {}: {}: {}",
                     index + 1,
                     node.id,
+                    requirement.asset,
+                    requirement.capability_kind,
                     title,
                     instructions
                 );
@@ -368,12 +405,15 @@ pub fn run_execution_plan(
     let mut readiness = loaded.readiness_issues(config.mode);
     for node in &loaded.nodes {
         let LoadedExecutionAction::Execute {
-            requirement,
+            requirements,
             document: Some(document),
         } = &node.action
         else {
             continue;
         };
+        let requirement = requirements
+            .first()
+            .expect("execution-plan validation requires a non-empty binding set");
         let Some(adapter) = &requirement.adapter else {
             continue;
         };
@@ -515,9 +555,12 @@ fn execute_execution_node(
 ) -> Result<NodeExecution> {
     match &node.action {
         LoadedExecutionAction::Execute {
-            requirement,
+            requirements,
             document: Some(document),
         } => {
+            let requirement = requirements
+                .first()
+                .expect("execution-plan validation requires a non-empty binding set");
             let adapter = requirement
                 .adapter
                 .as_ref()
@@ -572,12 +615,16 @@ fn execute_execution_node(
             Ok(NodeExecution::Done)
         }
         LoadedExecutionAction::Manual {
+            requirement,
             title,
             instructions,
         } => {
             events.emit(RunEvent::AttentionRequired {
                 node: node.id.clone(),
-                prompt: format!("{title}: {instructions}"),
+                prompt: format!(
+                    "{title} on Asset '{}' using CapabilityOffering '{}': {instructions}",
+                    requirement.asset, requirement.offering
+                ),
             });
             let confirmed = operator.confirm(
                 ConfirmKind::Manual,
@@ -641,6 +688,17 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
         );
     }
 
+    if let Some(planning) = &plan.planning {
+        for (label, artifact) in planning.artifacts() {
+            read_frozen_input(
+                &directory,
+                &artifact.path,
+                &artifact.sha256,
+                &format!("compiler {label}"),
+            )?;
+        }
+    }
+
     validate_catalog_bindings(&plan, &inventory)?;
     for requirement in &plan.requirements {
         if let Some(adapter) = &requirement.adapter {
@@ -655,20 +713,6 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
             )?;
         }
     }
-    for lowering in &plan.lowerings {
-        for artifact in &lowering.artifacts {
-            read_frozen_input(
-                &directory,
-                &artifact.path,
-                &artifact.sha256,
-                &format!(
-                    "reviewed artifact '{}' for adapter lowering '{}'",
-                    artifact.path, lowering.id
-                ),
-            )?;
-        }
-    }
-
     let requirements = plan
         .requirements
         .iter()
@@ -679,12 +723,21 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
     for node in ordered {
         let action = match &node.action {
             ExecutionPlanAction::Execute {
-                requirement,
+                requirements: node_requirements,
                 document,
             } => {
-                let binding = requirements
-                    .get(requirement.as_str())
-                    .expect("execution-plan validation resolved every requirement");
+                let bindings = node_requirements
+                    .iter()
+                    .map(|requirement| {
+                        (*requirements
+                            .get(requirement.as_str())
+                            .expect("execution-plan validation resolved every requirement"))
+                        .clone()
+                    })
+                    .collect::<Vec<_>>();
+                let binding = bindings
+                    .first()
+                    .expect("execution-plan validation requires a non-empty binding set");
                 let loaded = match document {
                     Some(document) => {
                         let adapter = binding.adapter.as_ref().with_context(|| {
@@ -710,7 +763,7 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                     None => None,
                 };
                 LoadedExecutionAction::Execute {
-                    requirement: Box::new((*binding).clone()),
+                    requirements: bindings,
                     document: loaded,
                 }
             }
@@ -726,12 +779,19 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                 instructions: instructions.clone(),
             },
             ExecutionPlanAction::Manual {
+                requirement,
                 title,
                 instructions,
-            } => LoadedExecutionAction::Manual {
-                title: title.clone(),
-                instructions: instructions.clone(),
-            },
+            } => {
+                let binding = requirements
+                    .get(requirement.as_str())
+                    .expect("execution-plan validation resolved every requirement");
+                LoadedExecutionAction::Manual {
+                    requirement: Box::new((*binding).clone()),
+                    title: title.clone(),
+                    instructions: instructions.clone(),
+                }
+            }
         };
         nodes.push(LoadedExecutionNode {
             id: node.id.clone(),
@@ -833,11 +893,41 @@ fn validate_catalog_bindings(
                         binding.requirement_instance, parameter.offering_parameter
                     )
                 })?;
-            if parameter.relation != "exact"
-                || observed.property_kind.as_str() != parameter.property_kind
-                || !scalar_equal(&parameter.observed, &observed.value)
-                || observed.unit.as_ref().map(|unit| unit.as_str())
-                    != parameter.observed_unit.as_deref()
+            let frozen_observed =
+                execution_property_value(&parameter.observed, parameter.observed_unit.as_deref())
+                    .with_context(|| {
+                    format!(
+                        "requirement '{}' records an invalid observed parameter value",
+                        binding.requirement_instance
+                    )
+                })?;
+            let catalog_observed = facility_property_value(
+                &observed.value,
+                observed.unit.as_ref().map(|unit| unit.as_str()),
+            )
+            .with_context(|| {
+                format!(
+                    "offering parameter '{}' has a value outside the execution type system",
+                    observed.identity
+                )
+            })?;
+            let constraint = PropertyConstraint {
+                property_kind: PropertyKind::new(parameter.property_kind.clone())?,
+                relation: parameter.relation,
+                required: execution_property_value(
+                    &parameter.required,
+                    parameter.required_unit.as_deref(),
+                )
+                .with_context(|| {
+                    format!(
+                        "requirement '{}' records an invalid required parameter value",
+                        binding.requirement_instance
+                    )
+                })?,
+            };
+            if observed.property_kind.as_str() != parameter.property_kind
+                || !frozen_observed.semantically_equals(&catalog_observed)
+                || !constraint.is_satisfied_by(&catalog_observed)?
             {
                 bail!(
                     "requirement '{}' has a parameter binding inconsistent with '{}'",
@@ -1028,19 +1118,38 @@ fn validate_output_bindings(
     Ok(())
 }
 
-fn scalar_equal(expected: &ExecutionParameterValue, observed: &FacilityScalarValue) -> bool {
-    match (expected, observed) {
-        (ExecutionParameterValue::Text(left), FacilityScalarValue::Text(right))
-        | (ExecutionParameterValue::Integer(left), FacilityScalarValue::Integer(right))
-        | (ExecutionParameterValue::Real(left), FacilityScalarValue::Real(right)) => left == right,
-        (ExecutionParameterValue::Boolean(left), FacilityScalarValue::Boolean(right)) => {
-            left == right
+fn execution_property_value(
+    value: &ExecutionParameterValue,
+    unit: Option<&str>,
+) -> Result<PropertyValue> {
+    let value = match value {
+        ExecutionParameterValue::Text(value) => ScalarValue::Text(value.clone()),
+        ExecutionParameterValue::Integer(value) => {
+            ScalarValue::Integer(ExactInteger::parse(value)?)
         }
-        (ExecutionParameterValue::Iri(left), FacilityScalarValue::Iri(right)) => {
-            left == right.as_str()
+        ExecutionParameterValue::Real(value) => ScalarValue::Real(ExactDecimal::parse(value)?),
+        ExecutionParameterValue::Boolean(value) => ScalarValue::Boolean(*value),
+        ExecutionParameterValue::Iri(value) => ScalarValue::Iri(AbsoluteIri::new(value.clone())?),
+    };
+    let unit = unit.map(UnitIri::new).transpose()?;
+    Ok(PropertyValue::new(value, unit)?)
+}
+
+fn facility_property_value(
+    value: &FacilityScalarValue,
+    unit: Option<&str>,
+) -> Result<PropertyValue> {
+    let value = match value {
+        FacilityScalarValue::Text(value) => ScalarValue::Text(value.clone()),
+        FacilityScalarValue::Integer(value) => ScalarValue::Integer(ExactInteger::parse(value)?),
+        FacilityScalarValue::Real(value) => ScalarValue::Real(ExactDecimal::parse(value)?),
+        FacilityScalarValue::Boolean(value) => ScalarValue::Boolean(*value),
+        FacilityScalarValue::Iri(value) => {
+            ScalarValue::Iri(AbsoluteIri::new(value.as_str().to_owned())?)
         }
-        _ => false,
-    }
+    };
+    let unit = unit.map(UnitIri::new).transpose()?;
+    Ok(PropertyValue::new(value, unit)?)
 }
 
 fn read_frozen_input(
@@ -1155,6 +1264,83 @@ fn load_reviewed_document(
             }
             Ok(LoadedReviewedDocument::Simulation(document))
         }
+        ("opentrons.ot2", OPENTRONS_PYTHON_PROTOCOL_FORMAT) => {
+            let source = std::str::from_utf8(bytes).with_context(|| {
+                format!(
+                    "{} is not a UTF-8 Opentrons Python protocol",
+                    path.display()
+                )
+            })?;
+            for marker in [
+                "from opentrons import protocol_api",
+                "def run(protocol: protocol_api.ProtocolContext) -> None:",
+                "# LAB:INVOCATION_PLAN",
+            ] {
+                if !source.contains(marker) {
+                    bail!(
+                        "{} is missing required Opentrons protocol marker {:?}",
+                        path.display(),
+                        marker
+                    );
+                }
+            }
+            let capability = expected_capability_kind
+                .rsplit(['#', '/'])
+                .find(|segment| !segment.is_empty())
+                .unwrap_or(expected_capability_kind);
+            Ok(LoadedReviewedDocument::ExternalFile {
+                format: format.to_owned(),
+                title: format!("Opentrons OT-2 {capability} protocol"),
+                contents: bytes.to_vec(),
+            })
+        }
+        ("opentrons.flex", OPENTRONS_PROTOCOL_DESIGNER_FORMAT) => {
+            let protocol: serde_json::Value = parse_json_document(bytes, path)?;
+            if protocol
+                .get("schemaVersion")
+                .and_then(serde_json::Value::as_u64)
+                != Some(8)
+            {
+                bail!(
+                    "{} is not an Opentrons Protocol Designer schema 8 document",
+                    path.display()
+                );
+            }
+            if protocol
+                .pointer("/robot/model")
+                .and_then(serde_json::Value::as_str)
+                != Some("OT-3 Standard")
+            {
+                bail!(
+                    "{} does not target the Opentrons Flex robot model",
+                    path.display()
+                );
+            }
+            let commands = protocol
+                .get("commands")
+                .and_then(serde_json::Value::as_array)
+                .with_context(|| {
+                    format!(
+                        "{} has no Protocol Designer command sequence",
+                        path.display()
+                    )
+                })?;
+            if commands.is_empty() {
+                bail!(
+                    "{} has an empty Protocol Designer command sequence",
+                    path.display()
+                );
+            }
+            let capability = expected_capability_kind
+                .rsplit(['#', '/'])
+                .find(|segment| !segment.is_empty())
+                .unwrap_or(expected_capability_kind);
+            Ok(LoadedReviewedDocument::ExternalFile {
+                format: format.to_owned(),
+                title: format!("Opentrons Flex {capability} protocol"),
+                contents: bytes.to_vec(),
+            })
+        }
         _ => bail!(
             "adapter '{driver}' has no runtime executor for reviewed document format '{format}'"
         ),
@@ -1218,9 +1404,9 @@ pub(crate) mod tests {
 
     use lab_runfmt::{
         ExecutionAdapterBinding, ExecutionInventoryReference, ExecutionMaterialBinding,
-        ExecutionMaterialOutput, ExecutionPlanAction, ExecutionPlanNode,
-        ExecutionRequirementBinding, ReviewedRunDocument, RunStep, STAR_RUN_FORMAT,
-        StarRunDocument,
+        ExecutionMaterialOutput, ExecutionMethodSelection, ExecutionPlanAction, ExecutionPlanNode,
+        ExecutionPlanningArtifact, ExecutionPlanningReference, ExecutionRequirementBinding,
+        ReviewedRunDocument, RunStep, STAR_RUN_FORMAT, StarRunDocument,
     };
 
     use super::*;
@@ -1247,6 +1433,14 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
     a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid_handling" ;
     fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Executable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
+ex:manual_workstation a sbol:TopLevel, fac:Asset ; sbol:displayId "manual_workstation" ;
+    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    fac:assetKind fac:Workstation ; fac:locatedIn ex:room ; fac:isActive true ;
+    fac:capability <https://example.org/facility/manual_workstation/material_provisioning> .
+<https://example.org/facility/manual_workstation/material_provisioning>
+    a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "material_provisioning" ;
+    fac:capabilityKind cap:MaterialProvisioning ; fac:qualification fac:Executable ;
+    fac:controlMode fac:ManualControl ; fac:isActive true .
 ex:design a sbol:Component ; sbol:displayId "design" ;
     sbol:hasNamespace <https://example.org/facility> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
@@ -1266,6 +1460,44 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
 
     struct RecordingExecutor {
         calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[test]
+    fn preflight_validates_external_ot2_protocols_without_claiming_a_live_executor() {
+        let source = br#"from opentrons import protocol_api
+PLAN_JSON = "{}"  # LAB:INVOCATION_PLAN
+def run(protocol: protocol_api.ProtocolContext) -> None:
+    pass
+"#;
+        let loaded = load_reviewed_document(
+            "opentrons.ot2",
+            "opentrons.python-protocol",
+            "https://sbol.io/ns/capability#LiquidHandling",
+            source,
+            Path::new("automation_protocol.py"),
+        )
+        .unwrap();
+
+        assert_eq!(loaded.format(), "opentrons.python-protocol");
+        assert_eq!(loaded.title(), "Opentrons OT-2 LiquidHandling protocol");
+        assert!(matches!(
+            loaded,
+            LoadedReviewedDocument::ExternalFile { contents, .. } if contents == source
+        ));
+
+        let error = load_reviewed_document(
+            "opentrons.ot2",
+            "opentrons.python-protocol",
+            "https://sbol.io/ns/capability#LiquidHandling",
+            b"def run(): pass\n",
+            Path::new("automation_protocol.py"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            error.contains("missing required Opentrons protocol marker"),
+            "{error}"
+        );
     }
 
     impl DocumentExecutor for RecordingExecutor {
@@ -1324,22 +1556,42 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                 source_sha256: sha256_hex(INVENTORY.as_bytes()),
                 facility: "https://example.org/facility/facility".to_owned(),
             },
-            requirements: vec![ExecutionRequirementBinding {
-                requirement_instance: "workflow/main/liquid".to_owned(),
-                requirement_template: "workflow::main::liquid".to_owned(),
-                capability_kind: "https://sbol.io/ns/capability#LiquidHandling".to_owned(),
-                offering: "https://example.org/facility/star/liquid_handling".to_owned(),
-                asset: "https://example.org/facility/star".to_owned(),
-                minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
-                observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
-                control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
-                parameters: Vec::new(),
-                adapter: Some(ExecutionAdapterBinding {
-                    driver: "hamilton.star".to_owned(),
-                    profile_path: "adapters/star.toml".to_owned(),
-                    profile_sha256: sha256_hex(b""),
-                }),
-            }],
+            planning: None,
+            requirements: vec![
+                ExecutionRequirementBinding {
+                    requirement_instance: "workflow/main/liquid".to_owned(),
+                    requirement_template: "workflow::main::liquid".to_owned(),
+                    capability_kind: "https://sbol.io/ns/capability#LiquidHandling".to_owned(),
+                    offering: "https://example.org/facility/star/liquid_handling".to_owned(),
+                    asset: "https://example.org/facility/star".to_owned(),
+                    minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
+                    procedure_implementation: None,
+                    parameters: Vec::new(),
+                    adapter: Some(ExecutionAdapterBinding {
+                        driver: "hamilton.star".to_owned(),
+                        profile_path: "adapters/star.toml".to_owned(),
+                        profile_sha256: sha256_hex(b""),
+                    }),
+                },
+                ExecutionRequirementBinding {
+                    requirement_instance: "workflow/main/deck-preparation".to_owned(),
+                    requirement_template: "workflow::main::deck-preparation".to_owned(),
+                    capability_kind: "https://sbol.io/ns/capability#MaterialProvisioning"
+                        .to_owned(),
+                    offering:
+                        "https://example.org/facility/manual_workstation/material_provisioning"
+                            .to_owned(),
+                    asset: "https://example.org/facility/manual_workstation".to_owned(),
+                    minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
+                    control_mode: "https://sbol.io/ns/facility#ManualControl".to_owned(),
+                    procedure_implementation: None,
+                    parameters: Vec::new(),
+                    adapter: None,
+                },
+            ],
             materials: vec![ExecutionMaterialBinding {
                 id: "input".to_owned(),
                 component: "https://example.org/facility/design".to_owned(),
@@ -1356,14 +1608,13 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                 position: None,
                 derived_from: vec!["input".to_owned()],
             }],
-            lowerings: Vec::new(),
             // Serialized order is intentionally not dependency order.
             nodes: vec![
                 ExecutionPlanNode {
                     id: "execute-0001".to_owned(),
                     after: vec!["prepare".to_owned()],
                     action: ExecutionPlanAction::Execute {
-                        requirement: "workflow/main/liquid".to_owned(),
+                        requirements: vec!["workflow/main/liquid".to_owned()],
                         document: Some(ReviewedRunDocument {
                             path: "runs/transfer.star.json".to_owned(),
                             format: STAR_RUN_FORMAT.to_owned(),
@@ -1375,6 +1626,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
                     id: "prepare".to_owned(),
                     after: Vec::new(),
                     action: ExecutionPlanAction::Manual {
+                        requirement: "workflow/main/deck-preparation".to_owned(),
                         title: "Prepare the deck".to_owned(),
                         instructions: "Confirm the reviewed deck layout.".to_owned(),
                     },
@@ -1439,6 +1691,56 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
             .unwrap_err()
             .to_string();
         assert!(error.contains("reviewed run document"), "{error}");
+        assert!(error.contains("reviewed plan requires"), "{error}");
+    }
+
+    #[test]
+    fn preflight_freezes_every_compiler_intermediate() {
+        let directory = write_execution_package();
+        let compiler = directory.path().join("compiler");
+        fs::create_dir_all(&compiler).unwrap();
+        let artifacts = [
+            ("planning-problem.json", b"problem\n".as_slice()),
+            ("facility-solution.json", b"solution\n".as_slice()),
+            ("allocated.lair", b"allocated\n".as_slice()),
+            ("adapter-invocations.json", b"invocations\n".as_slice()),
+        ];
+        for (name, contents) in artifacts {
+            fs::write(compiler.join(name), contents).unwrap();
+        }
+        let plan_path = directory.path().join(EXECUTION_PLAN_FILE);
+        let mut plan: ExecutionPlanDocument =
+            serde_json::from_slice(&fs::read(&plan_path).unwrap()).unwrap();
+        let artifact = |name: &str| ExecutionPlanningArtifact {
+            path: format!("compiler/{name}"),
+            sha256: sha256_hex(&fs::read(compiler.join(name)).unwrap()),
+        };
+        let problem = artifact("planning-problem.json");
+        let allocated = artifact("allocated.lair");
+        plan.planning = Some(ExecutionPlanningReference {
+            problem_sha256: problem.sha256.clone(),
+            allocated_lair_sha256: allocated.sha256.clone(),
+            planning_problem: problem,
+            facility_solution: artifact("facility-solution.json"),
+            allocated_lair: allocated,
+            adapter_invocations: artifact("adapter-invocations.json"),
+            methods: vec![ExecutionMethodSelection {
+                choice: "main::body[0]".to_owned(),
+                source_operation: "std.bio.build.realize".to_owned(),
+                method: "https://example.org/method#automated".to_owned(),
+                tasks: vec!["main::body[0]::setup".to_owned()],
+            }],
+        });
+        let mut bytes = serde_json::to_vec_pretty(&plan).unwrap();
+        bytes.push(b'\n');
+        fs::write(&plan_path, bytes).unwrap();
+        load_execution_directory(directory.path()).unwrap();
+
+        fs::write(compiler.join("allocated.lair"), "changed\n").unwrap();
+        let error = load_execution_directory(directory.path())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("compiler allocated LAIR"), "{error}");
         assert!(error.contains("reviewed plan requires"), "{error}");
     }
 

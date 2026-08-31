@@ -94,6 +94,12 @@ files = ["python", "tests"]
 module = ["sbol3.*", "loica.*"]
 ignore_missing_imports = true
 
+# Pytest's approximation helper conditionally imports NumPy for annotations.
+# Lab does not use that helper, so keep those transitive types out of the SDK check.
+[[tool.mypy.overrides]]
+module = ["_pytest.python_api"]
+follow_imports = "skip"
+
 # A record's fields are Lab types stated as annotations, so the constructor
 # mypy would need to see is one `@lab.record` builds at runtime. Reading it
 # statically is what a mypy plugin is for, the way dataclasses have one, and

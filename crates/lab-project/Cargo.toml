@@ -8,12 +8,17 @@ repository.workspace = true
 description = "Package-aware project loading and compilation for Lab."
 
 [dependencies]
+lab-capability.workspace = true
+lab-compiler.workspace = true
+lab-inventory.workspace = true
 lab-language.workspace = true
+lab-method.workspace = true
 lab-package.workspace = true
 lab-sbol.workspace = true
 sbol3.workspace = true
 semver.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 

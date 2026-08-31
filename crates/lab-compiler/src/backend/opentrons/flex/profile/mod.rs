@@ -17,14 +17,16 @@ use serde::{Deserialize, Serialize};
 pub use crate::backend::opentrons::flex::profile::error::FlexProfileError;
 // Only the field types other `flex` submodules reach into directly
 // are re-exported; the rest of the schema stays behind `FlexAdapterProfile`.
-use crate::backend::opentrons::flex::profile::schema::{FlexDeck, Instruments};
-pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Plates, Stages, TipRacks};
+use crate::backend::opentrons::flex::profile::schema::{
+    FlexDeck, FlexTechniqueCalibration, Instruments,
+};
+pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Stages, TipRacks};
 
 /// Slots the installed thermocycler occupies.
 const THERMOCYCLER_SLOTS: [FlexSlot; 2] = [FlexSlot::A1, FlexSlot::B1];
 
 /// The complete Flex implementation configuration consumed by planning and emission.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FlexAdapterProfile {
     /// File-stem label supplied by the exact Asset binding. It is review metadata, not profile input.
@@ -37,6 +39,8 @@ pub struct FlexAdapterProfile {
     pub deck: FlexDeck,
     #[serde(default)]
     pub stages: Stages,
+    #[serde(default)]
+    pub techniques: FlexTechniqueCalibration,
 }
 
 impl Default for FlexAdapterProfile {
@@ -45,6 +49,7 @@ impl Default for FlexAdapterProfile {
             name: "opentrons.flex".to_owned(),
             instruments: Instruments::default(),
             deck: FlexDeck::default(),
+            techniques: FlexTechniqueCalibration::default(),
             stages: Stages::default(),
         }
     }
@@ -62,6 +67,9 @@ impl FlexAdapterProfile {
     pub fn validate(&self) -> Result<(), FlexProfileError> {
         self.validate_instruments()?;
         self.validate_deck()?;
+        self.techniques
+            .validate()
+            .map_err(|message| FlexProfileError::InvalidTechnique { message })?;
         for (stage, claims) in [
             ("assembly", self.assembly_claims()),
             ("transformation", self.transformation_claims()),

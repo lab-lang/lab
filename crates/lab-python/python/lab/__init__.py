@@ -18,6 +18,10 @@ mapped back to the line of Python that produced the Lab it is about.
 import json
 from typing import Any, cast
 
+from . import adapters as adapters
+from . import methods as methods
+from . import planning as planning
+from . import procedures as procedures
 from . import sbol as sbol
 from ._artifacts import artifact
 from ._circuits import (
@@ -71,12 +75,16 @@ from ._source import Origin
 from ._types import TypeApplication
 from ._vocabulary import ArtifactKind, Function, Symbol
 from ._workflows import Context, Workflow, WorkflowCall, WorkflowError, workflow
+from .adapters import catalog as adapter_catalog
+from .adapters import validate_profile as validate_adapter_profile
 
 # The durable effects of the standard library, which a workflow performs
 # through `wf.perform`. They are the generated mirror's own objects, so
 # reaching them here and reaching them through their module are the same
 # thing, and either spelling emits the same `use` line.
 from .bio.build import realize
+from .methods import RefinedProgram, refine
+from .planning import FacilityPlan, plan, plan_project
 from .plasmid import (
     assemble,
     capture,
@@ -137,6 +145,7 @@ __all__ = [
     "Evidence",
     "Evidential",
     "Expression",
+    "FacilityPlan",
     "Fields",
     "Fragment",
     "Function",
@@ -161,6 +170,7 @@ __all__ = [
     "Record",
     "RecordDeclaration",
     "RecordType",
+    "RefinedProgram",
     "Regulation",
     "Rejected",
     "RestrictionEnzyme",
@@ -179,6 +189,8 @@ __all__ = [
     "WorkflowError",
     "acceptance_failed",
     "accepts",
+    "adapter_catalog",
+    "adapters",
     "analyze",
     "analyze_sources",
     "and_",
@@ -200,17 +212,23 @@ __all__ = [
     "inconclusive_sequence",
     "induced",
     "layout",
+    "methods",
     "no_colonies",
     "not_",
     "or_",
     "pick",
+    "plan",
+    "plan_project",
+    "planning",
     "plate",
+    "procedures",
     "provision",
     "purify",
     "quantify",
     "realize",
     "record",
     "recover",
+    "refine",
     "repressed",
     "sbol",
     "screen",
@@ -221,5 +239,6 @@ __all__ = [
     "store",
     "synthesize",
     "transform",
+    "validate_adapter_profile",
     "workflow",
 ]

@@ -1,45 +1,62 @@
 //! Target-neutral planning shared by compiler backends.
 
 mod adapters;
-mod allocation;
-mod capability;
 mod execution;
+mod explain;
 mod inventory;
+mod invocation;
 mod lowering;
 mod model;
+mod problem;
 mod resolution;
+mod schedule;
+mod solver;
 
 pub use adapters::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
     AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
-    BoundCapabilityParameterValue, ResolvedAdapterBinding,
-};
-pub use allocation::{
-    AllocatedAdapter, AllocationScalarValue, CandidateRejectionReason, EligibleCapabilityCandidate,
-    FACILITY_ALLOCATION_SCHEMA_VERSION, FacilityAllocation, FacilityAllocationError,
-    MatchedCapabilityParameter, RejectedCapabilityCandidate, RequirementAllocation,
-};
-pub use capability::{
-    CAPABILITY_REQUIREMENT_INSTANCES_SCHEMA_VERSION, CAPABILITY_REQUIREMENTS_SCHEMA_VERSION,
-    CapabilityInstantiationError, CapabilityMaterialInput, CapabilityMaterialOutput,
-    CapabilityParameterConstraint, CapabilityRequirement, CapabilityRequirementError,
-    CapabilityRequirementInstance, CapabilityRequirementInstances, CapabilityRequirementSource,
-    CapabilityRequirements, CapabilityValueInput, CapabilityValueOutput, ParameterRelation,
-    RequirementControlMode, RequirementQualification, StatementBlock, StatementPathSegment,
-    WorkflowCallSite, WorkflowIdentity,
+    BoundCapabilityParameterValue, BoundProcedureImplementation, ResolvedAdapterBinding,
 };
 pub use execution::{
-    ExecutionPlanBuildError, ExecutionPlanOptions, PlannedMaterialMove, build_execution_plan,
+    ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
 };
+pub use explain::explain_facility_planning_error;
 pub use inventory::BuildInventoryError;
+pub(crate) use invocation::hex_sha256;
+pub use invocation::{
+    ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
+    AdapterInvocationPlan, AdapterInvocationValidationError, AllocatedMethod,
+    AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter, adapter_invocation_id,
+};
 pub use lowering::{
     FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
-    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringProjectionError,
-    FacilityLoweringRoute, reviewed_lowering_bundles,
+    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
 };
 pub use model::{
     ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,
     DependencyBuildManifest, DependencyBuildStatus, DependencyEdge, DependencyInventorySource,
     DependencyNode, LegacyBuildInventory, MaterialLotBinding, MaterialLotBuildInventory,
 };
+pub use problem::{
+    PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
+    PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,
+    PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
+    PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+};
 pub use resolution::{DependencyGraphError, resolve_dependency_graph};
+pub use schedule::{
+    ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION, AllocatedExecutionGroup,
+    AllocatedProcedureSchedule, AllocatedProcedureScheduleError, ScheduledPhysicalLocation,
+    ScheduledValueRef,
+};
+pub use solver::{
+    AdapterRequirement, AlternativeMaterialBinding, AlternativeMethod,
+    AlternativeRequirementBinding, AssetPin, AssetPinSelector,
+    FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningError, FacilityPlanningPolicy,
+    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MethodPin,
+    MethodPinSelector, PlanningAlternative, PlanningCandidateRejectionReason,
+    PlanningMaterialRejectionReason, PlanningRejectedOffering, RejectedMethodCandidate,
+    RejectedPlanningMaterial, RejectedPlanningRequirement, SelectedAdapter,
+    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod,
+    SelectedProcedureTask, SelectedRequirementBinding,
+};

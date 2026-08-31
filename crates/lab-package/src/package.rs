@@ -139,6 +139,10 @@ pub enum PackageError {
     UnsupportedEdition(String),
     #[error("invalid dependency '{name}': {message}")]
     InvalidDependency { name: String, message: String },
+    #[error("invalid planning configuration: {0}")]
+    InvalidPlanning(String),
+    #[error("invalid Method catalog configuration: {0}")]
+    InvalidMethods(String),
     #[error("invalid inventory configuration: {0}")]
     InvalidInventory(String),
     #[error("invalid execution configuration: {0}")]

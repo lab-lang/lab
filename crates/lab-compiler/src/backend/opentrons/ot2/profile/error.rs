@@ -21,4 +21,9 @@ pub enum Ot2ProfileError {
     },
     #[error("{context} must declare at least one deck slot")]
     NoSlots { context: String },
+    #[error("OT-2 technique calibration '{parameter}' {message}")]
+    InvalidTechnique {
+        parameter: &'static str,
+        message: &'static str,
+    },
 }

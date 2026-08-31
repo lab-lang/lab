@@ -43,12 +43,27 @@ fn facility_plan_typesets_every_document_to_pdf() {
         serde_json::from_slice(&std::fs::read(plan_root.join("facility_lowering.json")).unwrap())
             .unwrap();
     let target_root = plan_root.join(lowering["routes"][0]["output"].as_str().unwrap());
-    for document in [
-        "manual_protocol.pdf",
-        "dependency_report.pdf",
-        "wave-001/manual_protocol.pdf",
-        "wave-002/manual_protocol.pdf",
-    ] {
+    let documents = lowering["routes"][0]["artifacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|artifact| artifact["role"] == "operator_document")
+        .map(|artifact| artifact["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(documents.len(), 4);
+    assert_eq!(
+        documents
+            .iter()
+            .map(|document| Path::new(document).file_name().unwrap().to_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from([
+            "assembly_manual_protocol.pdf",
+            "plate_map.pdf",
+            "plating_manual_protocol.pdf",
+            "transformation_manual_protocol.pdf",
+        ])
+    );
+    for document in documents {
         let path = target_root.join(document);
         let bytes = std::fs::read(&path)
             .unwrap_or_else(|error| panic!("missing {}: {error}", path.display()));

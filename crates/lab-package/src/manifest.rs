@@ -57,6 +57,10 @@ pub struct PackageManifest {
     #[serde(default)]
     pub build: BuildMetadata,
     #[serde(default)]
+    pub methods: MethodCatalogMetadata,
+    #[serde(default)]
+    pub planning: PlanningMetadata,
+    #[serde(default)]
     pub inventory: InventoryMetadata,
     #[serde(default)]
     pub execution: ExecutionMetadata,
@@ -77,6 +81,71 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
+}
+
+/// Portable Method documents contributed by this package.
+///
+/// Each JSON document uses the versioned `lab-method` catalog contract. Dependencies contribute
+/// their documents before their consumers, and the project composes the complete set with Lab's
+/// standard Methods before refinement.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MethodCatalogMetadata {
+    #[serde(default)]
+    pub documents: Vec<PathBuf>,
+}
+
+/// Explicit policy for resolving method and facility choices.
+///
+/// Method definitions live in versioned catalog documents. Planning configuration only selects
+/// among the resulting alternatives by stable source operation, choice, and Method identity.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanningMetadata {
+    #[serde(default, rename = "adapter-requirement")]
+    pub adapter_requirement: PlanningAdapterRequirement,
+    #[serde(default)]
+    pub methods: Vec<MethodPinMetadata>,
+    /// Which Asset satisfies a requirement when a facility offers more than one that could.
+    #[serde(default)]
+    pub assets: Vec<AssetPinMetadata>,
+}
+
+/// Selects one Asset for a capability kind or for one exact requirement.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssetPinMetadata {
+    /// Pin every requirement demanding this capability kind.
+    #[serde(default, rename = "capability-kind")]
+    pub capability_kind: Option<String>,
+    /// Pin one exact requirement ID from the emitted planning problem.
+    #[serde(default)]
+    pub requirement: Option<String>,
+    /// Exact Asset IRI selected for the matching requirement or requirements.
+    pub asset: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlanningAdapterRequirement {
+    /// Freeze a compatible configured adapter when one exists.
+    #[default]
+    Optional,
+    /// Require a configured planning adapter for every non-manual offering.
+    NonManual,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MethodPinMetadata {
+    /// Pin every reachable occurrence of this exact frontend Intent operation.
+    #[serde(default, rename = "source-operation")]
+    pub source_operation: Option<String>,
+    /// Pin one exact choice ID from the emitted planning problem.
+    #[serde(default)]
+    pub choice: Option<String>,
+    /// Exact method identity selected for the matching choice or choices.
+    pub method: String,
 }
 
 /// The facility catalog a package may plan against.
@@ -191,6 +260,8 @@ impl PackageManifest {
                 self.package.edition.clone(),
             ));
         }
+        self.methods.validate()?;
+        self.planning.validate()?;
         self.inventory.validate()?;
         self.execution.validate(&self.inventory)?;
         for (name, dependency) in &self.dependencies {
@@ -235,6 +306,110 @@ impl PackageManifest {
                         })?;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MethodCatalogMetadata {
+    fn validate(&self) -> Result<(), PackageError> {
+        let mut documents = BTreeSet::new();
+        for document in &self.documents {
+            if !valid_relative_path(document) {
+                return Err(PackageError::InvalidMethods(format!(
+                    "document '{}' must be a package-relative path without '..'",
+                    document.display()
+                )));
+            }
+            if document
+                .extension()
+                .and_then(|extension| extension.to_str())
+                != Some("json")
+            {
+                return Err(PackageError::InvalidMethods(format!(
+                    "document '{}' must use the versioned JSON Method catalog format",
+                    document.display()
+                )));
+            }
+            if !documents.insert(document) {
+                return Err(PackageError::InvalidMethods(format!(
+                    "document '{}' is declared more than once",
+                    document.display()
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl PlanningMetadata {
+    fn validate(&self) -> Result<(), PackageError> {
+        let mut selectors = BTreeSet::new();
+        for pin in &self.methods {
+            let selector = match (&pin.source_operation, &pin.choice) {
+                (Some(source_operation), None) if valid_local_id(source_operation) => {
+                    format!("source-operation:{source_operation}")
+                }
+                (None, Some(choice)) if valid_local_id(choice) => format!("choice:{choice}"),
+                (Some(_), Some(_)) => {
+                    return Err(PackageError::InvalidPlanning(
+                        "a method pin must declare exactly one of 'source-operation' or 'choice'"
+                            .to_owned(),
+                    ));
+                }
+                _ => {
+                    return Err(PackageError::InvalidPlanning(
+                        "a method pin needs one non-empty 'source-operation' or 'choice' without whitespace"
+                            .to_owned(),
+                    ));
+                }
+            };
+            if !valid_absolute_iri(&pin.method) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "method '{}' must be an absolute IRI",
+                    pin.method
+                )));
+            }
+            if !selectors.insert(selector.clone()) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "method selector '{selector}' is declared more than once"
+                )));
+            }
+        }
+        let mut asset_selectors = BTreeSet::new();
+        for pin in &self.assets {
+            let selector = match (&pin.capability_kind, &pin.requirement) {
+                (Some(capability_kind), None) if valid_absolute_iri(capability_kind) => {
+                    format!("capability-kind:{capability_kind}")
+                }
+                (None, Some(requirement)) if valid_local_id(requirement) => {
+                    format!("requirement:{requirement}")
+                }
+                (Some(_), Some(_)) => {
+                    return Err(PackageError::InvalidPlanning(
+                        "an asset pin must declare exactly one of 'capability-kind' or 'requirement'"
+                            .to_owned(),
+                    ));
+                }
+                (None, None) => "any-requirement".to_owned(),
+                _ => {
+                    return Err(PackageError::InvalidPlanning(
+                        "an asset pin needs an absolute 'capability-kind' IRI or a non-empty 'requirement', or neither to bind every requirement the Asset can serve"
+                            .to_owned(),
+                    ));
+                }
+            };
+            if !valid_absolute_iri(&pin.asset) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "asset '{}' must be an absolute IRI",
+                    pin.asset
+                )));
+            }
+            if !asset_selectors.insert(selector.clone()) {
+                return Err(PackageError::InvalidPlanning(format!(
+                    "asset selector '{selector}' is declared more than once"
+                )));
             }
         }
         Ok(())
@@ -328,6 +503,13 @@ fn valid_adapter_id(value: &str) -> bool {
                     character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
                 })
         })
+}
+
+fn valid_local_id(value: &str) -> bool {
+    !value.is_empty()
+        && !value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
 }
 
 fn valid_absolute_iri(value: &str) -> bool {
@@ -515,6 +697,146 @@ facility = "https://example.org/ebef/facility"
             Some("https://example.org/ebef/facility")
         );
         manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn reads_exact_method_pins_and_adapter_policy() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "golden-gate"
+version = "0.1.0"
+
+[planning]
+adapter-requirement = "non-manual"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://www.lab-compiler.org/ns/method#automated-golden-gate"
+
+[[planning.methods]]
+choice = "choice-17"
+method = "https://www.lab-compiler.org/ns/method#controlled-recovery"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.planning.adapter_requirement,
+            PlanningAdapterRequirement::NonManual
+        );
+        assert_eq!(manifest.planning.methods.len(), 2);
+        assert_eq!(
+            manifest.planning.methods[0].source_operation.as_deref(),
+            Some("std.bio.build.realize")
+        );
+        assert_eq!(
+            manifest.planning.methods[1].choice.as_deref(),
+            Some("choice-17")
+        );
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn reads_portable_method_catalog_documents_separately_from_planning_policy() {
+        let manifest = PackageManifest::parse(
+            r#"[package]
+name = "golden-gate"
+version = "0.1.0"
+
+[methods]
+documents = ["methods/liquid-handling.json", "methods/incubation.json"]
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://example.org/method/automated-golden-gate"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.methods.documents,
+            [
+                PathBuf::from("methods/liquid-handling.json"),
+                PathBuf::from("methods/incubation.json")
+            ]
+        );
+        assert_eq!(manifest.planning.methods.len(), 1);
+        manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn rejects_escaping_duplicate_or_non_json_method_documents() {
+        for documents in [
+            "[\"../methods.json\"]",
+            "[\"methods/catalog.toml\"]",
+            "[\"methods/catalog.json\", \"methods/catalog.json\"]",
+        ] {
+            let manifest = PackageManifest::parse(&format!(
+                "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[methods]\ndocuments = {documents}\n"
+            ))
+            .unwrap();
+
+            assert!(matches!(
+                manifest.validate(),
+                Err(PackageError::InvalidMethods(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_ambiguous_duplicate_or_non_iri_method_pins() {
+        let both = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+choice = "choice-17"
+method = "https://example.org/method"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            both.validate(),
+            Err(PackageError::InvalidPlanning(_))
+        ));
+
+        let duplicate = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://example.org/manual"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://example.org/automated"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            duplicate.validate(),
+            Err(PackageError::InvalidPlanning(_))
+        ));
+
+        let relative = PackageManifest::parse(
+            r#"[package]
+name = "test"
+version = "0.1.0"
+
+[[planning.methods]]
+choice = "choice-17"
+method = "automated-golden-gate"
+"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            relative.validate(),
+            Err(PackageError::InvalidPlanning(_))
+        ));
     }
 
     #[test]

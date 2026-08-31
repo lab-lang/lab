@@ -13,13 +13,13 @@ use thiserror::Error;
 use crate::lair::analysis::MaterialLinearityAnalysis;
 use crate::lair::stage::IrStage;
 
-/// Require every physical Protocol material value to have at most one consumer.
+/// Require every physical Procedure material value to have at most one consumer.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct CheckMaterialLinearityPass;
 
 impl Pass for CheckMaterialLinearityPass {
     fn name(&self) -> &str {
-        "protocol-check-material-linearity"
+        "check-material-linearity"
     }
 
     fn run(
@@ -47,10 +47,10 @@ pub struct PassInfo {
 }
 
 const MATERIAL_LINEARITY: PassInfo = PassInfo {
-    name: "protocol-check-material-linearity",
+    name: "check-material-linearity",
     summary: "require every physical material value to have at most one consumer",
-    input: IrStage::MethodSelectedProtocol,
-    output: IrStage::MethodSelectedProtocol,
+    input: IrStage::AllocatedProcedure,
+    output: IrStage::AllocatedProcedure,
 };
 
 const REGISTERED_PASSES: [PassInfo; 1] = [MATERIAL_LINEARITY];
@@ -78,7 +78,7 @@ impl FromStr for RegisteredPass {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim() {
-            "protocol-check-material-linearity" => Ok(Self::CheckMaterialLinearity),
+            "check-material-linearity" => Ok(Self::CheckMaterialLinearity),
             name => Err(PassPipelineError::UnknownPass {
                 name: name.to_owned(),
                 available: registered_passes()
@@ -164,14 +164,14 @@ mod tests {
     #[test]
     fn parses_and_prints_module_anchored_pipelines() {
         let pipeline = PassPipeline::from_str(
-            "builtin.module(protocol-check-material-linearity,protocol-check-material-linearity)",
+            "builtin.module(check-material-linearity,check-material-linearity)",
         )
         .unwrap();
 
         assert_eq!(pipeline.passes().len(), 2);
         assert_eq!(
             pipeline.to_string(),
-            "builtin.module(protocol-check-material-linearity,protocol-check-material-linearity)"
+            "builtin.module(check-material-linearity,check-material-linearity)"
         );
     }
 
@@ -180,7 +180,7 @@ mod tests {
         let error = PassPipeline::from_str("does-not-exist").unwrap_err();
         assert_eq!(
             error.to_string(),
-            "unknown pass 'does-not-exist'; available passes: protocol-check-material-linearity"
+            "unknown pass 'does-not-exist'; available passes: check-material-linearity"
         );
     }
 }

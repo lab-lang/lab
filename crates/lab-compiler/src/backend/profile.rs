@@ -3,8 +3,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-fn default_plate_capacity() -> usize {
-    96
+use crate::backend::resources::PlateCapacity;
+
+fn default_plate_capacity() -> PlateCapacity {
+    PlateCapacity::new(96).expect("96 is an addressable plate geometry")
 }
 
 /// One or more identical plates. Allocation fills each in turn, so adding a
@@ -15,12 +17,12 @@ pub struct Plates {
     pub labware: String,
     pub slots: Vec<String>,
     #[serde(default = "default_plate_capacity")]
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 impl Plates {
     pub fn total_capacity(&self) -> usize {
-        self.slots.len() * self.capacity
+        self.slots.len() * self.capacity.get()
     }
 }
 
@@ -30,12 +32,12 @@ pub struct TipRacks {
     pub labware: String,
     pub slots: Vec<String>,
     #[serde(default = "default_plate_capacity")]
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 impl TipRacks {
     pub fn total_capacity(&self) -> usize {
-        self.slots.len() * self.capacity
+        self.slots.len() * self.capacity.get()
     }
 }
 
@@ -45,4 +47,14 @@ pub struct MediaRack {
     pub labware: String,
     pub slot: String,
     pub medium_well: String,
+}
+
+/// One addressable rack of reagent or material sources.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SourceRack {
+    pub labware: String,
+    pub slot: String,
+    #[serde(default = "default_plate_capacity")]
+    pub capacity: PlateCapacity,
 }

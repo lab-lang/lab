@@ -17,7 +17,7 @@ pub use error::Ot2ProfileError;
 // Only the field types other `ot2` submodules reach into directly
 // are re-exported; the rest of the schema stays behind `Ot2AdapterProfile`.
 use schema::{Instruments, ProtocolOptions, SharedDeck};
-pub use schema::{Plates, Stages};
+pub use schema::{Stages, TechniqueCalibration};
 
 /// Deck slots an OT-2 can address. Slot 12 is the fixed trash.
 const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
@@ -25,7 +25,7 @@ const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "
 const THERMOCYCLER_SLOTS: [&str; 4] = ["7", "8", "10", "11"];
 
 /// The complete OT-2 implementation configuration consumed by planning and emission.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Ot2AdapterProfile {
     /// File-stem label supplied by the exact Asset binding. It is review metadata, not profile input.
@@ -36,6 +36,8 @@ pub struct Ot2AdapterProfile {
     pub protocol: ProtocolOptions,
     #[serde(default)]
     pub instruments: Instruments,
+    #[serde(default)]
+    pub techniques: TechniqueCalibration,
     #[serde(default)]
     pub deck: SharedDeck,
     #[serde(default)]
@@ -48,6 +50,7 @@ impl Default for Ot2AdapterProfile {
             name: "opentrons.ot2".to_owned(),
             protocol: ProtocolOptions::default(),
             instruments: Instruments::default(),
+            techniques: TechniqueCalibration::default(),
             deck: SharedDeck::default(),
             stages: Stages::default(),
         }
@@ -64,13 +67,14 @@ impl Ot2AdapterProfile {
     }
 
     pub fn validate(&self) -> Result<(), Ot2ProfileError> {
+        self.validate_techniques()?;
         for (stage, claims) in [
             ("assembly", self.assembly_claims()),
             ("transformation", self.transformation_claims()),
             ("plating", self.plating_claims()),
         ] {
             let mut seen: Vec<(String, String)> = Vec::new();
-            for (context, slots) in claims {
+            for (context, slots) in self.fixture_claims().into_iter().chain(claims) {
                 if slots.is_empty() {
                     return Err(Ot2ProfileError::NoSlots { context });
                 }
@@ -96,28 +100,104 @@ impl Ot2AdapterProfile {
         Ok(())
     }
 
-    fn temperature_claim(&self) -> (String, Vec<String>) {
-        (
+    fn validate_techniques(&self) -> Result<(), Ot2ProfileError> {
+        let calibration = &self.techniques;
+        for (parameter, value) in [
+            ("aspiration_rate", calibration.aspiration_rate),
+            ("dispense_rate", calibration.dispense_rate),
+            (
+                "tracked_meniscus_offset_mm",
+                calibration.tracked_meniscus_offset_mm,
+            ),
+            (
+                "tracked_usable_depth_offset_mm",
+                calibration.tracked_usable_depth_offset_mm,
+            ),
+            (
+                "tracked_minimum_height_mm",
+                calibration.tracked_minimum_height_mm,
+            ),
+            ("above_liquid_offset_mm", calibration.above_liquid_offset_mm),
+            ("touch_tip_speed_mm_s", calibration.touch_tip_speed_mm_s),
+        ] {
+            if !value.is_finite() || value <= 0.0 {
+                return Err(Ot2ProfileError::InvalidTechnique {
+                    parameter,
+                    message: "must be finite and greater than zero",
+                });
+            }
+        }
+        for (parameter, value) in [
+            (
+                "material_surface_offset_mm",
+                calibration.material_surface_offset_mm,
+            ),
+            (
+                "touch_tip_vertical_offset_mm",
+                calibration.touch_tip_vertical_offset_mm,
+            ),
+        ] {
+            if !value.is_finite() {
+                return Err(Ot2ProfileError::InvalidTechnique {
+                    parameter,
+                    message: "must be finite",
+                });
+            }
+        }
+        for (parameter, value) in [
+            (
+                "tracked_low_volume_fraction",
+                calibration.tracked_low_volume_fraction,
+            ),
+            ("touch_tip_radius", calibration.touch_tip_radius),
+        ] {
+            if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                return Err(Ot2ProfileError::InvalidTechnique {
+                    parameter,
+                    message: "must be finite and between zero and one",
+                });
+            }
+        }
+        if calibration.tracked_source_volume_ul == 0 {
+            return Err(Ot2ProfileError::InvalidTechnique {
+                parameter: "tracked_source_volume_ul",
+                message: "must be greater than zero",
+            });
+        }
+        if calibration.tracked_chunk_size == 0 {
+            return Err(Ot2ProfileError::InvalidTechnique {
+                parameter: "tracked_chunk_size",
+                message: "must be greater than zero",
+            });
+        }
+        Ok(())
+    }
+
+    /// Slots occupied by bolted-down hardware for the whole run, whichever stage is executing.
+    /// Every stage's claims are checked against these, so a stage cannot quietly place labware
+    /// on a module's slot.
+    fn fixture_claims(&self) -> Vec<(String, Vec<String>)> {
+        vec![(
             "the temperature module".to_owned(),
             vec![self.deck.temperature_module.slot.clone()],
-        )
+        )]
     }
 
     fn assembly_claims(&self) -> Vec<(String, Vec<String>)> {
-        vec![
-            self.temperature_claim(),
-            (
-                "assembly small tips".to_owned(),
-                self.stages.assembly.small_tips.slots.clone(),
-            ),
-        ]
+        vec![(
+            "assembly small tips".to_owned(),
+            self.stages.assembly.small_tips.slots.clone(),
+        )]
     }
 
     fn transformation_claims(&self) -> Vec<(String, Vec<String>)> {
         let stage = &self.stages.transformation;
         vec![
-            self.temperature_claim(),
             ("the DNA plate".to_owned(), stage.dna_plate.slots.clone()),
+            (
+                "the transformation source rack".to_owned(),
+                vec![stage.source_rack.slot.clone()],
+            ),
             (
                 "transformation small tips".to_owned(),
                 stage.small_tips.slots.clone(),
@@ -161,6 +241,7 @@ impl Ot2AdapterProfile {
             self.deck.thermocycler.labware.clone(),
             stages.assembly.small_tips.labware.clone(),
             stages.transformation.dna_plate.labware.clone(),
+            stages.transformation.source_rack.labware.clone(),
             stages.transformation.small_tips.labware.clone(),
             stages.transformation.large_tips.labware.clone(),
             stages.plating.dilution_plate.labware.clone(),
@@ -182,8 +263,37 @@ mod tests {
         assert_eq!(profile.name, "reference-bench");
         assert_eq!(profile.protocol.api_level, "2.21");
         assert_eq!(profile.deck.temperature_module.slot, "1");
-        assert_eq!(profile.stages.plating.agar_plate.slots, ["5", "6"]);
-        assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 192);
+        assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
+        assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 96);
+        assert_eq!(profile.techniques.tracked_chunk_size, 8);
+        assert_eq!(profile.techniques.touch_tip_vertical_offset_mm, -14.0);
+    }
+
+    #[test]
+    fn a_deck_fixture_holds_its_slot_during_every_stage() {
+        let error = Ot2AdapterProfile::parse(
+            "bench-three",
+            r#"
+[deck.temperature_module]
+model = "temperature module gen2"
+slot = "4"
+labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
+capacity = 24
+
+[stages.plating.large_tips]
+labware = "opentrons_96_filtertiprack_200ul"
+slots = ["4"]
+capacity = 96
+"#,
+        )
+        .unwrap_err();
+        let message = error.to_string();
+        assert!(
+            message.contains("deck slot '4'")
+                && message.contains("the temperature module")
+                && message.contains("plating"),
+            "the temperature module is bolted down for the whole run, so plating cannot claim its slot: {message}"
+        );
     }
 
     #[test]
@@ -201,7 +311,7 @@ capacity = 96
         assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
         assert_eq!(
             profile.stages.plating.dilution_plate.slots,
-            ["2", "3"],
+            ["2"],
             "an unstated stage keeps the reference layout"
         );
     }
@@ -257,5 +367,15 @@ capacity = 96
         let error = Ot2AdapterProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
             .expect_err("a misspelled key must not fall back to a default");
         assert!(error.to_string().contains("parse"), "{error}");
+    }
+
+    #[test]
+    fn rejects_unsafe_technique_calibration() {
+        let error = Ot2AdapterProfile::parse(
+            "bench-two",
+            "[techniques]\ntracked_low_volume_fraction = 1.5\n",
+        )
+        .expect_err("fractions outside the unit interval are unsafe");
+        assert!(error.to_string().contains("tracked_low_volume_fraction"));
     }
 }

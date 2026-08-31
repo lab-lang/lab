@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Component, Path};
 
+use lab_capability::ConstraintRelation;
 use serde::{Deserialize, Serialize};
 
 /// The format string every `lab.star-run.v0` document declares.
@@ -27,8 +28,14 @@ pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
 /// The format string every semantic capability simulation document declares.
 pub const SIMULATION_RUN_FORMAT: &str = "lab.simulation-run.v1";
 
+/// The reviewed-file format for a standalone Opentrons Python protocol.
+pub const OPENTRONS_PYTHON_PROTOCOL_FORMAT: &str = "opentrons.python-protocol";
+
+/// The reviewed-file format for an Opentrons Protocol Designer JSON protocol.
+pub const OPENTRONS_PROTOCOL_DESIGNER_FORMAT: &str = "opentrons.protocol-designer-json";
+
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v1";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v2";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -112,7 +119,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v1` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v2` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
@@ -131,15 +138,14 @@ pub struct ExecutionPlanDocument {
     /// Always [`EXECUTION_PLAN_FORMAT`].
     pub format: String,
     pub inventory: ExecutionInventoryReference,
+    /// Exact compiler decisions and intermediate artifacts, when this plan was compiler-derived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning: Option<ExecutionPlanningReference>,
     pub requirements: Vec<ExecutionRequirementBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<ExecutionMaterialBinding>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<ExecutionMaterialOutput>,
-    /// Immutable whole-program adapter outputs that implement several semantic requirements
-    /// together and therefore cannot be attached honestly to one Execute node.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub lowerings: Vec<ExecutionLoweringBundle>,
     pub nodes: Vec<ExecutionPlanNode>,
 }
 
@@ -153,6 +159,9 @@ impl ExecutionPlanDocument {
         }
         require_sha256("inventory source", &self.inventory.source_sha256)?;
         require_relative_path("inventory source", &self.inventory.document)?;
+        if let Some(planning) = &self.planning {
+            planning.validate()?;
+        }
 
         let mut requirements = BTreeMap::new();
         for requirement in &self.requirements {
@@ -224,124 +233,8 @@ impl ExecutionPlanDocument {
             }
         }
 
-        let mut lowering_ids = BTreeSet::new();
-        let mut lowered_requirements = BTreeSet::new();
-        let mut lowering_artifact_paths = BTreeSet::new();
-        for lowering in &self.lowerings {
-            if lowering.id.is_empty() || !lowering_ids.insert(lowering.id.as_str()) {
-                return Err(format!(
-                    "adapter lowering ID '{}' is empty or repeated",
-                    lowering.id
-                ));
-            }
-            if lowering.asset.is_empty() {
-                return Err(format!(
-                    "adapter lowering '{}' has an empty Asset IRI",
-                    lowering.id
-                ));
-            }
-            require_relative_path("adapter lowering profile", &lowering.adapter.profile_path)?;
-            require_sha256(
-                &format!("adapter lowering profile for '{}'", lowering.id),
-                &lowering.adapter.profile_sha256,
-            )?;
-            if lowering.requirements.is_empty() {
-                return Err(format!(
-                    "adapter lowering '{}' does not identify any triggering requirements",
-                    lowering.id
-                ));
-            }
-            let mut route_requirements = BTreeSet::new();
-            for requirement_id in &lowering.requirements {
-                if !route_requirements.insert(requirement_id.as_str()) {
-                    return Err(format!(
-                        "adapter lowering '{}' repeats requirement '{}'",
-                        lowering.id, requirement_id
-                    ));
-                }
-                if !lowered_requirements.insert(requirement_id.as_str()) {
-                    return Err(format!(
-                        "requirement '{}' belongs to more than one adapter lowering",
-                        requirement_id
-                    ));
-                }
-                let requirement = requirements.get(requirement_id.as_str()).ok_or_else(|| {
-                    format!(
-                        "adapter lowering '{}' references unknown requirement '{}'",
-                        lowering.id, requirement_id
-                    )
-                })?;
-                if requirement.asset != lowering.asset {
-                    return Err(format!(
-                        "adapter lowering '{}' binds Asset '{}', but requirement '{}' binds '{}'",
-                        lowering.id, lowering.asset, requirement_id, requirement.asset
-                    ));
-                }
-                if requirement.adapter.as_ref() != Some(&lowering.adapter) {
-                    return Err(format!(
-                        "adapter lowering '{}' does not match the frozen adapter for requirement '{}'",
-                        lowering.id, requirement_id
-                    ));
-                }
-            }
-            if lowering.artifacts.is_empty() {
-                return Err(format!(
-                    "adapter lowering '{}' has no reviewed artifacts",
-                    lowering.id
-                ));
-            }
-            let mut device_protocols = 0;
-            for artifact in &lowering.artifacts {
-                require_relative_path("reviewed lowering artifact", &artifact.path)?;
-                require_sha256(
-                    &format!(
-                        "reviewed lowering artifact '{}' in '{}'",
-                        artifact.path, lowering.id
-                    ),
-                    &artifact.sha256,
-                )?;
-                if artifact.media_type.is_empty() {
-                    return Err(format!(
-                        "reviewed lowering artifact '{}' in '{}' has no media type",
-                        artifact.path, lowering.id
-                    ));
-                }
-                if !lowering_artifact_paths.insert(artifact.path.as_str()) {
-                    return Err(format!(
-                        "reviewed lowering artifact path '{}' is repeated",
-                        artifact.path
-                    ));
-                }
-                match artifact.role {
-                    ReviewedLoweringArtifactRole::DeviceProtocol => {
-                        device_protocols += 1;
-                        if artifact.format.as_deref().is_none_or(str::is_empty) {
-                            return Err(format!(
-                                "device protocol '{}' in '{}' has no run-document format",
-                                artifact.path, lowering.id
-                            ));
-                        }
-                    }
-                    ReviewedLoweringArtifactRole::OperatorDocument
-                    | ReviewedLoweringArtifactRole::Support => {
-                        if artifact.format.is_some() {
-                            return Err(format!(
-                                "non-protocol artifact '{}' in '{}' declares a run-document format",
-                                artifact.path, lowering.id
-                            ));
-                        }
-                    }
-                }
-            }
-            if device_protocols == 0 {
-                return Err(format!(
-                    "adapter lowering '{}' has no reviewed device protocol",
-                    lowering.id
-                ));
-            }
-        }
-
         let mut nodes = BTreeMap::new();
+        let mut scheduled_requirements = BTreeSet::new();
         for node in &self.nodes {
             if node.id.is_empty() || nodes.insert(node.id.as_str(), node).is_some() {
                 return Err(format!("node ID '{}' is empty or repeated", node.id));
@@ -368,22 +261,48 @@ impl ExecutionPlanDocument {
             }
             match &node.action {
                 ExecutionPlanAction::Execute {
-                    requirement,
+                    requirements: node_requirements,
                     document,
                 } => {
-                    if !requirements.contains_key(requirement.as_str()) {
+                    if node_requirements.is_empty() {
                         return Err(format!(
-                            "execute node '{}' references unknown requirement '{}'",
-                            node.id, requirement
+                            "execute node '{}' does not satisfy any requirements",
+                            node.id
                         ));
                     }
-                    if let Some(document) = document {
-                        if lowered_requirements.contains(requirement.as_str()) {
+                    let mut execution_key = None;
+                    for requirement in node_requirements {
+                        let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
+                            format!(
+                                "execute node '{}' references unknown requirement '{}'",
+                                node.id, requirement
+                            )
+                        })?;
+                        if binding.control_mode == lab_capability::ControlMode::Manual.iri() {
                             return Err(format!(
-                                "execute node '{}' attaches a single run document to requirement '{}', which already belongs to whole-program adapter lowering",
+                                "execute node '{}' represents manual-control requirement '{}'; use a manual node",
                                 node.id, requirement
                             ));
                         }
+                        if !scheduled_requirements.insert(requirement.as_str()) {
+                            return Err(format!(
+                                "requirement '{}' is scheduled by more than one execution node",
+                                requirement
+                            ));
+                        }
+                        let key = (&binding.asset, &binding.adapter);
+                        if let Some(expected) = &execution_key {
+                            if expected != &key {
+                                return Err(format!(
+                                    "execute node '{}' combines requirements with different Asset or adapter bindings",
+                                    node.id
+                                ));
+                            }
+                        } else {
+                            execution_key = Some(key);
+                        }
+                    }
+                    if let Some(document) = document {
                         require_relative_path("reviewed run document", &document.path)?;
                         require_sha256(
                             &format!("reviewed run document for node '{}'", node.id),
@@ -405,14 +324,126 @@ impl ExecutionPlanDocument {
                         ));
                     }
                 }
-                ExecutionPlanAction::Manual { title, .. } if title.is_empty() => {
-                    return Err(format!("manual node '{}' has an empty title", node.id));
+                ExecutionPlanAction::Manual {
+                    requirement,
+                    title,
+                    instructions,
+                } => {
+                    let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
+                        format!(
+                            "manual node '{}' references unknown requirement '{}'",
+                            node.id, requirement
+                        )
+                    })?;
+                    if binding.control_mode != lab_capability::ControlMode::Manual.iri() {
+                        return Err(format!(
+                            "manual node '{}' references requirement '{}' with non-manual control mode '{}'",
+                            node.id, requirement, binding.control_mode
+                        ));
+                    }
+                    if binding.adapter.is_some() {
+                        return Err(format!(
+                            "manual node '{}' references requirement '{}' with a runtime adapter",
+                            node.id, requirement
+                        ));
+                    }
+                    if !scheduled_requirements.insert(requirement.as_str()) {
+                        return Err(format!(
+                            "requirement '{}' is scheduled by more than one execution node",
+                            requirement
+                        ));
+                    }
+                    if title.trim().is_empty() {
+                        return Err(format!("manual node '{}' has an empty title", node.id));
+                    }
+                    if instructions.trim().is_empty() {
+                        return Err(format!("manual node '{}' has empty instructions", node.id));
+                    }
                 }
-                ExecutionPlanAction::Manual { .. } => {}
             }
+        }
+        if let Some(requirement) = requirements
+            .keys()
+            .find(|requirement| !scheduled_requirements.contains(**requirement))
+        {
+            return Err(format!(
+                "requirement '{}' is not scheduled by an execution node",
+                requirement
+            ));
         }
         validate_acyclic(&nodes)
     }
+}
+
+/// Exact compiler provenance frozen into a reviewed execution plan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPlanningReference {
+    pub problem_sha256: String,
+    pub allocated_lair_sha256: String,
+    pub planning_problem: ExecutionPlanningArtifact,
+    pub facility_solution: ExecutionPlanningArtifact,
+    pub allocated_lair: ExecutionPlanningArtifact,
+    pub adapter_invocations: ExecutionPlanningArtifact,
+    pub methods: Vec<ExecutionMethodSelection>,
+}
+
+impl ExecutionPlanningReference {
+    pub fn artifacts(&self) -> [(&'static str, &ExecutionPlanningArtifact); 4] {
+        [
+            ("planning problem", &self.planning_problem),
+            ("facility solution", &self.facility_solution),
+            ("allocated LAIR", &self.allocated_lair),
+            ("adapter invocations", &self.adapter_invocations),
+        ]
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        require_sha256("planning problem", &self.problem_sha256)?;
+        require_sha256("allocated LAIR", &self.allocated_lair_sha256)?;
+        for (label, artifact) in self.artifacts() {
+            require_relative_path(label, &artifact.path)?;
+            require_sha256(label, &artifact.sha256)?;
+        }
+        if self.allocated_lair.sha256 != self.allocated_lair_sha256 {
+            return Err(
+                "allocated LAIR artifact digest must equal the selected LAIR digest".to_owned(),
+            );
+        }
+        if self.methods.is_empty() {
+            return Err("compiler-derived planning contains no selected Methods".to_owned());
+        }
+        let mut choices = BTreeSet::new();
+        for method in &self.methods {
+            if method.choice.is_empty()
+                || method.source_operation.is_empty()
+                || method.method.is_empty()
+                || method.tasks.is_empty()
+                || !choices.insert(method.choice.as_str())
+            {
+                return Err(format!(
+                    "selected Method choice '{}' is empty, repeated, or incomplete",
+                    method.choice
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// One immutable compiler artifact staged next to the reviewed plan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionPlanningArtifact {
+    pub path: String,
+    pub sha256: String,
+}
+
+/// One Method decision from the global facility solution.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionMethodSelection {
+    pub choice: String,
+    pub source_operation: String,
+    pub method: String,
+    pub tasks: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -433,6 +464,8 @@ pub struct ExecutionRequirementBinding {
     pub minimum_qualification: String,
     pub observed_qualification: String,
     pub control_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedure_implementation: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ExecutionParameterBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -443,7 +476,7 @@ pub struct ExecutionRequirementBinding {
 pub struct ExecutionParameterBinding {
     pub argument: String,
     pub property_kind: String,
-    pub relation: String,
+    pub relation: ConstraintRelation,
     #[serde(flatten)]
     pub required: ExecutionParameterValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -469,35 +502,6 @@ pub struct ExecutionAdapterBinding {
     pub driver: String,
     pub profile_path: String,
     pub profile_sha256: String,
-}
-
-/// One immutable adapter invocation whose device artifacts jointly realize several requirements.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExecutionLoweringBundle {
-    pub id: String,
-    pub asset: String,
-    pub adapter: ExecutionAdapterBinding,
-    pub requirements: Vec<String>,
-    pub artifacts: Vec<ReviewedLoweringArtifact>,
-}
-
-/// One hash-addressed child of a reviewed whole-program adapter lowering.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReviewedLoweringArtifact {
-    pub path: String,
-    pub media_type: String,
-    pub sha256: String,
-    pub role: ReviewedLoweringArtifactRole,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub format: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReviewedLoweringArtifactRole {
-    DeviceProtocol,
-    OperatorDocument,
-    Support,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -537,7 +541,7 @@ pub struct ExecutionPlanNode {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ExecutionPlanAction {
     Execute {
-        requirement: String,
+        requirements: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         document: Option<ReviewedRunDocument>,
     },
@@ -548,6 +552,7 @@ pub enum ExecutionPlanAction {
         instructions: String,
     },
     Manual {
+        requirement: String,
         title: String,
         instructions: String,
     },
@@ -732,6 +737,7 @@ mod tests {
                 source_sha256: "a".repeat(64),
                 facility: "https://example.org/facility".to_owned(),
             },
+            planning: None,
             requirements: vec![ExecutionRequirementBinding {
                 requirement_instance: "example::main/body[0]".to_owned(),
                 requirement_template: "example::main::body[0]".to_owned(),
@@ -741,6 +747,7 @@ mod tests {
                 minimum_qualification: "https://sbol.io/ns/facility#Plannable".to_owned(),
                 observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                 control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
+                procedure_implementation: None,
                 parameters: Vec::new(),
                 adapter: Some(ExecutionAdapterBinding {
                     driver: "example.incubator".to_owned(),
@@ -750,14 +757,42 @@ mod tests {
             }],
             materials: Vec::new(),
             outputs: Vec::new(),
-            lowerings: Vec::new(),
             nodes: vec![ExecutionPlanNode {
                 id: "execute-0001".to_owned(),
                 after: Vec::new(),
                 action: ExecutionPlanAction::Execute {
-                    requirement: "example::main/body[0]".to_owned(),
+                    requirements: vec!["example::main/body[0]".to_owned()],
                     document: None,
                 },
+            }],
+        }
+    }
+
+    fn planning_reference() -> ExecutionPlanningReference {
+        ExecutionPlanningReference {
+            problem_sha256: "c".repeat(64),
+            allocated_lair_sha256: "d".repeat(64),
+            planning_problem: ExecutionPlanningArtifact {
+                path: "compiler/planning-problem.json".to_owned(),
+                sha256: "c".repeat(64),
+            },
+            facility_solution: ExecutionPlanningArtifact {
+                path: "compiler/facility-solution.json".to_owned(),
+                sha256: "e".repeat(64),
+            },
+            allocated_lair: ExecutionPlanningArtifact {
+                path: "compiler/allocated.lair".to_owned(),
+                sha256: "d".repeat(64),
+            },
+            adapter_invocations: ExecutionPlanningArtifact {
+                path: "compiler/adapter-invocations.json".to_owned(),
+                sha256: "f".repeat(64),
+            },
+            methods: vec![ExecutionMethodSelection {
+                choice: "main::body[0]".to_owned(),
+                source_operation: "std.bio.build.realize".to_owned(),
+                method: "https://example.org/method#automated".to_owned(),
+                tasks: vec!["main::body[0]::setup".to_owned()],
             }],
         }
     }
@@ -779,6 +814,22 @@ mod tests {
     }
 
     #[test]
+    fn compiler_derived_plans_freeze_method_and_intermediate_artifact_identity() {
+        let mut plan = execution_plan();
+        plan.planning = Some(planning_reference());
+        plan.validate().unwrap();
+
+        let mut changed = plan;
+        changed.planning.as_mut().unwrap().allocated_lair.sha256 = "0".repeat(64);
+        assert!(
+            changed
+                .validate()
+                .unwrap_err()
+                .contains("allocated LAIR artifact digest")
+        );
+    }
+
+    #[test]
     fn execution_plan_validation_rejects_dangling_and_cyclic_dependencies() {
         let mut dangling = execution_plan();
         dangling.nodes[0].after.push("missing".to_owned());
@@ -790,25 +841,32 @@ mod tests {
         );
 
         let mut cyclic = execution_plan();
+        let mut manual = cyclic.requirements[0].clone();
+        manual.requirement_instance = "example::main/body[1]".to_owned();
+        manual.requirement_template = "example::main::body[1]".to_owned();
+        manual.control_mode = lab_capability::ControlMode::Manual.iri().to_owned();
+        manual.adapter = None;
+        cyclic.requirements.push(manual);
         cyclic.nodes.push(ExecutionPlanNode {
-            id: "execute-0002".to_owned(),
+            id: "manual-0002".to_owned(),
             after: vec!["execute-0001".to_owned()],
             action: ExecutionPlanAction::Manual {
+                requirement: "example::main/body[1]".to_owned(),
                 title: "inspect".to_owned(),
                 instructions: "confirm".to_owned(),
             },
         });
-        cyclic.nodes[0].after.push("execute-0002".to_owned());
+        cyclic.nodes[0].after.push("manual-0002".to_owned());
         assert!(cyclic.validate().unwrap_err().contains("dependency cycle"));
     }
 
     #[test]
     fn execution_plan_validation_checks_exact_references_and_digests() {
         let mut plan = execution_plan();
-        let ExecutionPlanAction::Execute { requirement, .. } = &mut plan.nodes[0].action else {
+        let ExecutionPlanAction::Execute { requirements, .. } = &mut plan.nodes[0].action else {
             unreachable!()
         };
-        *requirement = "missing".to_owned();
+        requirements[0] = "missing".to_owned();
         assert!(plan.validate().unwrap_err().contains("unknown requirement"));
 
         let mut plan = execution_plan();
@@ -817,40 +875,45 @@ mod tests {
     }
 
     #[test]
-    fn execution_plan_validation_freezes_whole_program_adapter_lowerings() {
+    fn one_execute_node_can_satisfy_an_atomic_requirement_set() {
         let mut plan = execution_plan();
-        let adapter = plan.requirements[0].adapter.clone().unwrap();
-        plan.lowerings.push(ExecutionLoweringBundle {
-            id: "example-incubator-a1b2c3d4e5f6".to_owned(),
-            asset: "https://example.org/incubator".to_owned(),
-            adapter,
-            requirements: vec!["example::main/body[0]".to_owned()],
-            artifacts: vec![ReviewedLoweringArtifact {
-                path: "lowerings/incubator/run.json".to_owned(),
-                media_type: "application/json".to_owned(),
-                sha256: "c".repeat(64),
-                role: ReviewedLoweringArtifactRole::DeviceProtocol,
-                format: Some("example.incubator-run.v1".to_owned()),
-            }],
-        });
+        plan.requirements[0].procedure_implementation =
+            Some("https://example.org/implementation/pipetting-v1".to_owned());
+        let mut mixing = plan.requirements[0].clone();
+        mixing.requirement_instance = "example::main/body[0]::mixing".to_owned();
+        mixing.requirement_template = "example::main::body[0]::mixing".to_owned();
+        mixing.capability_kind = "https://sbol.io/ns/capability#InWellMixing".to_owned();
+        plan.requirements.push(mixing);
+        let ExecutionPlanAction::Execute { requirements, .. } = &mut plan.nodes[0].action else {
+            unreachable!()
+        };
+        requirements.push("example::main/body[0]::mixing".to_owned());
+
         plan.validate().unwrap();
 
-        let mut wrong_asset = plan.clone();
-        wrong_asset.lowerings[0].asset = "https://example.org/other".to_owned();
-        assert!(
-            wrong_asset
-                .validate()
-                .unwrap_err()
-                .contains("but requirement")
-        );
+        plan.requirements[1].procedure_implementation =
+            Some("https://example.org/implementation/other".to_owned());
+        plan.validate().unwrap();
 
-        let mut missing_format = plan;
-        missing_format.lowerings[0].artifacts[0].format = None;
+        plan.requirements[1].asset = "https://example.org/other-asset".to_owned();
         assert!(
-            missing_format
-                .validate()
+            plan.validate()
                 .unwrap_err()
-                .contains("no run-document format")
+                .contains("different Asset or adapter bindings")
+        );
+    }
+
+    #[test]
+    fn execute_nodes_require_at_least_one_requirement() {
+        let mut plan = execution_plan();
+        let ExecutionPlanAction::Execute { requirements, .. } = &mut plan.nodes[0].action else {
+            unreachable!()
+        };
+        requirements.clear();
+        assert!(
+            plan.validate()
+                .unwrap_err()
+                .contains("does not satisfy any requirements")
         );
     }
 

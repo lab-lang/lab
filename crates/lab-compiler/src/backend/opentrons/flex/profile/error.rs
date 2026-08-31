@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum FlexProfileError {
+    #[error("invalid Flex technique calibration: {message}")]
+    InvalidTechnique { message: &'static str },
     #[error("failed to parse Flex adapter profile: {0}")]
     Parse(#[from] toml::de::Error),
     #[error(

@@ -52,6 +52,22 @@ struct BuildLoweringContext<'a> {
     bindings: &'a BTreeMap<(String, String), TypedExpression>,
 }
 
+/// The three properties a Golden Gate assembly recipe cannot be planned without.
+const ASSEMBLY_RECIPE_FIELDS: [&str; 3] = ["backbone", "components", "restriction_enzyme"];
+
+/// Renders field names for a diagnostic in the order they are declared.
+fn quoted_fields(fields: &[&str]) -> String {
+    let quoted = fields
+        .iter()
+        .map(|field| format!("`{field}`"))
+        .collect::<Vec<_>>();
+    match quoted.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
@@ -98,6 +114,15 @@ pub enum SourceLoweringError {
     UnbalancedReaction {
         artifact: String,
         reaction_volume_ul: u16,
+    },
+    #[error(
+        "artifact '{artifact}' states {present} but not {missing}, so its Golden Gate recipe is \
+incomplete; add {missing} to assemble it, or remove {present} to build it by another method"
+    )]
+    IncompleteAssemblyRecipe {
+        artifact: String,
+        present: String,
+        missing: String,
     },
     #[error("artifact '{0}' has no std.bio.build.realize workflow operation")]
     MissingRealization(String),
@@ -146,7 +171,11 @@ pub(crate) struct PlasmidArtifactIntent {
     pub name: String,
     pub sequence: DnaSequenceIntent,
     pub dependencies: Vec<String>,
-    pub recipe: AssemblyRecipeIntent,
+    /// Golden Gate-specific facts, when the design states a complete recipe.
+    ///
+    /// A plasmid defined by an exact sequence is still a valid realization Intent. It can be
+    /// refined by methods that do not require Golden Gate inputs.
+    pub recipe: Option<AssemblyRecipeIntent>,
     pub actions: Vec<WorkflowActionIntent>,
 }
 
@@ -184,6 +213,12 @@ pub(crate) struct AssemblyChemistryIntent {
     pub digest_minutes: u16,
     pub ligate_temperature_c: u16,
     pub ligate_minutes: u16,
+    pub lid_temperature_c: u16,
+    pub final_digest_temperature_c: u16,
+    pub final_digest_minutes: u16,
+    pub heat_inactivation_temperature_c: u16,
+    pub heat_inactivation_minutes: u16,
+    pub hold_temperature_c: u16,
 }
 
 impl AssemblyChemistryIntent {
@@ -351,40 +386,69 @@ fn lower_artifact(
             // they are all named items to pipette. This list has to track the
             // schema, and reading the kinds' grounding instead of naming them
             // is what would stop it drifting.
-            let components = symbols(
-                "components",
-                &["Part", "Plasmid", "Promoter", "CDS", "Backbone"],
-            )?;
-            let chemistry = AssemblyChemistryIntent {
-                reaction_volume_ul: quantity("reaction_volume", "uL", 20)?,
-                part_volume_ul: quantity("part_volume", "uL", 2)?,
-                enzyme_volume_ul: quantity("enzyme_volume", "uL", 2)?,
-                ligase_volume_ul: quantity("ligase_volume", "uL", 4)?,
-                buffer_volume_ul: quantity("buffer_volume", "uL", 2)?,
-                cycles: whole("assembly_cycles", 75)?,
-                digest_temperature_c: quantity("digest_temperature", "C", 37)?,
-                digest_minutes: quantity("digest_duration", "min", 2)?,
-                ligate_temperature_c: quantity("ligate_temperature", "C", 16)?,
-                ligate_minutes: quantity("ligate_duration", "min", 5)?,
-            };
-            // The backbone joins the reaction alongside every component.
-            if chemistry.water_volume_ul(1 + components.len()).is_none() {
-                return Err(SourceLoweringError::UnbalancedReaction {
+            let stated = |field: &str| properties.iter().any(|property| property.name == field);
+            let (present, missing): (Vec<_>, Vec<_>) = ASSEMBLY_RECIPE_FIELDS
+                .iter()
+                .copied()
+                .partition(|field| stated(field));
+            // A partly stated recipe is a mistake, not a request for manual assembly. Falling back
+            // silently would discard the stated chemistry and plan the artifact by hand instead.
+            if !present.is_empty() && !missing.is_empty() {
+                return Err(SourceLoweringError::IncompleteAssemblyRecipe {
                     artifact: name.to_owned(),
-                    reaction_volume_ul: chemistry.reaction_volume_ul,
+                    present: quoted_fields(&present),
+                    missing: quoted_fields(&missing),
                 });
             }
-            Ok(BuildArtifactIntent::Plasmid(PlasmidArtifactIntent {
-                name: name.to_owned(),
-                sequence: checked_dna(module, name, find("sequence")?, bindings)?,
-                dependencies: flow.dependencies.clone(),
-                recipe: AssemblyRecipeIntent {
+            let recipe = if missing.is_empty() {
+                let components = symbols(
+                    "components",
+                    &["Part", "Plasmid", "Promoter", "CDS", "Backbone"],
+                )?;
+                let chemistry = AssemblyChemistryIntent {
+                    reaction_volume_ul: quantity("reaction_volume", "uL", 20)?,
+                    part_volume_ul: quantity("part_volume", "uL", 2)?,
+                    enzyme_volume_ul: quantity("enzyme_volume", "uL", 2)?,
+                    ligase_volume_ul: quantity("ligase_volume", "uL", 4)?,
+                    buffer_volume_ul: quantity("buffer_volume", "uL", 2)?,
+                    cycles: whole("assembly_cycles", 75)?,
+                    digest_temperature_c: quantity("digest_temperature", "C", 37)?,
+                    digest_minutes: quantity("digest_duration", "min", 2)?,
+                    ligate_temperature_c: quantity("ligate_temperature", "C", 16)?,
+                    ligate_minutes: quantity("ligate_duration", "min", 5)?,
+                    lid_temperature_c: quantity("lid_temperature", "C", 105)?,
+                    final_digest_temperature_c: quantity("final_digest_temperature", "C", 50)?,
+                    final_digest_minutes: quantity("final_digest_duration", "min", 5)?,
+                    heat_inactivation_temperature_c: quantity(
+                        "heat_inactivation_temperature",
+                        "C",
+                        80,
+                    )?,
+                    heat_inactivation_minutes: quantity("heat_inactivation_duration", "min", 10)?,
+                    hold_temperature_c: quantity("hold_temperature", "C", 4)?,
+                };
+                // The backbone joins the reaction alongside every component.
+                if chemistry.water_volume_ul(1 + components.len()).is_none() {
+                    return Err(SourceLoweringError::UnbalancedReaction {
+                        artifact: name.to_owned(),
+                        reaction_volume_ul: chemistry.reaction_volume_ul,
+                    });
+                }
+                Some(AssemblyRecipeIntent {
                     backbone: symbol("backbone", &["Backbone"])?,
                     components,
                     restriction_enzyme: symbol("restriction_enzyme", &["RestrictionEnzyme"])?,
                     assembly_replicates: count("assembly_replicates", 1)?,
                     chemistry,
-                },
+                })
+            } else {
+                None
+            };
+            Ok(BuildArtifactIntent::Plasmid(PlasmidArtifactIntent {
+                name: name.to_owned(),
+                sequence: checked_dna(module, name, find("sequence")?, bindings)?,
+                dependencies: flow.dependencies.clone(),
+                recipe,
                 actions: flow.actions.clone(),
             }))
         }

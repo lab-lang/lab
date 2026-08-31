@@ -520,7 +520,6 @@ impl Checker {
                 } else {
                     OwnershipMode::Copy
                 },
-                parameter_kind: None,
                 value: action_contract::action_reference(
                     self.definition_for_action_word(word),
                     word,
@@ -532,7 +531,6 @@ impl Checker {
             ResolvedAction {
                 operation: format!("workflow.{operation}"),
                 callee: Some(self.definition_for_action_word(operation)),
-                capability: None,
                 arguments,
                 results: outputs
                     .iter()

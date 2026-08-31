@@ -515,11 +515,7 @@ let mut designs = BTreeMap::new();
 let design = designs[&name];
 ```
 
-including the raw index, which panics rather than diagnoses if the name does not
-match. And the edges that actually describe the design space are not SSA at all:
-`realize_components`, `realize_dependencies`, and `strain_plasmids` are
-`VecAttr` of `StringAttr`, and `backend/graph.rs` reconstructs the whole build
-DAG downstream by string equality against the set of assembled artifact names.
+including the raw index, which panics rather than diagnoses if the name does not match. And the edges that actually describe the design space are not SSA at all: `realize_components`, `realize_dependencies`, and `strain_plasmids` are `VecAttr` of `StringAttr`. Current Method refinement turns those exact source parameters into typed Procedure values and material bindings, but the Design layer still lacks SBOL identities on its SSA values.
 
 So a graph is being encoded as strings inside a system that already has a graph.
 The rest of the design dialect is a hand-maintained re-encoding of what SBOL
@@ -531,9 +527,7 @@ One concrete blocker to note before starting: both design ops verify
 artifact name to a bare identifier and would reject any IRI. Carrying identity
 into LAIR needs an attribute type for it rather than reuse of `StringAttr`.
 
-`IrStage::Design` is already a named, standalone, verifier-valid stage, so the
-seam exists. Make that stage an `sbol3::Document` and reduce the pliron design
-op to a reference carrying an IRI. Workflow and Protocol LAIR are untouched.
+`IrStage::Design` is already a named, standalone, verifier-valid stage, so the seam exists. Make that stage an `sbol3::Document` and reduce the pliron design op to a reference carrying an IRI. Workflow, Method, Procedure, Capability, and Allocation LAIR are untouched.
 
 Two payoffs beyond deleting code. The bespoke verifier is replaced by 109
 machine-checkable spec rules. And ADR 0022's unfinished half comes within reach:
@@ -638,13 +632,7 @@ The resulting chain is one identity-preserving graph: a design Component is real
 
 ### Where it should not go
 
-**Workflow and Protocol IR as RDF.** Triples are an unordered set with no
-use-def edges. `material_flow.rs` tracks ownership as `Place(Vec<String>)` over
-ordered statements, and `MaterialLinearityAnalysis` walks SSA use-lists.
-`marpaia/labop` already ran this experiment and reported the result: Golden Gate
-cycling written out one incubation at a time because "a LabOP activity has no
-loop construct", and "material linearity is not represented" filed in its
-omissions report.
+**Workflow, Method, Procedure, Capability, or Allocation IR as RDF.** Triples are an unordered set with no use-def edges. `material_flow.rs` tracks ownership as `Place(Vec<String>)` over ordered statements, and `MaterialLinearityAnalysis` walks SSA use-lists. `marpaia/labop` already ran this experiment and reported the result: Golden Gate cycling written out one incubation at a time because "a LabOP activity has no loop construct", and "material linearity is not represented" filed in its omissions report.
 
 **`CheckedModule` holding sbol3 types.** There is no serde anywhere in sbol-rs,
 and the portable module IR is versioned and must stay self-describing across
@@ -999,12 +987,7 @@ The design gains an identity IRI and type and role term IRIs, while the sequence
 gains its encoding term. That is what lets a backend stop guessing
 `SBO:0000241`, and it is a small enough change to land early.
 
-**Deep.** Once terms are attributes rather than op identity, `design.plasmid`
-and `design.strain` stop being distinct ops, and the stage's representation is
-what should change rather than its attribute list. `IrStage::Design` becomes an
-`sbol3::Document` and the pliron design op degenerates to a reference carrying
-an IRI, as argued above. Workflow and Protocol LAIR are untouched, because that
-is where pliron's SSA and linearity analysis earn their place.
+**Deep.** Once terms are attributes rather than op identity, `design.plasmid` and `design.strain` stop being distinct ops, and the stage's representation is what should change rather than its attribute list. `IrStage::Design` becomes an `sbol3::Document` and the pliron design op degenerates to a reference carrying an IRI, as argued above. Workflow, Method, Procedure, Capability, and Allocation LAIR are untouched, because that is where pliron's SSA and linearity analysis earn their place.
 
 Both versions push on the same wall: `source_lowering.rs` matching `"plasmid"`
 and `"strain"` by name and reading fields by name. That is the unfinished half

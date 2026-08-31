@@ -15,6 +15,7 @@ hardware = ["hamilton-star/usb"]
 [dependencies]
 anyhow = { workspace = true }
 hamilton-star = { workspace = true }
+lab-capability = { workspace = true }
 lab-instruments = { workspace = true }
 lab-inventory = { workspace = true }
 lab-runfmt = { workspace = true }

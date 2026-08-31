@@ -1951,7 +1951,7 @@ workflow invalid(image: Image) -> Evidence:
     }
 
     #[test]
-    fn lowers_action_capability_ownership_and_result_contract() {
+    fn lowers_action_intent_ownership_and_result_contract() {
         let module = compile_module(
             r#"use std.lab.plasmid
 use std.bio.designs
@@ -1970,11 +1970,8 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         let CheckedStatement::Effect { action, .. } = &body[0] else {
             panic!("expected effect")
         };
+        assert_eq!(module.schema_version, "lab.portable-module.v9");
         assert_eq!(action.operation, "std.lab.plasmid.store");
-        assert_eq!(
-            action.capability.as_deref(),
-            Some("https://sbol.io/ns/capability#ColdStorage")
-        );
         assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
         assert_eq!(action.results[0].name, "material");
         assert_eq!(action.results[0].r#type.display_name(), "Material<Plasmid>");

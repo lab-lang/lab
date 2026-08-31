@@ -1,39 +1,53 @@
 # Compiler implementation notes
 
-`crates/lab-compiler/` builds the experimental `labc` compiler and `lab-opt` IR tool. These are deliberately compiler-development interfaces. The standard Lab workflow is exposed through the repository's `lab` binary. None is a stable interface yet.
+`crates/lab-compiler/` builds the experimental `labc` compiler and `lab-opt` IR tool. These are compiler-development interfaces; the standard package, planning, and runtime workflow is exposed through the repository's `lab` binary.
 
-`CheckedModule` is the portable source-compilation boundary, and verified LAIR is the mandatory backend boundary. Source lowering constructs a `PortableLairProgram` containing Design and Workflow LAIR. Protocol selection consumes that program and returns a `ProtocolLairProgram`; typed robot backends consume only that verified Protocol boundary and cannot accept a checked source module directly. Artifact emission remains a separate operation. Output selection therefore does not choose a different parser or semantic pipeline or bypass LAIR.
+Lab is a multi-layer IR compiler. `CheckedModule` is the portable frontend boundary, verified LAIR is the mutable transformation boundary, the facility planning problem is the global constraint boundary, and immutable adapter-invocation and reviewed-plan documents are the implementation and runtime boundaries. A backend cannot consume a checked source module or unresolved Method alternatives.
 
-This is the first vertical slice of a larger progressive lowering stack. LAIR preserves high-level biological and workflow intent while later dialects select laboratory methods, bind materials and resources, schedule work, and finally produce device-specific operations for instruments, people, and services. An SBOLInventory facility graph describes installed capability offerings, while an adapter implements planning, lowering, simulation, or execution for exact Assets selected by reviewed plans.
+The canonical facility-aware pipeline is:
 
-The current Protocol IR is method-selected but not hardware-level. Containers, inventory lots, locations, timing, scheduling, deck geometry, device commands, and durable dispatch belong to later facility, adapter, and runtime layers.
+```text
+checked modules
+    -> Design and Intent LAIR
+    -> Method alternatives containing Procedure tasks and Capability requirements
+    -> one graph-wide Method, MaterialLot, offering, Asset, and adapter solution
+    -> Allocated Procedure LAIR
+    -> immutable adapter invocations
+    -> independently reviewed device and operator documents
+    -> one facility-wide execution plan
+```
+
+`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `FacilityPlanningSolution::solve` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `AllocatedLairProgram::adapter_invocations` is the only production backend projection.
+
+Verifier-valid Allocated Procedure LAIR is the only input device lowering is projected from. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
 
 The source tree follows semantic ownership and dependency direction:
 
-- `src/lair/` contains Design, Workflow, and Protocol dialects; the Workflow-to-Protocol dialect conversion; material-linearity analysis and pass; stage contracts; and the textual IR session;
-- `src/planning/` resolves artifact graphs against inventory without robot knowledge;
-- `src/backend/` defines the adapter registry and concrete single-device compilers, grouped by vendor family under `opentrons/` and `hamilton/`;
-- `src/artifact/` defines generated files independently of filesystem persistence;
-- `lab-runfmt` defines the reviewed documents the `lab` runner interprets, including `lab.execution-plan.v1`, `lab.simulation-run.v1`, `lab.star-run.v0`, `lab.thermocycle-run.v0`, and `lab.plate-read.v0`; and
-- `src/bin/labc/` and `src/bin/lab-opt/` contain developer-facing command orchestration.
+- `src/lair/` owns Design, Workflow/Intent, Method, Procedure, Capability, and Allocation dialects; source lowering; Method refinement; planning-problem extraction; solution application; stage contracts; analyses; and textual IR tooling;
+- `src/planning/` owns the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
+- `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
+- `src/artifact/` owns generated files independently of filesystem persistence;
+- `lab-runfmt` owns the versioned reviewed documents interpreted by the runtime; and
+- `src/bin/labc/` and `src/bin/lab-opt/` own developer-facing command orchestration.
 
-The dependency direction is language model → planning/LAIR → backend → artifacts, with command-line applications owning filesystem writes. LAIR and generic planning do not depend on concrete robots.
+The dependency direction is language model -> LAIR and planning -> adapter invocation -> backend artifacts, with application crates owning filesystems, SBOLInventory loading, and output writes. LAIR and global planning never depend on a concrete robot.
 
-`lab.adapter-catalog.v1` is the machine-readable implementation contract. Each stable adapter ID declares exact SBOLInventory capability-kind and control-mode IRIs, implementation features, accepted and emitted run-document formats, configuration schema, and truthful planning, simulation, and runtime support. Semantic capabilities and implementation features are deliberately separate. A driver is selected only by an explicit binding to an exact Asset IRI, never by manufacturer or model inference.
+`lab.adapter-catalog.v2` is the machine-readable implementation contract. Each stable adapter ID declares implementation features and private configuration schema. Its versioned Procedure implementations separately declare a stable implementation IRI, exact Procedure contract and operation set, required capability kinds, accepted control modes, run-document formats, and truthful planning, lowering, simulation, and runtime services. Broad adapter capability declarations are a compatibility surface for operations that have not yet been normalized and are not authority for a normalized Procedure program. A driver is selected only by an explicit manifest binding to an exact Asset IRI, never by manufacturer or model inference.
 
-`labc --emit` can expose the source AST, checked module IR, or an artifact emitted by a backend; its developer-only `--adapter` and `--adapter-profile` arguments choose one explicit low-level implementation without allowing the profile to select code. `lab-opt` separately parses, verifies, transforms, and prints textual LAIR without acting as another source frontend. Source-to-LAIR lowering lives under `src/lair/`; no production backend module imports `lab-language`. Design LAIR contains only declarative artifact identity, sequence, topology, copy, and acceptance intent. Workflow LAIR preserves `realize`, `provision`, `transform`, `recover`, `dilute`, and `plate` as typed material operations with explicit SSA use-def edges. A Pliron dialect conversion replaces that Workflow dataflow with verifier-valid Protocol operations and then eliminates every Workflow operation.
+`AdapterInvocationPlan` freezes every selected Method and Procedure task, canonical program, exact parameter and material value, requirement-to-offering-to-Asset binding, Procedure implementation, adapter identity, operational-profile digest, inventory digest, and allocated-LAIR digest. Invocations group only the tasks and requirements assigned to one exact Asset and adapter. One independently lowered task owns a non-empty requirement set; a canonical program may require that complete set to bind atomically to one Asset, adapter, and Procedure implementation.
 
-The OT-2 backend lives entirely under `src/backend/opentrons/ot2/` and accepts `ProtocolLairProgram`, not source IR or an OT-2-specific copy of the biological recipe. Its planner analyzes Protocol operations and their use-def chains directly, validates adapter constraints, and allocates an `Ot2ExecutionPlan`. The manifest, manual protocol, and three OT-2 protocol stages are rendered from that one execution plan. Robot constants, deck capacities, labware choices, Python generation, and robot-specific package text do not live in generic rendering, planning, or the language frontend. Robot behavior is maintained in the backend-local `python/` project and checked with Ruff, strict mypy, pytest, byte compilation, and Opentrons simulation; Rust bundles those Python modules and injects the execution plan.
+OT-2, Flex, and STAR lower through the same invocation boundary. Shared Procedure views validate stable operation and parameter identities, canonical QUDT units, material roles, exact selected material sources, capability kinds, and adapter capacity. Device-specific deck allocation, run-document construction, protocol rendering, and implementation constraints remain within the concrete adapter. Manual work and offerings without lowering services remain present in the semantic Procedure and reviewed facility plan without being misrepresented as device output.
 
-`dependency-plan` and `full-build-bundle` first use the facility-independent resolver in `src/planning/` to resolve source-declared artifact dependencies against supplied inventory evidence. The OT-2 package layer then compiles each successful graph node. A full-build bundle includes one consolidated human protocol in dependency-safe execution order, a separate dependency report, and standalone human/robot artifacts for each planning wave. Artifacts in one wave have no ordering constraint between them, so a wave is a single robot run over one deck. Adapters return an `ArtifactBundle`; `labc` is responsible for writing it to disk.
+`labc --emit` exposes source AST, checked module IR, `design-intent` LAIR, `refined-alternatives` LAIR, or the global planning problem for one self-contained source file. It deliberately has no device or adapter flag. `lab-opt` parses, verifies, transforms, and prints textual LAIR without acting as another source frontend. Multi-module package compilation, inventory selection, global allocation, adapter invocation, artifact persistence, and runtime plans belong to `lab` through the shared `lab-project` service.
 
-`labc` compiles one source file, so the modules it accepts are self-contained; a multi-module package is `lab build`'s job. The single-module sources these commands are exercised against live in [`tests/fixtures/`](tests/fixtures/). For the end-to-end package — designs, SBOLInventory facility, exact adapter binding, and the OT-2 protocols a robot application can open — see the [Golden Gate example](../../examples/golden-gate/README.md).
+For the complete package path, exact SBOLInventory facility, adapter binding, allocated Procedure evidence, and emitted OT-2 protocols, see the [Golden Gate example](../../examples/golden-gate/README.md).
 
-The end-to-end test runs every generated protocol through the official Opentrons simulator when `LAB_OPENTRONS_SIMULATOR` points at the executable. It stays optional so ordinary CI does not download the large robotics runtime:
+Generated Opentrons protocols lint and type-check with `scripts/check-opentrons-bundle.sh <bundle>`.
+To run them under the official simulator, build it once and pass it to `scripts/simulate-opentrons.sh`:
 
 ```sh
 uv venv .lab/opentrons-venv --python 3.12
 uv pip install --python .lab/opentrons-venv/bin/python 'opentrons>=8.4.1,<9'
-LAB_OPENTRONS_SIMULATOR=.lab/opentrons-venv/bin/opentrons_simulate \
-  cargo test -p lab-compiler --test opentrons_build
+scripts/simulate-opentrons.sh examples/golden-gate/.lab/build/assets/opentrons_ot2 \
+  .lab/opentrons-venv/bin/opentrons_simulate
 ```

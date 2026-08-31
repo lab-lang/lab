@@ -573,7 +573,7 @@ impl StandardLibrary {
             }
             for action in &module.actions {
                 if let Some(name) = action.source_name() {
-                    output.push_str(&format!("- action `{name}` [{}]\n", action.capability));
+                    output.push_str(&format!("- action `{name}` [{}]\n", action.operation));
                 }
             }
             output.push('\n');
@@ -710,7 +710,6 @@ mod tests {
     fn rejects_malformed_action_contracts_during_registration() {
         let malformed = ActionContractSpec {
             operation: "std.test.broken",
-            capability: "https://example.org/capability#Testing",
             phrase: vec![PhrasePart::Operand {
                 name: "input",
                 r#type: ContractType::Concrete(Ty::String),

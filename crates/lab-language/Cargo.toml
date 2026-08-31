@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Platform-neutral syntax and semantics for the Lab language."
 
 [dependencies]
+lab-capability.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

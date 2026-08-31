@@ -4,10 +4,7 @@ pub mod artifact;
 pub mod backend;
 pub mod lair;
 pub mod planning;
-pub use lab_runfmt as runfmt;
-#[cfg(test)]
-mod test_support;
-
+mod procedure;
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
 pub use lab_language::{
     Analysis, CheckedDeclaration, CheckedModule, Diagnostic, DiagnosticSeverity, MaterialFlowError,
@@ -16,9 +13,12 @@ pub use lab_language::{
     compile_module_in_environment, manifest, parse_module, render_checked_module,
     render_diagnostic, standard_library_manifest,
 };
+pub use lab_runfmt as runfmt;
+pub use lair::methods::{standard_method_definitions, standard_method_registry};
 pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
 pub use lair::program::{
-    PortableLairError, PortableLairProgram, ProtocolLairError, ProtocolLairProgram,
+    AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
+    PortableLairProgram, RefinedLairError, RefinedLairProgram,
 };
 pub use lair::session::{CompilerSession, SessionError, SessionOptions};
 pub use lair::stage::{IrStage, StageContract};

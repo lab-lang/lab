@@ -17,15 +17,14 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// an acceptance claim carries the evidence it is believed on, a role may name
 /// the ontology term it stands for, an artifact kind carries the roles its
 /// produced type plays, and artifact instances preserve exact SBOL identities
-/// independently of laboratory provenance. Action capabilities are absolute
-/// SBOLInventory capability-kind IRIs rather than compiler-local names, and
-/// durable workflow calls preserve the resolved identity of their callee, and
-/// operational parameters preserve absolute SBOLInventory property-kind IRIs.
+/// independently of laboratory provenance. Durable actions preserve stable
+/// Intent operation identities, typed values, ownership, and exact workflow
+/// callees, while Method definitions separately own capability refinement.
 ///
-/// Grounding, design identities, and capability identities are semantic
+/// Grounding, design identities, and Intent operation identities are semantic
 /// contracts, so each incompatible change raises the version rather than
 /// riding along as an optional field.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v8";
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v9";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -401,7 +400,6 @@ pub struct ResolvedAction {
     /// already the stable semantic operation identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<DefinitionId>,
-    pub capability: Option<String>,
     pub arguments: Vec<CheckedActionArgument>,
     pub results: Vec<CheckedField>,
 }
@@ -410,8 +408,6 @@ pub struct ResolvedAction {
 pub struct CheckedActionArgument {
     pub name: String,
     pub mode: OwnershipMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parameter_kind: Option<String>,
     pub value: TypedExpression,
 }
 

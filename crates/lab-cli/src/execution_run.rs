@@ -140,12 +140,15 @@ fn build_simulation_registry(
     let mut registry = ExecutorRegistry::new();
     for node in &loaded.nodes {
         let LoadedExecutionAction::Execute {
-            requirement,
+            requirements,
             document: Some(document),
         } = &node.action
         else {
             continue;
         };
+        let requirement = requirements
+            .first()
+            .context("execute nodes require at least one frozen requirement binding")?;
         let adapter = requirement
             .adapter
             .as_ref()
@@ -159,22 +162,29 @@ fn build_simulation_registry(
         if !descriptor.services.simulation {
             bail!("adapter '{}' does not provide simulation", adapter.driver);
         }
-        if !descriptor
-            .capabilities
-            .contains(&requirement.capability_kind)
-        {
-            bail!(
-                "adapter '{}' does not simulate capability '{}'",
-                adapter.driver,
-                requirement.capability_kind
-            );
-        }
-        if !descriptor.control_modes.contains(&requirement.control_mode) {
-            bail!(
-                "adapter '{}' does not accept control mode '{}'",
-                adapter.driver,
-                requirement.control_mode
-            );
+        for requirement in requirements {
+            if !descriptor
+                .capabilities
+                .iter()
+                .any(|kind| kind.as_str() == requirement.capability_kind)
+            {
+                bail!(
+                    "adapter '{}' does not simulate capability '{}'",
+                    adapter.driver,
+                    requirement.capability_kind
+                );
+            }
+            if !descriptor
+                .control_modes
+                .iter()
+                .any(|mode| mode.iri() == requirement.control_mode)
+            {
+                bail!(
+                    "adapter '{}' does not accept control mode '{}'",
+                    adapter.driver,
+                    requirement.control_mode
+                );
+            }
         }
         if !descriptor.accepted_run_formats.contains(document.format()) {
             bail!(
@@ -223,12 +233,15 @@ fn build_hardware_registry(
     let mut bindings = BTreeMap::<(String, String, String), (String, String)>::new();
     for node in &loaded.nodes {
         let LoadedExecutionAction::Execute {
-            requirement,
+            requirements,
             document: Some(document),
         } = &node.action
         else {
             continue;
         };
+        let requirement = requirements
+            .first()
+            .context("execute nodes require at least one frozen requirement binding")?;
         let Some(adapter) = &requirement.adapter else {
             continue;
         };

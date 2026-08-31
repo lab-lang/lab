@@ -7,7 +7,8 @@ mod package;
 pub use graph::{ImportResolution, ModuleGraph, ModuleGraphError, ModuleNode};
 pub use manifest::{
     AdapterBinding, BuildMetadata, DependencyDetail, DependencySpec, ExecutionMetadata,
-    InventoryMetadata, LabManifest, PackageManifest, PackageMetadata, WorkspaceManifest,
+    InventoryMetadata, LabManifest, MethodCatalogMetadata, MethodPinMetadata, PackageManifest,
+    PackageMetadata, PlanningAdapterRequirement, PlanningMetadata, WorkspaceManifest,
     WorkspaceMetadata,
 };
 pub use package::{

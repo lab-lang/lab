@@ -66,41 +66,41 @@ for sequence_binding in (
 # than a bare part, so the compiler knows what it is without being told
 # again wherever it is used.
 J23101 = Promoter.buy(
-    sbol_identity="https://synbiohub.org/public/igem/J23101",
+    sbol_identity="https://sbolcanvas.org/J23101",
     sequence=J23101_sequence,
 )
 J23106 = Promoter.buy(
-    sbol_identity="https://synbiohub.org/public/igem/J23106",
+    sbol_identity="https://sbolcanvas.org/J23106",
     sequence=J23106_sequence,
 )
 
 # The shared ribosome binding site and terminator. Neither has a narrower
 # kind here, so both are parts; a package that declares one may say more.
 B0034 = Part.buy(
-    sbol_identity="https://synbiohub.org/public/igem/B0034",
+    sbol_identity="https://sbolcanvas.org/B0034",
     sequence=B0034_sequence,
 )
 B0015 = Part.buy(
-    sbol_identity="https://synbiohub.org/public/igem/B0015",
+    sbol_identity="https://sbolcanvas.org/B0015",
     sequence=B0015_sequence,
 )
 
 # The fluorescent reporters, each a coding sequence.
 GFP = CDS.buy(
-    sbol_identity="https://synbiohub.org/public/igem/GFP",
+    sbol_identity="https://sbolcanvas.org/GFP",
     sequence=GFP_sequence,
 )
 RFP = CDS.buy(
-    sbol_identity="https://synbiohub.org/public/igem/RFP",
+    sbol_identity="https://sbolcanvas.org/RFP",
     sequence=RFP_sequence,
 )
 
 # Assembly backbone and the type IIS enzyme that opens it.
-pSB1C3 = Backbone.buy(sbol_identity="https://example.org/golden-gate/materials/pSB1C3")
+pSB1C3 = Backbone.buy(sbol_identity="https://sbolcanvas.org/pSB1C3")
 
 # BsaI cuts at 37 C; every plasmid it opens digests the same way.
 BsaI = RestrictionEnzyme.buy(
-    sbol_identity="https://example.org/golden-gate/materials/BsaI",
+    sbol_identity="https://SBOL2Build.org/BsaI",
     digest_temperature=37 * C,
     digest_duration=2 * minutes,
 )
@@ -119,7 +119,7 @@ recovery_medium = Reagent.buy(
 # Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
 # Both are transformed the way competent cells are: chilled, shocked, recovered.
 DH5alpha = Chassis.buy(
-    sbol_identity="https://example.org/golden-gate/materials/DH5alpha",
+    sbol_identity="https://sbolcanvas.org/DH5alpha",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
     recovery_temperature=37 * C,
@@ -127,7 +127,7 @@ DH5alpha = Chassis.buy(
 )
 
 BL21 = Chassis.buy(
-    sbol_identity="https://example.org/golden-gate/materials/BL21",
+    sbol_identity="https://sbolcanvas.org/BL21",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
     recovery_temperature=37 * C,

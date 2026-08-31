@@ -29,6 +29,12 @@ artifact Plasmid:
   // the datasheet, so a design may state its own.
   digest_temperature?: Quantity<C>
   digest_duration?: Quantity<min>
+  lid_temperature?: Quantity<C>
+  final_digest_temperature?: Quantity<C>
+  final_digest_duration?: Quantity<min>
+  heat_inactivation_temperature?: Quantity<C>
+  heat_inactivation_duration?: Quantity<min>
+  hold_temperature?: Quantity<C>
 
 /** What heat-shock transformation and plating need to build a strain. */
 artifact Strain:

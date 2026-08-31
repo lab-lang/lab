@@ -1,25 +1,40 @@
 //! Facility-derived adapter lowering and immutable artifact staging.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::{adapter_catalog, lower_dependency_build_with_adapter};
+use lab_compiler::ArtifactBundle;
+use lab_compiler::backend::{adapter_catalog, lower_adapter_invocation_with_adapter};
 use lab_compiler::planning::{
-    AdapterBindingSnapshot, BuildInventory, FACILITY_LOWERING_SCHEMA_VERSION, FacilityAllocation,
+    AdapterInvocation, AdapterInvocationPlan, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
     FacilityLoweringManifest, FacilityLoweringRoute,
 };
-use lab_compiler::{ArtifactBundle, CheckedModule, PortableLairProgram};
 use lab_inventory::InventorySnapshot;
 use lab_package::LabPackage;
+use lab_runfmt::ReviewedRunDocument;
 use sha2::{Digest, Sha256};
 
 pub(crate) struct FacilityLoweringOutput {
     pub(crate) manifest: FacilityLoweringManifest,
     pub(crate) protocols: Vec<PathBuf>,
     pub(crate) documents: Vec<PathBuf>,
+    pub(crate) reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
+}
+
+struct LowerableInvocation {
+    invocation: AdapterInvocation,
+    procedure_implementations: BTreeSet<lab_capability::ProcedureImplementationId>,
+    requirements: Vec<FacilityLoweredRequirement>,
+}
+
+struct WrittenFacilityArtifacts {
+    artifacts: Vec<FacilityLoweredArtifact>,
+    protocols: Vec<PathBuf>,
+    documents: Vec<PathBuf>,
+    reviewed_documents: BTreeMap<String, ReviewedRunDocument>,
 }
 
 /// Derives concrete backend invocations from exact facility allocations.
@@ -27,111 +42,111 @@ pub(crate) struct FacilityLoweringOutput {
 /// A package never selects a device implementation here. Each route exists only because a reachable semantic
 /// requirement was allocated to an offering, that offering belongs to an exact Asset, and the
 /// Asset has an explicit local adapter binding whose implementation provides lowering.
-pub(crate) fn lower_allocated_adapters(
+pub(crate) fn lower_adapter_invocations(
     package: &LabPackage,
-    modules: &[&CheckedModule],
     inventory: &InventorySnapshot,
-    allocation: &FacilityAllocation,
-    bindings: Option<&AdapterBindingSnapshot>,
+    invocation_plan: &AdapterInvocationPlan,
     output_root: &Path,
 ) -> Result<FacilityLoweringOutput> {
+    invocation_plan
+        .validate()
+        .context("allocated adapter invocations are invalid")?;
+    if invocation_plan.inventory_sha256 != inventory.source_sha256()
+        || invocation_plan.facility != inventory.facility().as_str()
+    {
+        bail!("adapter invocations and the selected inventory snapshot do not match");
+    }
     let catalog = adapter_catalog().context("failed to load the compiler adapter catalog")?;
     let descriptors = catalog
         .adapters
         .iter()
         .map(|descriptor| (descriptor.id.as_str(), descriptor))
         .collect::<BTreeMap<_, _>>();
-    let mut grouped =
-        BTreeMap::<(String, String, PathBuf, String), Vec<FacilityLoweredRequirement>>::new();
-    for selected in &allocation.allocations {
-        let Some(adapter) = selected.adapter.as_ref() else {
-            continue;
-        };
-        grouped
-            .entry((
-                selected.asset.clone(),
-                adapter.driver.clone(),
-                adapter.profile_path.clone(),
-                adapter.profile_sha256.clone(),
-            ))
-            .or_default()
-            .push(FacilityLoweredRequirement {
-                requirement_instance: selected.requirement_instance.clone(),
-                capability_kind: selected.capability_kind.clone(),
-                offering: selected.offering.clone(),
-            });
-    }
-
-    if let Some(bindings) = bindings
-        && (bindings.inventory_sha256 != allocation.inventory_sha256
-            || bindings.facility != allocation.facility)
-    {
-        bail!(
-            "adapter bindings and facility allocation do not describe the same inventory snapshot"
-        );
-    }
+    let requirements = invocation_plan
+        .methods
+        .iter()
+        .flat_map(|method| &method.tasks)
+        .flat_map(|task| &task.requirements)
+        .map(|requirement| (requirement.id.clone(), requirement))
+        .collect::<BTreeMap<_, _>>();
 
     let mut lowerable = Vec::new();
-    for (key, mut requirements) in grouped {
-        let descriptor = descriptors.get(key.1.as_str()).with_context(|| {
-            format!(
-                "allocated adapter '{}' is not present in this compiler build",
-                key.1
-            )
-        })?;
-        if !descriptor.services.lowering {
+    for invocation in &invocation_plan.invocations {
+        let descriptor = descriptors
+            .get(invocation.adapter.driver.as_str())
+            .with_context(|| {
+                format!(
+                    "allocated adapter '{}' is not present in this compiler build",
+                    invocation.adapter.driver
+                )
+            })?;
+        let mut procedure_implementations = BTreeSet::new();
+        let mut supports_lowering = true;
+        for requirement_id in &invocation.requirements {
+            let requirement = requirements
+                .get(requirement_id)
+                .expect("validated invocation Requirement exists");
+            if let Some(implementation_id) = &requirement.procedure_implementation {
+                procedure_implementations.insert(implementation_id.clone());
+                let implementation = descriptor
+                    .procedure_implementations
+                    .iter()
+                    .find(|implementation| &implementation.id == implementation_id)
+                    .with_context(|| {
+                        format!(
+                            "allocated Procedure implementation '{}' is not provided by adapter '{}' in this compiler build",
+                            implementation_id, invocation.adapter.driver
+                        )
+                    })?;
+                supports_lowering &= implementation.services.lowering;
+            } else {
+                supports_lowering &= descriptor.services.lowering;
+            }
+        }
+        if !supports_lowering {
             continue;
         }
-        let mut emitted_formats = descriptor.emitted_run_formats.iter();
-        let automation_format = emitted_formats.next().cloned().with_context(|| {
-            format!(
-                "adapter '{}' provides lowering but declares no emitted run-document format",
-                descriptor.id
-            )
-        })?;
-        if emitted_formats.next().is_some() {
-            bail!(
-                "adapter '{}' provides whole-program lowering with several emitted run-document formats; the lowering API must identify each artifact format explicitly",
-                descriptor.id
-            );
-        }
-        requirements
+        let mut lowered_requirements = invocation
+            .requirements
+            .iter()
+            .map(|requirement_id| {
+                let requirement = requirements
+                    .get(requirement_id)
+                    .expect("validated invocation Requirement exists");
+                FacilityLoweredRequirement {
+                    requirement_instance: requirement.id.to_string(),
+                    capability_kind: requirement.capability_kind.to_string(),
+                    offering: requirement.offering.clone(),
+                }
+            })
+            .collect::<Vec<_>>();
+        lowered_requirements
             .sort_by(|left, right| left.requirement_instance.cmp(&right.requirement_instance));
-        lowerable.push((key, requirements, automation_format));
+        lowerable.push(LowerableInvocation {
+            invocation: invocation.clone(),
+            procedure_implementations,
+            requirements: lowered_requirements,
+        });
     }
-    if lowerable.len() > 1 {
-        let routes = lowerable
-            .iter()
-            .map(|((asset, driver, _, _), _, _)| format!("{asset} through {driver}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        bail!(
-            "facility allocation selects several whole-program lowerers ({routes}); these legacy backends cannot yet partition one program by requirement"
-        );
-    }
-    let mut lowering_directories = facility_lowering_directories(
-        lowerable
-            .iter()
-            .map(|((asset, driver, _, _), _, _)| (asset.as_str(), driver.as_str())),
-    );
+    let mut lowering_directories =
+        facility_lowering_directories(lowerable.iter().map(|lowering| {
+            (
+                lowering.invocation.asset.as_str(),
+                lowering.invocation.adapter.driver.as_str(),
+            )
+        }));
 
     let mut routes = Vec::new();
     let mut protocols = Vec::new();
     let mut documents = Vec::new();
+    let mut reviewed_documents = BTreeMap::new();
     if !lowerable.is_empty() {
-        let lair = PortableLairProgram::lower_program(modules)
-            .context("failed to lower the allocated program for facility adapters")?;
-        let protocol = lair
-            .select_protocol()
-            .context("failed to select a concrete protocol for facility adapter lowering")?;
-        let build_inventory = semantic_build_inventory(modules, inventory)?;
-
-        for (
-            (asset, driver, source_profile_path, profile_sha256),
-            requirements,
-            automation_format,
-        ) in lowerable
-        {
+        for lowering in lowerable {
+            let invocation = lowering.invocation;
+            let asset = invocation.asset.clone();
+            let driver = invocation.adapter.driver.clone();
+            let source_profile_path = invocation.adapter.profile_path.clone();
+            let profile_sha256 = invocation.adapter.profile_sha256.clone();
             let source = package.root.join(&source_profile_path);
             let profile =
                 crate::adapters::load_and_validate(&driver, &source).with_context(|| {
@@ -147,39 +162,60 @@ pub(crate) fn lower_allocated_adapters(
                     asset
                 );
             }
-            let bundle = lower_dependency_build_with_adapter(
-                &driver,
-                &profile.name,
-                &profile.canonical_toml,
-                &protocol,
-                &build_inventory,
-            )
-            .with_context(|| {
-                format!(
-                    "failed to lower the allocated program for Asset '{}' through adapter '{}'",
-                    asset, driver
-                )
-            })?;
+            let lowered =
+                lower_adapter_invocation_with_adapter(&profile, invocation_plan, &invocation)
+                    .with_context(|| {
+                        format!(
+                            "failed to lower invocation '{}' for Asset '{}' through adapter '{}'",
+                            invocation.id, asset, driver
+                        )
+                    })?;
+            let invocation_documents = lowered
+                .documents
+                .into_iter()
+                .map(|document| {
+                    (
+                        document.path,
+                        (
+                            document
+                                .requirements
+                                .into_iter()
+                                .map(|requirement| requirement.to_string())
+                                .collect(),
+                            document.format,
+                        ),
+                    )
+                })
+                .collect();
             let relative_output = lowering_directories
                 .remove(&(asset.clone(), driver.clone()))
                 .expect("every lowerable Asset and adapter has an output directory");
             let written = write_facility_artifacts(
-                &bundle,
+                &lowered.artifacts,
                 output_root,
                 &relative_output,
-                &automation_format,
-                &mut protocols,
-                &mut documents,
+                &invocation_documents,
             )?;
+            protocols.extend(written.protocols);
+            documents.extend(written.documents);
+            for (requirement, document) in written.reviewed_documents {
+                if reviewed_documents
+                    .insert(requirement.clone(), document)
+                    .is_some()
+                {
+                    bail!("several adapter routes implement requirement '{requirement}'");
+                }
+            }
             routes.push(FacilityLoweringRoute {
                 id: facility_lowering_id(&asset, &driver),
                 asset,
                 driver: driver.clone(),
+                procedure_implementations: lowering.procedure_implementations,
                 profile_path: staged_adapter_profile_path(&driver, &profile_sha256),
                 profile_sha256,
-                requirements,
+                requirements: lowering.requirements,
                 output: relative_output,
-                artifacts: written,
+                artifacts: written.artifacts,
             });
         }
     }
@@ -189,38 +225,14 @@ pub(crate) fn lower_allocated_adapters(
     Ok(FacilityLoweringOutput {
         manifest: FacilityLoweringManifest {
             schema_version: FACILITY_LOWERING_SCHEMA_VERSION.to_owned(),
-            inventory_sha256: allocation.inventory_sha256.clone(),
-            facility: allocation.facility.clone(),
+            inventory_sha256: invocation_plan.inventory_sha256.clone(),
+            facility: invocation_plan.facility.clone(),
             routes,
         },
         protocols,
         documents,
+        reviewed_documents,
     })
-}
-
-fn semantic_build_inventory(
-    modules: &[&CheckedModule],
-    snapshot: &InventorySnapshot,
-) -> Result<BuildInventory> {
-    let material_lots = snapshot
-        .active_material_lots()
-        .context("failed to index active SBOLInventory MaterialLots")?;
-    let lots_by_component = material_lots
-        .components()
-        .map(|(component, lots)| {
-            (
-                component.as_str().to_owned(),
-                lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    BuildInventory::from_material_lots(
-        modules,
-        snapshot.source_sha256(),
-        snapshot.facility().as_str(),
-        &lots_by_component,
-    )
-    .context("failed to bind checked designs to SBOLInventory MaterialLots")
 }
 
 fn facility_lowering_directories<'a>(
@@ -283,12 +295,19 @@ fn write_facility_artifacts(
     bundle: &ArtifactBundle,
     output_root: &Path,
     relative_output: &Path,
-    automation_format: &str,
-    protocols: &mut Vec<PathBuf>,
-    documents: &mut Vec<PathBuf>,
-) -> Result<Vec<FacilityLoweredArtifact>> {
+    invocation_documents: &BTreeMap<String, (Vec<String>, String)>,
+) -> Result<WrittenFacilityArtifacts> {
     let route_root = output_root.join(relative_output);
+    if let Some(path) = invocation_documents
+        .keys()
+        .find(|path| bundle.get(path).is_none())
+    {
+        bail!("adapter names missing reviewed invocation artifact '{path}'");
+    }
     let mut artifacts = Vec::new();
+    let mut protocols = Vec::new();
+    let mut documents = Vec::new();
+    let mut reviewed_documents = BTreeMap::new();
     let mut typst_sources = Vec::new();
     for artifact in bundle.iter() {
         let relative_path = PathBuf::from(artifact.path());
@@ -299,7 +318,8 @@ fn write_facility_artifacts(
         }
         fs::write(&path, artifact.contents())
             .with_context(|| format!("failed to write {}", path.display()))?;
-        let role = if is_automation_protocol(&path) {
+        let invocation_document = invocation_documents.get(artifact.path());
+        let role = if invocation_document.is_some() {
             protocols.push(path);
             FacilityLoweredArtifactRole::AutomationProtocol
         } else {
@@ -308,13 +328,33 @@ fn write_facility_artifacts(
         if artifact.media_type() == "text/x-typst" && is_typeset_document(artifact.path()) {
             typst_sources.push(relative_path.clone());
         }
+        let sha256 = sha256_hex(artifact.contents());
+        let format = invocation_document.map(|(_, format)| format.clone());
+        if let Some((requirements, format)) = invocation_document {
+            let reviewed = ReviewedRunDocument {
+                path: relative_output
+                    .join(&relative_path)
+                    .to_str()
+                    .context("reviewed invocation document paths must be UTF-8")?
+                    .to_owned(),
+                format: format.clone(),
+                sha256: sha256.clone(),
+            };
+            for requirement in requirements {
+                if reviewed_documents
+                    .insert(requirement.clone(), reviewed.clone())
+                    .is_some()
+                {
+                    bail!("several adapter artifacts implement requirement '{requirement}'");
+                }
+            }
+        }
         artifacts.push(FacilityLoweredArtifact {
             path: relative_path,
             media_type: artifact.media_type().to_owned(),
-            sha256: sha256_hex(artifact.contents()),
+            sha256,
             role,
-            format: (role == FacilityLoweredArtifactRole::AutomationProtocol)
-                .then(|| automation_format.to_owned()),
+            format,
         });
     }
 
@@ -341,23 +381,16 @@ fn write_facility_artifacts(
         });
     }
     artifacts.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(artifacts)
+    Ok(WrittenFacilityArtifacts {
+        artifacts,
+        protocols,
+        documents,
+        reviewed_documents,
+    })
 }
 
 pub(crate) fn staged_adapter_profile_path(driver: &str, profile_sha256: &str) -> PathBuf {
     PathBuf::from("adapters").join(format!("{driver}-{}.toml", &profile_sha256[..12]))
-}
-
-fn is_automation_protocol(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| {
-            name.ends_with("_protocol.py")
-                || name.ends_with("_protocol.json")
-                || name.ends_with(".star.json")
-                || name.ends_with(".odtc.json")
-                || name.ends_with(".read.json")
-        })
 }
 
 fn is_typeset_document(path: &str) -> bool {
@@ -385,7 +418,7 @@ mod tests {
         assert_eq!(
             directories[&(
                 "https://example.org/facility/Opentrons_OT2".to_owned(),
-                "opentrons.ot2".to_owned()
+                "opentrons.ot2".to_owned(),
             )],
             PathBuf::from("assets/opentrons_ot2")
         );

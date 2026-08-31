@@ -1,8 +1,9 @@
 @prefix cap: <https://sbol.io/ns/capability#> .
+@prefix build: <https://SBOL2Build.org/> .
+@prefix canvas: <https://sbolcanvas.org/> .
 @prefix designs: <https://example.org/golden-gate/designs/> .
 @prefix ex: <https://example.org/golden-gate/> .
 @prefix fac: <https://sbol.io/ns/facility#> .
-@prefix igem: <https://synbiohub.org/public/igem/> .
 @prefix inv: <https://sbol.io/ns/inventory#> .
 @prefix lots: <https://example.org/golden-gate/lots/> .
 @prefix materials: <https://example.org/golden-gate/materials/> .
@@ -53,25 +54,201 @@ ex:opentrons_ot2
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:automation_bench ;
     fac:manufacturer "Opentrons" ;
-    fac:model "OT-2 with Thermocycler Module Gen2" ;
+    fac:model "OT-2 with Thermocycler Module GEN1" ;
     fac:isActive true ;
-    fac:capability ex:opentrons_ot2_liquid_handling, ex:opentrons_ot2_thermal_cycling .
+    fac:capability ex:opentrons_ot2_metered_liquid_transfer,
+        ex:opentrons_ot2_in_well_mixing,
+        ex:opentrons_ot2_temperature_controlled_staging,
+        ex:opentrons_ot2_liquid_level_aware_aspiration,
+        ex:opentrons_ot2_vessel_relative_liquid_access,
+        ex:opentrons_ot2_air_gap_handling,
+        ex:opentrons_ot2_post_dispense_blowout,
+        ex:opentrons_ot2_touch_tip,
+        ex:opentrons_ot2_programmed_block_temperature_control,
+        ex:opentrons_ot2_heated_lid_temperature_control .
 
-ex:opentrons_ot2_liquid_handling
+ex:opentrons_ot2_metered_liquid_transfer
     a sbol:Identified, fac:CapabilityOffering ;
-    sbol:displayId "liquid_handling" ;
-    fac:capabilityKind cap:LiquidHandling ;
+    sbol:displayId "metered_liquid_transfer" ;
+    fac:capabilityKind cap:MeteredLiquidTransfer ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_transfer_volume,
+        ex:opentrons_ot2_maximum_transfer_volume .
+
+ex:opentrons_ot2_minimum_transfer_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_transfer_volume" ;
+    fac:propertyKind cap:MinimumTransferVolume ;
+    fac:realValue "1"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_maximum_transfer_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_transfer_volume" ;
+    fac:propertyKind cap:MaximumTransferVolume ;
+    fac:realValue "300"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_in_well_mixing
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "in_well_mixing" ;
+    fac:capabilityKind cap:InWellMixing ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_maximum_mix_volume .
+
+ex:opentrons_ot2_maximum_mix_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_mix_volume" ;
+    fac:propertyKind cap:MaximumMixVolume ;
+    fac:realValue "300"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_temperature_controlled_staging
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "temperature_controlled_staging" ;
+    fac:capabilityKind cap:TemperatureControlledStaging ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_staging_temperature,
+        ex:opentrons_ot2_maximum_staging_temperature .
+
+ex:opentrons_ot2_minimum_staging_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_staging_temperature" ;
+    fac:propertyKind cap:MinimumTemperature ;
+    fac:realValue "4"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_staging_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_staging_temperature" ;
+    fac:propertyKind cap:MaximumTemperature ;
+    fac:realValue "4"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_liquid_level_aware_aspiration
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "liquid_level_aware_aspiration" ;
+    fac:capabilityKind cap:LiquidLevelAwareAspiration ;
     fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ;
     fac:isActive true .
 
-ex:opentrons_ot2_thermal_cycling
+ex:opentrons_ot2_vessel_relative_liquid_access
     a sbol:Identified, fac:CapabilityOffering ;
-    sbol:displayId "thermal_cycling" ;
-    fac:capabilityKind cap:ThermalCycling ;
+    sbol:displayId "vessel_relative_liquid_access" ;
+    fac:capabilityKind cap:VesselRelativeLiquidAccess ;
     fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ;
     fac:isActive true .
+
+ex:opentrons_ot2_air_gap_handling
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "air_gap_handling" ;
+    fac:capabilityKind cap:AirGapHandling ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_maximum_air_gap_volume .
+
+ex:opentrons_ot2_maximum_air_gap_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_air_gap_volume" ;
+    fac:propertyKind cap:MaximumAirGapVolume ;
+    fac:realValue "20"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_post_dispense_blowout
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "post_dispense_blowout" ;
+    fac:capabilityKind cap:PostDispenseBlowout ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:opentrons_ot2_touch_tip
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "touch_tip" ;
+    fac:capabilityKind cap:TouchTip ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true .
+
+ex:opentrons_ot2_programmed_block_temperature_control
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "programmed_block_temperature_control" ;
+    fac:capabilityKind cap:ProgrammedBlockTemperatureControl ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_block_temperature,
+        ex:opentrons_ot2_maximum_block_temperature,
+        ex:opentrons_ot2_maximum_sample_count,
+        ex:opentrons_ot2_minimum_thermal_sample_volume,
+        ex:opentrons_ot2_maximum_thermal_sample_volume .
+
+ex:opentrons_ot2_minimum_block_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_block_temperature" ;
+    fac:propertyKind cap:MinimumBlockTemperature ;
+    fac:realValue "4"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_block_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_block_temperature" ;
+    fac:propertyKind cap:MaximumBlockTemperature ;
+    fac:realValue "99"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_sample_count
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_sample_count" ;
+    fac:propertyKind cap:MaximumSampleCount ;
+    fac:integerValue 96 .
+
+ex:opentrons_ot2_minimum_thermal_sample_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_thermal_sample_volume" ;
+    fac:propertyKind cap:MinimumThermalSampleVolume ;
+    fac:realValue "10"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_maximum_thermal_sample_volume
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_thermal_sample_volume" ;
+    fac:propertyKind cap:MaximumThermalSampleVolume ;
+    fac:realValue "100"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/MicroL> .
+
+ex:opentrons_ot2_heated_lid_temperature_control
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "heated_lid_temperature_control" ;
+    fac:capabilityKind cap:HeatedLidTemperatureControl ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ReviewedFileControl ;
+    fac:isActive true ;
+    fac:parameter ex:opentrons_ot2_minimum_lid_temperature,
+        ex:opentrons_ot2_maximum_lid_temperature .
+
+ex:opentrons_ot2_minimum_lid_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "minimum_lid_temperature" ;
+    fac:propertyKind cap:MinimumLidTemperature ;
+    fac:realValue "37"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
+
+ex:opentrons_ot2_maximum_lid_temperature
+    a sbol:Identified, fac:PropertyValue ;
+    sbol:displayId "maximum_lid_temperature" ;
+    fac:propertyKind cap:MaximumLidTemperature ;
+    fac:realValue "110"^^xsd:double ;
+    fac:unit <http://qudt.org/vocab/unit/DEG_C> .
 
 ex:manual_workstation
     a sbol:TopLevel, fac:Asset ;
@@ -154,52 +331,52 @@ ex:manual_waste_handling
     fac:controlMode fac:ManualControl ;
     fac:isActive true .
 
-igem:J23101
+canvas:J23101
     a sbol:Component ;
     sbol:displayId "J23101" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:J23106
+canvas:J23106
     a sbol:Component ;
     sbol:displayId "J23106" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:B0034
+canvas:B0034
     a sbol:Component ;
     sbol:displayId "B0034" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:B0015
+canvas:B0015
     a sbol:Component ;
     sbol:displayId "B0015" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:GFP
+canvas:GFP
     a sbol:Component ;
     sbol:displayId "GFP" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-igem:RFP
+canvas:RFP
     a sbol:Component ;
     sbol:displayId "RFP" ;
-    sbol:hasNamespace <https://synbiohub.org/public/igem> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-materials:pSB1C3
+canvas:pSB1C3
     a sbol:Component ;
     sbol:displayId "pSB1C3" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-materials:BsaI
+build:BsaI
     a sbol:Component ;
     sbol:displayId "BsaI" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000252> .
 
 materials:T4_DNA_ligase
@@ -226,16 +403,16 @@ materials:recovery_medium
     sbol:hasNamespace <https://example.org/golden-gate/materials> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-materials:DH5alpha
+canvas:DH5alpha
     a sbol:Component ;
     sbol:displayId "DH5alpha" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-materials:BL21
+canvas:BL21
     a sbol:Component ;
     sbol:displayId "BL21" ;
-    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
 materials:chloramphenicol
@@ -250,40 +427,40 @@ materials:reference_gfp
     sbol:hasNamespace <https://example.org/golden-gate/materials> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-designs:composite_plasmid_1
+build:composite_plasmid_1
     a sbol:Component ;
     sbol:displayId "composite_plasmid_1" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-designs:composite_plasmid_2
+build:composite_plasmid_2
     a sbol:Component ;
     sbol:displayId "composite_plasmid_2" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-designs:composite_strain_1
+build:composite_strain_1
     a sbol:Component ;
     sbol:displayId "composite_strain_1" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-designs:composite_strain_2
+build:composite_strain_2
     a sbol:Component ;
     sbol:displayId "composite_strain_2" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-designs:composite_strain_3
+build:composite_strain_3
     a sbol:Component ;
     sbol:displayId "composite_strain_3" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-designs:composite_strain_4
+build:composite_strain_4
     a sbol:Component ;
     sbol:displayId "composite_strain_4" ;
-    sbol:hasNamespace <https://example.org/golden-gate/designs> ;
+    sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
 designs:expression_strain
@@ -302,7 +479,7 @@ lots:J23101_lot
     a sbol:Implementation ;
     sbol:displayId "J23101_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:J23101 ;
+    sbol:built canvas:J23101 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -312,7 +489,7 @@ lots:J23106_lot
     a sbol:Implementation ;
     sbol:displayId "J23106_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:J23106 ;
+    sbol:built canvas:J23106 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -322,7 +499,7 @@ lots:B0034_lot
     a sbol:Implementation ;
     sbol:displayId "B0034_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:B0034 ;
+    sbol:built canvas:B0034 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -332,7 +509,7 @@ lots:B0015_lot
     a sbol:Implementation ;
     sbol:displayId "B0015_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:B0015 ;
+    sbol:built canvas:B0015 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -342,7 +519,7 @@ lots:GFP_lot
     a sbol:Implementation ;
     sbol:displayId "GFP_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:GFP ;
+    sbol:built canvas:GFP ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -352,7 +529,7 @@ lots:RFP_lot
     a sbol:Implementation ;
     sbol:displayId "RFP_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built igem:RFP ;
+    sbol:built canvas:RFP ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -362,7 +539,7 @@ lots:pSB1C3_lot
     a sbol:Implementation ;
     sbol:displayId "pSB1C3_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:pSB1C3 ;
+    sbol:built canvas:pSB1C3 ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -372,7 +549,7 @@ lots:BsaI_lot
     a sbol:Implementation ;
     sbol:displayId "BsaI_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:BsaI ;
+    sbol:built build:BsaI ;
     fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -422,7 +599,7 @@ lots:DH5alpha_lot
     a sbol:Implementation ;
     sbol:displayId "DH5alpha_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:DH5alpha ;
+    sbol:built canvas:DH5alpha ;
     fac:materialKind inv:BacterialStock ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
@@ -432,7 +609,7 @@ lots:BL21_lot
     a sbol:Implementation ;
     sbol:displayId "BL21_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built materials:BL21 ;
+    sbol:built canvas:BL21 ;
     fac:materialKind inv:BacterialStock ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;

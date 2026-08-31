@@ -1,5 +1,7 @@
 //! Reference-bench default values for every Flex profile field.
 
+use crate::backend::resources::PlateCapacity;
+
 use crate::backend::opentrons::flex::profile::schema::{
     AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TemperatureModule, Thermocycler,
     TipRacks, TransformationStage, Trash,
@@ -24,7 +26,7 @@ pub(super) fn default_temperature_module() -> TemperatureModule {
         model: "temperatureModuleV2".to_owned(),
         slot: "C1".to_owned(),
         labware: "opentrons_24_aluminumblock_nest_1.5ml_snapcap".to_owned(),
-        capacity: 24,
+        capacity: plate_capacity(24),
     }
 }
 
@@ -32,7 +34,7 @@ pub(super) fn default_thermocycler() -> Thermocycler {
     Thermocycler {
         model: "thermocyclerModuleV2".to_owned(),
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        capacity: 96,
+        capacity: plate_capacity(96),
     }
 }
 
@@ -42,8 +44,8 @@ pub(super) fn default_trash() -> Trash {
     }
 }
 
-pub(super) fn default_plate_capacity() -> usize {
-    96
+pub(super) fn default_plate_capacity() -> PlateCapacity {
+    plate_capacity(96)
 }
 
 pub(super) fn default_assembly_small_tips() -> TipRacks {
@@ -140,4 +142,26 @@ pub(super) fn default_plating_stage() -> PlatingStage {
         small_tips: default_plating_small_tips(),
         large_tips: default_plating_large_tips(),
     }
+}
+
+/// A literal geometry this compiler ships as a default.
+fn plate_capacity(capacity: usize) -> PlateCapacity {
+    PlateCapacity::new(capacity).expect("built-in defaults declare addressable geometries")
+}
+
+/// A 15 mL conical carrying 10 mL of medium, the reference Flex bench.
+pub(super) fn default_flex_tracked_source_volume_ul() -> u32 {
+    10_000
+}
+
+pub(super) fn default_flex_tracked_usable_depth_mm() -> f64 {
+    75.0
+}
+
+pub(super) fn default_flex_tracked_meniscus_offset_mm() -> f64 {
+    3.0
+}
+
+pub(super) fn default_flex_tracked_minimum_height_mm() -> f64 {
+    2.0
 }

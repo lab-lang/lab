@@ -1662,14 +1662,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-capability"
+version = "0.1.2"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-cli"
 version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
  "flate2",
+ "lab-capability",
  "lab-compiler",
  "lab-inventory",
+ "lab-method",
  "lab-package",
  "lab-project",
  "lab-runfmt",
@@ -1697,9 +1709,12 @@ dependencies = [
  "cargo-husky",
  "clap",
  "hamilton-star",
+ "lab-capability",
  "lab-instruments",
  "lab-inventory",
  "lab-language",
+ "lab-method",
+ "lab-procedure",
  "lab-runfmt",
  "opentrons-protocol",
  "pliron",
@@ -1760,6 +1775,7 @@ dependencies = [
 name = "lab-language"
 version = "0.1.2"
 dependencies = [
+ "lab-capability",
  "serde",
  "thiserror",
 ]
@@ -1778,6 +1794,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-method"
+version = "0.1.2"
+dependencies = [
+ "lab-capability",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-package"
 version = "0.1.2"
 dependencies = [
@@ -1788,15 +1815,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-procedure"
+version = "0.1.2"
+dependencies = [
+ "lab-capability",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-project"
 version = "0.1.2"
 dependencies = [
+ "lab-capability",
+ "lab-compiler",
+ "lab-inventory",
  "lab-language",
+ "lab-method",
  "lab-package",
  "lab-sbol",
  "sbol3",
  "semver",
  "serde",
+ "serde_json",
  "thiserror",
  "toml 0.8.23",
 ]
@@ -1806,6 +1849,8 @@ name = "lab-python"
 version = "0.1.2"
 dependencies = [
  "lab-compiler",
+ "lab-method",
+ "lab-project",
  "pyo3",
  "serde",
  "serde_json",
@@ -1815,6 +1860,7 @@ dependencies = [
 name = "lab-runfmt"
 version = "0.1.2"
 dependencies = [
+ "lab-capability",
  "lab-instruments",
  "serde",
  "serde_json",
@@ -1828,6 +1874,7 @@ version = "0.1.2"
 dependencies = [
  "anyhow",
  "hamilton-star",
+ "lab-capability",
  "lab-instruments",
  "lab-inventory",
  "lab-runfmt",

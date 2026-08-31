@@ -1,6 +1,6 @@
 # 0011: Artifact dependencies derive from typed material dataflow
 
-Status: accepted, initial facility lowering implemented
+Status: accepted, initial facility lowering implemented; amended by [0045](0045-lair-method-refinement-and-facility-allocation.md)
 
 ## Decision
 
@@ -20,4 +20,4 @@ A facility-independent planner may derive graph edges, roots, build waves, cycle
 
 ## Boundary
 
-The generic frontend resolves operations, checks types and ownership, and preserves dependency dataflow. Method selection may choose Golden Gate and heat shock while remaining independent of any facility. Facility planning binds the resulting requirements to exact offerings and Assets, after which the bound adapter chooses deck layouts and device operations. A different supported method or compatible adapter may lower the same source operations differently or reject unsupported properties and operation sequences explicitly.
+The generic frontend resolves operations, checks types and ownership, and preserves dependency dataflow. Facility-independent method refinement may enumerate Golden Gate, another assembly method, or an offered assembly service, and may enumerate heat shock or another transformation method. Facility planning selects an unpinned method together with the exact offerings, Assets, adapters, and MaterialLots that make it feasible, after which the bound adapter chooses implementation-specific deck layouts and device operations. A different facility or explicit method policy may select a different supported refinement of the same source operation, while unsupported properties and operation sequences remain explicit diagnostics.

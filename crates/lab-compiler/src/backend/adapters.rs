@@ -5,28 +5,43 @@
 //! and control modes that implementation can use. Product features stay separate from semantic
 //! capability kinds so neither manufacturer nor model can silently select a driver.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+use lab_capability::{
+    CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
+};
+use lab_procedure::ProgramFeature;
+use lab_procedure::vocabulary::{
+    AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
+    LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1,
+    POST_DISPENSE_BLOWOUT, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, TEMPERATURE_CONTROLLED_STAGING,
+    THERMAL_PROGRAM_V1, TOUCH_TIP, VESSEL_RELATIVE_LIQUID_ACCESS,
+};
 use sbol_inventory::vocabulary::{
-    ABSORBANCE_MEASUREMENT, ControlMode, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
+    ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
 };
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use crate::ArtifactBundle;
 use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
-use crate::planning::BuildInventory;
-use crate::{ArtifactBundle, ProtocolLairProgram};
-use lab_runfmt::{SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
+use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
+use crate::procedure::{
+    ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
+    PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
+};
+use lab_method::LocalId;
+use lab_runfmt::{
+    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
+    STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
+};
 
-pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v1";
+pub const ADAPTER_CATALOG_FORMAT: &str = "lab.adapter-catalog.v2";
 pub const ADAPTER_PROFILE_SCHEMA_VERSION: &str = "lab.adapter-profile.v2";
-
-const OPENTRONS_PYTHON_PROTOCOL: &str = "opentrons.python-protocol";
-const OPENTRONS_PROTOCOL_DESIGNER: &str = "opentrons.protocol-designer-json";
 
 const KNOWN_ADAPTERS: [&str; 6] = [
     "opentrons.ot2",
@@ -40,7 +55,7 @@ const KNOWN_ADAPTERS: [&str; 6] = [
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterServices {
     pub planning: bool,
-    /// This adapter can lower a complete checked Lab program into device artifacts.
+    /// Whether this adapter can lower exact allocated Procedure invocations.
     pub lowering: bool,
     pub simulation: bool,
     pub runtime: bool,
@@ -52,16 +67,202 @@ pub struct AdapterDescriptor {
     pub display_name: String,
     pub manufacturer: Option<String>,
     /// Exact SBOLInventory `fac:capabilityKind` IRIs this implementation supports.
-    pub capabilities: BTreeSet<String>,
+    pub capabilities: BTreeSet<CapabilityKind>,
     /// Implementation facts that must never be used as semantic capability kinds.
     pub features: BTreeSet<String>,
     /// Exact closed SBOLInventory control-mode IRIs this implementation supports.
-    pub control_modes: BTreeSet<String>,
+    pub control_modes: BTreeSet<ControlMode>,
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
     pub services: AdapterServices,
+    /// Versioned operational contracts implemented by this adapter.
+    ///
+    /// Unlike the broad `capabilities` compatibility surface retained for unnormalized tasks,
+    /// each entry identifies the exact Procedure contract and operations whose programs the
+    /// adapter can plan and lower.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub procedure_implementations: Vec<ProcedureImplementationDescriptor>,
     pub profile_schema: Value,
     pub default_profile: ValidatedAdapterProfile,
+}
+
+/// Reaction setup dispatches on every canonical liquid-access strategy and both finishing actions,
+/// and stages its reagents at a stated temperature. It carries no air gap.
+const OT2_SETUP_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::VesselTemperatureControl,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateVesselBottom,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::DispenseAboveLiquid,
+    ProgramFeature::DispenseVesselBottom,
+    ProgramFeature::DispenseVesselTop,
+    ProgramFeature::PostDispenseBlowout,
+    ProgramFeature::TouchTip,
+];
+
+/// Transformation preparation dispatches the same strategies and stages competent cells cold. The
+/// single-task emitter carries no air gap, so neither does the operation.
+const OT2_PREPARE_FEATURES: &[ProgramFeature] = OT2_SETUP_FEATURES;
+
+/// Recovery addition dispatches dispense strategies and carries an air gap, but always aspirates at
+/// the labware default. One tip serves the whole distribution, so its steps share a fluid path.
+const OT2_RECOVERY_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::DispenseAboveLiquid,
+    ProgramFeature::DispenseVesselBottom,
+    ProgramFeature::DispenseVesselTop,
+    ProgramFeature::AirGap,
+];
+
+/// Serial dilution follows the medium's falling surface and otherwise works at the labware default.
+/// Its emitters dispatch no other strategy, so no other strategy may reach them.
+const OT2_DILUTION_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::DispenseLiquid,
+];
+
+/// Plating spots onto a material surface at a calibrated offset and blows out. That is the only
+/// dispense it performs. One tip serves each dilution's spots, so those steps share a fluid path.
+const OT2_PLATING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::DispenseMaterialSurface,
+    ProgramFeature::PostDispenseBlowout,
+];
+
+/// Thermal features the Opentrons Thermocycler Module templates realize. Neither Opentrons
+/// application format expresses a controlled ramp rate.
+const OPENTRONS_THERMAL_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::ThermalStageRepeat,
+    ProgramFeature::ThermalHeatedLid,
+    ProgramFeature::ThermalFinalHold,
+    ProgramFeature::ThermalMultiSample,
+];
+
+/// Canonical pipetting features the Flex protocol builder realizes.
+const FLEX_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+];
+
+/// Canonical pipetting features the STAR choreographer realizes. It carries its own measured
+/// volume-to-height models, so it tracks a liquid surface the Flex builder cannot.
+const STAR_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+];
+
+/// Thermal features the Inheco ODTC realizes. It controls ramp rate, and it addresses one load at
+/// a time rather than an independently addressable sample count.
+const ODTC_THERMAL_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::ThermalStageRepeat,
+    ProgramFeature::ThermalHeatedLid,
+    ProgramFeature::ThermalControlledRamp,
+    ProgramFeature::ThermalFinalHold,
+];
+
+/// The semantic simulator preserves every canonical value because it emits meaning rather than
+/// motion.
+const SIMULATOR_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::Transfer,
+    ProgramFeature::Distribute,
+    ProgramFeature::Mix,
+    ProgramFeature::Barrier,
+    ProgramFeature::MultiPositionVessel,
+    ProgramFeature::VesselVolumeLimits,
+    ProgramFeature::VesselTemperatureControl,
+    ProgramFeature::FluidPathIsolatedDestinations,
+    ProgramFeature::FluidPathSharedSourceNoReentry,
+    ProgramFeature::FluidPathGroup,
+    ProgramFeature::AspirateLiquid,
+    ProgramFeature::AspirateTrackedSurface,
+    ProgramFeature::AspirateVesselBottom,
+    ProgramFeature::DispenseLiquid,
+    ProgramFeature::DispenseAboveLiquid,
+    ProgramFeature::DispenseVesselBottom,
+    ProgramFeature::DispenseVesselTop,
+    ProgramFeature::DispenseMaterialSurface,
+    ProgramFeature::AirGap,
+    ProgramFeature::PostDispenseBlowout,
+    ProgramFeature::TouchTip,
+];
+
+const SIMULATOR_THERMAL_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::ThermalStageRepeat,
+    ProgramFeature::ThermalHeatedLid,
+    ProgramFeature::ThermalControlledRamp,
+    ProgramFeature::ThermalFinalHold,
+    ProgramFeature::ThermalMultiSample,
+];
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcedureImplementationDescriptor {
+    pub id: ProcedureImplementationId,
+    pub contract: ProcedureContractId,
+    pub operations: BTreeSet<OperationId>,
+    pub capability_kinds: BTreeSet<CapabilityKind>,
+    pub control_modes: BTreeSet<ControlMode>,
+    pub accepted_run_formats: BTreeSet<String>,
+    pub emitted_run_formats: BTreeSet<String>,
+    /// Fine-grained canonical program features this implementation realizes, per operation.
+    ///
+    /// Keyed by operation because one implementation lowers several of them through different
+    /// emitters: a plating run spots onto agar while a reaction setup cannot, and an aspiration
+    /// strategy one emitter dispatches is one another would silently ignore. A program carrying a
+    /// feature absent from its operation's entry is rejected before lowering. Declaring a feature
+    /// is a claim that the emitted device document preserves it, not that the value parses.
+    pub program_features: BTreeMap<OperationId, BTreeSet<ProgramFeature>>,
+    pub services: AdapterServices,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -113,13 +314,62 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 ["on-deck-modules", "python-protocol-api", "single-channel"],
                 [ControlMode::ReviewedFile],
                 [],
-                [OPENTRONS_PYTHON_PROTOCOL],
+                [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
                 AdapterServices {
                     planning: true,
                     lowering: true,
                     simulation: false,
                     runtime: false,
                 },
+                vec![
+                    pipetting_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
+                        [
+                            (SETUP_GOLDEN_GATE, OT2_SETUP_FEATURES),
+                            (PREPARE_CHEMICAL_TRANSFORMATION, OT2_PREPARE_FEATURES),
+                            (ADD_RECOVERY_MEDIUM, OT2_RECOVERY_FEATURES),
+                            (SERIAL_DILUTION, OT2_DILUTION_FEATURES),
+                            (PLATE_DILUTED_CULTURE, OT2_PLATING_FEATURES),
+                        ],
+                        [
+                            METERED_LIQUID_TRANSFER,
+                            IN_WELL_MIXING,
+                            TEMPERATURE_CONTROLLED_STAGING,
+                            LIQUID_LEVEL_AWARE_ASPIRATION,
+                            VESSEL_RELATIVE_LIQUID_ACCESS,
+                            AIR_GAP_HANDLING,
+                            POST_DISPENSE_BLOWOUT,
+                            TOUCH_TIP,
+                        ],
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                    )?,
+                    thermal_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
+                        [
+                            (CYCLE_GOLDEN_GATE, OPENTRONS_THERMAL_FEATURES),
+                            (HEAT_SHOCK_TRANSFORMATION, OPENTRONS_THERMAL_FEATURES),
+                            (INCUBATE_RECOVERY_CULTURE, OPENTRONS_THERMAL_FEATURES),
+                        ],
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                        false,
+                    )?,
+                ],
                 schema_value::<Ot2AdapterProfile>()?,
             )?,
             descriptor(
@@ -130,13 +380,50 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 ["on-deck-modules", "protocol-designer-json"],
                 [ControlMode::ReviewedFile],
                 [],
-                [OPENTRONS_PROTOCOL_DESIGNER],
+                [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
                 AdapterServices {
                     planning: true,
                     lowering: true,
                     simulation: false,
                     runtime: false,
                 },
+                vec![
+                    pipetting_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1",
+                        [
+                            (SETUP_GOLDEN_GATE, FLEX_PIPETTING_FEATURES),
+                            (SERIAL_DILUTION, FLEX_PIPETTING_FEATURES),
+                        ],
+                        [
+                            METERED_LIQUID_TRANSFER,
+                            IN_WELL_MIXING,
+                            LIQUID_LEVEL_AWARE_ASPIRATION,
+                        ],
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                    )?,
+                    thermal_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexThermalV1",
+                        [(CYCLE_GOLDEN_GATE, OPENTRONS_THERMAL_FEATURES)],
+                        [ControlMode::ReviewedFile],
+                        [],
+                        [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: false,
+                            runtime: false,
+                        },
+                        false,
+                    )?,
+                ],
                 schema_value::<FlexAdapterProfile>()?,
             )?,
             descriptor(
@@ -154,6 +441,27 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: true,
                     runtime: true,
                 },
+                vec![pipetting_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1",
+                    [
+                        (SETUP_GOLDEN_GATE, STAR_PIPETTING_FEATURES),
+                        (SERIAL_DILUTION, STAR_PIPETTING_FEATURES),
+                    ],
+                    [
+                        METERED_LIQUID_TRANSFER,
+                        IN_WELL_MIXING,
+                        LIQUID_LEVEL_AWARE_ASPIRATION,
+                    ],
+                    [ControlMode::ReviewedFile, ControlMode::Api],
+                    [STAR_RUN_FORMAT],
+                    [STAR_RUN_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: true,
+                        runtime: true,
+                    },
+                )?],
                 schema_value::<StarAdapterProfile>()?,
             )?,
             descriptor(
@@ -167,10 +475,24 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                 [THERMOCYCLE_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: false,
+                    lowering: true,
                     simulation: true,
                     runtime: true,
                 },
+                vec![thermal_implementation(
+                    "https://www.lab-compiler.org/ns/adapter-implementation#InhecoOdtcThermalV1",
+                    [(CYCLE_GOLDEN_GATE, ODTC_THERMAL_FEATURES)],
+                    [ControlMode::Sila2],
+                    [THERMOCYCLE_RUN_FORMAT],
+                    [THERMOCYCLE_RUN_FORMAT],
+                    AdapterServices {
+                        planning: true,
+                        lowering: true,
+                        simulation: true,
+                        runtime: true,
+                    },
+                    true,
+                )?],
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
             descriptor(
@@ -188,23 +510,81 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
                     simulation: false,
                     runtime: false,
                 },
+                Vec::new(),
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
             descriptor(
                 "lab.simulator",
                 "Lab semantic capability simulator",
                 None,
-                [LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT],
+                [
+                    LIQUID_HANDLING,
+                    THERMAL_CYCLING,
+                    INCUBATION,
+                    ABSORBANCE_MEASUREMENT,
+                ],
                 ["no-hardware", "semantic-simulation"],
                 [ControlMode::ReviewedFile],
                 [SIMULATION_RUN_FORMAT],
                 [SIMULATION_RUN_FORMAT],
                 AdapterServices {
                     planning: true,
-                    lowering: false,
+                    lowering: true,
                     simulation: true,
                     runtime: false,
                 },
+                vec![
+                    pipetting_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1",
+                        [
+                            (SETUP_GOLDEN_GATE, SIMULATOR_PIPETTING_FEATURES),
+                            (
+                                PREPARE_CHEMICAL_TRANSFORMATION,
+                                SIMULATOR_PIPETTING_FEATURES,
+                            ),
+                            (ADD_RECOVERY_MEDIUM, SIMULATOR_PIPETTING_FEATURES),
+                            (SERIAL_DILUTION, SIMULATOR_PIPETTING_FEATURES),
+                            (PLATE_DILUTED_CULTURE, SIMULATOR_PIPETTING_FEATURES),
+                        ],
+                        [
+                            METERED_LIQUID_TRANSFER,
+                            IN_WELL_MIXING,
+                            TEMPERATURE_CONTROLLED_STAGING,
+                            LIQUID_LEVEL_AWARE_ASPIRATION,
+                            VESSEL_RELATIVE_LIQUID_ACCESS,
+                            AIR_GAP_HANDLING,
+                            POST_DISPENSE_BLOWOUT,
+                            TOUCH_TIP,
+                        ],
+                        [ControlMode::ReviewedFile],
+                        [SIMULATION_RUN_FORMAT],
+                        [SIMULATION_RUN_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: true,
+                            runtime: false,
+                        },
+                    )?,
+                    thermal_implementation(
+                        "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorThermalV1",
+                        [
+                            (CYCLE_GOLDEN_GATE, SIMULATOR_THERMAL_FEATURES),
+                            (HEAT_SHOCK_TRANSFORMATION, SIMULATOR_THERMAL_FEATURES),
+                            (INCUBATE_RECOVERY_CULTURE, SIMULATOR_THERMAL_FEATURES),
+                        ],
+                        [ControlMode::ReviewedFile],
+                        [SIMULATION_RUN_FORMAT],
+                        [SIMULATION_RUN_FORMAT],
+                        AdapterServices {
+                            planning: true,
+                            lowering: true,
+                            simulation: true,
+                            runtime: false,
+                        },
+                        true,
+                    )?,
+                ],
                 schema_value::<EmptyAdapterProfile>()?,
             )?,
         ],
@@ -222,23 +602,159 @@ fn descriptor<const C: usize, const F: usize, const M: usize, const A: usize, co
     accepted_run_formats: [&'static str; A],
     emitted_run_formats: [&'static str; E],
     services: AdapterServices,
+    procedure_implementations: Vec<ProcedureImplementationDescriptor>,
     profile_schema: Value,
 ) -> Result<AdapterDescriptor, AdapterProfileContractError> {
     Ok(AdapterDescriptor {
         id: id.to_owned(),
         display_name: display_name.to_owned(),
         manufacturer: manufacturer.map(str::to_owned),
-        capabilities: strings(capabilities),
-        features: strings(features),
-        control_modes: control_modes
+        capabilities: capabilities
             .into_iter()
-            .map(|mode| mode.iri().to_owned())
-            .collect(),
+            .map(|kind| {
+                CapabilityKind::new(kind).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "adapter '{id}' declares invalid capability kind: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        features: strings(features),
+        control_modes: control_modes.into_iter().collect(),
         accepted_run_formats: strings(accepted_run_formats),
         emitted_run_formats: strings(emitted_run_formats),
         services,
+        procedure_implementations,
         profile_schema,
         default_profile: default_adapter_profile(id, id)?,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pipetting_implementation<
+    const O: usize,
+    const C: usize,
+    const M: usize,
+    const A: usize,
+    const E: usize,
+>(
+    id: &'static str,
+    operations: [(&'static str, &'static [ProgramFeature]); O],
+    capability_kinds: [&'static str; C],
+    control_modes: [ControlMode; M],
+    accepted_run_formats: [&'static str; A],
+    emitted_run_formats: [&'static str; E],
+    services: AdapterServices,
+) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
+    Ok(ProcedureImplementationDescriptor {
+        id: ProcedureImplementationId::new(id).map_err(|error| {
+            AdapterProfileContractError::Contract(format!(
+                "Procedure implementation '{id}' has an invalid identity: {error}"
+            ))
+        })?,
+        contract: ProcedureContractId::new(PIPETTING_PROGRAM_V1)
+            .expect("built-in Procedure contract is an absolute IRI"),
+        operations: operations
+            .into_iter()
+            .map(|(operation, _)| {
+                OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        capability_kinds: capability_kinds
+            .into_iter()
+            .map(|kind| {
+                CapabilityKind::new(kind).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid capability: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        control_modes: control_modes.into_iter().collect(),
+        accepted_run_formats: strings(accepted_run_formats),
+        emitted_run_formats: strings(emitted_run_formats),
+        program_features: operations
+            .into_iter()
+            .map(|(operation, features)| {
+                let operation = OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })?;
+                Ok((operation, features.iter().copied().collect()))
+            })
+            .collect::<Result<_, AdapterProfileContractError>>()?,
+        services,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn thermal_implementation<const O: usize, const M: usize, const A: usize, const E: usize>(
+    id: &'static str,
+    operations: [(&'static str, &'static [ProgramFeature]); O],
+    control_modes: [ControlMode; M],
+    accepted_run_formats: [&'static str; A],
+    emitted_run_formats: [&'static str; E],
+    services: AdapterServices,
+    controlled_ramp: bool,
+) -> Result<ProcedureImplementationDescriptor, AdapterProfileContractError> {
+    let mut capability_kinds = [
+        PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
+        HEATED_LID_TEMPERATURE_CONTROL,
+    ]
+    .into_iter()
+    .map(|kind| {
+        CapabilityKind::new(kind).map_err(|error| {
+            AdapterProfileContractError::Contract(format!(
+                "Procedure implementation '{id}' declares an invalid capability: {error}"
+            ))
+        })
+    })
+    .collect::<Result<BTreeSet<_>, _>>()?;
+    if controlled_ramp {
+        capability_kinds.insert(
+            CapabilityKind::new(CONTROLLED_TEMPERATURE_RAMP)
+                .expect("built-in capability is an absolute IRI"),
+        );
+    }
+    Ok(ProcedureImplementationDescriptor {
+        id: ProcedureImplementationId::new(id).map_err(|error| {
+            AdapterProfileContractError::Contract(format!(
+                "Procedure implementation '{id}' has an invalid identity: {error}"
+            ))
+        })?,
+        contract: ProcedureContractId::new(THERMAL_PROGRAM_V1)
+            .expect("built-in Procedure contract is an absolute IRI"),
+        operations: operations
+            .into_iter()
+            .map(|(operation, _)| {
+                OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })
+            })
+            .collect::<Result<_, _>>()?,
+        capability_kinds,
+        control_modes: control_modes.into_iter().collect(),
+        accepted_run_formats: strings(accepted_run_formats),
+        emitted_run_formats: strings(emitted_run_formats),
+        program_features: operations
+            .into_iter()
+            .map(|(operation, features)| {
+                let operation = OperationId::new(operation).map_err(|error| {
+                    AdapterProfileContractError::Contract(format!(
+                        "Procedure implementation '{id}' declares an invalid operation: {error}"
+                    ))
+                })?;
+                Ok((operation, features.iter().copied().collect()))
+            })
+            .collect::<Result<_, AdapterProfileContractError>>()?,
+        services,
     })
 }
 
@@ -287,101 +803,300 @@ pub fn validate_adapter_profile(
     }
 }
 
-/// Lowers one complete checked program through an explicitly selected adapter.
-///
-/// Selection has already happened through facility allocation. This function cannot infer a
-/// driver from an Asset's manufacturer or model and cannot select a different adapter. The
-/// profile is private operational configuration for the exact Asset binding, not a second facility model.
-pub fn lower_dependency_build_with_adapter(
-    driver: &str,
-    name: &str,
-    contents: &str,
-    protocol: &ProtocolLairProgram,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, AdapterLoweringError> {
+/// One reviewed run document emitted for an exact allocated requirement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdapterInvocationDocument {
+    pub requirements: Vec<LocalId>,
+    pub path: String,
+    pub format: String,
+}
+
+/// Artifacts emitted by a requirement-scoped adapter invocation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdapterInvocationLowering {
+    pub artifacts: ArtifactBundle,
+    pub documents: Vec<AdapterInvocationDocument>,
+}
+
+/// Lower one exact allocated invocation without exposing LAIR or the rest of the experiment.
+pub fn lower_adapter_invocation_with_adapter(
+    profile: &ValidatedAdapterProfile,
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
+    let driver = profile.driver.as_str();
+    invocation_plan
+        .validate()
+        .map_err(|error| AdapterLoweringError::InvalidInvocation {
+            driver: driver.to_owned(),
+            message: error.to_string(),
+        })?;
+    let revalidated = validate_adapter_profile(driver, &profile.name, &profile.canonical_toml)
+        .map_err(|error| AdapterLoweringError::InvalidProfile {
+            driver: driver.to_owned(),
+            message: error.to_string(),
+        })?;
+    if revalidated != *profile {
+        return Err(AdapterLoweringError::InvalidProfile {
+            driver: driver.to_owned(),
+            message: "the validated profile does not match its canonical adapter representation"
+                .to_owned(),
+        });
+    }
+    if invocation.adapter.driver != driver
+        || invocation.adapter.profile_sha256 != profile.sha256
+        || !invocation_plan
+            .invocations
+            .iter()
+            .any(|candidate| candidate == invocation)
+    {
+        return Err(AdapterLoweringError::InvalidInvocation {
+            driver: driver.to_owned(),
+            message: "the invocation is not an exact member of its validated plan".to_owned(),
+        });
+    }
+    validate_invocation_implementation(invocation_plan, invocation).map_err(|message| {
+        AdapterLoweringError::InvalidInvocation {
+            driver: driver.to_owned(),
+            message,
+        }
+    })?;
     match driver {
         "opentrons.ot2" => {
-            let profile = Ot2AdapterProfile::parse(name, contents).map_err(|error| {
-                AdapterLoweringError::InvalidProfile {
+            let parsed = Ot2AdapterProfile::parse(&profile.name, &profile.canonical_toml).map_err(
+                |error| AdapterLoweringError::InvalidProfile {
                     driver: driver.to_owned(),
                     message: error.to_string(),
-                }
-            })?;
-            lab_compiler_ot2(protocol, &profile, inventory).map_err(|message| {
-                AdapterLoweringError::Lowering {
+                },
+            )?;
+            crate::backend::opentrons::ot2::lower_invocation(&parsed, invocation_plan, invocation)
+                .map_err(|message| AdapterLoweringError::Lowering {
                     driver: driver.to_owned(),
                     message,
-                }
-            })
+                })
         }
         "opentrons.flex" => {
-            let profile = FlexAdapterProfile::parse(name, contents).map_err(|error| {
-                AdapterLoweringError::InvalidProfile {
+            let parsed = FlexAdapterProfile::parse(&profile.name, &profile.canonical_toml)
+                .map_err(|error| AdapterLoweringError::InvalidProfile {
                     driver: driver.to_owned(),
                     message: error.to_string(),
-                }
-            })?;
-            lab_compiler_flex(protocol, &profile, inventory).map_err(|message| {
-                AdapterLoweringError::Lowering {
+                })?;
+            crate::backend::opentrons::flex::lower_invocation(&parsed, invocation_plan, invocation)
+                .map_err(|message| AdapterLoweringError::Lowering {
                     driver: driver.to_owned(),
                     message,
-                }
-            })
+                })
         }
         "hamilton.star" => {
-            let profile = StarAdapterProfile::parse(name, contents).map_err(|error| {
-                AdapterLoweringError::InvalidProfile {
+            let parsed = StarAdapterProfile::parse(&profile.name, &profile.canonical_toml)
+                .map_err(|error| AdapterLoweringError::InvalidProfile {
                     driver: driver.to_owned(),
                     message: error.to_string(),
-                }
-            })?;
-            lab_compiler_star(protocol, &profile, inventory).map_err(|message| {
-                AdapterLoweringError::Lowering {
+                })?;
+            crate::backend::hamilton::star::lower_invocation(&parsed, invocation_plan, invocation)
+                .map_err(|message| AdapterLoweringError::Lowering {
                     driver: driver.to_owned(),
                     message,
-                }
-            })
+                })
         }
-        _ => Err(AdapterLoweringError::Unsupported {
+        "inheco.odtc" => {
+            crate::backend::inheco::odtc::lower_invocation(invocation_plan, invocation).map_err(
+                |message| AdapterLoweringError::Lowering {
+                    driver: driver.to_owned(),
+                    message,
+                },
+            )
+        }
+        "lab.simulator" => lower_simulator_invocation(invocation_plan, invocation),
+        _ => Err(AdapterLoweringError::UnsupportedInvocation {
             driver: driver.to_owned(),
         }),
     }
 }
 
-fn lab_compiler_ot2(
-    protocol: &ProtocolLairProgram,
-    profile: &Ot2AdapterProfile,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, String> {
-    crate::backend::opentrons::ot2::compile_dependency_build(protocol, profile, inventory)
-        .map(|bundle| bundle.artifacts().clone())
-        .map_err(|error| error.to_string())
+fn validate_invocation_implementation(
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+) -> Result<(), String> {
+    let catalog = adapter_catalog().map_err(|error| error.to_string())?;
+    let descriptor = catalog
+        .adapters
+        .iter()
+        .find(|descriptor| descriptor.id == invocation.adapter.driver)
+        .ok_or_else(|| {
+            format!(
+                "adapter '{}' is not present in this compiler build",
+                invocation.adapter.driver
+            )
+        })?;
+    let invocation_tasks = invocation.tasks.iter().collect::<BTreeSet<_>>();
+    let invocation_requirements = invocation.requirements.iter().collect::<BTreeSet<_>>();
+    for task in invocation_plan
+        .methods
+        .iter()
+        .flat_map(|method| &method.tasks)
+        .filter(|task| invocation_tasks.contains(&task.id))
+    {
+        let selected_requirements = task
+            .requirements
+            .iter()
+            .filter(|requirement| invocation_requirements.contains(&requirement.id))
+            .collect::<Vec<_>>();
+        let Some(program) = &task.program else {
+            if !descriptor.services.lowering {
+                return Err(format!(
+                    "adapter '{}' does not provide legacy lowering for task '{}'",
+                    invocation.adapter.driver, task.id
+                ));
+            }
+            continue;
+        };
+        for requirement in selected_requirements {
+            let implementation_id = requirement.procedure_implementation.as_ref().expect(
+                "invocation validation requires normalized adapter work to name an implementation",
+            );
+            let implementation = descriptor
+                .procedure_implementations
+                .iter()
+                .find(|implementation| &implementation.id == implementation_id)
+                .ok_or_else(|| {
+                    format!(
+                        "Procedure implementation '{}' is not provided by adapter '{}' in this compiler build",
+                        implementation_id, invocation.adapter.driver
+                    )
+                })?;
+            if !implementation.services.lowering {
+                return Err(format!(
+                    "Procedure implementation '{}' does not provide lowering",
+                    implementation.id
+                ));
+            }
+            if implementation.contract != program.contract
+                || !implementation.operations.contains(&task.operation)
+                || !implementation
+                    .capability_kinds
+                    .contains(&requirement.capability_kind)
+            {
+                return Err(format!(
+                    "Procedure implementation '{}' does not implement task '{}' contract '{}' operation '{}'",
+                    implementation.id, task.id, program.contract, task.operation
+                ));
+            }
+            // An implementation that does not declare a feature would otherwise render the program
+            // without it, emitting a plausible device document that performs different science.
+            let validated = program.clone().validate().map_err(|error| {
+                format!(
+                    "Procedure task '{}' has an invalid normalized program: {error}",
+                    task.id
+                )
+            })?;
+            // Features are matched against this exact operation. One implementation lowers several
+            // operations through different emitters, and what one of them dispatches another would
+            // silently ignore.
+            let realized = implementation
+                .program_features
+                .get(&task.operation)
+                .ok_or_else(|| {
+                    format!(
+                        "Procedure implementation '{}' declares operation '{}' without stating the program features it realizes",
+                        implementation.id, task.operation
+                    )
+                })?;
+            let missing = validated
+                .features()
+                .difference(realized)
+                .map(ProgramFeature::to_string)
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                return Err(format!(
+                    "Procedure implementation '{}' cannot realize task '{}' operation '{}': its normalized program requires {}, which this implementation does not realize for that operation",
+                    implementation.id,
+                    task.id,
+                    task.operation,
+                    missing.join(", ")
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
-fn lab_compiler_flex(
-    protocol: &ProtocolLairProgram,
-    profile: &FlexAdapterProfile,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, String> {
-    crate::backend::opentrons::flex::compile_dependency_build(protocol, profile, inventory)
-        .map(|bundle| bundle.artifacts().clone())
-        .map_err(|error| error.to_string())
+fn lower_simulator_invocation(
+    invocation_plan: &AdapterInvocationPlan,
+    invocation: &AdapterInvocation,
+) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
+    let requirements = invocation_plan
+        .methods
+        .iter()
+        .flat_map(|method| &method.tasks)
+        .flat_map(|task| {
+            task.requirements
+                .iter()
+                .map(move |requirement| (requirement.id.clone(), task))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut artifacts = ArtifactBundle::new();
+    let mut documents = Vec::new();
+    for (ordinal, requirement_id) in invocation.requirements.iter().enumerate() {
+        let task = requirements
+            .get(requirement_id)
+            .expect("validated invocation requirements belong to exact tasks");
+        let requirement = task
+            .requirements
+            .iter()
+            .find(|requirement| &requirement.id == requirement_id)
+            .expect("the requirement index preserves the owning requirement");
+        let document = SimulationRunDocument {
+            format: SIMULATION_RUN_FORMAT.to_owned(),
+            id: requirement_id.to_string(),
+            title: format!("Simulate {}", task.operation),
+            capability_kind: requirement.capability_kind.to_string(),
+            assumptions: vec![
+                "Semantic simulation only; no physical hardware is contacted.".to_owned(),
+                format!("Allocated Asset: {}", invocation.asset),
+                format!("Procedure operation: {}", task.operation),
+            ],
+        };
+        let path = format!(
+            "requirement-{:03}-{}.simulation.json",
+            ordinal + 1,
+            short_digest(requirement_id.as_str())
+        );
+        let mut contents = serde_json::to_string_pretty(&document).map_err(|error| {
+            AdapterLoweringError::Lowering {
+                driver: invocation.adapter.driver.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        contents.push('\n');
+        artifacts
+            .insert_text(&path, "application/json", contents)
+            .map_err(|error| AdapterLoweringError::Lowering {
+                driver: invocation.adapter.driver.clone(),
+                message: error.to_string(),
+            })?;
+        documents.push(AdapterInvocationDocument {
+            requirements: vec![requirement_id.clone()],
+            path,
+            format: SIMULATION_RUN_FORMAT.to_owned(),
+        });
+    }
+    Ok(AdapterInvocationLowering {
+        artifacts,
+        documents,
+    })
 }
 
-fn lab_compiler_star(
-    protocol: &ProtocolLairProgram,
-    profile: &StarAdapterProfile,
-    inventory: &BuildInventory,
-) -> Result<ArtifactBundle, String> {
-    crate::backend::hamilton::star::compile_dependency_build(protocol, profile, inventory)
-        .map(|bundle| bundle.artifacts().clone())
-        .map_err(|error| error.to_string())
+fn short_digest(value: &str) -> String {
+    sha256(value.as_bytes())[..8].to_owned()
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AdapterLoweringError {
-    #[error("adapter '{driver}' does not provide whole-program lowering")]
-    Unsupported { driver: String },
+    #[error("adapter '{driver}' does not provide requirement-scoped lowering")]
+    UnsupportedInvocation { driver: String },
+    #[error("invalid invocation for adapter '{driver}': {message}")]
+    InvalidInvocation { driver: String, message: String },
     #[error("invalid operational profile for adapter '{driver}': {message}")]
     InvalidProfile { driver: String, message: String },
     #[error("adapter '{driver}' could not lower the allocated program: {message}")]
@@ -516,8 +1231,146 @@ fn unknown_driver(found: &str) -> AdapterProfileContractError {
 }
 
 #[cfg(test)]
-mod tests {
+mod feature_scope_tests {
     use super::*;
+
+    fn implementation(driver: &str, suffix: &str) -> ProcedureImplementationDescriptor {
+        adapter_catalog()
+            .expect("the built-in catalog is valid")
+            .adapters
+            .into_iter()
+            .find(|adapter| adapter.id == driver)
+            .expect("adapter is present")
+            .procedure_implementations
+            .into_iter()
+            .find(|implementation| implementation.id.as_str().ends_with(suffix))
+            .expect("implementation is present")
+    }
+
+    fn realizes(
+        implementation: &ProcedureImplementationDescriptor,
+        operation: &str,
+        feature: ProgramFeature,
+    ) -> bool {
+        implementation
+            .program_features
+            .get(&OperationId::new(operation).unwrap())
+            .expect("every declared operation states its features")
+            .contains(&feature)
+    }
+
+    /// One implementation lowers several operations through different emitters, so a feature one of
+    /// them dispatches is not a feature the implementation realizes everywhere.
+    #[test]
+    fn ot2_features_are_scoped_to_the_operation_that_realizes_them() {
+        let ot2 = implementation("opentrons.ot2", "OpentronsOt2PipettingV1");
+
+        // Only the recovery emitter reads an air gap; the assembly emitter would drop it.
+        assert!(realizes(&ot2, ADD_RECOVERY_MEDIUM, ProgramFeature::AirGap));
+        assert!(!realizes(&ot2, SETUP_GOLDEN_GATE, ProgramFeature::AirGap));
+
+        // Only plating spots onto a material surface; asking dilution for it would be ignored.
+        assert!(realizes(
+            &ot2,
+            PLATE_DILUTED_CULTURE,
+            ProgramFeature::DispenseMaterialSurface
+        ));
+        assert!(!realizes(
+            &ot2,
+            SERIAL_DILUTION,
+            ProgramFeature::DispenseMaterialSurface
+        ));
+
+        // Only dilution follows a falling surface; the setup emitter raises on that strategy.
+        assert!(realizes(
+            &ot2,
+            SERIAL_DILUTION,
+            ProgramFeature::AspirateTrackedSurface
+        ));
+        assert!(!realizes(
+            &ot2,
+            SETUP_GOLDEN_GATE,
+            ProgramFeature::AspirateTrackedSurface
+        ));
+
+        // Only setup and preparation dispatch a vessel-relative aspiration.
+        assert!(realizes(
+            &ot2,
+            SETUP_GOLDEN_GATE,
+            ProgramFeature::AspirateVesselBottom
+        ));
+        assert!(!realizes(
+            &ot2,
+            PLATE_DILUTED_CULTURE,
+            ProgramFeature::AspirateVesselBottom
+        ));
+    }
+
+    /// The gate refuses the program rather than letting an emitter that never reads the value
+    /// render a plausible protocol that performs different science.
+    #[test]
+    fn a_feature_absent_from_an_operation_is_refused_for_that_operation() {
+        let ot2 = implementation("opentrons.ot2", "OpentronsOt2PipettingV1");
+        let setup = ot2
+            .program_features
+            .get(&OperationId::new(SETUP_GOLDEN_GATE).unwrap())
+            .unwrap();
+        let recovery = ot2
+            .program_features
+            .get(&OperationId::new(ADD_RECOVERY_MEDIUM).unwrap())
+            .unwrap();
+
+        // Take a program the recovery emitter fully realizes, including its air gap.
+        let requested = recovery.clone();
+        assert!(requested.contains(&ProgramFeature::AirGap));
+        assert!(
+            requested.difference(recovery).next().is_none(),
+            "recovery realizes its own program"
+        );
+
+        // The identical program offered to reaction setup asks for an air gap that emitter never
+        // reads, and the gate reports exactly that.
+        let missing = requested.difference(setup).copied().collect::<Vec<_>>();
+        assert_eq!(missing, vec![ProgramFeature::AirGap]);
+    }
+
+    /// An implementation cannot gain an operation without saying what it realizes for it.
+    #[test]
+    fn every_declared_operation_states_its_features() {
+        for adapter in adapter_catalog()
+            .expect("the built-in catalog is valid")
+            .adapters
+        {
+            for implementation in adapter.procedure_implementations {
+                for operation in &implementation.operations {
+                    assert!(
+                        implementation.program_features.contains_key(operation),
+                        "{} declares operation {operation} without stating its features",
+                        implementation.id
+                    );
+                }
+                assert_eq!(
+                    implementation.program_features.len(),
+                    implementation.operations.len(),
+                    "{} states features for operations it does not declare",
+                    implementation.id
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::planning::{
+        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+        MaterialLotBuildInventory,
+    };
+    use lab_capability::{MethodId, OperationId, QualificationLevel};
+    use lab_method::IntentOperationId;
 
     #[test]
     fn registry_separates_semantic_capabilities_from_features() {
@@ -530,13 +1383,107 @@ mod tests {
             .iter()
             .find(|adapter| adapter.id == "hamilton.star")
             .unwrap();
-        assert_eq!(star.capabilities, strings([LIQUID_HANDLING]));
+        assert_eq!(
+            star.capabilities,
+            [CapabilityKind::new(LIQUID_HANDLING).unwrap()]
+                .into_iter()
+                .collect()
+        );
         assert!(star.features.contains("eight-channel"));
-        assert!(!star.capabilities.contains("eight-channel"));
-        assert!(star.control_modes.contains(ControlMode::Api.iri()));
+        assert!(
+            !star
+                .capabilities
+                .iter()
+                .any(|kind| kind.as_str() == "eight-channel")
+        );
+        assert!(star.control_modes.contains(&ControlMode::Api));
         assert!(star.accepted_run_formats.contains(STAR_RUN_FORMAT));
         assert!(star.services.lowering);
         assert!(star.services.runtime);
+        assert_eq!(star.procedure_implementations.len(), 1);
+        let star_pipetting = &star.procedure_implementations[0];
+        assert_eq!(star_pipetting.contract.as_str(), PIPETTING_PROGRAM_V1);
+        assert!(
+            star_pipetting
+                .operations
+                .contains(&OperationId::new(SETUP_GOLDEN_GATE).unwrap())
+        );
+        assert!(
+            star_pipetting
+                .operations
+                .contains(&OperationId::new(SERIAL_DILUTION).unwrap())
+        );
+        assert_eq!(
+            star_pipetting.capability_kinds,
+            [
+                METERED_LIQUID_TRANSFER,
+                IN_WELL_MIXING,
+                LIQUID_LEVEL_AWARE_ASPIRATION,
+            ]
+            .into_iter()
+            .map(|kind| CapabilityKind::new(kind).unwrap())
+            .collect()
+        );
+
+        let ot2 = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "opentrons.ot2")
+            .unwrap();
+        assert!(ot2.services.lowering);
+        assert!(!ot2.services.runtime);
+        let ot2_thermal = ot2
+            .procedure_implementations
+            .iter()
+            .find(|implementation| implementation.contract.as_str() == THERMAL_PROGRAM_V1)
+            .expect("OT-2 implements the canonical thermal contract");
+        assert!(
+            ot2_thermal
+                .operations
+                .contains(&OperationId::new(CYCLE_GOLDEN_GATE).unwrap())
+        );
+        assert_eq!(
+            ot2_thermal.capability_kinds,
+            [
+                PROGRAMMED_BLOCK_TEMPERATURE_CONTROL,
+                HEATED_LID_TEMPERATURE_CONTROL,
+            ]
+            .into_iter()
+            .map(|kind| CapabilityKind::new(kind).unwrap())
+            .collect()
+        );
+
+        let flex = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "opentrons.flex")
+            .unwrap();
+        assert!(flex.services.lowering);
+        assert!(
+            flex.emitted_run_formats
+                .contains(OPENTRONS_PROTOCOL_DESIGNER_FORMAT)
+        );
+        assert!(!flex.services.runtime);
+
+        let odtc = catalog
+            .adapters
+            .iter()
+            .find(|adapter| adapter.id == "inheco.odtc")
+            .unwrap();
+        assert!(odtc.services.lowering);
+        assert!(odtc.services.runtime);
+        let odtc_thermal = &odtc.procedure_implementations[0];
+        assert_eq!(odtc_thermal.contract.as_str(), THERMAL_PROGRAM_V1);
+        assert!(
+            odtc_thermal
+                .capability_kinds
+                .contains(&CapabilityKind::new(CONTROLLED_TEMPERATURE_RAMP).unwrap())
+        );
+        assert!(
+            odtc_thermal
+                .emitted_run_formats
+                .contains(THERMOCYCLE_RUN_FORMAT)
+        );
 
         let simulator = catalog
             .adapters
@@ -544,7 +1491,7 @@ mod tests {
             .find(|adapter| adapter.id == "lab.simulator")
             .unwrap();
         assert!(simulator.services.simulation);
-        assert!(!simulator.services.lowering);
+        assert!(simulator.services.lowering);
         assert!(!simulator.services.runtime);
         assert!(
             simulator
@@ -553,7 +1500,148 @@ mod tests {
         );
         assert_eq!(
             simulator.capabilities,
-            strings([LIQUID_HANDLING, INCUBATION, ABSORBANCE_MEASUREMENT])
+            [
+                LIQUID_HANDLING,
+                THERMAL_CYCLING,
+                INCUBATION,
+                ABSORBANCE_MEASUREMENT,
+            ]
+            .into_iter()
+            .map(|kind| CapabilityKind::new(kind).unwrap())
+            .collect()
+        );
+    }
+
+    #[test]
+    fn simulator_lowers_each_exact_invocation_without_receiving_other_assets_work() {
+        let profile = default_adapter_profile("lab.simulator", "simulator").unwrap();
+        let adapter = InvocationAdapter {
+            driver: "lab.simulator".to_owned(),
+            profile_path: "adapters/simulator.toml".into(),
+            profile_sha256: profile.sha256.clone(),
+            features: BTreeSet::from(["no-hardware".to_owned(), "semantic-simulation".to_owned()]),
+            accepted_run_formats: BTreeSet::from([SIMULATION_RUN_FORMAT.to_owned()]),
+            emitted_run_formats: BTreeSet::from([SIMULATION_RUN_FORMAT.to_owned()]),
+        };
+        let make_task =
+            |choice: &str, operation: &str, capability: &str, asset: &str, offering: &str| {
+                let task_id = LocalId::new(format!("{choice}::task")).unwrap();
+                let requirement_id =
+                    LocalId::new(format!("{choice}::task::requirement::capability")).unwrap();
+                let requirement = AllocatedRequirementBinding {
+                    id: requirement_id.clone(),
+                    capability_kind: CapabilityKind::new(capability).unwrap(),
+                    minimum_qualification: QualificationLevel::Simulatable,
+                    accepted_control_modes: BTreeSet::from([ControlMode::ReviewedFile]),
+                    offering: offering.to_owned(),
+                    asset: asset.to_owned(),
+                    observed_qualification: QualificationLevel::Simulatable.to_string(),
+                    control_mode: ControlMode::ReviewedFile.to_string(),
+                    parameters: Vec::new(),
+                    procedure_implementation: None,
+                    adapter: Some(adapter.clone()),
+                };
+                (
+                    AllocatedMethod {
+                        choice: LocalId::new(choice).unwrap(),
+                        source_operation: IntentOperationId::new(format!(
+                            "https://example.org/intent/{choice}"
+                        ))
+                        .unwrap(),
+                        method: MethodId::new(format!("https://example.org/method/{choice}"))
+                            .unwrap(),
+                        after: Vec::new(),
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
+                        yields: Vec::new(),
+                        tasks: vec![AllocatedProcedureTask {
+                            id: task_id.clone(),
+                            operation: OperationId::new(operation).unwrap(),
+                            program: None,
+                            inputs: Vec::new(),
+                            outputs: Vec::new(),
+                            parameters: Vec::new(),
+                            materials: Vec::new(),
+                            requirements: vec![requirement],
+                        }],
+                    },
+                    task_id,
+                    requirement_id,
+                )
+            };
+        let first_asset = "https://example.org/facility/liquid-handler";
+        let second_asset = "https://example.org/facility/reader";
+        let (first_method, first_task, first_requirement) = make_task(
+            "prepare",
+            "https://example.org/procedure/prepare-plate",
+            LIQUID_HANDLING,
+            first_asset,
+            "https://example.org/facility/liquid-handler/liquid-handling",
+        );
+        let (second_method, second_task, second_requirement) = make_task(
+            "measure",
+            "https://example.org/procedure/measure-plate",
+            ABSORBANCE_MEASUREMENT,
+            second_asset,
+            "https://example.org/facility/reader/absorbance",
+        );
+        let make_invocation = |asset: &str, task: LocalId, requirement: LocalId| {
+            let mut invocation = AdapterInvocation {
+                id: String::new(),
+                asset: asset.to_owned(),
+                adapter: adapter.clone(),
+                tasks: vec![task],
+                requirements: vec![requirement],
+            };
+            invocation.id =
+                crate::planning::adapter_invocation_id(&invocation.asset, &invocation.adapter);
+            invocation
+        };
+        let first = make_invocation(first_asset, first_task, first_requirement.clone());
+        let second = make_invocation(second_asset, second_task, second_requirement.clone());
+        let plan = AdapterInvocationPlan {
+            schema_version: crate::planning::ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
+            problem_sha256: "a".repeat(64),
+            allocated_lair_sha256: "c".repeat(64),
+            inventory_sha256: "d".repeat(64),
+            facility: "https://example.org/facility".to_owned(),
+            material_inventory: MaterialLotBuildInventory {
+                source_sha256: "d".repeat(64),
+                facility: "https://example.org/facility".to_owned(),
+                materials: BTreeMap::new(),
+                artifacts: BTreeMap::new(),
+            },
+            methods: vec![first_method, second_method],
+            invocations: vec![first.clone(), second.clone()],
+        };
+        plan.validate().unwrap();
+
+        let first_lowered = lower_adapter_invocation_with_adapter(&profile, &plan, &first).unwrap();
+        let second_lowered =
+            lower_adapter_invocation_with_adapter(&profile, &plan, &second).unwrap();
+        assert_eq!(
+            first_lowered.documents[0].requirements,
+            vec![first_requirement]
+        );
+        assert_eq!(
+            second_lowered.documents[0].requirements,
+            vec![second_requirement]
+        );
+        assert_eq!(first_lowered.artifacts.len(), 1);
+        assert_eq!(second_lowered.artifacts.len(), 1);
+        let first_document: SimulationRunDocument =
+            serde_json::from_slice(first_lowered.artifacts.iter().next().unwrap().contents())
+                .unwrap();
+        let second_document: SimulationRunDocument =
+            serde_json::from_slice(second_lowered.artifacts.iter().next().unwrap().contents())
+                .unwrap();
+        assert_eq!(first_document.capability_kind, LIQUID_HANDLING);
+        assert_eq!(second_document.capability_kind, ABSORBANCE_MEASUREMENT);
+        assert!(
+            first_document
+                .assumptions
+                .iter()
+                .all(|assumption| !assumption.contains(second_asset))
         );
     }
 

@@ -21,6 +21,7 @@ TRANSFORMATION = {
 
 composite_strain_1 = Strain.build(
     doc="The GFP reporter carried in the DH5alpha cloning strain.",
+    sbol_identity="https://SBOL2Build.org/composite_strain_1",
     chassis=DH5alpha,
     plasmids=[composite_plasmid_1],
     selection=chloramphenicol,
@@ -31,6 +32,7 @@ composite_strain_1 = Strain.build(
 )
 composite_strain_2 = Strain.build(
     doc="The RFP reporter carried in the DH5alpha cloning strain.",
+    sbol_identity="https://SBOL2Build.org/composite_strain_2",
     chassis=DH5alpha,
     plasmids=[composite_plasmid_2],
     selection=chloramphenicol,
@@ -41,6 +43,7 @@ composite_strain_2 = Strain.build(
 )
 composite_strain_3 = Strain.build(
     doc="The GFP reporter carried in the BL21 expression strain.",
+    sbol_identity="https://SBOL2Build.org/composite_strain_3",
     chassis=BL21,
     plasmids=[composite_plasmid_1],
     selection=chloramphenicol,
@@ -51,6 +54,7 @@ composite_strain_3 = Strain.build(
 )
 composite_strain_4 = Strain.build(
     doc="The RFP reporter carried in the BL21 expression strain.",
+    sbol_identity="https://SBOL2Build.org/composite_strain_4",
     chassis=BL21,
     plasmids=[composite_plasmid_2],
     selection=chloramphenicol,

@@ -2,8 +2,16 @@
 
 ## Status
 
-Accepted. Builds on [0007](0007-toolchain-cli-boundary.md), which places
-materialization concerns in the CLI and keeps the compiler pure.
+Accepted, and partly overtaken by
+[0046](0046-allocated-procedure-is-the-device-boundary.md). Builds on
+[0007](0007-toolchain-cli-boundary.md), which places materialization concerns in
+the CLI and keeps the compiler pure.
+
+Typst remains the operator-document format, which is the substance of this
+decision. The markdown renderer this document describes alongside it, and the
+`labc --emit manual-protocol` mode that served it, were removed when Allocated
+Procedure became the only device-lowering boundary; `labc` no longer emits
+operator documents in any format.
 
 ## Context
 

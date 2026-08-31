@@ -1,11 +1,53 @@
 //! Deserializable shape of OT-2 adapter configuration: protocol options, instruments, deck modules, and the labware each build stage claims.
 
 use schemars::JsonSchema;
+
+use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 
-pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
+pub use crate::backend::profile::{MediaRack, Plates, SourceRack, TipRacks};
 
 use crate::backend::opentrons::ot2::profile::defaults::*;
+
+/// Calibrated OT-2 realization policy for portable pipetting techniques.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TechniqueCalibration {
+    #[serde(default = "default_aspiration_rate")]
+    pub aspiration_rate: f64,
+    #[serde(default = "default_dispense_rate")]
+    pub dispense_rate: f64,
+    #[serde(default = "default_tracked_source_volume_ul")]
+    pub tracked_source_volume_ul: u32,
+    #[serde(default = "default_tracked_meniscus_offset_mm")]
+    pub tracked_meniscus_offset_mm: f64,
+    #[serde(default = "default_tracked_usable_depth_offset_mm")]
+    pub tracked_usable_depth_offset_mm: f64,
+    #[serde(default = "default_tracked_minimum_height_mm")]
+    pub tracked_minimum_height_mm: f64,
+    #[serde(default = "default_tracked_low_volume_fraction")]
+    pub tracked_low_volume_fraction: f64,
+    #[serde(default = "default_tracked_chunk_size")]
+    pub tracked_chunk_size: usize,
+    #[serde(default = "default_distribution_disposal_volume_ul")]
+    pub distribution_disposal_volume_ul: u32,
+    #[serde(default = "default_above_liquid_offset_mm")]
+    pub above_liquid_offset_mm: f64,
+    #[serde(default = "default_material_surface_offset_mm")]
+    pub material_surface_offset_mm: f64,
+    #[serde(default = "default_touch_tip_radius")]
+    pub touch_tip_radius: f64,
+    #[serde(default = "default_touch_tip_vertical_offset_mm")]
+    pub touch_tip_vertical_offset_mm: f64,
+    #[serde(default = "default_touch_tip_speed_mm_s")]
+    pub touch_tip_speed_mm_s: f64,
+}
+
+impl Default for TechniqueCalibration {
+    fn default() -> Self {
+        default_technique_calibration()
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -77,7 +119,7 @@ pub struct TemperatureModule {
     pub slot: String,
     /// Rack of chilled source tubes carried on the module.
     pub labware: String,
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 /// The thermocycler occupies fixed slots, so it declares no slot of its own.
@@ -86,7 +128,7 @@ pub struct TemperatureModule {
 pub struct Thermocycler {
     pub model: String,
     pub labware: String,
-    pub capacity: usize,
+    pub capacity: PlateCapacity,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -119,6 +161,9 @@ pub struct TransformationStage {
     /// Plate holding the assembled plasmids a transformation draws from.
     #[serde(default = "default_transformation_dna_plate")]
     pub dna_plate: Plates,
+    /// Rack holding competent-cell sources and recovery medium.
+    #[serde(default = "default_transformation_source_rack")]
+    pub source_rack: SourceRack,
     #[serde(default = "default_transformation_small_tips")]
     pub small_tips: TipRacks,
     #[serde(default = "default_transformation_large_tips")]

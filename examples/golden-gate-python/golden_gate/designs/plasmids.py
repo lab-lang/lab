@@ -26,6 +26,7 @@ composite_plasmid_1_sequence = designs.dna_sequence(
     ),
 )
 composite_plasmid_1_design = designs.plasmid(
+    identity="https://SBOL2Build.org/composite_plasmid_1",
     components=[J23101, B0034, GFP, B0015],
     sequence=composite_plasmid_1_sequence,
     description="A GFP transcription unit in the pSB1C3 backbone.",
@@ -41,8 +42,16 @@ composite_plasmid_1 = Plasmid.build(
     ligase_volume=4 * uL,
     buffer_volume=2 * uL,
     assembly_cycles=75,
+    digest_temperature=42 * C,
+    digest_duration=2 * minutes,
     ligate_temperature=16 * C,
     ligate_duration=5 * minutes,
+    lid_temperature=42 * C,
+    final_digest_temperature=60 * C,
+    final_digest_duration=10 * minutes,
+    heat_inactivation_temperature=80 * C,
+    heat_inactivation_duration=10 * minutes,
+    hold_temperature=4 * C,
     accept=[lambda built: built.sequence == built.design.sequence],
 )
 
@@ -54,6 +63,7 @@ composite_plasmid_2_sequence = designs.dna_sequence(
     ),
 )
 composite_plasmid_2_design = designs.plasmid(
+    identity="https://SBOL2Build.org/composite_plasmid_2",
     components=[J23106, B0034, RFP, B0015],
     sequence=composite_plasmid_2_sequence,
     description="An RFP transcription unit in the pSB1C3 backbone.",
@@ -69,7 +79,15 @@ composite_plasmid_2 = Plasmid.build(
     ligase_volume=4 * uL,
     buffer_volume=2 * uL,
     assembly_cycles=75,
+    digest_temperature=42 * C,
+    digest_duration=2 * minutes,
     ligate_temperature=16 * C,
     ligate_duration=5 * minutes,
+    lid_temperature=42 * C,
+    final_digest_temperature=60 * C,
+    final_digest_duration=10 * minutes,
+    heat_inactivation_temperature=80 * C,
+    heat_inactivation_duration=10 * minutes,
+    hold_temperature=4 * C,
     accept=[lambda built: built.sequence == built.design.sequence],
 )

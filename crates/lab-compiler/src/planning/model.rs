@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The inventory evidence available to dependency planning.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BuildInventory {
     /// Exact SBOL Component-to-MaterialLot candidates from one validated facility snapshot.
     MaterialLots(MaterialLotBuildInventory),
@@ -37,7 +39,7 @@ impl BuildInventory {
 }
 
 /// Symbolic inventory accepted only while existing package manifests migrate.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LegacyBuildInventory {
     #[serde(default)]
     pub available_materials: BTreeSet<String>,
@@ -46,7 +48,7 @@ pub struct LegacyBuildInventory {
 }
 
 /// Exact candidate lots for the checked declarations in one program.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MaterialLotBuildInventory {
     pub(crate) source_sha256: String,
     pub(crate) facility: String,
@@ -64,7 +66,8 @@ impl MaterialLotBuildInventory {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "snake_case")]
 pub(crate) enum MaterialLotCandidates {
     Unidentified,
     Identified {

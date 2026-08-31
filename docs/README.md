@@ -69,17 +69,25 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0042: Robotics incubates separately](language/decisions/0042-robotics-incubates-separately.md) | simulation, visualization, embodied robotics, and their compute control plane live in the robotics repository |
 | [0043: Sequences are first-class design values](language/decisions/0043-sequences-are-first-class-design-values.md) | DNA and protein sequences are independent typed values referenced by designs |
 | [0044: Facility graphs replace workcell targets](language/decisions/0044-facility-graphs-replace-workcell-targets.md) | SBOLInventory facilities compose exact capability, Asset, material, plan, and run bindings |
+| [0045: LAIR represents method alternatives before facility allocation](language/decisions/0045-lair-method-refinement-and-facility-allocation.md) | Method, Procedure, and Capability alternatives remain live until one graph-wide facility solution is applied |
+| [0046: Allocated Procedure is the device boundary](language/decisions/0046-allocated-procedure-is-the-device-boundary.md) | immutable exact-task adapter invocations replace fixed Protocol and whole-program device lowering |
+| [0047: Packages contribute versioned Method catalogs](language/decisions/0047-packages-contribute-versioned-method-catalogs.md) | portable packages extend Method, Procedure, and Capability semantics through one shared validated document contract |
+| [0048: Canonical Procedure programs derive atomic capability formulas](language/decisions/0048-canonical-procedures-derive-capabilities.md) | device-neutral operational programs derive fine-grained requirements that one Asset and implementation realize atomically |
+| [0049: Pipetting techniques cross device boundaries](language/decisions/0049-pipetting-techniques-cross-device.md) | portable liquid-access constraints remain distinct from calibrated adapter realizations |
+| [0050: Allocated Procedure schedules make device batching explicit](language/decisions/0050-allocated-procedure-schedules.md) | fusing complete tasks into one device run is a checked artifact that preserves every identity |
+| [0051: Interchangeable physical resources resolve without a pin](language/decisions/0051-interchangeable-resources-resolve-without-a-pin.md) | equally usable MaterialLots bind deterministically and reviewably; Assets stay an explicit choice |
 
 ## Implementation and embedding
 
 - [LAIR overview](../crates/lab-compiler/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
-- [Protocol IR](../crates/lab-compiler/src/lair/dialect/protocol/README.md) describes the selected biological-procedure boundary and what deliberately remains for facility allocation and hardware lowering.
 - [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
+- [Portable method definitions](../crates/lab-method/README.md) describe the facility-independent Method, Procedure, and Capability contract shared by compiler and Python extensions.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
+- [PUDU workflow equivalence](integrations/pudu-workflow-equivalence.md) defines and executes the output comparison between the Golden Gate example and PUDU's documented OT-2 workflow.
 
 ## Examples versus specimens
 

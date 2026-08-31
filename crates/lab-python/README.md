@@ -50,6 +50,129 @@ module = compile_lab_module(source)
 print(module["declarations"])
 ```
 
+## Portable Methods and capability refinement
+
+Python can also contribute portable Methods at the same semantic boundary as the Rust compiler. A Method refines one Intent operation into a Procedure graph with typed values, parameters, and capability requirements. It does not name a facility, asset, offering, material lot, adapter, or schedule; the facility planner makes those choices later.
+
+```python
+import lab
+from lab import methods as m
+
+sequence_synthesis = m.Method(
+    id="https://example.org/method#sequence-synthesis",
+    refines="std.bio.build.realize",
+    inputs=(m.MethodInput("design", m.Port.design()),),
+    parameters=(
+        m.MethodParameter.scalar("artifact", m.ScalarType.TEXT),
+        m.MethodParameter.list("dependencies", m.ScalarType.TEXT),
+    ),
+    tasks=(
+        m.Task(
+            id="synthesize",
+            operation="https://example.org/procedure#SynthesizePlasmid",
+            inputs=(m.ValueReference.method_input("design"),),
+            outputs=(
+                m.TaskOutput(
+                    "product",
+                    m.Port.material(
+                        "https://www.lab-compiler.org/ns/material-state#PlasmidProduct"
+                    ),
+                ),
+            ),
+            parameters=(
+                m.ProcedureParameter(
+                    "artifact",
+                    "https://example.org/procedure#Artifact",
+                    m.ProcedureValueExpression.intent_parameter("artifact"),
+                ),
+                m.ProcedureParameter(
+                    "dependencies",
+                    "https://example.org/procedure#Dependencies",
+                    m.ProcedureValueExpression.intent_parameter("dependencies"),
+                ),
+            ),
+            requirements=(
+                m.Requirement(
+                    id="synthesis",
+                    capability_kind="https://example.org/capability#SequenceSynthesis",
+                    accepted_control_modes=(m.ControlMode.REVIEWED_FILE,),
+                ),
+            ),
+        ),
+    ),
+    outputs=(m.MethodOutput("product", m.ValueReference.task_output("synthesize", "product")),),
+)
+
+program = lab.check_sources({"example.main": source})
+refined = lab.refine(program, methods=(sequence_synthesis,), include_standard=False)
+print(refined.planning_problem)
+```
+
+The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v1` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+
+The same typed authoring surface writes a persistent package catalog:
+
+```python
+catalog = m.MethodCatalog((sequence_synthesis,))
+catalog.write("methods/synthesis.json")
+```
+
+```toml
+[methods]
+documents = ["methods/synthesis.json"]
+```
+
+`write` validates through Rust and emits the versioned `lab.method-catalog.v1` envelope. `include_standard` controls validation and in-memory refinement; it is not serialized because a package document contributes only its own portable definitions. Lab loads documents from the runnable package and its reachable path dependencies, composes them with the standard registry, and fails `lab check` on an unknown version, duplicate Method identity, incompatible Intent signature, or invalid Procedure graph.
+
+## Facility planning
+
+Python calls the same project service as `lab plan`; it does not implement a separate allocator. A package's `lab.toml` contributes persistent Method catalogs, selects its SBOLInventory document, and declares local adapter bindings. `plan_project` composes those catalogs with any `methods=` supplied in memory, then compiles the package through Method refinement, exact MaterialLot and capability-offering allocation, allocated Procedure LAIR, and adapter invocation projection.
+
+```python
+import lab
+from lab import procedures
+
+planned = lab.plan_project("examples/golden-gate")
+print(planned.inventory.facility)
+for invocation in planned.invocations:
+    print(invocation.asset, invocation.adapter.driver)
+    for task in planned.invocation_tasks(invocation):
+        print(task.operation)
+        if task.program is not None:
+            print(task.program.contract)
+            if isinstance(task.program.body, procedures.ThermalProgramV1):
+                for stage in task.program.body.stages:
+                    print(stage.repeats, stage.steps)
+        for requirement in task.requirements:
+            print(requirement.capability_kind, requirement.offering)
+```
+
+An in-memory `Program`, including one emitted by the Python object model, can use an existing package as its facility and policy context:
+
+```python
+program = lab.check(designs.module, workflows.module)
+planned = lab.plan(program, project="path/to/facility-package")
+```
+
+The returned `FacilityPlan` provides typed Method, Procedure task, canonical program, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. `lab.procedures` exposes immutable `PipettingProgramV1` and `ThermalProgramV1` bodies with exact `Decimal` quantities, typed vessel roles and liquid operations, portable aspiration and dispense strategies, air gaps, blowout and touch-tip requirements, and typed thermal stages and steps. Rust remains the authority that normalizes and validates these programs, constructs the exact liquid ledger, and derives their capability formulas; Python reads the frozen result. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
+
+## Adapter discovery and profile validation
+
+Python reads the same compiler-owned adapter catalog as the CLI. It does not keep another list of devices, capabilities, control modes, schemas, or service claims.
+
+```python
+import lab
+
+adapters = lab.adapter_catalog()
+ot2 = adapters.get("opentrons.ot2")
+print(ot2.capabilities, ot2.services.lowering)
+
+profile = lab.adapters.validate_profile_file("opentrons.ot2", "adapters/ot2.toml")
+print(profile.sha256)
+```
+
+The explicit driver selects the Rust validator. The profile cannot select another adapter or Asset, and manufacturer or model metadata never dispatches implementation code. The returned catalog and profile objects expose typed service, format, capability, feature, configuration, and digest fields while retaining canonical JSON or TOML where exact interoperability is needed.
+
 ## Writing a program
 
 A Lab module is a Python module. The standard library is mirrored as Python packages, so a kind is a class you import, its properties are keyword arguments, and a claim is a function of the artifact it is about:

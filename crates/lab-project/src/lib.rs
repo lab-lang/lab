@@ -3,6 +3,8 @@
 //! This crate owns filesystem resolution and compilation order. The language
 //! crate remains I/O-free and accepts only explicit semantic environments.
 
+mod facility;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +13,10 @@ use lab_language::Grounding;
 use lab_language::{
     CheckedDeclaration, CheckedModule, ModuleId, SemanticEnvironment,
     compile_module_in_environment, parse_module,
+};
+use lab_method::{
+    MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
+    MethodRegistryError,
 };
 use lab_package::{
     DependencySpec, DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource,
@@ -21,6 +27,11 @@ use sbol3::{Document, RdfFormat};
 use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+pub use facility::{
+    FacilityPlanningResult, FacilityProjectError, load_package_inventory, plan_modules_for_package,
+    resolve_package_adapter_bindings,
+};
 
 pub const LOCK_FILE: &str = "lab.lock";
 pub const LOCK_SCHEMA_VERSION: u32 = 2;
@@ -40,6 +51,47 @@ pub enum ProjectError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error(
+        "failed to resolve Method catalog '{document}' in package '{package}' at {path}: {source}"
+    )]
+    ResolveMethodCatalog {
+        package: String,
+        document: PathBuf,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("Method catalog '{document}' resolves outside package '{package}'")]
+    MethodCatalogOutsidePackage { package: String, document: PathBuf },
+    #[error("failed to read Method catalog {path} in package '{package}': {source}")]
+    ReadMethodCatalog {
+        package: String,
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse Method catalog {path} in package '{package}': {source}")]
+    ParseMethodCatalog {
+        package: String,
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("invalid Method catalog {path} in package '{package}': {source}")]
+    InvalidMethodCatalog {
+        package: String,
+        path: PathBuf,
+        #[source]
+        source: Box<MethodCatalogError>,
+    },
+    #[error(
+        "portable Method definitions reachable from package '{package}' do not form one registry: {source}"
+    )]
+    InvalidMethodRegistry {
+        package: String,
+        #[source]
+        source: Box<MethodRegistryError>,
     },
     #[error(
         "dependency '{dependency}' of package '{package}' is not a path dependency; registry resolution is intentionally unavailable"
@@ -90,6 +142,8 @@ pub struct CompiledProject {
     /// Member package names in declaration order.
     pub members: Vec<String>,
     pub modules: Vec<CompiledModule>,
+    /// The standard and package-contributed Methods available to the default runnable package.
+    pub methods: MethodRegistry,
     pub lock: ProjectLock,
 }
 
@@ -192,12 +246,18 @@ impl LabProject {
     /// package build lowers exactly these packages' modules together, so an
     /// artifact declared in a dependency reaches planning and adapter lowering.
     pub fn program_packages(&self) -> Vec<String> {
+        self.ordered_reachable_roots(&self.default_member)
+            .into_iter()
+            .map(|root| self.packages[root].package.manifest.package.name.clone())
+            .collect()
+    }
+
+    fn ordered_reachable_roots(&self, root: &PathBuf) -> Vec<&PathBuf> {
         let mut reachable = BTreeSet::new();
-        self.collect_reachable(&self.default_member, &mut reachable);
+        self.collect_reachable(root, &mut reachable);
         self.order
             .iter()
-            .filter(|root| reachable.contains(*root))
-            .map(|root| self.packages[root].package.manifest.package.name.clone())
+            .filter(|candidate| reachable.contains(*candidate))
             .collect()
     }
 
@@ -211,6 +271,7 @@ impl LabProject {
     }
 
     pub fn compile(&self) -> Result<CompiledProject, ProjectError> {
+        let methods = self.validate_method_registries()?;
         let mut compiled_by_package = BTreeMap::<PathBuf, Vec<CompiledModule>>::new();
         for root in &self.order {
             let resolved = &self.packages[root];
@@ -245,8 +306,95 @@ impl LabProject {
                 .map(|package| package.manifest.package.name.clone())
                 .collect(),
             modules,
+            methods,
             lock: self.lock(),
         })
+    }
+
+    /// Load package-contributed Methods reachable from the default runnable package.
+    ///
+    /// Definitions are returned dependency-first and do not include the compiler's standard
+    /// catalog. Embedders can use this surface to compose package Methods with additional
+    /// frontend-authored definitions under one authoritative `MethodRegistry` validation.
+    pub fn package_method_definitions(&self) -> Result<Vec<MethodDefinition>, ProjectError> {
+        let roots = self.ordered_reachable_roots(&self.default_member);
+        self.load_method_definitions(&roots)
+    }
+
+    /// Build the complete Method registry for the default runnable package.
+    pub fn method_registry(&self) -> Result<MethodRegistry, ProjectError> {
+        self.method_registry_for(&self.default_member)
+    }
+
+    fn validate_method_registries(&self) -> Result<MethodRegistry, ProjectError> {
+        let mut default = None;
+        for member in &self.members {
+            let registry = self.method_registry_for(member)?;
+            if member == &self.default_member {
+                default = Some(registry);
+            }
+        }
+        Ok(default.expect("a validated project always has a default member"))
+    }
+
+    fn method_registry_for(&self, root: &PathBuf) -> Result<MethodRegistry, ProjectError> {
+        let roots = self.ordered_reachable_roots(root);
+        let mut definitions = lab_compiler::standard_method_definitions();
+        definitions.extend(self.load_method_definitions(&roots)?);
+        MethodRegistry::new(definitions).map_err(|source| ProjectError::InvalidMethodRegistry {
+            package: self.packages[root].package.manifest.package.name.clone(),
+            source: Box::new(source),
+        })
+    }
+
+    fn load_method_definitions(
+        &self,
+        roots: &[&PathBuf],
+    ) -> Result<Vec<MethodDefinition>, ProjectError> {
+        let mut definitions = Vec::new();
+        for root in roots {
+            let package = &self.packages[*root].package;
+            for document in &package.manifest.methods.documents {
+                let joined = package.root.join(document);
+                let path = fs::canonicalize(&joined).map_err(|source| {
+                    ProjectError::ResolveMethodCatalog {
+                        package: package.manifest.package.name.clone(),
+                        document: document.clone(),
+                        path: joined.clone(),
+                        source,
+                    }
+                })?;
+                if !path.starts_with(&package.root) {
+                    return Err(ProjectError::MethodCatalogOutsidePackage {
+                        package: package.manifest.package.name.clone(),
+                        document: document.clone(),
+                    });
+                }
+                let contents = fs::read_to_string(&path).map_err(|source| {
+                    ProjectError::ReadMethodCatalog {
+                        package: package.manifest.package.name.clone(),
+                        path: path.clone(),
+                        source,
+                    }
+                })?;
+                let catalog =
+                    serde_json::from_str::<MethodCatalogDocument>(&contents).map_err(|source| {
+                        ProjectError::ParseMethodCatalog {
+                            package: package.manifest.package.name.clone(),
+                            path: path.clone(),
+                            source,
+                        }
+                    })?;
+                definitions.extend(catalog.into_methods().map_err(|source| {
+                    ProjectError::InvalidMethodCatalog {
+                        package: package.manifest.package.name.clone(),
+                        path: path.clone(),
+                        source: Box::new(source),
+                    }
+                })?);
+            }
+        }
+        Ok(definitions)
     }
 
     pub fn lock(&self) -> ProjectLock {
@@ -549,6 +697,8 @@ fn relative_path(from: &Path, to: &Path) -> PathBuf {
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use lab_capability::MethodId;
+
     use super::*;
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -663,6 +813,97 @@ plasmid derived:
         let lock = compiled.lock.to_toml().unwrap();
         assert!(lock.contains(&format!("schema_version = {LOCK_SCHEMA_VERSION}")));
         assert!(lock.contains("members = [\"app\"]"));
+    }
+
+    #[test]
+    fn composes_versioned_method_documents_from_reachable_dependencies() {
+        let fixture = TestProject::new();
+        let shared = fixture.package(
+            "shared",
+            r#"[package]
+name = "shared"
+version = "1.2.0"
+
+[methods]
+documents = ["methods/recovery.json"]
+"#,
+            &[("values.lab", DONOR)],
+        );
+        let mut custom = lab_compiler::standard_method_definitions()
+            .into_iter()
+            .find(|definition| definition.refines.as_str() == "std.lab.plasmid.recover")
+            .unwrap();
+        custom.id = MethodId::new("https://example.org/method/custom-recovery").unwrap();
+        let catalog = MethodCatalogDocument::new(vec![custom.clone()]).unwrap();
+        fs::create_dir_all(shared.join("methods")).unwrap();
+        fs::write(
+            shared.join("methods/recovery.json"),
+            serde_json::to_string_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+        let root = fixture.package(
+            "app",
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+shared = { path = "../shared" }
+"#,
+            &[("main.lab", DONOR)],
+        );
+
+        let project = LabProject::discover(root).unwrap();
+        assert_eq!(project.package_method_definitions().unwrap(), [custom]);
+        let compiled = project.compile().unwrap();
+        let recovery = compiled
+            .methods
+            .methods_for(&lab_method::IntentOperationId::new("std.lab.plasmid.recover").unwrap());
+
+        assert_eq!(
+            recovery
+                .iter()
+                .map(|method| method.id.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            std::collections::BTreeSet::from([
+                "https://www.lab-compiler.org/ns/method#manual-recovery",
+                "https://www.lab-compiler.org/ns/method#controlled-recovery",
+                "https://www.lab-compiler.org/ns/method#automated-recovery",
+                "https://example.org/method/custom-recovery",
+            ])
+        );
+    }
+
+    #[test]
+    fn compilation_rejects_an_unknown_method_catalog_schema() {
+        let fixture = TestProject::new();
+        let root = fixture.package(
+            "app",
+            r#"[package]
+name = "app"
+version = "0.1.0"
+
+[methods]
+documents = ["methods/catalog.json"]
+"#,
+            &[("main.lab", DONOR)],
+        );
+        fs::create_dir_all(root.join("methods")).unwrap();
+        fs::write(
+            root.join("methods/catalog.json"),
+            r#"{"schema_version":"lab.method-catalog.v99","methods":[]}"#,
+        )
+        .unwrap();
+
+        let error = LabProject::discover(root).unwrap().compile().unwrap_err();
+
+        let ProjectError::InvalidMethodCatalog { source, .. } = error else {
+            panic!("expected an invalid Method catalog, got {error}");
+        };
+        assert!(matches!(
+            source.as_ref(),
+            MethodCatalogError::UnsupportedSchema { .. }
+        ));
     }
 
     #[test]
@@ -809,5 +1050,42 @@ workflow main() -> Material<Plasmid>:
         let compiled = LabProject::discover(root).unwrap().compile().unwrap();
         assert_eq!(compiled.modules.len(), 1);
         assert_eq!(compiled.modules[0].source.module, "ebef_reference.facility");
+    }
+
+    #[test]
+    fn plans_a_project_through_exact_facility_and_material_allocations() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/golden-gate");
+        let project = LabProject::discover(root).unwrap();
+        let compiled = project.compile().unwrap();
+        let planned = project
+            .plan_facility_with_package_methods(&compiled)
+            .unwrap();
+
+        assert_eq!(
+            planned.inventory.facility().as_str(),
+            "https://example.org/golden-gate/facility"
+        );
+        assert!(planned.refined_lair.contains("method.choice"));
+        assert_eq!(
+            planned.problem().sha256(),
+            planned.solution().problem_sha256
+        );
+        assert!(
+            planned
+                .adapter_invocations
+                .invocations
+                .iter()
+                .any(|invocation| invocation.adapter.driver == "opentrons.ot2")
+        );
+        assert!(planned.solution().selections.iter().any(|method| {
+            method.tasks.iter().any(|task| {
+                task.materials.iter().any(|material| {
+                    matches!(
+                        material.source,
+                        lab_compiler::planning::SelectedMaterialSource::MaterialLot { .. }
+                    )
+                })
+            })
+        }));
     }
 }

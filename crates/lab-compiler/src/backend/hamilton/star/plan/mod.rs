@@ -1,30 +1,16 @@
-//! STAR protocol analysis, validation, allocation, and run lowering.
+//! STAR-local planning from one exact allocated Procedure task to a run document.
 
-mod build;
 mod choreograph;
-mod constraints;
 mod error;
 mod execution;
+mod invocation;
 mod liquids;
 
-use crate::ProtocolLairProgram;
-pub use crate::backend::hamilton::star::plan::build::plan_build;
-pub(in crate::backend) use crate::backend::hamilton::star::plan::build::plan_selected_build;
-pub use crate::backend::hamilton::star::plan::error::{
-    StarBuildError, StarEmissionError, StarPlanningError,
-};
-pub use crate::backend::hamilton::star::plan::execution::{
-    ChannelLiquid, ManualStep, SourceFill, StarAssemblyChemistry, StarAssemblyPlan,
-    StarExecutionPlan, StarOperation, StarPlatingPlan, StarRunPlan, StarStrainChemistry,
-    StarStrainPlan, StarTransformationPlan, StarWell, ThermalRequirement, TipClass,
+pub(in crate::backend::hamilton::star) use error::StarEmissionError;
+pub(in crate::backend::hamilton::star) use execution::{
+    ChannelLiquid, SourceFill, StarExecutionPlan, StarOperation, StarRunPlan, TipClass,
     TipPickupPosition,
 };
-use crate::planning::BuildGraph;
-
-/// Robot-neutral build-graph projection, carrying this backend's planning
-/// error type.
-pub(in crate::backend::hamilton::star) fn protocol_build_graph(
-    protocol: &ProtocolLairProgram,
-) -> Result<BuildGraph, StarPlanningError> {
-    Ok(crate::backend::graph::protocol_build_graph(protocol)?)
-}
+pub(in crate::backend::hamilton::star) use invocation::{
+    SetupAddition, plan_dilution_invocation, plan_setup_invocation,
+};

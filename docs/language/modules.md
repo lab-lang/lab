@@ -72,6 +72,8 @@ inventory/
   facility.ttl
 adapters/
   opentrons-ot2.toml
+methods/
+  site-methods.json
 src/
   designs/
     parts.lab
@@ -98,6 +100,7 @@ tests/
 - `programs` wires designs, policies, parameters, and workflows into runnable entry points.
 - `inventory` holds portable SBOLInventory facility catalogs and material ledgers.
 - `adapters` holds non-secret operational configuration bound to exact facility Assets by `lab.toml`.
+- `methods` holds portable, facility-independent Method definitions contributed by the package.
 - `.lab/` is generated output and runtime state, never hand-authored source.
 
 These directory names are conventions rather than language keywords. `lab.toml` names the inventory and adapter-profile paths explicitly; the module system does not give a directory magical semantics merely because it is called `workflows`.
@@ -139,10 +142,20 @@ edition = "2026"
 [build]
 entry = "src/programs/main.lab"
 
+[methods]
+documents = ["methods/site-methods.json"]
+
 [inventory]
 document = "inventory/facility.ttl"
 # Required only when the document contains more than one facility:
 facility = "https://example.org/facilities/tet-lab"
+
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate"
+
+[[planning.assets]]
+asset = "https://example.org/facilities/tet-lab/star-1"
 
 [[execution.adapters]]
 asset = "https://example.org/facilities/tet-lab/star-1"
@@ -154,9 +167,13 @@ parts = "1.2"
 local-policies = { path = "../policies" }
 ```
 
+`[methods] documents` names versioned `lab.method-catalog.v1` JSON files inside the package. Lab composes those definitions with catalogs contributed by reachable path dependencies and the standard Method set, then validates the complete registry before compiling. Method documents describe facility-independent Procedure and Capability alternatives; exact selection remains in `[[planning.methods]]`, facility facts remain in SBOLInventory, and adapter implementation remains under `[[execution.adapters]]`.
+
+`[[planning.methods]]` selects one Method for a source operation or for one exact choice when several are scientifically valid. `[[planning.assets]]` names which Asset satisfies a requirement when a facility offers more than one that could; on its own it binds every requirement that Asset can serve, and adding `capability-kind` or `requirement` narrows it to those. A `requirement` pin is exact and makes its Method infeasible when that Asset cannot serve it; broader pins apply only where the named Asset is eligible. Two active MaterialLots of the same component need no pin: they satisfy an input identically, so the compiler takes one and records the others on the binding as `interchangeable_alternatives`. Two instruments are not interchangeable, because each carries its own calibration and location, so those require a pin. `adapter-requirement = "non-manual"` turns an unlowered non-manual offering into an error rather than a plan with nothing to execute.
+
 `[inventory] document` names a package-relative SBOLInventory document in Turtle, RDF/XML, JSON-LD, or N-Triples. Lab validates the complete SBOL 3 and SBOLInventory Profile 0.2 graph before planning. If `facility` is omitted, the document must contain exactly one facility; otherwise the absolute Facility IRI selects one exactly.
 
-Each required source declaration reaches the graph through its exact `sbol_identity`, and availability means one active MaterialLot in the selected facility whose `sbol:built` points to that exact local Component. No declaration name, display ID, supplier identifier, or IRI prefix is used for matching. Zero lots leaves the dependency blocked, one freezes a Component-to-MaterialLot binding in `lab.dependency-build.v1`, and several produce an allocation ambiguity instead of a silent first choice. A built artifact with one active lot is reused through the same rule.
+Each required source declaration reaches the graph through its exact `sbol_identity`, and availability means one active MaterialLot in the selected facility whose `sbol:built` points to that exact local Component. No declaration name, display ID, supplier identifier, or IRI prefix is used for matching. Zero lots leaves the dependency blocked, and one freezes a Component-to-MaterialLot binding in `lab.dependency-build.v1`. Several active lots of the same Component satisfy the input identically, so the compiler binds one and records the rest on that binding; the choice is frozen in the reviewed plan rather than made silently at run time. A built artifact with one active lot is reused through the same rule.
 
 The old `materials` and `artifacts` arrays remain as a mutually exclusive legacy form while existing examples migrate. They retain symbolic behavior and are identified as `legacy_symbols` in emitted dependency manifests; new packages should use `document`.
 

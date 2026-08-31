@@ -255,6 +255,7 @@ fn materialize_reviewed_simulation() -> tempfile::TempDir {
             source_sha256: sha256_hex(inventory.as_bytes()),
             facility: FACILITY.to_owned(),
         },
+        planning: None,
         requirements: vec![
             requirement(
                 "assay/liquid-handling",
@@ -281,7 +282,6 @@ fn materialize_reviewed_simulation() -> tempfile::TempDir {
             material_lot: ASSAY_LOT.to_owned(),
         }],
         outputs: Vec::new(),
-        lowerings: Vec::new(),
         nodes: vec![
             ExecutionPlanNode {
                 id: "move-to-liquid-handler".to_owned(),
@@ -344,6 +344,7 @@ fn requirement(
         minimum_qualification: Qualification::Simulatable.iri().to_owned(),
         observed_qualification: Qualification::Simulatable.iri().to_owned(),
         control_mode: ControlMode::ReviewedFile.iri().to_owned(),
+        procedure_implementation: None,
         parameters: Vec::new(),
         adapter: Some(ExecutionAdapterBinding {
             driver: SIMULATOR.to_owned(),
@@ -363,7 +364,7 @@ fn execute_node(
         id: id.to_owned(),
         after: after.iter().map(|id| (*id).to_owned()).collect(),
         action: ExecutionPlanAction::Execute {
-            requirement: requirement.to_owned(),
+            requirements: vec![requirement.to_owned()],
             document: Some(document),
         },
     }

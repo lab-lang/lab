@@ -5,12 +5,10 @@
 //! `StandardLibrary`; it does not assign biological meaning by spelling.
 
 mod bio;
-mod capability;
 mod catalog;
 mod contract;
 mod lab;
 pub mod manifest;
-mod parameter;
 mod prelude;
 
 pub(crate) use catalog::{

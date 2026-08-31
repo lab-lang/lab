@@ -1,6 +1,5 @@
 // Construction APIs are consumed by LAIR transformations, which may be supplied
 // independently of the compiler's source frontend.
-#![allow(dead_code)]
 
 use pliron::builtin::attributes::{BoolAttr, IntegerAttr, StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::NOpdsInterface;

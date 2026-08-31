@@ -23,7 +23,10 @@ class Plasmid(ArtifactKind, LabType):
 
     Properties: assembly_cycles?: Integer, assembly_replicates?: Integer, buffer_volume?:
     Quantity<uL>, digest_duration?: Quantity<min>, digest_temperature?: Quantity<C>,
-    enzyme_volume?: Quantity<uL>, ligase_volume?: Quantity<uL>, ligate_duration?:
+    enzyme_volume?: Quantity<uL>, final_digest_duration?: Quantity<min>,
+    final_digest_temperature?: Quantity<C>, heat_inactivation_duration?: Quantity<min>,
+    heat_inactivation_temperature?: Quantity<C>, hold_temperature?: Quantity<C>,
+    lid_temperature?: Quantity<C>, ligase_volume?: Quantity<uL>, ligate_duration?:
     Quantity<min>, ligate_temperature?: Quantity<C>, part_volume?: Quantity<uL>,
     reaction_volume?: Quantity<uL>, restriction_enzyme?: RestrictionEnzyme.
     """
@@ -38,6 +41,12 @@ class Plasmid(ArtifactKind, LabType):
         "digest_duration",
         "digest_temperature",
         "enzyme_volume",
+        "final_digest_duration",
+        "final_digest_temperature",
+        "heat_inactivation_duration",
+        "heat_inactivation_temperature",
+        "hold_temperature",
+        "lid_temperature",
         "ligase_volume",
         "ligate_duration",
         "ligate_temperature",

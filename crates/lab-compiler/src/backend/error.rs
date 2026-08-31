@@ -11,8 +11,6 @@ use crate::backend::AdapterConstraintError;
 pub(in crate::backend) enum PlanningError {
     #[error(transparent)]
     Constraint(Box<AdapterConstraintError>),
-    #[error("{0}")]
-    InvalidProtocol(String),
 }
 
 impl From<AdapterConstraintError> for PlanningError {

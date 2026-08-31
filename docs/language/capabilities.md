@@ -1,46 +1,110 @@
 # Capability requirements
 
-Every durable Lab action carries one absolute capability-kind IRI in checked portable IR. The IRI identifies semantic work required by the workflow; it does not identify a device, driver, asset, or product model. Facility planning compares these requirements with exact `fac:capabilityKind` values on SBOLInventory capability offerings.
+A durable Lab action identifies scientific intent through a stable operation identity, typed operands and results, material ownership, exact parameters, and source origin. It does not permanently own one capability kind. Facility-independent Method refinement expands each reachable action into one or more candidate Procedure graphs, and those Procedure tasks own the first-class Capability requirements compared with exact `fac:capabilityKind` values on SBOLInventory offerings.
 
-SBOLInventory Profile 0.2 deliberately keeps capability kinds open. Lab uses the profile's normative terms where they fit exactly and uses explicit terms in the same capability namespace where the current vocabulary has a gap. An extension term is a stable exact IRI, but it is not represented as a Profile 0.2 vocabulary term until it is contributed upstream. Lab never substitutes a local abbreviation or guesses equivalence from an IRI suffix.
+A primitive Method may produce one requirement, a composite Method may produce several operational tasks and requirements, and a high-level service offering may remain a valid alternative primitive Method. An unpinned Method is selected together with exact facility resources rather than before the facility is known. This architecture is recorded by [0045](decisions/0045-lair-method-refinement-and-facility-allocation.md), and [0046](decisions/0046-allocated-procedure-is-the-device-boundary.md) makes its allocated result the only production adapter input.
 
-## Standard-action audit
+SBOLInventory Profile 0.2 deliberately keeps capability kinds open. Lab uses the profile's normative terms where they fit exactly and explicit absolute IRIs where the current vocabulary has a gap. Lab never substitutes a local abbreviation, compares suffixes, or guesses equivalence between capability terms.
 
-| Operation | Capability kind | Profile 0.2 status |
+## Built-in Method coverage
+
+The compiler's validated standard Method registry currently covers the Intent operations reachable in the Golden Gate vertical slice:
+
+| Intent operation | Built-in Method alternatives | Procedure requirements |
 | --- | --- | --- |
-| `std.bio.build.realize` | `https://sbol.io/ns/capability#ArtifactRealization` | open extension; abstract requirement that must be refined before asset allocation |
-| `std.lab.plasmid.capture` | `https://sbol.io/ns/capability#PlateImaging` | open extension |
-| `std.lab.plasmid.synthesize` | `https://sbol.io/ns/capability#DnaSynthesis` | open extension |
-| `std.lab.plasmid.assemble` | `https://sbol.io/ns/capability#DnaAssembly` | open extension |
-| `std.lab.plasmid.provision` | `https://sbol.io/ns/capability#MaterialProvisioning` | open extension |
-| `std.lab.plasmid.transform` | `https://sbol.io/ns/capability#ChemicalTransformation` | open extension |
-| `std.lab.plasmid.recover` | `https://sbol.io/ns/capability#Incubation` | Profile 0.2 vocabulary |
-| `std.lab.plasmid.dilute` | `https://sbol.io/ns/capability#LiquidHandling` | Profile 0.2 vocabulary |
-| `std.lab.plasmid.plate` | `https://sbol.io/ns/capability#AntibioticSelection` | open extension |
-| `std.lab.plasmid.pick` | `https://sbol.io/ns/capability#ColonyPicking` | open extension |
-| `std.lab.plasmid.screen` | `https://sbol.io/ns/capability#CloneScreening` | open extension |
-| `std.lab.plasmid.grow` | `https://sbol.io/ns/capability#Incubation` | Profile 0.2 vocabulary |
-| `std.lab.plasmid.purify` | `https://sbol.io/ns/capability#PlasmidPurification` | open extension |
-| `std.lab.plasmid.split` | `https://sbol.io/ns/capability#LiquidHandling` | Profile 0.2 vocabulary |
-| `std.lab.plasmid.sequence` | `https://sbol.io/ns/capability#SangerSequencing` | open extension |
-| `std.lab.plasmid.quantify` | `https://sbol.io/ns/capability#DnaQuantification` | open extension |
-| `std.lab.plasmid.store` | `https://sbol.io/ns/capability#ColdStorage` | Profile 0.2 vocabulary |
-| `std.lab.plasmid.dispose` | `https://sbol.io/ns/capability#WasteHandling` | open extension |
+| `std.bio.build.realize` | manual artifact-realization service; automated Golden Gate | `ArtifactRealization`, or atomic `MeteredLiquidTransfer` + `InWellMixing` followed by atomic `ProgrammedBlockTemperatureControl` + `HeatedLidTemperatureControl` |
+| `std.lab.plasmid.provision` | manual material provisioning | `MaterialProvisioning` |
+| `std.lab.plasmid.transform` | manual chemical transformation | `ChemicalTransformation` |
+| `std.lab.plasmid.recover` | manual recovery; controlled recovery | `Incubation` with an exact duration constraint |
+| `std.lab.plasmid.dilute` | serial dilution | atomic `MeteredLiquidTransfer` + `InWellMixing` |
+| `std.lab.plasmid.plate` | manual antibiotic selection | `AntibioticSelection` |
 
-The audit does not assert that every source action maps directly to one instrument operation. `ArtifactRealization`, `DnaAssembly`, `ChemicalTransformation`, and similar biological requirements may refine into several operational requirements such as liquid handling, thermal cycling, incubation, transport, or manual work. Requirement refinement must preserve the parent requirement and source-action identity so a reviewed plan can explain why each allocated offering is present.
+The automated Golden Gate Method is deliberately composite. Reaction setup and thermal cycling are separate Procedure tasks with a typed material edge between them, so a facility may allocate them to different Assets. The source action does not pretend that assembly is one device capability.
 
-## Compiler requirement IR
+Profile 0.2 defines broad taxonomy terms such as `LiquidHandling`, `ThermalCycling`, and `Incubation` and explicitly leaves its capability and property vocabularies open. Lab uses stable `https://sbol.io/ns/capability#` extension IRIs for the finer operational terms and parameters introduced by canonical contracts, including `MeteredLiquidTransfer`, `InWellMixing`, `ProgrammedBlockTemperatureControl`, and `HeatedLidTemperatureControl`. Terms such as `ArtifactRealization`, `MaterialProvisioning`, `ChemicalTransformation`, and `AntibioticSelection` are also open extensions where the profile has no exact normative term. The compiler preserves exact IRIs in every case. Broad terms remain useful taxonomy parents but do not authorize normalized program dispatch.
 
-`lab build` emits `capability_requirements.json` with schema `lab.capability-requirements.v2` and links it from the portable package index. Each requirement template has a deterministic ID and exact source module, workflow, statement path, and operation. It records the capability-kind IRI, a typed minimum qualification, a typed set of accepted SBOLInventory control modes, exact typed scalar constraints, typed design or data value ports, and typed material inputs and outputs with ownership modes. Every operational parameter names an absolute `fac:propertyKind` IRI, and every quantity also carries a canonical QUDT unit IRI, so allocation never joins RDF facts through source argument names or unit abbreviations.
+## Canonical Procedure programs
 
-Runnable packages also emit `capability_instances.json` with schema `lab.capability-requirement-instances.v2`, which records the exact requirement-catalog schema it references. The compiler begins at the exact module named by `build.entry` and its `main` workflow, follows resolved workflow declaration identities across package boundaries, and emits one instance for each reachable call path. Calling one workflow twice creates two distinct instances. Uncalled workflow templates remain portable but are not allocated. Structural branches and loops are retained conservatively as potential work, while recursive workflow expansion is rejected because it cannot yield a finite reviewed plan.
+Method tasks with supported operational semantics normalize into versioned programs from `lab-procedure` before planning. `PipettingProgramV1` stores logical vessels, references to enclosing task inputs, exact material sources and products, initial liquid quantities when known, ordered liquid operations, contamination-path policies, portable aspiration and dispense strategies, air gaps, blowout, touch-tip, and environmental constraints without naming a device or facility. Validation constructs an exact liquid ledger and rejects known underflow or impossible mixes. Golden Gate setup and serial dilution both use this contract. `ThermalProgramV1` stores the incoming and resulting material states, sample count and fill volume, a global heated-lid setpoint, ordered stages, repeated plateaus, exact temperatures and hold durations, optional controlled ramp rates, and an optional indefinite final hold. Golden Gate cycling uses this contract.
 
-These records describe workflow definitions. A workflow call does not duplicate its callee's template, and an unused workflow remains visible as a reusable template. Facility planning must instantiate only the workflows reached by the selected program, preserve call and refinement ancestry, and then allocate the resulting operational requirements. The root templates deliberately contain no Asset or CapabilityOffering IRI.
+A validated program derives its capability formula. The pipetting formula requests `MeteredLiquidTransfer` with exact minimum and maximum volume bounds, `InWellMixing` with an exact maximum-volume bound, and `TemperatureControlledStaging` when the program constrains source temperature. It additionally requests `LiquidLevelAwareAspiration`, `VesselRelativeLiquidAccess`, `AirGapHandling` with an exact maximum air-gap volume, `PostDispenseBlowout`, and `TouchTip` only when the ordered program uses those techniques. The thermal formula requests `ProgrammedBlockTemperatureControl` with exact block range, sample count, and minimum/maximum working-volume compatibility, `HeatedLidTemperatureControl` only when a setpoint is present, and `ControlledTemperatureRamp` only when at least one step states an explicit rate. Both formulas have `AtomicAssetAssembly` scope, so every clause must bind to offerings on one Asset through one adapter and one exact Procedure implementation. This decision and its compiler invariants are recorded by [0048](decisions/0048-canonical-procedures-derive-capabilities.md).
+
+## Portable Method contract
+
+Method authors use the RDF-free `lab-method` crate or the equivalent typed Python `lab.methods` API. A `MethodDefinition` contains:
+
+- one stable absolute Method IRI and one exact Intent operation identity;
+- a typed input and output signature shared by all alternatives for that Intent;
+- the exact Intent parameters the candidate requires;
+- topologically ordered Procedure tasks with open operation IRIs;
+- typed task inputs, outputs, scalar or homogeneous-list parameters, and material inputs;
+- one or more Capability requirements on every task; and
+- typed property constraints with exact property-kind and canonical unit IRIs.
+
+The registry rejects duplicate identities, incompatible candidate signatures, dangling or forward value references, missing requirements, descriptive `UnspecifiedControl`, invalid parameter references, and invalid material expressions before LAIR is constructed. Candidate order is lexical and deterministic only for review; it is never a selection policy.
+
+Methods cannot name a Facility, Zone, Asset, CapabilityOffering, MaterialLot, adapter, location, schedule, or runtime endpoint. Those facts and decisions belong later.
+
+## Package-contributed Method catalogs
+
+Compiler Rust is not the extension boundary. A package can contribute one or more versioned Method documents independently of its planning policy:
+
+```toml
+[methods]
+documents = ["methods/site-methods.json"]
+
+[[planning.methods]]
+source-operation = "std.lab.plasmid.recover"
+method = "https://example.org/method/custom-recovery"
+```
+
+The document uses the shared `lab.method-catalog.v1` envelope:
+
+```json
+{
+  "schema_version": "lab.method-catalog.v1",
+  "methods": []
+}
+```
+
+An empty document is valid and contributes no alternatives. A useful document fills `methods` with complete definitions that implement an Intent operation's typed signature and contain at least one valid Procedure task with a Capability requirement. The complete schema is the serialized `lab_method::MethodCatalogDocument` and `MethodDefinition` contract.
+
+Lab loads catalogs from the default package and every reachable path dependency in dependency-first order. Each path must remain inside its package, each document is version-checked and validated independently, and the combined definitions are validated again with the standard catalog. `lab check` therefore catches unknown schemas, duplicate Method IRIs, incompatible alternatives, and malformed task graphs before planning. `lab build` uses the same captured registry whether it emits an inventory-free planning frontier or a facility-bound plan.
+
+Method documents and planning pins remain intentionally separate. A catalog states scientifically valid alternatives; a pin restricts one exact source operation or planning choice to one of those Method IRIs. Neither record contains facility or adapter facts. This boundary is recorded by [0047](decisions/0047-packages-contribute-versioned-method-catalogs.md).
+
+## Authoritative compiler representation
+
+`PortableLairProgram::refine_methods` replaces every supported reachable Intent operation with a `method.choice`. Each candidate region contains generic `procedure.task`, `procedure.parameter`, `procedure.material`, `capability.requirement`, and `capability.constraint` operations and yields a compatible typed result. Source-to-Method ancestry and stable local identities are retained.
+
+The resulting `refined-alternatives` LAIR graph is the only authoritative requirement graph. Facility planning does not walk `CheckedModule`, an action-capability string table, or a separate requirement catalog to rediscover work. A read-only analysis projects `lab.planning-problem.v1` directly from verifier-valid LAIR.
+
+The graph-wide solver combines Method choices with one validated immutable SBOLInventory snapshot, exact active MaterialLot evidence, configured adapter bindings, and manifest policy. It selects exact Methods, CapabilityOfferings, Assets, adapters, material sources, and dependencies together. Zero eligible solutions is an explained failure. Several semantically equal solutions remain an explained ambiguity unless explicit policy distinguishes them.
+
+The allocation pass validates the complete `lab.facility-planning-solution.v1` against the exact problem and applies it back to the same LAIR identities. The resulting `allocated-procedure` module has no unresolved Method choice and carries one exact binding for every Capability requirement and material input. When a task has a normalized Procedure program, each non-manual adapter selection also freezes the exact operation-aware Procedure implementation IRI. Whole-module affine material analysis runs before adapter projection.
 
 ## Matching rules
 
-Capability matching is exact IRI equality. Qualification, control mode, typed parameters, material compatibility, containment, capacity, and configured adapter availability are separate predicates. Candidate order is deterministic for review but never constitutes allocation.
+Capability matching is exact IRI equality. The following checks remain independent:
 
-The facility phase run automatically by a facility-configured `lab build`, or separately by `lab plan`, emits `lab.facility-allocation.v1` and then projects it into the reviewed `lab.execution-plan.v1` document. Each allocation is `Requirement instance -> CapabilityOffering IRI -> Asset IRI` and records the required and observed qualification, control mode, exact matched parameters, rejected candidates, and an optional exact adapter/profile hash. The generic plan freezes the inventory source hash and Facility IRI, requirement bindings, optional Component-to-MaterialLot bindings, and a dependency DAG of `Execute`, `MoveMaterial`, and `Manual` nodes. A child device document is optional for a planning-only plan, but when present its path, format, and SHA-256 must agree with the frozen adapter contract.
+- the offering belongs to the selected Facility and is effectively active;
+- observed qualification satisfies the requirement's minimum;
+- the offering's closed control mode is accepted;
+- every typed property constraint matches by exact property kind, scalar type, relation, value, and canonical unit;
+- exact material sources are available and unambiguous;
+- the configured adapter explicitly supports the offering's capability kind and control mode when policy requires an implementation; and
+- implementation-specific capacity and feature checks succeed during lowering.
 
-An adapter declaration is resolved independently of workflow allocation. `lab.adapter-bindings.v2` joins its exact Asset IRI to only those owned CapabilityOfferings whose capability-kind and control-mode IRIs the declared driver supports, records each offering's exact typed parameters, then records effective activity and separate planning, simulation, and execution eligibility. A Plannable offering does not become Executable because a runtime adapter exists, and an Executable offering does not become operable unless a configured adapter supports its exact control mode.
+Qualification belongs to the offering, not the Asset or adapter. A runtime implementation cannot promote a Plannable offering to Executable, and an Executable offering is not operable unless a configured adapter supports its exact control mode.
+
+## Adapter uptake
+
+`lab.adapter-invocations.v1` is projected from Allocated Procedure LAIR and retains selected Methods, exact input/output/yield edges, tasks, normalized programs, Procedure implementation identities, requirements, parameters, materials, offerings, Assets, adapters, profile digests, and compiler-evidence digests. Each allocated requirement freezes its Procedure implementation while an invocation groups the tasks assigned to one exact Asset, adapter, and profile; one physical adapter invocation may therefore realize several explicit Procedure contracts without fragmenting the Asset's output bundle.
+
+Shared typed Procedure views validate operation semantics, canonical program structure, derived capability clauses, parameter identity and type, canonical QUDT units, material roles, and allocation ownership before device-specific code runs. OT-2, Flex, and STAR implement canonical pipetting; OT-2, Flex, and Inheco ODTC implement canonical thermal programs. The Opentrons implementations emit their respective application formats while the ODTC implementation emits `lab.thermocycle-run.v0` for the existing runtime executor. Unsupported Procedure operations or values fail explicitly instead of being ignored.
+
+One independently executable child document realizes one exact Procedure task and names its complete non-empty requirement set. For an atomic formula, invocation validation requires those requirements to share one Asset, adapter binding, and Procedure implementation. Runtime preserves that set on one `Execute` node and dispatches the reviewed document once.
+
+## Python uptake
+
+Python-authored Methods serialize the same `lab-method` contract and are validated by Rust. `MethodCatalog.write(path)` writes a versioned package document; the `include_standard` authoring option controls in-memory composition and is not serialized into that portable document. `lab.refine` constructs the same refined LAIR and planning problem as the native frontend. `lab.plan` and `lab.plan_project` load package-contributed catalogs, compose any additional Python Methods, call the shared `lab-project` facility service, and return typed Method, Procedure task, canonical program, material, requirement, offering, Asset, adapter, and invocation views. `lab.procedures` exposes the same `PipettingProgramV1` and `ThermalProgramV1` structures with exact `Decimal` quantities; it does not reimplement normalization, validation, capability derivation, or allocation. `lab.adapters` exposes the exact built-in adapter catalog and validates operational profiles through the Rust implementation.

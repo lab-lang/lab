@@ -6,6 +6,22 @@ edition = "2026"
 [build]
 entry = "src/programs/reporter_panel.lab"
 
+[[planning.methods]]
+source-operation = "std.bio.build.realize"
+method = "https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate"
+
+[[planning.methods]]
+source-operation = "std.lab.plasmid.transform"
+method = "https://www.lab-compiler.org/ns/method#automated-chemical-transformation"
+
+[[planning.methods]]
+source-operation = "std.lab.plasmid.recover"
+method = "https://www.lab-compiler.org/ns/method#automated-recovery"
+
+[[planning.methods]]
+source-operation = "std.lab.plasmid.plate"
+method = "https://www.lab-compiler.org/ns/method#automated-antibiotic-selection"
+
 [inventory]
 document = "inventory/facility.ttl"
 
