@@ -17,9 +17,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::pipetting::{
     AspirationStrategy, DispenseStrategy, FluidPathPolicy, MixTechnique, PipettingProgramV1,
-    PipettingStep, TransferTechnique,
+    PipettingStep, TransferTechnique, Vessel,
 };
-use crate::thermal::ThermalProgramV1;
+use crate::thermal::{ThermalLoad, ThermalProgramV1, ThermalStage, ThermalStep};
 
 /// One observable property an implementation must realize to run a program faithfully.
 #[derive(
@@ -51,6 +51,8 @@ pub enum ProgramFeature {
     FluidPathGroup,
     /// A vessel whose staging temperature the program constrains.
     VesselTemperatureControl,
+    /// A vessel stating a working capacity or a volume the program must not draw below.
+    VesselVolumeLimits,
     ThermalStageRepeat,
     ThermalControlledRamp,
     ThermalHeatedLid,
@@ -82,6 +84,7 @@ impl ProgramFeature {
             Self::FluidPathSharedSourceNoReentry => "fluid_path_shared_source_no_reentry",
             Self::FluidPathGroup => "fluid_path_group",
             Self::VesselTemperatureControl => "vessel_temperature_control",
+            Self::VesselVolumeLimits => "vessel_volume_limits",
             Self::ThermalStageRepeat => "thermal_stage_repeat",
             Self::ThermalControlledRamp => "thermal_controlled_ramp",
             Self::ThermalHeatedLid => "thermal_heated_lid",
@@ -163,23 +166,36 @@ fn mix_features(technique: &MixTechnique, features: &mut BTreeSet<ProgramFeature
 /// Every feature a pipetting program requires of its implementation.
 pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeature> {
     let mut features = BTreeSet::new();
-    if program.vessels.iter().any(|vessel| vessel.positions > 1) {
-        features.insert(ProgramFeature::MultiPositionVessel);
-    }
-    if program
-        .vessels
-        .iter()
-        .any(|vessel| vessel.temperature.is_some())
-    {
-        features.insert(ProgramFeature::VesselTemperatureControl);
+    for vessel in &program.vessels {
+        let Vessel {
+            id: _,
+            role: _,
+            positions,
+            initial_volume_each: _,
+            working_capacity_each,
+            dead_volume_each,
+            temperature,
+        } = vessel;
+        if *positions > 1 {
+            features.insert(ProgramFeature::MultiPositionVessel);
+        }
+        if temperature.is_some() {
+            features.insert(ProgramFeature::VesselTemperatureControl);
+        }
+        if working_capacity_each.is_some() || dead_volume_each.is_some() {
+            features.insert(ProgramFeature::VesselVolumeLimits);
+        }
     }
     for step in &program.steps {
         match step {
             PipettingStep::Transfer {
+                id: _,
+                source: _,
+                destination: _,
+                volume: _,
                 fluid_path,
                 fluid_path_group,
                 technique,
-                ..
             } => {
                 features.insert(ProgramFeature::Transfer);
                 features.insert(fluid_path_feature(fluid_path));
@@ -189,10 +205,13 @@ pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeatu
                 transfer_features(technique, &mut features);
             }
             PipettingStep::Distribute {
+                id: _,
+                source: _,
+                destinations: _,
+                volume_each: _,
                 fluid_path,
                 fluid_path_group,
                 technique,
-                ..
             } => {
                 features.insert(ProgramFeature::Distribute);
                 features.insert(fluid_path_feature(fluid_path));
@@ -202,10 +221,13 @@ pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeatu
                 transfer_features(technique, &mut features);
             }
             PipettingStep::Mix {
+                id: _,
+                targets: _,
+                cycles: _,
+                volume: _,
                 fluid_path,
                 fluid_path_group,
                 technique,
-                ..
             } => {
                 features.insert(ProgramFeature::Mix);
                 features.insert(fluid_path_feature(fluid_path));
@@ -214,7 +236,7 @@ pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeatu
                 }
                 mix_features(technique, &mut features);
             }
-            PipettingStep::Barrier { .. } => {
+            PipettingStep::Barrier { id: _, reason: _ } => {
                 features.insert(ProgramFeature::Barrier);
             }
         }
@@ -224,22 +246,45 @@ pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeatu
 
 /// Every feature a thermal program requires of its implementation.
 pub fn thermal_features(program: &ThermalProgramV1) -> BTreeSet<ProgramFeature> {
+    let ThermalProgramV1 {
+        load,
+        lid_temperature,
+        stages,
+        final_hold,
+    } = program;
+    let ThermalLoad {
+        input: _,
+        outputs: _,
+        sample_count,
+        volume_each: _,
+    } = load;
     let mut features = BTreeSet::new();
-    if program.load.sample_count > 1 {
+    if *sample_count > 1 {
         features.insert(ProgramFeature::ThermalMultiSample);
     }
-    if program.lid_temperature.is_some() {
+    if lid_temperature.is_some() {
         features.insert(ProgramFeature::ThermalHeatedLid);
     }
-    if program.final_hold.is_some() {
+    if final_hold.is_some() {
         features.insert(ProgramFeature::ThermalFinalHold);
     }
-    for stage in &program.stages {
-        if stage.repeats > 1 {
+    for stage in stages {
+        let ThermalStage {
+            id: _,
+            repeats,
+            steps,
+        } = stage;
+        if *repeats > 1 {
             features.insert(ProgramFeature::ThermalStageRepeat);
         }
-        for step in &stage.steps {
-            if step.ramp_rate.is_some() {
+        for step in steps {
+            let ThermalStep {
+                id: _,
+                temperature: _,
+                hold: _,
+                ramp_rate,
+            } = step;
+            if ramp_rate.is_some() {
                 features.insert(ProgramFeature::ThermalControlledRamp);
             }
         }

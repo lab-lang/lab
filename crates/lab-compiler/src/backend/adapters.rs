@@ -92,6 +92,7 @@ pub struct AdapterDescriptor {
 /// the planner parses it. This is the outer gate: the per-operation normalizers in
 /// [`crate::backend::procedure`] still reject a program shape a specific template cannot render.
 const OT2_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::VesselVolumeLimits,
     ProgramFeature::MultiPositionVessel,
     ProgramFeature::Transfer,
     ProgramFeature::Distribute,
@@ -124,6 +125,7 @@ const OPENTRONS_THERMAL_FEATURES: &[ProgramFeature] = &[
 
 /// Canonical pipetting features the Flex protocol builder realizes.
 const FLEX_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::VesselVolumeLimits,
     ProgramFeature::MultiPositionVessel,
     ProgramFeature::FluidPathGroup,
     ProgramFeature::AspirateTrackedSurface,
@@ -139,6 +141,7 @@ const FLEX_PIPETTING_FEATURES: &[ProgramFeature] = &[
 /// Canonical pipetting features the STAR choreographer realizes. It carries its own measured
 /// volume-to-height models, so it tracks a liquid surface the Flex builder cannot.
 const STAR_PIPETTING_FEATURES: &[ProgramFeature] = &[
+    ProgramFeature::VesselVolumeLimits,
     ProgramFeature::MultiPositionVessel,
     ProgramFeature::FluidPathGroup,
     ProgramFeature::Transfer,

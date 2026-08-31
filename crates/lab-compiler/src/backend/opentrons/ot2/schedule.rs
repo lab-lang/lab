@@ -713,7 +713,8 @@ fn merge_source_temperature(
 ) -> Result<Option<f64>, String> {
     match (shared, candidate) {
         (Some(shared), Some(candidate)) if shared != candidate => Err(
-            "OT-2 cannot batch Golden Gate reactions with different source temperatures".to_owned(),
+            "OT-2 cannot batch work whose staged materials require different temperatures"
+                .to_owned(),
         ),
         (None, Some(candidate)) => Ok(Some(candidate)),
         (shared, _) => Ok(shared),
@@ -987,7 +988,7 @@ fn allocate_transformation(
         *cell_source_volume_ul = cell_loads[cell_key];
         locations.push(ScheduledPhysicalLocation {
             value: graph.choice_input_ref(tasks[*prepare].task, &cell_input)?,
-            resource: "transformation-source-rack".to_owned(),
+            resource: "transformation-chilled-rack".to_owned(),
             positions: vec![cell_source_well.clone()],
         });
         for placement in dna {
@@ -1648,7 +1649,7 @@ mod tests {
         assert_eq!(shared, Some(4.0));
         assert_eq!(
             merge_source_temperature(shared, Some(8.0)).unwrap_err(),
-            "OT-2 cannot batch Golden Gate reactions with different source temperatures"
+            "OT-2 cannot batch work whose staged materials require different temperatures"
         );
     }
 }

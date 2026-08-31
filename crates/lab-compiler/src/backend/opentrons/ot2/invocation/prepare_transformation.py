@@ -106,7 +106,8 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         tip_racks=large_tips,
     )
 
-    temperature.set_temperature(execution["cell_staging_temperature_c"])
+    if execution["cell_staging_temperature_c"] is not None:
+        temperature.set_temperature(execution["cell_staging_temperature_c"])
     thermocycler.set_block_temperature(_BLOCK_IDLE_CELSIUS)
     thermocycler.open_lid()
     reactions = [reaction_plate[name] for name in execution["reaction_wells"]]
