@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::method::ProcedureValue;
+use crate::procedure::BindingScope;
 use lab_capability::{ControlMode, ScalarValue};
-use lab_procedure::BindingScope;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,

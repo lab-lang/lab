@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 
 use crate::method::LocalId;
+use crate::procedure::{MixTechnique, TransferTechnique};
 use lab_instruments::ThermalProfile;
-use lab_procedure::{MixTechnique, TransferTechnique};
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
 use serde::Serialize;
 

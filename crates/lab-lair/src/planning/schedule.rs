@@ -16,7 +16,7 @@ use super::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask,
     InvocationAdapter, PlanningValueSource,
 };
-use crate::procedure::PROVISION_MATERIAL;
+use crate::procedure::vocabulary::PROVISION_MATERIAL;
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
 

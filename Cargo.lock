@@ -1755,7 +1755,6 @@ dependencies = [
  "lab-instruments",
  "lab-inventory",
  "lab-language",
- "lab-procedure",
  "lab-runfmt",
  "opentrons-protocol",
  "pliron",
@@ -1799,17 +1798,6 @@ dependencies = [
  "serde",
  "thiserror",
  "toml 0.8.23",
-]
-
-[[package]]
-name = "lab-procedure"
-version = "0.1.2"
-dependencies = [
- "lab-capability",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
 ]
 
 [[package]]

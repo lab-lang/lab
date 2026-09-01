@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::method::{IntentOperationId, LocalId, PortType, ProcedureValue};
+use crate::procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint, PropertyKind,
     QualificationLevel,
 };
-use lab_procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -523,7 +523,7 @@ fn validate_program_bindings(
             if program.as_program().vessels.iter().any(|vessel| {
                 matches!(
                     &vessel.role,
-                    lab_procedure::VesselRole::ProcedureInput { input }
+                    crate::procedure::VesselRole::ProcedureInput { input }
                         if usize::try_from(*input).map_or(true, |input| input >= task.inputs.len())
                 )
             }) {

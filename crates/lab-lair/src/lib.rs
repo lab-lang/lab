@@ -5,7 +5,7 @@ pub mod backend;
 pub mod lair;
 pub mod method;
 pub mod planning;
-mod procedure;
+pub mod procedure;
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
 pub use lab_language::{
     Analysis, CheckedDeclaration, CheckedModule, Diagnostic, DiagnosticSeverity, MaterialFlowError,

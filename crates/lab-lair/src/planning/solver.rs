@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::method::{IntentOperationId, LocalId};
+use crate::procedure::BindingScope;
 use lab_capability::{
     AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId,
     ProcedureImplementationId, PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel,
@@ -13,7 +14,6 @@ use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
     FacilityScalarValue, InventorySnapshot,
 };
-use lab_procedure::BindingScope;
 use sbol_inventory::vocabulary::Qualification;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1479,11 +1479,11 @@ mod tests {
     use std::fs;
 
     use crate::method::PortType;
-    use lab_capability::{CapabilityKind, ExactInteger, OperationId, ScalarValue};
-    use lab_procedure::{
+    use crate::procedure::{
         FluidPathPolicy, Location, MaterialOutput, PipettingConstraints, PipettingProgramV1,
         PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole, Volume,
     };
+    use lab_capability::{CapabilityKind, ExactInteger, OperationId, ScalarValue};
     use tempfile::TempDir;
 
     use crate::planning::{
@@ -1491,7 +1491,7 @@ mod tests {
         PlanningMethodYield, PlanningPort, PlanningProcedureTask, PlanningTaskOutput,
         PlanningValueSource,
     };
-    use crate::{backend::validate_adapter_profile, procedure::SETUP_GOLDEN_GATE};
+    use crate::{backend::validate_adapter_profile, procedure::vocabulary::SETUP_GOLDEN_GATE};
 
     use super::*;
 
@@ -1531,7 +1531,7 @@ mod tests {
             operation: OperationId::new(format!("https://example.org/procedure/{operation}"))
                 .unwrap(),
             program: None,
-            binding_scope: lab_procedure::BindingScope::Independent,
+            binding_scope: crate::procedure::BindingScope::Independent,
             inputs: Vec::new(),
             outputs: vec![PlanningTaskOutput {
                 name: id("result"),

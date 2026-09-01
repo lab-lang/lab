@@ -552,13 +552,13 @@ fn workflow_value(
 #[cfg(test)]
 mod tests {
     use crate::method::{IntentOperationId, ProcedureValue, ScalarType};
+    use crate::procedure::{
+        AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
+    };
     use lab_capability::ScalarValue;
     use lab_inventory::InventorySnapshot;
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
-    };
-    use lab_procedure::{
-        AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
     };
 
     use crate::backend::default_adapter_profile;
@@ -1044,7 +1044,7 @@ workflow main() -> Material<Plasmid>:
         assert_eq!(staged_program.materials.len(), 9);
         assert_eq!(staged_program.steps.len(), 18);
         let source_temperature =
-            lab_procedure::staged_temperature_envelope(&staged_program.vessels)
+            crate::procedure::staged_temperature_envelope(&staged_program.vessels)
                 .expect("the Method requires controlled source staging");
         assert_eq!(source_temperature.minimum, source_temperature.maximum);
         assert_eq!(source_temperature.minimum.value().to_string(), "4");
@@ -1147,7 +1147,7 @@ workflow main() -> Material<Plasmid>:
         assert!(dilution_program.as_program().vessels.iter().any(|vessel| {
             matches!(
                 &vessel.role,
-                lab_procedure::VesselRole::ProcedureInput { input: 0 }
+                crate::procedure::VesselRole::ProcedureInput { input: 0 }
             )
         }));
         assert_eq!(dilution_program.as_program().steps.len(), 9);
@@ -1197,8 +1197,8 @@ workflow main() -> Material<Plasmid>:
         let ValidatedProcedureProgram::PipettingV1(add_medium) = add_medium else {
             panic!("recovery medium addition must be pipetting")
         };
-        let recovered_location = lab_procedure::Location {
-            vessel: lab_procedure::ProcedureLocalId::new("recovery-cultures").unwrap(),
+        let recovered_location = crate::procedure::Location {
+            vessel: crate::procedure::ProcedureLocalId::new("recovery-cultures").unwrap(),
             position: 0,
         };
         assert_eq!(

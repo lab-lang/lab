@@ -9,8 +9,8 @@
 use std::collections::BTreeSet;
 
 use crate::method::{LocalId, PortType, ProcedureValue};
+use crate::procedure::ProcedureProgram;
 use lab_capability::{AbsoluteIri, OperationId, PropertyKind};
-use lab_procedure::ProcedureProgram;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;

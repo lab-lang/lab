@@ -40,7 +40,7 @@ use crate::lair::dialect::workflow::{
     DiluteOp, MaterialType as WorkflowMaterialType, PlateOp, ProvisionOp, RealizeOp, RecoverOp,
     TransformOp,
 };
-use crate::procedure::{
+use crate::procedure::normalization::{
     ProcedureTaskInstance, ResolvedProcedureMaterial, ResolvedProcedureParameter, normalize_task,
 };
 
