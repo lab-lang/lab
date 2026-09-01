@@ -168,7 +168,7 @@ impl PortableLairProgram {
         mut self,
         registry: &MethodRegistry,
     ) -> Result<RefinedLairProgram, RefinedLairError> {
-        crate::lair::method_refinement::refine_method_alternatives(
+        crate::method::refinement::refine_method_alternatives(
             &mut self.context,
             self.module.get_operation(),
             registry,
@@ -193,7 +193,7 @@ impl PortableLairProgram {
 
     /// Refine with the validated methods bundled into this compiler build.
     pub fn refine_standard_methods(self) -> Result<RefinedLairProgram, RefinedLairError> {
-        self.refine_methods(crate::lair::methods::standard_method_registry())
+        self.refine_methods(crate::method::standard_method_registry())
     }
 }
 

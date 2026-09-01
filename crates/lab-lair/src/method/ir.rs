@@ -24,7 +24,7 @@ use pliron::value::Value;
 use pliron::verify_err;
 
 use crate::lair::dialect::attributes::string_vec;
-use crate::lair::dialect::procedure::is_stable_local_id;
+use crate::procedure::ir::is_stable_local_id;
 
 /// One refinable source action with one single-block region per candidate method.
 #[pliron_op(

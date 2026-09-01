@@ -15,8 +15,8 @@ use crate::lair::dialect::allocation::{
 };
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::meta::StageOp;
-use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-use crate::lair::dialect::procedure::{MaterialInputOp, ParameterOp, TaskOp};
+use crate::method::ir::{ChoiceOp, YieldOp};
+use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp};
 
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -737,9 +737,9 @@ mod tests {
 
     use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
     use crate::lair::dialect::design::DesignDnaSequenceOp;
-    use crate::lair::dialect::method::{ChoiceOp, ChoicePorts, YieldOp};
-    use crate::lair::dialect::procedure::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
     use crate::lair::session::CompilerSession;
+    use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
+    use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
 
     use super::*;
 

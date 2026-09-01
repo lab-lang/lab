@@ -17,11 +17,11 @@ use thiserror::Error;
 
 use crate::lair::dialect::allocation::{BindingOp, ContextOp, MaterialBindingOp, MethodOp};
 use crate::lair::dialect::capability::RequirementOp;
-use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-use crate::lair::dialect::procedure::MaterialInputOp;
+use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::planning::{
     FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem,
 };
+use crate::procedure::ir::MaterialInputOp;
 
 #[derive(Debug, Error)]
 pub enum AllocationApplicationError {

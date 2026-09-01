@@ -15,7 +15,6 @@ pub use lab_language::{
     render_diagnostic, standard_library_manifest,
 };
 pub use lab_runfmt as runfmt;
-pub use lair::methods::{standard_method_definitions, standard_method_registry};
 pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
 pub use lair::program::{
     AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,

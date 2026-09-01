@@ -31,14 +31,14 @@ use crate::lair::dialect::attributes::{quantity_entry, u32_value};
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
 use crate::lair::dialect::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 use crate::lair::dialect::design::DesignType;
-use crate::lair::dialect::method::{ChoiceOp, ChoicePorts, YieldOp};
-use crate::lair::dialect::procedure::{
-    DataType as ProcedureDataType, MaterialInputOp, MaterialType as ProcedureMaterialType,
-    ParameterOp, TaskOp,
-};
 use crate::lair::dialect::workflow::{
     DiluteOp, MaterialType as WorkflowMaterialType, PlateOp, ProvisionOp, RealizeOp, RecoverOp,
     TransformOp,
+};
+use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
+use crate::procedure::ir::{
+    DataType as ProcedureDataType, MaterialInputOp, MaterialType as ProcedureMaterialType,
+    ParameterOp, TaskOp,
 };
 use crate::procedure::normalization::{
     ProcedureTaskInstance, ResolvedProcedureMaterial, ResolvedProcedureParameter, normalize_task,

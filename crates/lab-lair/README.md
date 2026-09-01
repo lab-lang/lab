@@ -23,7 +23,9 @@ Verifier-valid Allocated Procedure LAIR is the only input device lowering is pro
 
 The source tree follows semantic ownership and dependency direction:
 
-- `src/lair/` owns Design, Workflow/Intent, Method, Procedure, Capability, and Allocation dialects; source lowering; Method refinement; planning-problem extraction; solution application; stage contracts; analyses; and textual IR tooling;
+- `src/method/` owns portable Method definitions and registries together with `method.choice`, bundled methods, and the refinement pass that constructs candidate regions;
+- `src/procedure/` owns `procedure.task` and its typed ports together with canonical pipetting and thermal bodies, task normalization, validation, capability derivation, and exact quantities;
+- `src/lair/` owns the remaining Design, Workflow/Intent, Capability, and Allocation operations; source lowering; planning-problem extraction; solution application; stage contracts; analyses; and textual IR tooling;
 - `src/planning/` owns the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
 - `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
 - `src/artifact/` owns generated files independently of filesystem persistence;

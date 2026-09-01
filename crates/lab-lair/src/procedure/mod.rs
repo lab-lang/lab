@@ -7,6 +7,7 @@
 pub mod capability;
 pub mod feature;
 pub mod id;
+pub(crate) mod ir;
 pub(crate) mod normalization;
 pub mod pipetting;
 pub mod program;

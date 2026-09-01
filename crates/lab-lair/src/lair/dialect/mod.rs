@@ -136,7 +136,5 @@ pub(crate) mod capability;
 pub(crate) mod chemistry;
 pub(crate) mod design;
 pub(crate) mod meta;
-pub(crate) mod method;
-pub(crate) mod procedure;
 pub(crate) mod scalar;
 pub(crate) mod workflow;

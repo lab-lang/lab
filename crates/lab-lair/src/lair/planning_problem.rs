@@ -14,15 +14,15 @@ use pliron::value::Value;
 use thiserror::Error;
 
 use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
-use crate::lair::dialect::method::{ChoiceOp, YieldOp};
-use crate::lair::dialect::procedure::{MaterialInputOp, ParameterOp, TaskOp, semantic_port_type};
 use crate::lair::stage::{IrStage, detect_stage};
+use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::planning::{
     PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
     PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,
     PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
+use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp, semantic_port_type};
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PlanningProblemExtractionError {

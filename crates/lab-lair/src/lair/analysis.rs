@@ -9,7 +9,7 @@ use pliron::r#type::Typed;
 use pliron::value::Value;
 use pliron::verify_err;
 
-use crate::lair::dialect::procedure::MaterialType as ProcedureMaterialType;
+use crate::procedure::ir::MaterialType as ProcedureMaterialType;
 
 /// A whole-IR analysis of the affine physical-resource rule.
 ///
@@ -81,7 +81,7 @@ mod tests {
     use pliron::builtin::attributes::StringAttr;
 
     use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp};
-    use crate::lair::dialect::procedure::{MaterialType, TaskOp};
+    use crate::procedure::ir::{MaterialType, TaskOp};
 
     use crate::lair::analysis::*;
 

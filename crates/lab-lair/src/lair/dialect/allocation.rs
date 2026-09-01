@@ -13,10 +13,10 @@ use pliron::result::Result;
 use pliron::verify_err;
 
 use crate::lair::dialect::attributes::string_vec;
-use crate::lair::dialect::procedure::is_stable_local_id;
 use crate::planning::{
     SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod, SelectedRequirementBinding,
 };
+use crate::procedure::ir::is_stable_local_id;
 
 /// Binds allocated LAIR to the exact immutable planning and facility inputs.
 #[pliron_op(

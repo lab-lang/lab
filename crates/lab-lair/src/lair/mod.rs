@@ -3,12 +3,10 @@
 pub(crate) mod allocation;
 pub(crate) mod analysis;
 pub(crate) mod dialect;
-pub mod methods;
 pub mod pipeline;
 pub mod program;
 pub mod session;
 pub mod stage;
 
-pub(crate) mod method_refinement;
 pub(crate) mod planning_problem;
 pub(crate) mod source_lowering;
