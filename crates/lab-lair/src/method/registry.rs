@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lab_capability::{ConstraintRelation, ControlMode, MethodId};
 use thiserror::Error;
 
-use crate::{
+use crate::method::{
     IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodSignature,
     ParameterType, ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput,
     ValueReference,
@@ -424,7 +424,7 @@ mod tests {
         PropertyKind, PropertyValue, QualificationLevel, ScalarValue,
     };
 
-    use crate::{
+    use crate::method::{
         CapabilityConstraintDefinition, CapabilityRequirementDefinition, MaterialInputDefinition,
         MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput, MethodParameter,
         ParameterType, PortType, ProcedureParameterDefinition, ProcedureTaskDefinition,

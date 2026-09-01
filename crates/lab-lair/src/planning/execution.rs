@@ -2,8 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::method::ProcedureValue;
 use lab_capability::{ControlMode, ScalarValue};
-use lab_method::ProcedureValue;
 use lab_procedure::BindingScope;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
@@ -129,8 +129,8 @@ pub fn build_execution_plan_from_invocations(
 
     let mut requirements = Vec::new();
     let mut nodes = Vec::<ExecutionPlanNode>::new();
-    let mut node_tasks = Vec::<BTreeSet<lab_method::LocalId>>::new();
-    let mut task_nodes = BTreeMap::<lab_method::LocalId, Vec<String>>::new();
+    let mut node_tasks = Vec::<BTreeSet<crate::method::LocalId>>::new();
+    let mut task_nodes = BTreeMap::<crate::method::LocalId, Vec<String>>::new();
     let mut document_nodes = BTreeMap::<(String, String, String), usize>::new();
     for method in &invocations.methods {
         for task in &method.tasks {
@@ -402,13 +402,13 @@ pub fn build_execution_plan_from_invocations(
 }
 
 type SelectedChoices<'a> =
-    BTreeMap<lab_method::LocalId, (&'a PlanningMethodChoice, &'a PlanningMethodCandidate)>;
+    BTreeMap<crate::method::LocalId, (&'a PlanningMethodChoice, &'a PlanningMethodCandidate)>;
 
 fn execution_task_dependencies(
     invocations: &AdapterInvocationPlan,
     problem: &PlanningProblem,
-    task_nodes: &BTreeMap<lab_method::LocalId, Vec<String>>,
-) -> Result<BTreeMap<lab_method::LocalId, Vec<String>>, ExecutionPlanBuildError> {
+    task_nodes: &BTreeMap<crate::method::LocalId, Vec<String>>,
+) -> Result<BTreeMap<crate::method::LocalId, Vec<String>>, ExecutionPlanBuildError> {
     let problem_choices = problem
         .choices
         .iter()
@@ -567,11 +567,11 @@ fn allocated_material_matches(
 }
 
 fn source_execution_nodes(
-    owner: &lab_method::LocalId,
+    owner: &crate::method::LocalId,
     source: &PlanningValueSource,
     selected: &SelectedChoices<'_>,
-    task_nodes: &BTreeMap<lab_method::LocalId, Vec<String>>,
-    visiting_inputs: &mut BTreeSet<(lab_method::LocalId, lab_method::LocalId)>,
+    task_nodes: &BTreeMap<crate::method::LocalId, Vec<String>>,
+    visiting_inputs: &mut BTreeSet<(crate::method::LocalId, crate::method::LocalId)>,
 ) -> Result<Vec<String>, ExecutionPlanBuildError> {
     match source {
         PlanningValueSource::TaskOutput { task, .. } => {

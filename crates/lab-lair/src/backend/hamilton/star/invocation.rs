@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use lab_method::LocalId;
+use crate::method::LocalId;
 use lab_runfmt::STAR_RUN_FORMAT;
 use serde::Serialize;
 

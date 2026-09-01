@@ -10,7 +10,7 @@ Putting Method definitions directly in `lab.toml` would mix a large typed graph 
 
 ## Decision
 
-`lab-method` owns a versioned, RDF-free JSON document contract named `lab.method-catalog.v1`. A document contains only its schema version and portable `MethodDefinition` records. Every Method retains an absolute identity, one exact Intent operation, a typed signature, topologically ordered Procedure tasks, typed values and material expressions, and first-class Capability requirements. It cannot name a Facility, Zone, Asset, CapabilityOffering, MaterialLot, adapter, schedule, endpoint, or credential.
+`lab_lair::method` owns a versioned, RDF-free JSON document contract named `lab.method-catalog.v1`. A document contains only its schema version and portable `MethodDefinition` records. Every Method retains an absolute identity, one exact Intent operation, a typed signature, topologically ordered Procedure tasks, typed values and material expressions, and first-class Capability requirements. It cannot name a Facility, Zone, Asset, CapabilityOffering, MaterialLot, adapter, schedule, endpoint, or credential.
 
 A package contributes documents by path:
 

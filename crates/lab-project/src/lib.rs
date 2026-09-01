@@ -9,14 +9,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use lab_lair::method::{
+    MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
+    MethodRegistryError,
+};
 use lab_language::Grounding;
 use lab_language::{
     CheckedDeclaration, CheckedModule, ModuleId, SemanticEnvironment,
     compile_module_in_environment, parse_module,
-};
-use lab_method::{
-    MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
-    MethodRegistryError,
 };
 use lab_package::{
     DependencySpec, DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource,
@@ -856,9 +856,9 @@ shared = { path = "../shared" }
         let project = LabProject::discover(root).unwrap();
         assert_eq!(project.package_method_definitions().unwrap(), [custom]);
         let compiled = project.compile().unwrap();
-        let recovery = compiled
-            .methods
-            .methods_for(&lab_method::IntentOperationId::new("std.lab.plasmid.recover").unwrap());
+        let recovery = compiled.methods.methods_for(
+            &lab_lair::method::IntentOperationId::new("std.lab.plasmid.recover").unwrap(),
+        );
 
         assert_eq!(
             recovery

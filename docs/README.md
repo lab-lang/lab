@@ -82,7 +82,7 @@ Decision records preserve the reasoning and status behind the language rather th
 - [LAIR overview](../crates/lab-lair/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
 - [LAIR internals](../crates/lab-lair/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
-- [Portable method definitions](../crates/lab-method/README.md) describe the facility-independent Method, Procedure, and Capability contract shared by compiler and Python extensions.
+- [Portable method definitions](language/capabilities.md) describe the facility-independent Method, Procedure, and Capability documents owned by LAIR and shared with Python extensions.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-lair`](../crates/lab-lair/README.md) crate is the Rust compiler and IR embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.

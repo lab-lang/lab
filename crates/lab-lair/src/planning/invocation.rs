@@ -3,11 +3,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
+use crate::method::{IntentOperationId, LocalId};
 use lab_capability::{
     AbsoluteIri, CapabilityKind, ControlMode, MethodId, ProcedureImplementationId,
     QualificationLevel,
 };
-use lab_method::{IntentOperationId, LocalId};
 use lab_procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

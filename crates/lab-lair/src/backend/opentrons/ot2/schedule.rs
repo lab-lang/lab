@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_method::LocalId;
+use crate::method::LocalId;
 use serde::Serialize;
 
 use super::BACKEND;

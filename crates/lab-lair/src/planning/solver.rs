@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use crate::method::{IntentOperationId, LocalId};
 use lab_capability::{
     AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId,
     ProcedureImplementationId, PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel,
@@ -12,7 +13,6 @@ use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
     FacilityScalarValue, InventorySnapshot,
 };
-use lab_method::{IntentOperationId, LocalId};
 use lab_procedure::BindingScope;
 use sbol_inventory::vocabulary::Qualification;
 use schemars::JsonSchema;
@@ -1478,8 +1478,8 @@ fn summarize_alternative(selection: &[SelectedMethod]) -> PlanningAlternative {
 mod tests {
     use std::fs;
 
+    use crate::method::PortType;
     use lab_capability::{CapabilityKind, ExactInteger, OperationId, ScalarValue};
-    use lab_method::PortType;
     use lab_procedure::{
         FluidPathPolicy, Location, MaterialOutput, PipettingConstraints, PipettingProgramV1,
         PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole, Volume,

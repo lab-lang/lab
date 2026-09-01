@@ -76,8 +76,8 @@ mod tests {
     use pliron::linked_list::ContainsLinkedList;
     use pliron::op::Op;
 
+    use crate::method::LocalId;
     use lab_capability::OperationId;
-    use lab_method::LocalId;
     use pliron::builtin::attributes::StringAttr;
 
     use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp};

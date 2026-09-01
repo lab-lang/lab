@@ -3,6 +3,7 @@
 pub mod artifact;
 pub mod backend;
 pub mod lair;
+pub mod method;
 pub mod planning;
 mod procedure;
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};

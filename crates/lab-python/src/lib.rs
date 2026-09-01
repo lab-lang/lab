@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
+use lab_lair::method::{MethodDefinition, MethodRegistry};
 use lab_lair::{
     CheckedModule, Diagnostic, ModuleId, PortableLairProgram, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
     standard_method_definitions,
 };
-use lab_method::{MethodDefinition, MethodRegistry};
 use lab_project::{FacilityPlanningResult, LabProject, plan_modules_for_package};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;

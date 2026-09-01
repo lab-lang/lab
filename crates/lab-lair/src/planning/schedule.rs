@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_method::LocalId;
+use crate::method::LocalId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -548,10 +548,10 @@ mod tests {
     use super::super::model::MaterialLotCandidates;
     use super::super::solver::SelectedMaterialBinding;
     use super::super::solver::SelectedMaterialSource;
+    use crate::method::{IntentOperationId, PortType};
     use lab_capability::{
         AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
     };
-    use lab_method::{IntentOperationId, PortType};
 
     use super::*;
     use crate::planning::{

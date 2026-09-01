@@ -2,8 +2,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::method::LocalId;
 use lab_instruments::ThermalProfile;
-use lab_method::LocalId;
 use lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT;
 use opentrons_protocol::schema::Metadata;
 use opentrons_protocol::v8::schema::{WellLocation, WellOrigin};

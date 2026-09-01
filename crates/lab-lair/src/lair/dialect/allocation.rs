@@ -1,7 +1,7 @@
 //! Exact facility decisions attached to selected Procedure and Capability operations.
 
+use crate::method::{IntentOperationId, LocalId};
 use lab_capability::{AbsoluteIri, ControlMode, MethodId, QualificationLevel};
-use lab_method::{IntentOperationId, LocalId};
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
 use pliron::common_traits::Verify;

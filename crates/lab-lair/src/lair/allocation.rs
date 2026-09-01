@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use lab_method::LocalId;
+use crate::method::LocalId;
 use pliron::builtin::op_interfaces::OneRegionInterface;
 use pliron::builtin::ops::ModuleOp;
 use pliron::context::Context;

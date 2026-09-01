@@ -12,7 +12,6 @@ lab-capability.workspace = true
 lab-lair.workspace = true
 lab-inventory.workspace = true
 lab-language.workspace = true
-lab-method.workspace = true
 lab-package.workspace = true
 lab-sbol.workspace = true
 sbol3.workspace = true

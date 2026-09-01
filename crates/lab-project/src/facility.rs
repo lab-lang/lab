@@ -13,6 +13,7 @@ use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
 use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
 use lab_lair::backend::{AdapterProfileContractError, validate_adapter_profile};
+use lab_lair::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_lair::planning::{
     AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
     AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, BuildInventory,
@@ -23,7 +24,6 @@ use lab_lair::{
     AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
     PortableLairProgram, RefinedLairError,
 };
-use lab_method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_package::{LabPackage, PlanningAdapterRequirement};
 use thiserror::Error;
 

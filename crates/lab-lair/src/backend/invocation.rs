@@ -8,8 +8,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::method::ProcedureValue;
 use lab_capability::ScalarValue;
-use lab_method::ProcedureValue;
 
 use crate::planning::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,

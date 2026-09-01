@@ -2,11 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::method::{IntentOperationId, LocalId, PortType, ProcedureValue};
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint, PropertyKind,
     QualificationLevel,
 };
-use lab_method::{IntentOperationId, LocalId, PortType, ProcedureValue};
 use lab_procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

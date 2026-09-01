@@ -2,14 +2,14 @@
 
 use std::collections::BTreeMap;
 
-use lab_capability::{
-    CapabilityKind, ControlMode, ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue,
-    QualificationLevel, ScalarValue, UnitIri,
-};
-use lab_method::{
+use crate::method::{
     IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodRegistry,
     PortType, ProcedureValue, ProcedureValueExpression, ScalarType, ScalarValueExpression,
     ValueReference,
+};
+use lab_capability::{
+    CapabilityKind, ControlMode, ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue,
+    QualificationLevel, ScalarValue, UnitIri,
 };
 use pliron::attribute::AttrObj;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
@@ -780,7 +780,7 @@ fn resolve_procedure_value(
 fn verify_inputs(
     context: &Context,
     operation: Ptr<Operation>,
-    expected: &[lab_method::MethodInput],
+    expected: &[crate::method::MethodInput],
     operands: &[Value],
 ) -> Result<()> {
     if expected.len() != operands.len() {
@@ -817,7 +817,7 @@ fn method_is_applicable(
 fn verify_results(
     context: &Context,
     operation: Ptr<Operation>,
-    expected: &[lab_method::TaskOutput],
+    expected: &[crate::method::TaskOutput],
 ) -> Result<()> {
     let actual = operation.deref(context).results().collect::<Vec<_>>();
     if expected.len() != actual.len() {

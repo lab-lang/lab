@@ -234,7 +234,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     }
     let semantic_tasks = tasks
         .iter()
-        .map(|task| lab_method::LocalId::new(task).expect("verified task IDs are stable"))
+        .map(|task| crate::method::LocalId::new(task).expect("verified task IDs are stable"))
         .collect::<BTreeSet<_>>();
     if selected_tasks != semantic_tasks {
         return Err(
@@ -255,7 +255,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     }
     for (input, material) in &materials {
         let stable_id =
-            lab_method::LocalId::new(input).expect("verified material input IDs are stable");
+            crate::method::LocalId::new(input).expect("verified material input IDs are stable");
         let Some(binding) = material_bindings.get(&stable_id) else {
             return Err(format!(
                 "allocated Procedure material input '{input}' has no binding"
@@ -305,8 +305,8 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         return Err("every allocated Requirement must have exactly one binding".to_owned());
     }
     for (requirement_id, requirement) in &requirements {
-        let stable_id =
-            lab_method::LocalId::new(requirement_id).expect("verified Requirement IDs are stable");
+        let stable_id = crate::method::LocalId::new(requirement_id)
+            .expect("verified Requirement IDs are stable");
         let Some(binding) = bindings.get(&stable_id) else {
             return Err(format!(
                 "allocated Requirement '{requirement_id}' has no binding"
@@ -724,11 +724,11 @@ fn operation_counts(context: &Context, module: ModuleOp) -> Result<(usize, usize
 
 #[cfg(test)]
 mod tests {
+    use crate::method::ProcedureValue;
     use lab_capability::{
         CapabilityKind, ConstraintRelation, ControlMode, ExactInteger, MethodId, OperationId,
         PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
     };
-    use lab_method::ProcedureValue;
     use pliron::builtin::attributes::StringAttr;
     use pliron::builtin::ops::ModuleOp;
     use pliron::identifier::Identifier;
@@ -856,7 +856,10 @@ mod tests {
             &candidates,
             ChoicePorts {
                 inputs: vec![],
-                outputs: vec![(lab_method::LocalId::new("sample").unwrap(), material_type)],
+                outputs: vec![(
+                    crate::method::LocalId::new("sample").unwrap(),
+                    material_type,
+                )],
             },
             None,
             &[],
@@ -873,7 +876,7 @@ mod tests {
                 &operation,
                 vec![],
                 vec![material_type],
-                &[lab_method::LocalId::new("sample").unwrap()],
+                &[crate::method::LocalId::new("sample").unwrap()],
             );
             let result = task.get_operation().deref(&context).get_result(0);
             choice.append_candidate_operation(&mut context, candidate, task.get_operation());

@@ -3,16 +3,16 @@
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
-use lab_capability::{
-    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, ExactInteger, MethodId,
-    OperationId, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
-};
-use lab_method::{
+use crate::method::{
     CapabilityConstraintDefinition, CapabilityRequirementDefinition, IntentOperationId, LocalId,
     MaterialInputDefinition, MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput,
     MethodParameter, MethodRegistry, ParameterType, PortType, ProcedureParameterDefinition,
     ProcedureTaskDefinition, ProcedureValue, ProcedureValueExpression, ScalarType,
     ScalarValueExpression, TaskOutput, ValueReference,
+};
+use lab_capability::{
+    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, ExactInteger, MethodId,
+    OperationId, PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
 };
 
 const METHOD_NS: &str = "https://www.lab-compiler.org/ns/method#";

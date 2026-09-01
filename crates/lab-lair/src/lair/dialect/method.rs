@@ -4,8 +4,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::method::{IntentOperationId, LocalId};
 use lab_capability::MethodId;
-use lab_method::{IntentOperationId, LocalId};
 use pliron::basic_block::BasicBlock;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{

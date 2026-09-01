@@ -2,8 +2,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::method::MethodRegistry;
 use lab_language::CheckedModule;
-use lab_method::MethodRegistry;
 use pliron::builtin::op_interfaces::SingleBlockRegionInterface;
 use pliron::builtin::ops::ModuleOp;
 use pliron::context::Context;
@@ -551,12 +551,12 @@ fn workflow_value(
 
 #[cfg(test)]
 mod tests {
+    use crate::method::{IntentOperationId, ProcedureValue, ScalarType};
     use lab_capability::ScalarValue;
     use lab_inventory::InventorySnapshot;
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
-    use lab_method::{IntentOperationId, ProcedureValue, ScalarType};
     use lab_procedure::{
         AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
     };
@@ -837,7 +837,7 @@ workflow main() -> Material<Plasmid>:
         let checked = compile_module(SHARED_SEQUENCE_PROGRAM).expect("program checks");
         let error = PortableLairProgram::lower(&checked)
             .expect("portable LAIR lowers")
-            .refine_methods(&lab_method::MethodRegistry::default())
+            .refine_methods(&crate::method::MethodRegistry::default())
             .err()
             .expect("an empty method registry cannot refine reachable Intent");
 
@@ -1479,7 +1479,7 @@ workflow main() -> Material<Plasmid>:
         let mut tampered = decoded;
         tampered.invocations[0]
             .tasks
-            .push(lab_method::LocalId::new("task-that-was-never-allocated").unwrap());
+            .push(crate::method::LocalId::new("task-that-was-never-allocated").unwrap());
         assert!(matches!(
             tampered.validate(),
             Err(crate::planning::AdapterInvocationValidationError::UnknownTask { .. })

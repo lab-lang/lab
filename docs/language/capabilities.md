@@ -31,7 +31,7 @@ A validated program derives its capability formula. The pipetting formula reques
 
 ## Portable Method contract
 
-Method authors use the RDF-free `lab-method` crate or the equivalent typed Python `lab.methods` API. A `MethodDefinition` contains:
+Method authors use the RDF-free `lab_lair::method` API or the equivalent typed Python `lab.methods` API. A `MethodDefinition` contains:
 
 - one stable absolute Method IRI and one exact Intent operation identity;
 - a typed input and output signature shared by all alternatives for that Intent;
@@ -67,7 +67,7 @@ The document uses the shared `lab.method-catalog.v1` envelope:
 }
 ```
 
-An empty document is valid and contributes no alternatives. A useful document fills `methods` with complete definitions that implement an Intent operation's typed signature and contain at least one valid Procedure task with a Capability requirement. The complete schema is the serialized `lab_method::MethodCatalogDocument` and `MethodDefinition` contract.
+An empty document is valid and contributes no alternatives. A useful document fills `methods` with complete definitions that implement an Intent operation's typed signature and contain at least one valid Procedure task with a Capability requirement. The complete schema is the serialized `lab_lair::method::MethodCatalogDocument` and `MethodDefinition` contract.
 
 Lab loads catalogs from the default package and every reachable path dependency in dependency-first order. Each path must remain inside its package, each document is version-checked and validated independently, and the combined definitions are validated again with the standard catalog. `lab check` therefore catches unknown schemas, duplicate Method IRIs, incompatible alternatives, and malformed task graphs before planning. `lab build` uses the same captured registry whether it emits an inventory-free planning frontier or a facility-bound plan.
 
@@ -107,4 +107,4 @@ One independently executable child document realizes one exact Procedure task an
 
 ## Python uptake
 
-Python-authored Methods serialize the same `lab-method` contract and are validated by Rust. `MethodCatalog.write(path)` writes a versioned package document; the `include_standard` authoring option controls in-memory composition and is not serialized into that portable document. `lab.refine` constructs the same refined LAIR and planning problem as the native frontend. `lab.plan` and `lab.plan_project` load package-contributed catalogs, compose any additional Python Methods, call the shared `lab-project` facility service, and return typed Method, Procedure task, canonical program, material, requirement, offering, Asset, adapter, and invocation views. `lab.procedures` exposes the same `PipettingProgramV1` and `ThermalProgramV1` structures with exact `Decimal` quantities; it does not reimplement normalization, validation, capability derivation, or allocation. `lab.adapters` exposes the exact built-in adapter catalog and validates operational profiles through the Rust implementation.
+Python-authored Methods serialize the same LAIR-owned Method document contract and are validated by Rust. `MethodCatalog.write(path)` writes a versioned package document; the `include_standard` authoring option controls in-memory composition and is not serialized into that portable document. `lab.refine` constructs the same refined LAIR and planning problem as the native frontend. `lab.plan` and `lab.plan_project` load package-contributed catalogs, compose any additional Python Methods, call the shared `lab-project` facility service, and return typed Method, Procedure task, canonical program, material, requirement, offering, Asset, adapter, and invocation views. `lab.procedures` exposes the same `PipettingProgramV1` and `ThermalProgramV1` structures with exact `Decimal` quantities; it does not reimplement normalization, validation, capability derivation, or allocation. `lab.adapters` exposes the exact built-in adapter catalog and validates operational profiles through the Rust implementation.

@@ -1,5 +1,5 @@
+use crate::method::ProcedureValue;
 use lab_capability::{ExactDecimal, ScalarValue};
-use lab_method::ProcedureValue;
 use lab_procedure::ProcedureLocalId;
 
 use super::{ProcedureTaskInstance, ResolvedProcedureMaterial};
@@ -141,7 +141,7 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
     }
 }
 
-fn material_role(id: &lab_method::LocalId) -> Option<&str> {
+fn material_role(id: &crate::method::LocalId) -> Option<&str> {
     id.as_str()
         .rsplit_once("::material::")
         .map(|(_, role)| role.split("::").next().unwrap_or(role))

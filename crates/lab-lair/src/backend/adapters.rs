@@ -29,12 +29,12 @@ use crate::ArtifactBundle;
 use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
+use crate::method::LocalId;
 use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
 use crate::procedure::{
     ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
     PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
 };
-use lab_method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
     STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
@@ -1365,12 +1365,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+    use crate::method::IntentOperationId;
     use crate::planning::{
         AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
         MaterialLotBuildInventory,
     };
     use lab_capability::{MethodId, OperationId, QualificationLevel};
-    use lab_method::IntentOperationId;
 
     #[test]
     fn registry_separates_semantic_capabilities_from_features() {

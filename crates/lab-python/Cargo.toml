@@ -17,7 +17,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 lab-lair.workspace = true
-lab-method.workspace = true
 lab-project.workspace = true
 pyo3.workspace = true
 serde.workspace = true

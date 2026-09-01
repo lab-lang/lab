@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{MethodDefinition, MethodRegistry, MethodRegistryError};
+use crate::method::{MethodDefinition, MethodRegistry, MethodRegistryError};
 
 /// The exact serialization contract for portable Method documents consumed by Lab packages.
 pub const METHOD_CATALOG_SCHEMA_VERSION: &str = "lab.method-catalog.v1";

@@ -85,7 +85,7 @@ pub struct BuildMetadata {
 
 /// Portable Method documents contributed by this package.
 ///
-/// Each JSON document uses the versioned `lab-method` catalog contract. Dependencies contribute
+/// Each JSON document uses the versioned LAIR Method catalog contract. Dependencies contribute
 /// their documents before their consumers, and the project composes the complete set with Lab's
 /// standard Methods before refinement.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

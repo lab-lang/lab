@@ -1681,7 +1681,6 @@ dependencies = [
  "lab-capability",
  "lab-inventory",
  "lab-lair",
- "lab-method",
  "lab-package",
  "lab-project",
  "lab-runfmt",
@@ -1756,7 +1755,6 @@ dependencies = [
  "lab-instruments",
  "lab-inventory",
  "lab-language",
- "lab-method",
  "lab-procedure",
  "lab-runfmt",
  "opentrons-protocol",
@@ -1794,17 +1792,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lab-method"
-version = "0.1.2"
-dependencies = [
- "lab-capability",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "lab-package"
 version = "0.1.2"
 dependencies = [
@@ -1833,7 +1820,6 @@ dependencies = [
  "lab-inventory",
  "lab-lair",
  "lab-language",
- "lab-method",
  "lab-package",
  "lab-sbol",
  "sbol3",
@@ -1849,7 +1835,6 @@ name = "lab-python"
 version = "0.1.2"
 dependencies = [
  "lab-lair",
- "lab-method",
  "lab-project",
  "pyo3",
  "serde",

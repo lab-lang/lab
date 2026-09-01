@@ -8,8 +8,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::method::{LocalId, PortType, ProcedureValue};
 use lab_capability::{AbsoluteIri, OperationId, PropertyKind};
-use lab_method::{LocalId, PortType, ProcedureValue};
 use lab_procedure::ProcedureProgram;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};

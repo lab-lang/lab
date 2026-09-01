@@ -8,8 +8,8 @@ mod serial_dilution;
 mod thermal_cycle;
 mod view;
 
+use crate::method::{LocalId, ProcedureValue};
 use lab_capability::OperationId;
-use lab_method::{LocalId, ProcedureValue};
 use lab_procedure::ProcedureProgram;
 use thiserror::Error;
 

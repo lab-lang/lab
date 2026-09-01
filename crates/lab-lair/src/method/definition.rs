@@ -7,7 +7,7 @@ use lab_capability::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{IntentOperationId, LocalId};
+use crate::method::{IntentOperationId, LocalId};
 
 /// The semantic type of one method or Procedure port.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

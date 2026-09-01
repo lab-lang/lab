@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use lab_method::LocalId;
+use crate::method::LocalId;
 use pliron::builtin::op_interfaces::OneRegionInterface;
 use pliron::builtin::ops::ModuleOp;
 use pliron::context::Context;
@@ -412,7 +412,7 @@ fn decode_port_type(
     context: &Context,
     value: Value,
     owner: String,
-) -> Result<lab_method::PortType, PlanningProblemExtractionError> {
+) -> Result<crate::method::PortType, PlanningProblemExtractionError> {
     semantic_port_type(context, value.get_type(context))
         .ok_or(PlanningProblemExtractionError::UnsupportedPortType { owner })
 }

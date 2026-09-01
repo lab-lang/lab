@@ -552,7 +552,7 @@ fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
 
 fn write_unallocated_compiler_frontier(
     modules: &[&lab_lair::CheckedModule],
-    methods: &lab_method::MethodRegistry,
+    methods: &lab_lair::method::MethodRegistry,
     output_root: &Path,
 ) -> Result<BuildCompilerIndex> {
     let compiler = output_root.join("compiler");
