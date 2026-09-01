@@ -11,7 +11,7 @@ description = "WebAssembly bindings for Lab editor intelligence."
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-lab-compiler.workspace = true
+lab-lair.workspace = true
 lab-ide.workspace = true
 lab-language.workspace = true
 serde.workspace = true

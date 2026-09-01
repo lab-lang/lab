@@ -1679,8 +1679,8 @@ dependencies = [
  "clap",
  "flate2",
  "lab-capability",
- "lab-compiler",
  "lab-inventory",
+ "lab-lair",
  "lab-method",
  "lab-package",
  "lab-project",
@@ -1702,33 +1702,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lab-compiler"
-version = "0.1.2"
-dependencies = [
- "anyhow",
- "cargo-husky",
- "clap",
- "hamilton-star",
- "lab-capability",
- "lab-instruments",
- "lab-inventory",
- "lab-language",
- "lab-method",
- "lab-procedure",
- "lab-runfmt",
- "opentrons-protocol",
- "pliron",
- "sbol-inventory",
- "schemars",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
- "toml 0.8.23",
-]
-
-[[package]]
 name = "lab-ide"
 version = "0.1.2"
 dependencies = [
@@ -1740,8 +1713,8 @@ dependencies = [
 name = "lab-ide-wasm"
 version = "0.1.2"
 dependencies = [
- "lab-compiler",
  "lab-ide",
+ "lab-lair",
  "lab-language",
  "serde",
  "serde-wasm-bindgen",
@@ -1769,6 +1742,33 @@ dependencies = [
  "sha2",
  "tempfile",
  "thiserror",
+]
+
+[[package]]
+name = "lab-lair"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "cargo-husky",
+ "clap",
+ "hamilton-star",
+ "lab-capability",
+ "lab-instruments",
+ "lab-inventory",
+ "lab-language",
+ "lab-method",
+ "lab-procedure",
+ "lab-runfmt",
+ "opentrons-protocol",
+ "pliron",
+ "sbol-inventory",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -1830,8 +1830,8 @@ name = "lab-project"
 version = "0.1.2"
 dependencies = [
  "lab-capability",
- "lab-compiler",
  "lab-inventory",
+ "lab-lair",
  "lab-language",
  "lab-method",
  "lab-package",
@@ -1848,7 +1848,7 @@ dependencies = [
 name = "lab-python"
 version = "0.1.2"
 dependencies = [
- "lab-compiler",
+ "lab-lair",
  "lab-method",
  "lab-project",
  "pyo3",

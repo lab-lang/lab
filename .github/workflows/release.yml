@@ -49,7 +49,7 @@ jobs:
       - name: Build
         run: >
           cargo build --release --target ${{ matrix.target }}
-          -p lab-cli -p lab-compiler
+          -p lab-cli -p lab-lair
 
       - name: Package (unix)
         if: runner.os != 'Windows'

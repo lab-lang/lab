@@ -39,7 +39,7 @@ The rest of this file is the package's own documentation.
 
 ## How it works
 
-The Python package is a PyO3 binding over the `lab-compiler` crate and an object model for writing Lab programs in Python. It does not reimplement parsing or semantic checking: the object model emits Lab source and the language's own frontend decides whether it is well formed.
+The Python package is a PyO3 binding over the `lab-lair` crate and an object model for writing Lab programs in Python. It does not reimplement parsing or semantic checking: the object model emits Lab source and the language's own frontend decides whether it is well formed.
 
 Checking source text directly returns the backend-neutral checked module as Python-native data:
 

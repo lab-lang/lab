@@ -11,18 +11,18 @@ use std::path::PathBuf;
 
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
-use lab_compiler::backend::{AdapterProfileContractError, validate_adapter_profile};
-use lab_compiler::planning::{
+use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
+use lab_lair::backend::{AdapterProfileContractError, validate_adapter_profile};
+use lab_lair::planning::{
     AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
     AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, BuildInventory,
     BuildInventoryError, FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
     MaterialLotBuildInventory, MethodPin, MethodPinSelector, explain_facility_planning_error,
 };
-use lab_compiler::{
+use lab_lair::{
     AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
     PortableLairProgram, RefinedLairError,
 };
-use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
 use lab_method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_package::{LabPackage, PlanningAdapterRequirement};
 use thiserror::Error;
@@ -45,7 +45,7 @@ pub struct FacilityPlanningResult {
 }
 
 impl FacilityPlanningResult {
-    pub fn problem(&self) -> &lab_compiler::planning::PlanningProblem {
+    pub fn problem(&self) -> &lab_lair::planning::PlanningProblem {
         self.allocated.planning_problem()
     }
 

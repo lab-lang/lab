@@ -57,7 +57,7 @@ while a table of six or more columns shares the width equally so cells wrap
 instead of colliding.
 
 The look of every document lives in one style sheet,
-`crates/lab-compiler/src/backend/typst/templates/lab-style.typ`, maintained as
+`crates/lab-lair/src/backend/typst/templates/lab-style.typ`, maintained as
 real Typst the way the OT-2 protocol modules are maintained as real Python.
 The style sheet is emitted into every output directory that holds a document,
 and generated documents import it by relative path, so each directory is a
@@ -66,7 +66,7 @@ without the Lab toolchain.
 
 ## Consequences
 
-- The typst crates are a dependency of `lab-cli` only. `lab-compiler` emits
+- The typst crates are a dependency of `lab-cli` only. `lab-lair` emits
   `.typ` sources and stays lean for `lab-python`. `labc` writes bundles
   without PDFs and prints markdown on stdout, where a terminal is the display.
 - A typesetting failure fails the build. The sources are generated, so an

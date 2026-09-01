@@ -1,14 +1,14 @@
 [package]
-name = "lab-compiler"
+name = "lab-lair"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "The Lab Compiler biological lowering pipeline for the Lab ecosystem."
+description = "The Lab aggregate intermediate representation and lowering pipeline."
 
 [lib]
-name = "lab_compiler"
+name = "lab_lair"
 path = "src/lib.rs"
 
 [[bin]]

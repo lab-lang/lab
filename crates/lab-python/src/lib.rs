@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use lab_compiler::{
+use lab_lair::{
     CheckedModule, Diagnostic, ModuleId, PortableLairProgram, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
     standard_method_definitions,
@@ -108,7 +108,7 @@ fn lab_standard_library() -> PyResult<String> {
 /// Describe every adapter implementation and profile schema in this compiler build.
 #[pyfunction]
 fn lab_adapter_catalog() -> PyResult<String> {
-    let catalog = lab_compiler::backend::adapter_catalog()
+    let catalog = lab_lair::backend::adapter_catalog()
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&catalog).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -116,7 +116,7 @@ fn lab_adapter_catalog() -> PyResult<String> {
 /// Validate and canonicalize one operational adapter profile through its explicit driver.
 #[pyfunction]
 fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyResult<String> {
-    let profile = lab_compiler::backend::validate_adapter_profile(driver, name, contents)
+    let profile = lab_lair::backend::validate_adapter_profile(driver, name, contents)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -211,7 +211,7 @@ fn compile_named_modules(modules: &[(String, String)]) -> PyResult<Vec<CheckedMo
 struct RefinedProgram {
     schema_version: &'static str,
     refined_lair: String,
-    planning_problem: lab_compiler::planning::PlanningProblem,
+    planning_problem: lab_lair::planning::PlanningProblem,
 }
 
 /// Refine checked Python-emitted Lab modules through the shared Rust Method pipeline.
@@ -252,12 +252,12 @@ struct PythonFacilityPlan<'a> {
     package: &'a str,
     version: &'a str,
     inventory: PythonInventorySelection<'a>,
-    adapter_bindings: Option<&'a lab_compiler::planning::AdapterBindingSnapshot>,
+    adapter_bindings: Option<&'a lab_lair::planning::AdapterBindingSnapshot>,
     refined_lair: &'a str,
-    planning_problem: &'a lab_compiler::planning::PlanningProblem,
-    facility_solution: &'a lab_compiler::planning::FacilityPlanningSolution,
+    planning_problem: &'a lab_lair::planning::PlanningProblem,
+    facility_solution: &'a lab_lair::planning::FacilityPlanningSolution,
     allocated_lair: String,
-    adapter_invocations: &'a lab_compiler::planning::AdapterInvocationPlan,
+    adapter_invocations: &'a lab_lair::planning::AdapterInvocationPlan,
 }
 
 fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String> {

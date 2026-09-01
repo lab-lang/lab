@@ -55,4 +55,4 @@ The language and its intermediate representations are evolving, and the durable 
 - [Golden Gate example](examples/golden-gate/README.md)
 - [Golden Gate in Python](examples/golden-gate-python/README.md) — the same checked program through the typed Python frontend
 - [Golden Gate, extended](examples/golden-gate-extended/README.md) — the same laboratory with most of the language in it
-- [Compiler internals](crates/lab-compiler/README.md)
+- [LAIR internals](crates/lab-lair/README.md)

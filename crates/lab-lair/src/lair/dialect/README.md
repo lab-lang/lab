@@ -2,7 +2,7 @@
 
 LAIR, the Lab Automation Intermediate Representation, is Lab's multi-layer compiler IR. It is implemented as a family of Pliron dialects that preserve biological and physical meaning while a program is progressively lowered from scientific intent toward allocated laboratory work. [Decision 0045](../../../../../docs/language/decisions/0045-lair-method-refinement-and-facility-allocation.md) establishes the stage architecture, and [Decision 0046](../../../../../docs/language/decisions/0046-allocated-procedure-is-the-device-boundary.md) makes Allocated Procedure the only production device-lowering boundary.
 
-Pliron is an implementation detail of `lab-compiler`. Production stage wrappers own their `Context`, `ModuleOp`, and analyses together. Pliron pointers, values, operations, regions, and lifetimes do not cross the public Method, planning, adapter, or runtime APIs. `lab-opt` remains the dynamic textual tool for compiler development.
+Pliron is the structural substrate of `lab-lair`: its operations, SSA values, regions, and stage markers carry the graph-scale semantics of a laboratory program. Method and Procedure bodies are complementary parts of that aggregate rather than a separate Pliron-free model. Stage wrappers own their `Context`, `ModuleOp`, and analyses together, while `lab-opt` remains the dynamic textual tool for compiler development.
 
 ## Implemented dialects
 

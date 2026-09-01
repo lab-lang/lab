@@ -339,7 +339,7 @@ impl LabProject {
 
     fn method_registry_for(&self, root: &PathBuf) -> Result<MethodRegistry, ProjectError> {
         let roots = self.ordered_reachable_roots(root);
-        let mut definitions = lab_compiler::standard_method_definitions();
+        let mut definitions = lab_lair::standard_method_definitions();
         definitions.extend(self.load_method_definitions(&roots)?);
         MethodRegistry::new(definitions).map_err(|source| ProjectError::InvalidMethodRegistry {
             package: self.packages[root].package.manifest.package.name.clone(),
@@ -829,7 +829,7 @@ documents = ["methods/recovery.json"]
 "#,
             &[("values.lab", DONOR)],
         );
-        let mut custom = lab_compiler::standard_method_definitions()
+        let mut custom = lab_lair::standard_method_definitions()
             .into_iter()
             .find(|definition| definition.refines.as_str() == "std.lab.plasmid.recover")
             .unwrap();
@@ -1082,7 +1082,7 @@ workflow main() -> Material<Plasmid>:
                 task.materials.iter().any(|material| {
                     matches!(
                         material.source,
-                        lab_compiler::planning::SelectedMaterialSource::MaterialLot { .. }
+                        lab_lair::planning::SelectedMaterialSource::MaterialLot { .. }
                     )
                 })
             })

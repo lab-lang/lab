@@ -79,13 +79,13 @@ Decision records preserve the reasoning and status behind the language rather th
 
 ## Implementation and embedding
 
-- [LAIR overview](../crates/lab-compiler/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
-- [Compiler internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
+- [LAIR overview](../crates/lab-lair/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
+- [LAIR internals](../crates/lab-lair/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Portable method definitions](../crates/lab-method/README.md) describe the facility-independent Method, Procedure, and Capability contract shared by compiler and Python extensions.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
-- The [`lab-compiler`](../crates/lab-compiler/README.md) crate is the Rust embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
+- The [`lab-lair`](../crates/lab-lair/README.md) crate is the Rust compiler and IR embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
 - [PUDU workflow equivalence](integrations/pudu-workflow-equivalence.md) defines and executes the output comparison between the Golden Gate example and PUDU's documented OT-2 workflow.
 

@@ -1,6 +1,6 @@
-# Compiler implementation notes
+# LAIR implementation notes
 
-`crates/lab-compiler/` builds the experimental `labc` compiler and `lab-opt` IR tool. These are compiler-development interfaces; the standard package, planning, and runtime workflow is exposed through the repository's `lab` binary.
+`crates/lab-lair/` owns Lab's aggregate intermediate representation and builds the experimental `labc` compiler and `lab-opt` IR tool. These are compiler-development interfaces; the standard package, planning, and runtime workflow is exposed through the repository's `lab` binary.
 
 Lab is a multi-layer IR compiler. `CheckedModule` is the portable frontend boundary, verified LAIR is the mutable transformation boundary, the facility planning problem is the global constraint boundary, and immutable adapter-invocation and reviewed-plan documents are the implementation and runtime boundaries. A backend cannot consume a checked source module or unresolved Method alternatives.
 

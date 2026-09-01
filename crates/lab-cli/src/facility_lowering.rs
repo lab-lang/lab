@@ -5,14 +5,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::ArtifactBundle;
-use lab_compiler::backend::{adapter_catalog, lower_adapter_invocation_with_adapter};
-use lab_compiler::planning::{
+use lab_inventory::InventorySnapshot;
+use lab_lair::ArtifactBundle;
+use lab_lair::backend::{adapter_catalog, lower_adapter_invocation_with_adapter};
+use lab_lair::planning::{
     AdapterInvocation, AdapterInvocationPlan, FACILITY_LOWERING_SCHEMA_VERSION,
     FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
     FacilityLoweringManifest, FacilityLoweringRoute,
 };
-use lab_inventory::InventorySnapshot;
 use lab_package::LabPackage;
 use lab_runfmt::ReviewedRunDocument;
 use sha2::{Digest, Sha256};

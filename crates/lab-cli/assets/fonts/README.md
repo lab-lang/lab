@@ -18,4 +18,4 @@ above.
 `lab-cli`'s typesetter embeds these files with `include_bytes!` so generated
 protocol documents render in the brand faces on any machine, offline, with no
 font installation. The document style sheet that names them lives at
-`crates/lab-compiler/src/backend/typst/templates/lab-style.typ`.
+`crates/lab-lair/src/backend/typst/templates/lab-style.typ`.
