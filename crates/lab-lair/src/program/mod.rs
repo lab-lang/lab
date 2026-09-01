@@ -8,10 +8,13 @@ use crate::method::MethodRegistry;
 use lab_language::CheckedModule;
 use pliron::builtin::op_interfaces::SingleBlockRegionInterface;
 use pliron::builtin::ops::ModuleOp;
+use pliron::combine::{Parser, eof};
 use pliron::context::Context;
 use pliron::identifier::Identifier;
+use pliron::irfmt::parsers::spaced;
 use pliron::op::Op;
-use pliron::operation::verify_operation;
+use pliron::operation::{Operation, verify_operation};
+use pliron::parsable::parse_from_str;
 use pliron::pass::{Analysis, AnalysisManager};
 use pliron::printable::Printable;
 use thiserror::Error;
@@ -47,6 +50,10 @@ pub enum RefinedLairError {
 
 #[derive(Debug, Error)]
 pub enum AllocatedLairError {
+    #[error("failed to parse allocated LAIR: {0}")]
+    Parse(String),
+    #[error("expected a builtin.module root operation, found '{0}'")]
+    ExpectedModule(String),
     #[error(transparent)]
     Problem(#[from] PlanningProblemExtractionError),
     #[error(transparent)]
@@ -217,39 +224,23 @@ impl RefinedLairProgram {
     /// Apply one complete solution to this exact refined module and eliminate every alternative.
     pub fn allocate(
         mut self,
-        solution: crate::planning::FacilityPlanningSolution,
+        solution: &crate::planning::FacilityPlanningSolution,
     ) -> Result<AllocatedLairProgram, AllocatedLairError> {
         let problem = self.planning_problem()?;
         crate::allocation::apply_facility_solution(
             &mut self.context,
             self.module,
             &problem,
-            &solution,
+            solution,
         )?;
         set_stage(&mut self.context, self.module, IrStage::AllocatedProcedure)
             .map_err(AllocatedLairError::Stage)?;
-        verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
-            AllocatedLairError::Verification(error.disp(&self.context).to_string())
-        })?;
-        crate::procedure::analysis::MaterialLinearityAnalysis::compute(
-            self.module.get_operation(),
-            &self.context,
-            &mut AnalysisManager::default(),
-        )
-        .map_err(|error| {
-            AllocatedLairError::MaterialLinearity(error.disp(&self.context).to_string())
-        })?;
-        let stage = detect_stage(&self.context, self.module).map_err(AllocatedLairError::Stage)?;
-        if stage != IrStage::AllocatedProcedure {
-            return Err(AllocatedLairError::Stage(format!(
-                "expected allocated-procedure, found {stage}"
-            )));
-        }
+        verify_allocated_program(&self.context, self.module)?;
+        let source = self.module.get_operation().disp(&self.context).to_string();
         Ok(AllocatedLairProgram {
             context: self.context,
             module: self.module,
-            problem,
-            solution,
+            source,
         })
     }
 }
@@ -258,21 +249,51 @@ impl RefinedLairProgram {
 pub struct AllocatedLairProgram {
     context: Context,
     module: ModuleOp,
-    problem: crate::planning::PlanningProblem,
-    solution: crate::planning::FacilityPlanningSolution,
+    source: String,
 }
 
 impl AllocatedLairProgram {
+    /// Parse and verify a complete textual Allocated LAIR program.
+    ///
+    /// The resulting program has no dependency on the planning problem or solution that
+    /// originally produced the text; every backend-facing semantic fact is reconstructed from
+    /// the allocated IR itself.
+    pub fn parse_ir(source: &str) -> Result<Self, AllocatedLairError> {
+        let mut context = Context::new();
+        let root = parse_from_str(
+            spaced(Operation::top_level_parser()).skip(eof()),
+            &mut context,
+            source,
+        )
+        .map_err(|error| AllocatedLairError::Parse(error.disp(&context).to_string()))?;
+        let module = Operation::get_op::<ModuleOp>(root, &context).ok_or_else(|| {
+            AllocatedLairError::ExpectedModule(Operation::get_opid(root, &context).to_string())
+        })?;
+        verify_allocated_program(&context, module)?;
+        Ok(Self {
+            context,
+            module,
+            source: source.to_owned(),
+        })
+    }
+
     pub fn ir(&self) -> String {
-        self.module.get_operation().disp(&self.context).to_string()
+        self.source.clone()
     }
 
-    pub fn solution(&self) -> &crate::planning::FacilityPlanningSolution {
-        &self.solution
+    /// Digest the exact verified textual artifact retained by this program.
+    pub fn sha256(&self) -> String {
+        crate::planning::hex_sha256(self.source.as_bytes())
     }
 
-    pub fn planning_problem(&self) -> &crate::planning::PlanningProblem {
-        &self.problem
+    /// Reconstruct the complete facility-bound semantic aggregate from Allocated LAIR.
+    pub fn allocated_program(
+        &self,
+    ) -> Result<
+        crate::allocation::AllocatedProgram,
+        crate::allocation::AllocatedProgramExtractionError,
+    > {
+        crate::allocation::extract_allocated_program(&self.context, self.module)
     }
 
     /// Project the exact backend-facing ABI from this verifier-valid allocated program.
@@ -281,15 +302,33 @@ impl AllocatedLairProgram {
         material_inventory: crate::planning::MaterialLotBuildInventory,
     ) -> Result<crate::planning::AdapterInvocationPlan, crate::planning::AdapterInvocationError>
     {
-        let ir = self.ir();
-        let allocated_lair_sha256 = crate::planning::hex_sha256(ir.as_bytes());
-        crate::planning::AdapterInvocationPlan::project(
-            &self.problem,
-            &self.solution,
+        let allocated_lair_sha256 = self.sha256();
+        let allocated = self.allocated_program()?;
+        crate::planning::AdapterInvocationPlan::from_allocated(
+            allocated,
             allocated_lair_sha256,
             material_inventory,
         )
+        .map_err(Into::into)
     }
+}
+
+fn verify_allocated_program(context: &Context, module: ModuleOp) -> Result<(), AllocatedLairError> {
+    verify_operation(module.get_operation(), context)
+        .map_err(|error| AllocatedLairError::Verification(error.disp(context).to_string()))?;
+    crate::procedure::analysis::MaterialLinearityAnalysis::compute(
+        module.get_operation(),
+        context,
+        &mut AnalysisManager::default(),
+    )
+    .map_err(|error| AllocatedLairError::MaterialLinearity(error.disp(context).to_string()))?;
+    let stage = detect_stage(context, module).map_err(AllocatedLairError::Stage)?;
+    if stage != IrStage::AllocatedProcedure {
+        return Err(AllocatedLairError::Stage(format!(
+            "expected allocated-procedure, found {stage}"
+        )));
+    }
+    Ok(())
 }
 
 fn append_workflow(
@@ -567,7 +606,7 @@ mod tests {
     use crate::session::CompilerSession;
     use crate::stage::IrStage;
 
-    use super::PortableLairProgram;
+    use super::{AllocatedLairProgram, PortableLairProgram};
 
     const DESIGNS: &str = r#"use std.bio.designs
 use std.bio.golden_gate
@@ -1408,12 +1447,15 @@ workflow main() -> Material<Plasmid>:
             policy,
         )
         .unwrap();
-        let allocated = refined.allocate(solution).expect("solution applies");
+        let allocated = refined.allocate(&solution).expect("solution applies");
         let ir = allocated.ir();
 
         assert!(ir.contains("allocated-procedure"), "{ir}");
         assert!(ir.contains("allocation.context"), "{ir}");
         assert!(ir.contains("allocation.method"), "{ir}");
+        assert!(ir.contains("allocation.yield"), "{ir}");
+        assert!(ir.contains("selected_input_names"), "{ir}");
+        assert!(ir.contains("selected_output_names"), "{ir}");
         assert!(ir.contains("allocation.binding"), "{ir}");
         assert!(
             ir.contains("https://example.org/golden-gate/opentrons_ot2"),
@@ -1423,7 +1465,17 @@ workflow main() -> Material<Plasmid>:
         assert!(!ir.contains("method.choice"), "{ir}");
         assert!(!ir.contains("method.yield"), "{ir}");
 
-        let invocations = allocated.adapter_invocations(material_inventory).unwrap();
+        let allocated_lair_sha256 = crate::planning::hex_sha256(ir.as_bytes());
+        let sidecar_projection = AdapterInvocationPlan::project(
+            &problem,
+            &solution,
+            allocated_lair_sha256,
+            material_inventory.clone(),
+        )
+        .unwrap();
+        let reparsed = AllocatedLairProgram::parse_ir(&ir).unwrap();
+        let invocations = reparsed.adapter_invocations(material_inventory).unwrap();
+        assert_eq!(invocations, sidecar_projection);
         assert_eq!(invocations.invocations.len(), 1);
         assert_eq!(
             invocations.invocations[0].asset,

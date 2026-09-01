@@ -10,20 +10,28 @@ use lab_capability::{
     ProcedureImplementationId, PropertyConstraint, PropertyKind, PropertyValue, QualificationLevel,
     ScalarValue, UnitIri,
 };
+use pliron::basic_block::BasicBlock;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
-use pliron::builtin::op_interfaces::{NOpdsInterface, NResultsInterface};
+use pliron::builtin::op_interfaces::{
+    IsTerminatorInterface, IsolatedFromAboveInterface, NOpdsInterface, NResultsInterface,
+    OneRegionInterface, SingleBlockRegionInterface,
+};
 use pliron::common_traits::Verify;
-use pliron::context::Context;
+use pliron::context::{Context, Ptr};
 use pliron::derive::pliron_op;
+use pliron::linked_list::ContainsLinkedList;
 use pliron::op::Op;
 use pliron::operation::Operation;
+use pliron::region::Region;
 use pliron::result::Result;
+use pliron::r#type::{TypeHandle, Typed};
+use pliron::value::Value;
 use pliron::verify_err;
 
 use crate::ir::attributes::string_vec;
 use crate::planning::{
-    SelectedAdapter, SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
-    SelectedMethod, SelectedRequirementBinding,
+    PlanningMethodCandidate, PlanningMethodChoice, SelectedAdapter, SelectedCapabilityParameter,
+    SelectedMaterialBinding, SelectedMaterialSource, SelectedRequirementBinding,
 };
 use crate::procedure::ir::is_stable_local_id;
 
@@ -97,40 +105,87 @@ impl Verify for ContextOp {
         selected_choice: StringAttr,
         selected_source_operation: StringAttr,
         selected_method: StringAttr,
-        selected_procedure_nodes: VecAttr
+        selected_after: VecAttr,
+        selected_input_names: VecAttr,
+        selected_output_names: VecAttr
     ),
-    interfaces = [NOpdsInterface<0>, NResultsInterface<0>]
+    interfaces = [
+        IsolatedFromAboveInterface,
+        OneRegionInterface,
+        SingleBlockRegionInterface
+    ]
 )]
 pub(crate) struct MethodOp;
 
 impl MethodOp {
-    pub(crate) fn new(context: &mut Context, selection: &SelectedMethod) -> Self {
+    pub(crate) fn new(
+        context: &mut Context,
+        choice: &PlanningMethodChoice,
+        candidate: &PlanningMethodCandidate,
+        operands: Vec<Value>,
+        result_types: Vec<TypeHandle>,
+    ) -> Self {
+        let argument_types = operands
+            .iter()
+            .map(|operand| operand.get_type(context))
+            .collect();
         let raw = Operation::new(
             context,
             Self::get_concrete_op_info(),
+            result_types,
+            operands,
             vec![],
-            vec![],
-            vec![],
-            0,
+            1,
         );
         let result = Self { op: raw };
-        result.set_attr_selected_choice(context, StringAttr::new(selection.choice.to_string()));
+        result.set_attr_selected_choice(context, StringAttr::new(choice.id.to_string()));
         result.set_attr_selected_source_operation(
             context,
-            StringAttr::new(selection.source_operation.to_string()),
+            StringAttr::new(choice.source_operation.to_string()),
         );
-        result.set_attr_selected_method(context, StringAttr::new(selection.method.to_string()));
-        result.set_attr_selected_procedure_nodes(
+        result.set_attr_selected_method(context, StringAttr::new(candidate.method.to_string()));
+        result.set_attr_selected_after(
+            context,
+            string_vec(choice.after.iter().map(ToString::to_string).collect()),
+        );
+        result.set_attr_selected_input_names(
             context,
             string_vec(
-                selection
-                    .tasks
+                choice
+                    .inputs
                     .iter()
-                    .map(|task| task.task.to_string())
+                    .map(|port| port.name.to_string())
                     .collect(),
             ),
         );
+        result.set_attr_selected_output_names(
+            context,
+            string_vec(
+                choice
+                    .outputs
+                    .iter()
+                    .map(|port| port.name.to_string())
+                    .collect(),
+            ),
+        );
+        let block = BasicBlock::new(context, None, argument_types);
+        block.insert_at_front(result.body(context), context);
         result
+    }
+
+    pub(crate) fn body(&self, context: &Context) -> Ptr<Region> {
+        self.get_operation().deref(context).get_region(0)
+    }
+
+    pub(crate) fn entry_block(&self, context: &Context) -> Ptr<BasicBlock> {
+        self.body(context)
+            .deref(context)
+            .get_head()
+            .expect("allocation.method construction creates one entry block")
+    }
+
+    pub(crate) fn append_body_operation(&self, context: &mut Context, operation: Ptr<Operation>) {
+        self.append_operation(context, operation, 0);
     }
 
     pub(crate) fn choice(&self, context: &Context) -> LocalId {
@@ -142,21 +197,30 @@ impl MethodOp {
         .expect("verified allocation.method choice is stable")
     }
 
-    pub(crate) fn procedure_nodes(&self, context: &Context) -> Vec<LocalId> {
-        self.get_attr_selected_procedure_nodes(context)
-            .expect("verified allocation.method carries Procedure nodes")
-            .0
-            .iter()
-            .map(|value| {
-                LocalId::new(
-                    value
-                        .downcast_ref::<StringAttr>()
-                        .expect("verified Procedure node identities are strings")
-                        .as_str(),
-                )
-                .expect("verified Procedure node identity is stable")
-            })
-            .collect()
+    pub(crate) fn after(&self, context: &Context) -> Vec<LocalId> {
+        local_ids(
+            &self
+                .get_attr_selected_after(context)
+                .expect("verified allocation.method carries completion dependencies"),
+        )
+    }
+
+    #[allow(dead_code, reason = "consumed by the allocated-LAIR extractor")]
+    pub(crate) fn input_names(&self, context: &Context) -> Vec<LocalId> {
+        local_ids(
+            &self
+                .get_attr_selected_input_names(context)
+                .expect("verified allocation.method carries input names"),
+        )
+    }
+
+    #[allow(dead_code, reason = "consumed by the allocated-LAIR extractor")]
+    pub(crate) fn output_names(&self, context: &Context) -> Vec<LocalId> {
+        local_ids(
+            &self
+                .get_attr_selected_output_names(context)
+                .expect("verified allocation.method carries output names"),
+        )
     }
 }
 
@@ -189,35 +253,185 @@ impl Verify for MethodOp {
                 "allocation.method selected_method must be an absolute IRI"
             );
         }
-        let Some(nodes) = self.get_attr_selected_procedure_nodes(context) else {
+        let choice = self
+            .get_attr_selected_choice(context)
+            .expect("allocation.method choice was verified above");
+        let Some(after) = self.get_attr_selected_after(context) else {
             return verify_err!(
                 self.loc(context),
-                "allocation.method is missing selected_procedure_nodes"
+                "allocation.method is missing selected_after"
             );
         };
-        if nodes.0.is_empty() {
-            return verify_err!(
-                self.loc(context),
-                "allocation.method must select at least one Procedure node"
-            );
-        }
-        let mut seen = std::collections::BTreeSet::new();
-        for node in &nodes.0 {
-            let Some(node) = node.downcast_ref::<StringAttr>() else {
+        let mut dependencies = BTreeSet::new();
+        for dependency in &after.0 {
+            let Some(dependency) = dependency.downcast_ref::<StringAttr>() else {
                 return verify_err!(
                     self.loc(context),
-                    "allocation.method Procedure nodes must be strings"
+                    "allocation.method completion dependencies must be strings"
                 );
             };
-            if !is_stable_local_id(node.as_str()) || !seen.insert(node.as_str()) {
+            if !is_stable_local_id(dependency.as_str())
+                || dependency.as_str() == choice.as_str()
+                || !dependencies.insert(dependency.as_str())
+            {
                 return verify_err!(
                     self.loc(context),
-                    "allocation.method Procedure nodes must be stable and unique"
+                    "allocation.method completion dependencies must be stable, unique, and non-self-referential"
+                );
+            }
+        }
+        self.verify_port_names(context, true)?;
+        self.verify_port_names(context, false)?;
+
+        let region = self.body(context);
+        let Some(block) = region.deref(context).get_head() else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method region must contain exactly one block"
+            );
+        };
+        if region.deref(context).get_tail() != Some(block) {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method region must contain exactly one block"
+            );
+        }
+        let method = self.get_operation().deref(context);
+        let body = block.deref(context);
+        if body.get_num_arguments() != method.get_num_operands() {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method entry arguments must match its operand arity"
+            );
+        }
+        for index in 0..method.get_num_operands() {
+            if body.get_argument(index).get_type(context)
+                != method.get_operand(index).get_type(context)
+            {
+                return verify_err!(
+                    self.loc(context),
+                    "allocation.method entry argument types must match its operand types"
+                );
+            }
+        }
+        let Some(tail) = body.get_tail() else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method region must terminate with allocation.yield"
+            );
+        };
+        let Some(yield_op) = Operation::get_op::<YieldOp>(tail, context) else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method region must terminate with allocation.yield"
+            );
+        };
+        let yielded = yield_op.get_operation().deref(context);
+        if yielded.get_num_operands() != method.get_num_results() {
+            return verify_err!(
+                self.loc(context),
+                "allocation.yield arity must match allocation.method results"
+            );
+        }
+        for index in 0..method.get_num_results() {
+            if yielded.get_operand(index).get_type(context)
+                != method.get_result(index).get_type(context)
+            {
+                return verify_err!(
+                    self.loc(context),
+                    "allocation.yield operand types must match allocation.method result types"
                 );
             }
         }
         Ok(())
     }
+}
+
+impl MethodOp {
+    fn verify_port_names(&self, context: &Context, inputs: bool) -> Result<()> {
+        let operation = self.get_operation().deref(context);
+        let (kind, names, expected) = if inputs {
+            (
+                "input",
+                self.get_attr_selected_input_names(context),
+                operation.get_num_operands(),
+            )
+        } else {
+            (
+                "output",
+                self.get_attr_selected_output_names(context),
+                operation.get_num_results(),
+            )
+        };
+        let Some(names) = names else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method is missing selected_{kind}_names"
+            );
+        };
+        if names.0.len() != expected {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method {kind} names must match its {kind} arity"
+            );
+        }
+        let mut seen = BTreeSet::new();
+        for name in &names.0 {
+            let Some(name) = name.downcast_ref::<StringAttr>() else {
+                return verify_err!(
+                    self.loc(context),
+                    "allocation.method {kind} names must contain only strings"
+                );
+            };
+            if !is_stable_local_id(name.as_str()) || !seen.insert(name.as_str()) {
+                return verify_err!(
+                    self.loc(context),
+                    "allocation.method {kind} names must be stable and unique"
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Terminates one selected Method region with the values realizing its exact outputs.
+#[pliron_op(
+    name = "allocation.yield",
+    format,
+    interfaces = [IsTerminatorInterface, NResultsInterface<0>],
+    verifier = "succ"
+)]
+pub(crate) struct YieldOp;
+
+impl YieldOp {
+    pub(crate) fn new(context: &mut Context, values: Vec<Value>) -> Self {
+        Self {
+            op: Operation::new(
+                context,
+                Self::get_concrete_op_info(),
+                vec![],
+                values,
+                vec![],
+                0,
+            ),
+        }
+    }
+}
+
+fn local_ids(values: &VecAttr) -> Vec<LocalId> {
+    values
+        .0
+        .iter()
+        .map(|value| {
+            LocalId::new(
+                value
+                    .downcast_ref::<StringAttr>()
+                    .expect("verified local IDs are strings")
+                    .as_str(),
+            )
+            .expect("verified local IDs are stable")
+        })
+        .collect()
 }
 
 /// Freezes the physical source selected for one Procedure material input.
@@ -307,6 +521,22 @@ impl MaterialBindingOp {
             .expect("verified allocation.material carries a symbol")
             .as_str()
             .to_owned()
+    }
+
+    pub(crate) fn source_choice(&self, context: &Context) -> Option<LocalId> {
+        (self
+            .get_attr_material_source_kind(context)
+            .as_deref()
+            .map(StringAttr::as_str)
+            == Some("choice_output"))
+        .then(|| {
+            LocalId::new(
+                self.get_attr_bound_choice(context)
+                    .expect("verified choice_output allocation.material carries a choice")
+                    .as_str(),
+            )
+            .expect("verified allocation.material choice is stable")
+        })
     }
 
     #[allow(dead_code, reason = "consumed by the allocated-LAIR extractor")]
@@ -651,7 +881,13 @@ impl BindingOp {
             }
             result.set_attr_adapter_profile_path(
                 context,
-                StringAttr::new(adapter.profile_path.to_string_lossy().into_owned()),
+                StringAttr::new(
+                    adapter
+                        .profile_path
+                        .to_str()
+                        .expect("validated facility solutions use UTF-8 adapter profile paths")
+                        .to_owned(),
+                ),
             );
             result.set_attr_adapter_profile_sha256(
                 context,

@@ -20,6 +20,7 @@ use pliron::irbuild::dialect_conversion::{
 };
 use pliron::irbuild::inserter::Inserter;
 use pliron::irbuild::rewriter::Rewriter;
+use pliron::linked_list::ContainsLinkedList;
 use pliron::location::Located;
 use pliron::op::Op;
 use pliron::operation::Operation;
@@ -167,7 +168,6 @@ impl DialectConversion for MethodRefinement<'_> {
                 candidate_index,
                 &choice_id,
                 candidate,
-                &operands,
                 &instance.parameters,
             )?;
         }
@@ -449,19 +449,26 @@ fn append_candidate(
     candidate_index: usize,
     choice_id: &str,
     method: &MethodDefinition,
-    operands: &[Value],
     parameters: &BTreeMap<LocalId, ProcedureValue>,
 ) -> Result<()> {
+    let candidate_inputs = choice
+        .candidate_region(context, candidate_index)
+        .deref(context)
+        .get_head()
+        .expect("method.choice construction creates a candidate block")
+        .deref(context)
+        .arguments()
+        .collect::<Vec<_>>();
     let mut values = method
         .inputs
         .iter()
-        .zip(operands)
+        .zip(candidate_inputs)
         .map(|(input, value)| {
             (
                 ValueReference::Input {
                     input: input.name.clone(),
                 },
-                *value,
+                value,
             )
         })
         .collect::<BTreeMap<_, _>>();

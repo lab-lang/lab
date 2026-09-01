@@ -41,17 +41,19 @@ pub struct FacilityPlanningResult {
     pub inventory: InventorySnapshot,
     pub adapter_bindings: Option<AdapterBindingSnapshot>,
     pub refined_lair: String,
+    pub problem: lab_lair::planning::PlanningProblem,
+    pub solution: FacilityPlanningSolution,
     pub allocated: AllocatedLairProgram,
     pub adapter_invocations: AdapterInvocationPlan,
 }
 
 impl FacilityPlanningResult {
     pub fn problem(&self) -> &lab_lair::planning::PlanningProblem {
-        self.allocated.planning_problem()
+        &self.problem
     }
 
     pub fn solution(&self) -> &FacilityPlanningSolution {
-        self.allocated.solution()
+        &self.solution
     }
 }
 
@@ -207,7 +209,7 @@ fn plan_modules_with_inventory(
     )
     .map_err(FacilityProjectError::FacilityPlanning)?;
     let allocated = refined
-        .allocate(solution)
+        .allocate(&solution)
         .map_err(FacilityProjectError::Allocation)?;
     let adapter_invocations = allocated
         .adapter_invocations(material_inventory)
@@ -219,6 +221,8 @@ fn plan_modules_with_inventory(
         inventory,
         adapter_bindings,
         refined_lair,
+        problem,
+        solution,
         allocated,
         adapter_invocations,
     })

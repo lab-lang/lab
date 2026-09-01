@@ -9,7 +9,8 @@ use lab_capability::MethodId;
 use pliron::basic_block::BasicBlock;
 use pliron::builtin::attributes::{StringAttr, VecAttr};
 use pliron::builtin::op_interfaces::{
-    IsTerminatorInterface, NResultsInterface, SingleBlockRegionInterface,
+    IsTerminatorInterface, IsolatedFromAboveInterface, NResultsInterface,
+    SingleBlockRegionInterface,
 };
 use pliron::common_traits::Verify;
 use pliron::context::{Context, Ptr};
@@ -39,7 +40,7 @@ use crate::procedure::ir::is_stable_local_id;
         choice_artifact: StringAttr,
         choice_dependencies: VecAttr
     ),
-    interfaces = [SingleBlockRegionInterface]
+    interfaces = [IsolatedFromAboveInterface, SingleBlockRegionInterface]
 )]
 pub(crate) struct ChoiceOp;
 
@@ -88,8 +89,14 @@ impl ChoiceOp {
             StringAttr::new(artifact.unwrap_or_default().to_owned()),
         );
         result.set_attr_choice_dependencies(context, string_vec(dependencies.to_vec()));
+        let argument_types = result
+            .get_operation()
+            .deref(context)
+            .operands()
+            .map(|operand| operand.get_type(context))
+            .collect::<Vec<_>>();
         for index in 0..candidates.len() {
-            let block = BasicBlock::new(context, None, vec![]);
+            let block = BasicBlock::new(context, None, argument_types.clone());
             block.insert_at_front(result.candidate_region(context, index), context);
         }
         result
@@ -350,13 +357,30 @@ impl ChoiceOp {
         let Some(tail) = block.deref(context).get_tail() else {
             return verify_err!(self.loc(context), "method.choice candidate region is empty");
         };
+        let choice = self.get_operation().deref(context);
+        let body = block.deref(context);
+        if body.get_num_arguments() != choice.get_num_operands() {
+            return verify_err!(
+                self.loc(context),
+                "method.choice candidate entry arguments must match its operand arity"
+            );
+        }
+        for index in 0..choice.get_num_operands() {
+            if body.get_argument(index).get_type(context)
+                != choice.get_operand(index).get_type(context)
+            {
+                return verify_err!(
+                    self.loc(context),
+                    "method.choice candidate entry argument types must match its operand types"
+                );
+            }
+        }
         let Some(yield_op) = Operation::get_op::<YieldOp>(tail, context) else {
             return verify_err!(
                 self.loc(context),
                 "method.choice candidate region must terminate with method.yield"
             );
         };
-        let choice = self.get_operation().deref(context);
         let yielded = yield_op.get_operation().deref(context);
         if yielded.get_num_operands() != choice.get_num_results() {
             return verify_err!(
@@ -399,5 +423,56 @@ impl YieldOp {
                 0,
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lab_capability::MethodId;
+    use pliron::context::Context;
+    use pliron::linked_list::ContainsLinkedList;
+    use pliron::op::Op;
+    use pliron::operation::verify_operation;
+    use pliron::r#type::Typed;
+
+    use crate::design::ir::DesignDnaSequenceOp;
+    use crate::method::LocalId;
+
+    use super::{ChoiceOp, ChoicePorts, YieldOp};
+
+    #[test]
+    fn aliased_choice_inputs_receive_distinct_candidate_arguments() {
+        let context = &mut Context::new();
+        let sequence = DesignDnaSequenceOp::new(context, "sequence", "ACGT");
+        let input = sequence.get_result_sequence(context);
+        let choice = ChoiceOp::new(
+            context,
+            "aliased-inputs",
+            "example.alias",
+            &[MethodId::new("https://example.org/method/alias").unwrap()],
+            ChoicePorts {
+                inputs: vec![
+                    (LocalId::new("first").unwrap(), input),
+                    (LocalId::new("second").unwrap(), input),
+                ],
+                outputs: vec![],
+            },
+            None,
+            &[],
+        );
+        let block = choice
+            .candidate_region(context, 0)
+            .deref(context)
+            .get_head()
+            .unwrap();
+        let arguments = block.deref(context).arguments().collect::<Vec<_>>();
+        assert_eq!(arguments.len(), 2);
+        assert_ne!(arguments[0], arguments[1]);
+        assert_eq!(arguments[0].get_type(context), input.get_type(context));
+        assert_eq!(arguments[1].get_type(context), input.get_type(context));
+
+        let r#yield = YieldOp::new(context, vec![]);
+        choice.append_candidate_operation(context, 0, r#yield.get_operation());
+        verify_operation(choice.get_operation(), context).unwrap();
     }
 }

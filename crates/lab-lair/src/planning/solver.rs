@@ -551,6 +551,17 @@ impl FacilityPlanningSolution {
                             },
                         );
                     }
+                    if binding
+                        .adapter
+                        .as_ref()
+                        .is_some_and(|adapter| adapter.profile_path.to_str().is_none())
+                    {
+                        return Err(
+                            FacilityPlanningSolutionValidationError::NonUtf8AdapterProfile {
+                                requirement: requirement.id.clone(),
+                            },
+                        );
+                    }
                 }
                 if task.binding_scope == BindingScope::AtomicAssetAssembly {
                     let first = selected_task
@@ -599,6 +610,10 @@ pub enum FacilityPlanningSolutionValidationError {
     MaterialSet { task: LocalId },
     #[error("facility solution contains an invalid MaterialLot binding for input `{input}`")]
     InvalidMaterialBinding { input: LocalId },
+    #[error(
+        "facility solution contains a non-UTF-8 adapter profile path for requirement `{requirement}`"
+    )]
+    NonUtf8AdapterProfile { requirement: LocalId },
 }
 
 #[derive(Clone)]
@@ -1986,6 +2001,47 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                 })
             })
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn solution_validation_rejects_non_utf8_adapter_profile_paths() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let (_directory, inventory) = inventory(false);
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        normalize_test_task(
+            &mut problem.choices[0].candidates[0].tasks[0],
+            SETUP_GOLDEN_GATE,
+        );
+        problem.validate().unwrap();
+        let adapters = ot2_bindings(&inventory);
+        let mut solution = FacilityPlanningSolution::solve(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            Some(&adapters),
+            FacilityPlanningPolicy {
+                method_pins: Vec::new(),
+                asset_pins: Vec::new(),
+                adapter_requirement: AdapterRequirement::NonManual,
+            },
+        )
+        .unwrap();
+        solution.selections[0].tasks[0].requirements[0]
+            .adapter
+            .as_mut()
+            .unwrap()
+            .profile_path = PathBuf::from(OsString::from_vec(vec![b'a', 0x80]));
+
+        assert!(matches!(
+            solution.validate_against(&problem),
+            Err(FacilityPlanningSolutionValidationError::NonUtf8AdapterProfile { .. })
+        ));
     }
 
     #[test]

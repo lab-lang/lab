@@ -208,9 +208,9 @@ fn extract_candidate(
             choice: choice_id.clone(),
             candidate: candidate_index,
         })?;
-    let choice_operation = choice.get_operation().deref(context);
-    let mut values = choice_operation
-        .operands()
+    let mut values = block
+        .deref(context)
+        .arguments()
         .zip(choice.input_names(context))
         .map(|(value, input)| (value, PlanningValueSource::ChoiceInput { input }))
         .collect::<Vec<_>>();

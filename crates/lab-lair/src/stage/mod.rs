@@ -10,10 +10,12 @@ use pliron::context::Context;
 use pliron::linked_list::ContainsLinkedList;
 use pliron::op::Op;
 use pliron::operation::Operation;
+use pliron::r#type::Typed;
 use pliron::value::{DefiningEntity, Value};
 
 use crate::allocation::ir::{
     BindingOp, ContextOp as AllocationContextOp, MaterialBindingOp, MethodOp, ParameterMatchOp,
+    YieldOp as AllocationYieldOp,
 };
 use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::ir::{ChoiceOp, YieldOp};
@@ -121,15 +123,6 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         .ok_or_else(|| "builtin.module has no entry block".to_owned())?;
     let mut allocation_contexts = 0;
     let mut methods = Vec::new();
-    let mut task_operations = Vec::new();
-    let mut tasks = BTreeSet::new();
-    let mut requirements = BTreeMap::new();
-    let mut parameters = Vec::new();
-    let mut materials = BTreeMap::new();
-    let mut constraints = Vec::new();
-    let mut bindings = BTreeMap::new();
-    let mut parameter_matches = BTreeMap::new();
-    let mut material_bindings = BTreeMap::new();
     let mut design_operations = 0;
 
     for operation in block.deref(context).iter(context) {
@@ -149,34 +142,137 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             methods.push(method);
             continue;
         }
+        return Err(format!(
+            "operation '{id}' is not legal at the allocated-procedure module boundary"
+        ));
+    }
+    if design_operations == 0 {
+        return Err("allocated-procedure requires at least one Design operation".to_owned());
+    }
+    if allocation_contexts != 1 {
+        return Err(format!(
+            "allocated-procedure requires exactly one allocation.context, found {allocation_contexts}"
+        ));
+    }
+    if methods.is_empty() {
+        return Err("allocated-procedure requires at least one selected Method".to_owned());
+    }
+
+    let mut choices = BTreeSet::new();
+    let mut global_tasks = BTreeSet::new();
+    let mut global_requirements = BTreeSet::new();
+    let mut global_parameters = BTreeSet::new();
+    let mut global_materials = BTreeSet::new();
+    for method in &methods {
+        let choice = method.choice(context);
+        if !choices.insert(choice.clone()) {
+            return Err(format!("duplicate selected Method choice '{choice}'"));
+        }
+        verify_allocated_method(
+            context,
+            method,
+            &mut global_tasks,
+            &mut global_requirements,
+            &mut global_parameters,
+            &mut global_materials,
+        )?;
+    }
+    verify_allocated_method_dependencies(context, &methods, &choices)
+}
+
+fn verify_allocated_method(
+    context: &Context,
+    method: &MethodOp,
+    global_tasks: &mut BTreeSet<String>,
+    global_requirements: &mut BTreeSet<String>,
+    global_parameters: &mut BTreeSet<String>,
+    global_materials: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let choice = method.choice(context);
+    let region = method.body(context);
+    let Some(block) = region.deref(context).get_head() else {
+        return Err(format!(
+            "allocated Method '{choice}' must contain exactly one block"
+        ));
+    };
+    if region.deref(context).get_tail() != Some(block) {
+        return Err(format!(
+            "allocated Method '{choice}' must contain exactly one block"
+        ));
+    }
+    let Some(tail) = block.deref(context).get_tail() else {
+        return Err(format!(
+            "allocated Method '{choice}' must terminate with allocation.yield"
+        ));
+    };
+    let Some(yield_op) = Operation::get_op::<AllocationYieldOp>(tail, context) else {
+        return Err(format!(
+            "allocated Method '{choice}' must terminate with allocation.yield"
+        ));
+    };
+
+    let method_operation = method.get_operation().deref(context);
+    let yielded = yield_op.get_operation().deref(context);
+    if yielded.get_num_operands() != method_operation.get_num_results()
+        || yielded
+            .operands()
+            .zip(method_operation.results())
+            .any(|(yielded, result)| yielded.get_type(context) != result.get_type(context))
+    {
+        return Err(format!(
+            "allocated Method '{choice}' yield arity and types must match its results"
+        ));
+    }
+
+    let mut task_operations = Vec::new();
+    let mut tasks = BTreeSet::new();
+    let mut requirements = BTreeMap::new();
+    let mut parameters = Vec::new();
+    let mut materials = BTreeMap::new();
+    let mut constraints = Vec::new();
+    let mut bindings = BTreeMap::new();
+    let mut parameter_matches = BTreeMap::new();
+    let mut material_bindings = BTreeMap::new();
+
+    for operation in block.deref(context).iter(context) {
         if let Some(task) = Operation::get_op::<TaskOp>(operation, context) {
             let node = task.node_id(context);
             if !tasks.insert(node.clone()) {
+                return Err(format!(
+                    "allocated Method '{choice}' repeats Procedure node '{node}'"
+                ));
+            }
+            if !global_tasks.insert(node.clone()) {
                 return Err(format!("duplicate Procedure node identity '{node}'"));
             }
             task_operations.push(operation);
             continue;
         }
         if let Some(requirement) = Operation::get_op::<RequirementOp>(operation, context) {
-            let requirement_id = requirement.requirement_id(context);
-            if requirements
-                .insert(requirement_id.clone(), requirement)
-                .is_some()
-            {
-                return Err(format!("duplicate Requirement identity '{requirement_id}'"));
+            let id = requirement.requirement_id(context);
+            if requirements.insert(id.clone(), requirement).is_some() {
+                return Err(format!(
+                    "allocated Method '{choice}' repeats Requirement '{id}'"
+                ));
+            }
+            if !global_requirements.insert(id.clone()) {
+                return Err(format!("duplicate Requirement identity '{id}'"));
             }
             continue;
         }
         if let Some(parameter) = Operation::get_op::<ParameterOp>(operation, context) {
-            parameters.push((
-                parameter.parameter_id(context),
-                parameter.procedure_node(context),
-            ));
+            let id = parameter.parameter_id(context);
+            if !global_parameters.insert(id.clone()) {
+                return Err(format!("duplicate Procedure parameter identity '{id}'"));
+            }
+            parameters.push((id, parameter.procedure_node(context)));
             continue;
         }
         if let Some(material) = Operation::get_op::<MaterialInputOp>(operation, context) {
             let input = material.input_id(context);
-            if materials.insert(input.clone(), material).is_some() {
+            if materials.insert(input.clone(), material).is_some()
+                || !global_materials.insert(input.clone())
+            {
                 return Err(format!(
                     "duplicate Procedure material input identity '{input}'"
                 ));
@@ -219,57 +315,36 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             }
             continue;
         }
-        return Err(format!(
-            "operation '{id}' is not legal at the allocated-procedure module boundary"
-        ));
-    }
-    if design_operations == 0 {
-        return Err("allocated-procedure requires at least one Design operation".to_owned());
-    }
-    if allocation_contexts != 1 {
-        return Err(format!(
-            "allocated-procedure requires exactly one allocation.context, found {allocation_contexts}"
-        ));
-    }
-    if methods.is_empty() || tasks.is_empty() {
-        return Err("allocated-procedure requires selected Methods and Procedure tasks".to_owned());
-    }
-
-    let mut choices = BTreeSet::new();
-    let mut selected_tasks = BTreeSet::new();
-    for method in methods {
-        let choice = method.choice(context);
-        if !choices.insert(choice.clone()) {
-            return Err(format!("duplicate selected Method choice '{choice}'"));
-        }
-        for task in method.procedure_nodes(context) {
-            if !selected_tasks.insert(task.clone()) {
+        if Operation::get_op::<AllocationYieldOp>(operation, context).is_some() {
+            if operation != tail {
                 return Err(format!(
-                    "Procedure node '{task}' belongs to more than one selected Method"
+                    "allocated Method '{choice}' contains allocation.yield before its end"
                 ));
             }
+            continue;
         }
+        return Err(format!(
+            "operation '{}' is not legal inside allocated Method '{choice}'",
+            Operation::get_opid(operation, context)
+        ));
     }
-    let semantic_tasks = tasks
-        .iter()
-        .map(|task| crate::method::LocalId::new(task).expect("verified task IDs are stable"))
-        .collect::<BTreeSet<_>>();
-    if selected_tasks != semantic_tasks {
-        return Err(
-            "selected Methods must name every allocated Procedure node exactly once".to_owned(),
-        );
+
+    if tasks.is_empty() {
+        return Err(format!(
+            "allocated Method '{choice}' must contain a Procedure task"
+        ));
     }
     for (parameter, node) in parameters {
         if !tasks.contains(&node) {
             return Err(format!(
-                "Procedure parameter '{parameter}' references absent node '{node}'"
+                "Procedure parameter '{parameter}' references node '{node}' outside allocated Method '{choice}'"
             ));
         }
     }
     if material_bindings.len() != materials.len() {
-        return Err(
-            "every allocated Procedure material input must have exactly one binding".to_owned(),
-        );
+        return Err(format!(
+            "every Procedure material input in allocated Method '{choice}' must have exactly one binding"
+        ));
     }
     for (input, material) in &materials {
         let stable_id =
@@ -288,8 +363,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         }
         if !tasks.contains(&material.procedure_node(context)) {
             return Err(format!(
-                "Procedure material input '{input}' references absent node '{}'",
-                material.procedure_node(context)
+                "Procedure material input '{input}' references a node outside allocated Method '{choice}'"
             ));
         }
     }
@@ -297,7 +371,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         let node = requirement.procedure_node(context);
         if !tasks.contains(&node) {
             return Err(format!(
-                "Requirement '{}' references absent Procedure node '{node}'",
+                "Requirement '{}' references Procedure node '{node}' outside allocated Method '{choice}'",
                 requirement.requirement_id(context)
             ));
         }
@@ -316,7 +390,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         let requirement = constraint.requirement_id(context);
         if !requirements.contains_key(&requirement) {
             return Err(format!(
-                "Capability constraint references absent Requirement '{requirement}'"
+                "Capability constraint references Requirement '{requirement}' outside allocated Method '{choice}'"
             ));
         }
     }
@@ -330,12 +404,14 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     for requirement in parameter_matches.keys() {
         if !requirements.contains_key(requirement.as_str()) {
             return Err(format!(
-                "allocation.parameter_match references absent Requirement '{requirement}'"
+                "allocation.parameter_match references Requirement '{requirement}' outside allocated Method '{choice}'"
             ));
         }
     }
     if bindings.len() != requirements.len() {
-        return Err("every allocated Requirement must have exactly one binding".to_owned());
+        return Err(format!(
+            "every Requirement in allocated Method '{choice}' must have exactly one binding"
+        ));
     }
     for (requirement_id, requirement) in &requirements {
         let stable_id = crate::method::LocalId::new(requirement_id)
@@ -399,7 +475,113 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             ));
         }
     }
-    verify_allocated_dataflow(context, &task_operations)
+    verify_allocated_dataflow(context, method, &task_operations, tail)
+}
+
+fn verify_allocated_method_dependencies(
+    context: &Context,
+    methods: &[MethodOp],
+    choices: &BTreeSet<crate::method::LocalId>,
+) -> Result<(), String> {
+    let mut dependencies = methods
+        .iter()
+        .map(|method| (method.choice(context), BTreeSet::new()))
+        .collect::<BTreeMap<_, _>>();
+    for method in methods {
+        let choice = method.choice(context);
+        for dependency in method.after(context) {
+            if !choices.contains(&dependency) {
+                return Err(format!(
+                    "allocated Method '{choice}' references unknown completion dependency '{dependency}'"
+                ));
+            }
+            dependencies
+                .get_mut(&choice)
+                .expect("every allocated Method has a dependency set")
+                .insert(dependency);
+        }
+        for operand in method.get_operation().deref(context).operands() {
+            let DefiningEntity::Op(definition) = operand.defining_entity() else {
+                return Err(format!(
+                    "allocated Method '{choice}' operand is not defined by Design or another allocated Method"
+                ));
+            };
+            if Operation::get_opid(definition, context).dialect.as_ref() == "design" {
+                continue;
+            }
+            let Some(producer_index) = methods
+                .iter()
+                .position(|candidate| candidate.get_operation() == definition)
+            else {
+                return Err(format!(
+                    "allocated Method '{choice}' operand is not defined by Design or another allocated Method"
+                ));
+            };
+            dependencies
+                .get_mut(&choice)
+                .expect("every allocated Method has a dependency set")
+                .insert(methods[producer_index].choice(context));
+        }
+        let body = method.entry_block(context);
+        for operation in body.deref(context).iter(context) {
+            let Some(binding) = Operation::get_op::<MaterialBindingOp>(operation, context) else {
+                continue;
+            };
+            let Some(producer) = binding.source_choice(context) else {
+                continue;
+            };
+            if !choices.contains(&producer) {
+                return Err(format!(
+                    "allocated Method '{choice}' material allocation references unknown choice '{producer}'"
+                ));
+            }
+            dependencies
+                .get_mut(&choice)
+                .expect("every allocated Method has a dependency set")
+                .insert(producer);
+        }
+    }
+    if !choice_dependencies_are_acyclic(&dependencies) {
+        return Err("allocated Methods contain a cyclic value or completion dependency".to_owned());
+    }
+    Ok(())
+}
+
+fn choice_dependencies_are_acyclic(
+    dependencies: &BTreeMap<crate::method::LocalId, BTreeSet<crate::method::LocalId>>,
+) -> bool {
+    let mut indegree = dependencies
+        .iter()
+        .map(|(choice, producers)| (choice.clone(), producers.len()))
+        .collect::<BTreeMap<_, _>>();
+    let mut dependents =
+        BTreeMap::<crate::method::LocalId, BTreeSet<crate::method::LocalId>>::new();
+    for (choice, producers) in dependencies {
+        for producer in producers {
+            dependents
+                .entry(producer.clone())
+                .or_default()
+                .insert(choice.clone());
+        }
+    }
+    let mut ready = indegree
+        .iter()
+        .filter_map(|(choice, degree)| (*degree == 0).then_some(choice.clone()))
+        .collect::<BTreeSet<_>>();
+    let mut visited = 0;
+    while let Some(choice) = ready.pop_first() {
+        visited += 1;
+        for dependent in dependents.get(&choice).into_iter().flatten() {
+            let degree = indegree
+                .get_mut(dependent)
+                .expect("every dependent is an allocated Method");
+            *degree -= 1;
+            if *degree == 0 {
+                ready.insert(dependent.clone());
+            }
+        }
+    }
+    visited == dependencies.len()
 }
 
 fn selected_parameters_match_constraints(
@@ -438,35 +620,65 @@ fn selected_parameters_match_constraints(
 
 fn verify_allocated_dataflow(
     context: &Context,
+    method: &MethodOp,
     tasks: &[pliron::context::Ptr<Operation>],
+    yield_operation: pliron::context::Ptr<Operation>,
 ) -> Result<(), String> {
+    let choice = method.choice(context);
+    let method_arguments = method
+        .entry_block(context)
+        .deref(context)
+        .arguments()
+        .collect::<Vec<_>>();
     for (consumer_index, task) in tasks.iter().enumerate() {
         let task_id = Operation::get_op::<TaskOp>(*task, context)
             .expect("allocated task list contains Procedure tasks")
             .node_id(context);
         for operand in task.deref(context).operands() {
-            let DefiningEntity::Op(definition) = operand.defining_entity() else {
-                return Err(format!(
-                    "allocated Procedure node '{task_id}' cannot consume a block argument"
-                ));
-            };
-            let definition_id = Operation::get_opid(definition, context);
-            if definition_id.dialect.as_ref() == "design" {
-                continue;
-            }
-            let Some(definition_index) =
-                tasks.iter().position(|candidate| *candidate == definition)
-            else {
-                return Err(format!(
-                    "allocated Procedure node '{task_id}' consumes a value outside Design or Procedure LAIR"
-                ));
-            };
-            if definition_index >= consumer_index {
-                return Err(format!(
-                    "allocated Procedure node '{task_id}' uses a value before its task defines it"
-                ));
-            }
+            verify_allocated_operand(
+                context,
+                &choice,
+                &method_arguments,
+                tasks,
+                operand,
+                Some((consumer_index, task_id.as_str())),
+            )?;
         }
+    }
+    for operand in yield_operation.deref(context).operands() {
+        verify_allocated_operand(context, &choice, &method_arguments, tasks, operand, None)?;
+    }
+    Ok(())
+}
+
+fn verify_allocated_operand(
+    _context: &Context,
+    choice: &crate::method::LocalId,
+    method_arguments: &[Value],
+    tasks: &[pliron::context::Ptr<Operation>],
+    operand: Value,
+    consumer: Option<(usize, &str)>,
+) -> Result<(), String> {
+    if method_arguments.contains(&operand) {
+        return Ok(());
+    }
+    let consumer_description = consumer
+        .map(|(_, task)| format!("Procedure node '{task}'"))
+        .unwrap_or_else(|| "allocation.yield".to_owned());
+    let DefiningEntity::Op(definition) = operand.defining_entity() else {
+        return Err(format!(
+            "{consumer_description} in allocated Method '{choice}' consumes a block argument other than a Method operand"
+        ));
+    };
+    let Some(definition_index) = tasks.iter().position(|candidate| *candidate == definition) else {
+        return Err(format!(
+            "{consumer_description} in allocated Method '{choice}' consumes a value outside its Method operands or Procedure tasks"
+        ));
+    };
+    if consumer.is_some_and(|(consumer_index, _)| definition_index >= consumer_index) {
+        return Err(format!(
+            "{consumer_description} in allocated Method '{choice}' uses a value before its task defines it"
+        ));
     }
     Ok(())
 }
@@ -763,9 +975,12 @@ fn verify_candidate_dataflow(
 ) -> Result<(), String> {
     let choice_id = choice.choice_id(context);
     let external = choice
-        .get_operation()
+        .candidate_region(context, candidate)
         .deref(context)
-        .operands()
+        .get_head()
+        .expect("generic verification requires one block per method candidate")
+        .deref(context)
+        .arguments()
         .collect::<Vec<_>>();
     for (task_index, task) in tasks.iter().enumerate() {
         for operand in task.deref(context).operands() {
@@ -804,7 +1019,9 @@ fn verify_candidate_value(
         return Ok(());
     }
     let DefiningEntity::Op(defining_operation) = value.defining_entity() else {
-        return Err("a block value is not declared as a method.choice operand".to_owned());
+        return Err(
+            "a block value is not an entry argument of this method.choice candidate".to_owned(),
+        );
     };
     let Some(definition_index) = tasks
         .iter()

@@ -13,6 +13,9 @@ mod resolution;
 mod schedule;
 mod solver;
 
+pub use crate::allocation::{
+    AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+};
 pub use adapters::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
     AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
@@ -28,8 +31,7 @@ pub use inventory::BuildInventoryError;
 pub(crate) use invocation::hex_sha256;
 pub use invocation::{
     ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterInvocationValidationError, AllocatedMethod,
-    AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter, adapter_invocation_id,
+    AdapterInvocationPlan, AdapterInvocationValidationError, adapter_invocation_id,
 };
 pub use lowering::{
     FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,

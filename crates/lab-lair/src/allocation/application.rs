@@ -13,11 +13,15 @@ use pliron::irbuild::rewriter::{IRRewriter, Rewriter};
 use pliron::linked_list::ContainsLinkedList;
 use pliron::op::Op;
 use pliron::operation::Operation;
+use pliron::r#type::Typed;
 use thiserror::Error;
 
-use crate::allocation::ir::{BindingOp, ContextOp, MaterialBindingOp, MethodOp, ParameterMatchOp};
+use crate::allocation::ir::{
+    BindingOp, ContextOp, MaterialBindingOp, MethodOp, ParameterMatchOp,
+    YieldOp as AllocationYieldOp,
+};
 use crate::capability::ir::RequirementOp;
-use crate::method::ir::{ChoiceOp, YieldOp};
+use crate::method::ir::{ChoiceOp, YieldOp as MethodYieldOp};
 use crate::planning::{
     FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem,
 };
@@ -67,6 +71,11 @@ pub(crate) fn apply_facility_solution(
         .iter()
         .map(|selection| (selection.choice.clone(), selection))
         .collect::<BTreeMap<_, _>>();
+    let planning_choices = problem
+        .choices
+        .iter()
+        .map(|choice| (choice.id.clone(), choice))
+        .collect::<BTreeMap<_, _>>();
     let mut inserted_context = false;
 
     for choice in choices {
@@ -76,6 +85,10 @@ pub(crate) fn apply_facility_solution(
                 choice: choice_id.clone(),
             }
         })?;
+        let planning_choice = planning_choices
+            .get(&choice_id)
+            .copied()
+            .expect("solution validation proves every selected choice is in the problem");
         let candidate = choice
             .candidate_ids(context)
             .iter()
@@ -84,6 +97,11 @@ pub(crate) fn apply_facility_solution(
                 choice: choice_id.clone(),
                 method: selection.method.to_string(),
             })?;
+        let planning_candidate = planning_choice
+            .candidates
+            .iter()
+            .find(|candidate| candidate.method == selection.method)
+            .expect("solution validation proves the selected Method candidate exists");
         let candidate_block = choice
             .candidate_region(context, candidate)
             .deref(context)
@@ -97,7 +115,7 @@ pub(crate) fn apply_facility_solution(
             .collect::<Vec<_>>();
         let yield_op = operations
             .iter()
-            .find_map(|operation| Operation::get_op::<YieldOp>(*operation, context))
+            .find_map(|operation| Operation::get_op::<MethodYieldOp>(*operation, context))
             .ok_or_else(|| AllocationApplicationError::MissingYield {
                 choice: choice_id.clone(),
             })?;
@@ -132,11 +150,34 @@ pub(crate) fn apply_facility_solution(
             rewriter.append_operation(context, allocation_context.get_operation());
             inserted_context = true;
         }
-        let method = MethodOp::new(context, selection);
+        let (method_operands, method_result_types) = {
+            let operation = choice.get_operation().deref(context);
+            (
+                operation.operands().collect::<Vec<_>>(),
+                operation
+                    .results()
+                    .map(|result| result.get_type(context))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let method = MethodOp::new(
+            context,
+            planning_choice,
+            planning_candidate,
+            method_operands.clone(),
+            method_result_types,
+        );
         rewriter.append_operation(context, method.get_operation());
         let mut mapping = IrMapping::new();
+        for (candidate_argument, method_argument) in candidate_block
+            .deref(context)
+            .arguments()
+            .zip(method.entry_block(context).deref(context).arguments())
+        {
+            mapping.map_value(candidate_argument, method_argument);
+        }
         for operation in operations {
-            if Operation::get_op::<YieldOp>(operation, context).is_some() {
+            if Operation::get_op::<MethodYieldOp>(operation, context).is_some() {
                 continue;
             }
             let requirement_id =
@@ -150,7 +191,7 @@ pub(crate) fn apply_facility_solution(
                         .expect("verified material input identity is stable")
                 });
             let cloned = clone_operation(operation, context, &mut rewriter, &mut mapping);
-            rewriter.append_operation(context, cloned);
+            method.append_body_operation(context, cloned);
             if let Some(input) = material_input_id {
                 let (procedure_node, binding) = material_bindings.get(&input).ok_or_else(|| {
                     AllocationApplicationError::MissingMaterialBinding {
@@ -158,7 +199,7 @@ pub(crate) fn apply_facility_solution(
                     }
                 })?;
                 let binding = MaterialBindingOp::new(context, procedure_node, binding);
-                rewriter.append_operation(context, binding.get_operation());
+                method.append_body_operation(context, binding.get_operation());
             }
             if let Some(requirement_id) = requirement_id {
                 let (procedure_node, binding) = bindings.get(&requirement_id).ok_or_else(|| {
@@ -167,32 +208,30 @@ pub(crate) fn apply_facility_solution(
                     }
                 })?;
                 let allocation = BindingOp::new(context, procedure_node, binding);
-                rewriter.append_operation(context, allocation.get_operation());
+                method.append_body_operation(context, allocation.get_operation());
                 for parameter in &binding.parameters {
                     let parameter = ParameterMatchOp::new(context, &requirement_id, parameter);
-                    rewriter.append_operation(context, parameter.get_operation());
+                    method.append_body_operation(context, parameter.get_operation());
                 }
             }
         }
-        let replacements = yield_op
+        let yielded = yield_op
             .get_operation()
             .deref(context)
             .operands()
-            .map(|value| {
-                mapping.lookup_value(value).or_else(|| {
-                    choice
-                        .get_operation()
-                        .deref(context)
-                        .operands()
-                        .any(|operand| operand == value)
-                        .then_some(value)
-                })
-            })
+            .map(|value| mapping.lookup_value(value))
             .collect::<Option<Vec<_>>>()
             .ok_or_else(|| AllocationApplicationError::MissingYieldMapping {
                 choice: choice_id.clone(),
             })?;
-        rewriter.replace_operation_with_values(context, choice.get_operation(), replacements);
+        let allocation_yield = AllocationYieldOp::new(context, yielded);
+        method.append_body_operation(context, allocation_yield.get_operation());
+        let method_results = method
+            .get_operation()
+            .deref(context)
+            .results()
+            .collect::<Vec<_>>();
+        rewriter.replace_operation_with_values(context, choice.get_operation(), method_results);
     }
     Ok(())
 }
