@@ -15,11 +15,11 @@ use pliron::printable::Printable;
 use thiserror::Error;
 
 use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
-use crate::lair::dialect::attributes::quantity_dict;
-use crate::lair::stage::{IrStage, detect_stage, initialize_stage, set_stage};
+use crate::ir::attributes::quantity_dict;
 use crate::lowering::{
     BuildArtifactIntent, SourceLoweringError, WorkflowActionIntent, lower_build_intent,
 };
+use crate::stage::{IrStage, detect_stage, initialize_stage, set_stage};
 use crate::workflow::ir::{DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp};
 
 #[derive(Debug, Error)]
@@ -42,14 +42,14 @@ pub enum RefinedLairError {
     Stage(String),
 }
 
-pub use crate::lair::planning_problem::PlanningProblemExtractionError;
+pub use crate::planning::PlanningProblemExtractionError;
 
 #[derive(Debug, Error)]
 pub enum AllocatedLairError {
     #[error(transparent)]
     Problem(#[from] PlanningProblemExtractionError),
     #[error(transparent)]
-    Application(#[from] crate::lair::allocation::AllocationApplicationError),
+    Application(#[from] crate::allocation::AllocationApplicationError),
     #[error("generated allocated LAIR failed verification: {0}")]
     Verification(String),
     #[error("generated allocated LAIR failed material-linearity analysis: {0}")]
@@ -210,7 +210,7 @@ impl RefinedLairProgram {
     pub fn planning_problem(
         &self,
     ) -> Result<crate::planning::PlanningProblem, PlanningProblemExtractionError> {
-        crate::lair::planning_problem::extract_planning_problem(&self.context, self.module)
+        crate::planning::extract_planning_problem(&self.context, self.module)
     }
 
     /// Apply one complete solution to this exact refined module and eliminate every alternative.
@@ -219,7 +219,7 @@ impl RefinedLairProgram {
         solution: crate::planning::FacilityPlanningSolution,
     ) -> Result<AllocatedLairProgram, AllocatedLairError> {
         let problem = self.planning_problem()?;
-        crate::lair::allocation::apply_facility_solution(
+        crate::allocation::apply_facility_solution(
             &mut self.context,
             self.module,
             &problem,
@@ -230,7 +230,7 @@ impl RefinedLairProgram {
         verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
             AllocatedLairError::Verification(error.disp(&self.context).to_string())
         })?;
-        crate::lair::analysis::MaterialLinearityAnalysis::compute(
+        crate::procedure::analysis::MaterialLinearityAnalysis::compute(
             self.module.get_operation(),
             &self.context,
             &mut AnalysisManager::default(),
@@ -561,12 +561,12 @@ mod tests {
 
     use crate::backend::default_adapter_profile;
     use crate::lair::session::CompilerSession;
-    use crate::lair::stage::IrStage;
     use crate::planning::{
         AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationPlan, AdapterRequirement,
         BuildInventory, FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin,
         MethodPinSelector, PlanningProblem, PlanningValueSource,
     };
+    use crate::stage::IrStage;
 
     use super::PortableLairProgram;
 

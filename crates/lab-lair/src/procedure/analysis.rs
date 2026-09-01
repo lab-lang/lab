@@ -83,7 +83,7 @@ mod tests {
     use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp};
     use crate::procedure::ir::{MaterialType, TaskOp};
 
-    use crate::lair::analysis::*;
+    use crate::procedure::analysis::*;
 
     #[test]
     fn rejects_two_consumers_of_one_physical_value() {

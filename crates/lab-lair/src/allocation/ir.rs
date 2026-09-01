@@ -12,7 +12,7 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::verify_err;
 
-use crate::lair::dialect::attributes::string_vec;
+use crate::ir::attributes::string_vec;
 use crate::planning::{
     SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod, SelectedRequirementBinding,
 };

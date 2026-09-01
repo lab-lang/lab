@@ -1,13 +1,17 @@
 //! The Lab Compiler biological compilation pipeline.
 
+pub mod allocation;
 pub mod artifact;
 pub mod backend;
+pub(crate) mod capability;
 pub(crate) mod design;
+pub(crate) mod ir;
 pub mod lair;
 pub(crate) mod lowering;
 pub mod method;
 pub mod planning;
 pub mod procedure;
+pub mod stage;
 pub(crate) mod workflow;
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
 pub use lab_language::{
@@ -24,4 +28,4 @@ pub use lair::program::{
     PortableLairProgram, RefinedLairError, RefinedLairProgram,
 };
 pub use lair::session::{CompilerSession, SessionError, SessionOptions};
-pub use lair::stage::{IrStage, StageContract};
+pub use stage::{IrStage, StageContract};

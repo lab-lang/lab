@@ -24,12 +24,16 @@ Verifier-valid Allocated Procedure LAIR is the only input device lowering is pro
 The source tree follows semantic ownership and dependency direction:
 
 - `src/method/` owns portable Method definitions and registries together with `method.choice`, bundled methods, and the refinement pass that constructs candidate regions;
-- `src/procedure/` owns `procedure.task` and its typed ports together with canonical pipetting and thermal bodies, task normalization, validation, capability derivation, and exact quantities;
+- `src/procedure/` owns `procedure.task` and its typed ports together with canonical pipetting and thermal bodies, task normalization, validation, capability derivation, exact quantities, and whole-program material-linearity analysis;
 - `src/design/` owns reusable biological design identities and their LAIR operations;
 - `src/workflow/` owns method-neutral Workflow/Intent operations;
 - `src/lowering.rs` translates checked Lab modules into the coupled Design and Workflow portions of a LAIR program;
-- `src/lair/` owns the remaining Capability, Allocation, and core metadata operations; planning-problem extraction; solution application; stage contracts; analyses; and textual IR tooling;
-- `src/planning/` owns the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
+- `src/capability/` owns Capability requirement operations and exact scalar attribute codecs;
+- `src/allocation/` owns exact binding operations and application of complete facility decisions to LAIR;
+- `src/stage/` owns the explicit stage marker and whole-module structural contracts;
+- `src/ir/` owns the small set of Pliron attribute helpers shared across domain operations;
+- `src/lair/` temporarily owns only the program wrapper, pass pipeline, and compiler session while those core modules are flattened;
+- `src/planning/` owns planning-problem extraction, the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
 - `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
 - `src/artifact/` owns generated files independently of filesystem persistence;
 - `lab-runfmt` owns the versioned reviewed documents interpreted by the runtime; and

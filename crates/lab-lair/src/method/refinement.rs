@@ -27,10 +27,9 @@ use pliron::result::Result;
 use pliron::r#type::{TypeHandle, Typed};
 use pliron::value::Value;
 
+use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::design::ir::DesignType;
-use crate::lair::dialect::attributes::{quantity_entry, u32_value};
-use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
-use crate::lair::dialect::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
+use crate::ir::attributes::{quantity_entry, u32_value};
 use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
 use crate::procedure::ir::{
     DataType as ProcedureDataType, MaterialInputOp, MaterialType as ProcedureMaterialType,
@@ -39,6 +38,7 @@ use crate::procedure::ir::{
 use crate::procedure::normalization::{
     ProcedureTaskInstance, ResolvedProcedureMaterial, ResolvedProcedureParameter, normalize_task,
 };
+use crate::workflow::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 use crate::workflow::ir::{
     DiluteOp, MaterialType as WorkflowMaterialType, PlateOp, ProvisionOp, RealizeOp, RecoverOp,
     TransformOp,

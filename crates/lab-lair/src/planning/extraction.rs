@@ -13,8 +13,7 @@ use pliron::r#type::Typed;
 use pliron::value::Value;
 use thiserror::Error;
 
-use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
-use crate::lair::stage::{IrStage, detect_stage};
+use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::planning::{
     PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
@@ -23,6 +22,7 @@ use crate::planning::{
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp, semantic_port_type};
+use crate::stage::{IrStage, detect_stage};
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum PlanningProblemExtractionError {

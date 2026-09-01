@@ -24,7 +24,7 @@ use pliron::value::Value;
 use pliron::{verify_err, verify_err_noloc};
 
 use crate::design::ir::DesignType;
-use crate::lair::dialect::attributes::string_vec;
+use crate::ir::attributes::string_vec;
 
 /// One physical state in a method candidate.
 #[pliron_type(

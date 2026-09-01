@@ -10,8 +10,8 @@ use pliron::pass::{AnalysisManager, OpGuard, OpPass, Pass, PassResult};
 use pliron::result::Result as PlironResult;
 use thiserror::Error;
 
-use crate::lair::analysis::MaterialLinearityAnalysis;
-use crate::lair::stage::IrStage;
+use crate::procedure::analysis::MaterialLinearityAnalysis;
+use crate::stage::IrStage;
 
 /// Require every physical Procedure material value to have at most one consumer.
 #[derive(Clone, Copy, Debug, Default)]

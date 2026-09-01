@@ -3,6 +3,7 @@
 mod adapters;
 mod execution;
 mod explain;
+mod extraction;
 mod inventory;
 mod invocation;
 mod lowering;
@@ -21,6 +22,8 @@ pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
 };
 pub use explain::explain_facility_planning_error;
+pub use extraction::PlanningProblemExtractionError;
+pub(crate) use extraction::extract_planning_problem;
 pub use inventory::BuildInventoryError;
 pub(crate) use invocation::hex_sha256;
 pub use invocation::{

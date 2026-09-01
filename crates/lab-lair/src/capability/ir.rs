@@ -19,8 +19,8 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::verify_err;
 
-use crate::lair::dialect::attributes::string_vec;
-use crate::lair::dialect::scalar::{decode_property_value, encode_property_value};
+use crate::capability::scalar::{decode_property_value, encode_property_value};
+use crate::ir::attributes::string_vec;
 use crate::procedure::ir::is_stable_local_id;
 
 /// A semantic requirement attached to one exact Procedure node in the same candidate.

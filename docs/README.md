@@ -79,7 +79,7 @@ Decision records preserve the reasoning and status behind the language rather th
 
 ## Implementation and embedding
 
-- [LAIR overview](../crates/lab-lair/src/lair/dialect/README.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
+- [LAIR overview](../crates/lab-lair/IR.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
 - [LAIR internals](../crates/lab-lair/README.md) describes the current compiler pipeline and developer commands.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Portable method definitions](language/capabilities.md) describe the facility-independent Method, Procedure, and Capability documents owned by LAIR and shared with Python extensions.

@@ -1,3 +1,5 @@
+mod ir;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Display};
 use std::str::FromStr;
@@ -10,13 +12,13 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use pliron::value::{DefiningEntity, Value};
 
-use crate::lair::dialect::allocation::{
+use crate::allocation::ir::{
     BindingOp, ContextOp as AllocationContextOp, MaterialBindingOp, MethodOp,
 };
-use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
-use crate::lair::dialect::meta::StageOp;
+use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp};
+use crate::stage::ir::StageOp;
 
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -735,8 +737,8 @@ mod tests {
     use pliron::operation::verify_operation;
     use pliron::printable::Printable;
 
+    use crate::capability::ir::{ConstraintOp, RequirementOp};
     use crate::design::ir::DesignDnaSequenceOp;
-    use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
     use crate::lair::session::CompilerSession;
     use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};

@@ -4,6 +4,7 @@
 //! operations and derive semantic facility demands. They remain device-neutral and do not contain
 //! facility identities, adapter profiles, or vendor command models.
 
+pub(crate) mod analysis;
 pub mod capability;
 pub mod feature;
 pub mod id;

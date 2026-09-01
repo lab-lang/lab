@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::lair::pipeline::{
     PassPipeline, PassPipelineError, RegisteredPass, build_material_linearity_pass,
 };
-use crate::lair::stage::detect_stage;
+use crate::stage::detect_stage;
 use crate::{IrStage, StageContract};
 
 #[derive(Debug, Error)]

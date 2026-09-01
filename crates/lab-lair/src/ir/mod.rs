@@ -130,9 +130,3 @@ pub(crate) mod attributes {
         Ok(())
     }
 }
-
-pub(crate) mod allocation;
-pub(crate) mod capability;
-pub(crate) mod chemistry;
-pub(crate) mod meta;
-pub(crate) mod scalar;

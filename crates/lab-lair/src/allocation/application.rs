@@ -15,8 +15,8 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use thiserror::Error;
 
-use crate::lair::dialect::allocation::{BindingOp, ContextOp, MaterialBindingOp, MethodOp};
-use crate::lair::dialect::capability::RequirementOp;
+use crate::allocation::ir::{BindingOp, ContextOp, MaterialBindingOp, MethodOp};
+use crate::capability::ir::RequirementOp;
 use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::planning::{
     FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem,

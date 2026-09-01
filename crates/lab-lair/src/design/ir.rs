@@ -11,7 +11,7 @@ use pliron::operation::Operation;
 use pliron::result::Result;
 use pliron::verify_err;
 
-use crate::lair::dialect::attributes::{
+use crate::ir::attributes::{
     require_string, require_string_vec, string_vec, u32_attr, u32_value, verify_u32_attr,
 };
 
