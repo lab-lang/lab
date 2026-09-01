@@ -13,10 +13,11 @@ use pliron::operation::Operation;
 use pliron::value::{DefiningEntity, Value};
 
 use crate::allocation::ir::{
-    BindingOp, ContextOp as AllocationContextOp, MaterialBindingOp, MethodOp,
+    BindingOp, ContextOp as AllocationContextOp, MaterialBindingOp, MethodOp, ParameterMatchOp,
 };
 use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::ir::{ChoiceOp, YieldOp};
+use crate::procedure::binding::{ProcedureCapabilityRequirement, ProcedureTaskInterface};
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp};
 use crate::stage::ir::StageOp;
 
@@ -127,6 +128,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     let mut materials = BTreeMap::new();
     let mut constraints = Vec::new();
     let mut bindings = BTreeMap::new();
+    let mut parameter_matches = BTreeMap::new();
     let mut material_bindings = BTreeMap::new();
     let mut design_operations = 0;
 
@@ -182,7 +184,7 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             continue;
         }
         if let Some(constraint) = Operation::get_op::<ConstraintOp>(operation, context) {
-            constraints.push(constraint.requirement_id(context));
+            constraints.push(constraint);
             continue;
         }
         if let Some(binding) = Operation::get_op::<BindingOp>(operation, context) {
@@ -192,6 +194,20 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
                     "Requirement '{requirement}' has more than one allocation.binding"
                 ));
             }
+            continue;
+        }
+        if let Some(parameter_match) = Operation::get_op::<ParameterMatchOp>(operation, context) {
+            let requirement = parameter_match.requirement(context);
+            let selected_parameter = parameter_match.selected_parameter(context);
+            let matched_parameters = parameter_matches
+                .entry(requirement.clone())
+                .or_insert_with(Vec::new);
+            if matched_parameters.contains(&selected_parameter) {
+                return Err(format!(
+                    "Requirement '{requirement}' repeats an allocation.parameter_match"
+                ));
+            }
+            matched_parameters.push(selected_parameter);
             continue;
         }
         if let Some(binding) = Operation::get_op::<MaterialBindingOp>(operation, context) {
@@ -296,10 +312,25 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             ));
         }
     }
-    for requirement in constraints {
+    for constraint in &constraints {
+        let requirement = constraint.requirement_id(context);
         if !requirements.contains_key(&requirement) {
             return Err(format!(
                 "Capability constraint references absent Requirement '{requirement}'"
+            ));
+        }
+    }
+    verify_task_program_contracts(
+        context,
+        &task_operations,
+        &requirements,
+        &materials,
+        &constraints,
+    )?;
+    for requirement in parameter_matches.keys() {
+        if !requirements.contains_key(requirement.as_str()) {
+            return Err(format!(
+                "allocation.parameter_match references absent Requirement '{requirement}'"
             ));
         }
     }
@@ -309,6 +340,24 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     for (requirement_id, requirement) in &requirements {
         let stable_id = crate::method::LocalId::new(requirement_id)
             .expect("verified Requirement IDs are stable");
+        let expected_constraints = constraints
+            .iter()
+            .filter(|constraint| constraint.requirement_id(context) == *requirement_id)
+            .map(|constraint| {
+                constraint
+                    .decode(context)
+                    .expect("generic verification accepts typed Capability constraints")
+            })
+            .collect::<Vec<_>>();
+        let selected_parameters = parameter_matches
+            .get(&stable_id)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if !selected_parameters_match_constraints(selected_parameters, &expected_constraints) {
+            return Err(format!(
+                "allocation parameter matches for Requirement '{requirement_id}' do not exactly cover its constraints"
+            ));
+        }
         let Some(binding) = bindings.get(&stable_id) else {
             return Err(format!(
                 "allocated Requirement '{requirement_id}' has no binding"
@@ -353,6 +402,40 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
     verify_allocated_dataflow(context, &task_operations)
 }
 
+fn selected_parameters_match_constraints(
+    parameters: &[crate::planning::SelectedCapabilityParameter],
+    constraints: &[lab_capability::PropertyConstraint],
+) -> bool {
+    if parameters.len() != constraints.len()
+        || parameters
+            .iter()
+            .map(|parameter| parameter.offering_parameter.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+            != parameters.len()
+    {
+        return false;
+    }
+    let mut matched = vec![false; constraints.len()];
+    parameters.iter().all(|parameter| {
+        let Some(index) = constraints
+            .iter()
+            .enumerate()
+            .find_map(|(index, constraint)| {
+                (!matched[index]
+                    && parameter.property_kind == constraint.property_kind
+                    && parameter.relation == constraint.relation
+                    && parameter.required == constraint.required)
+                    .then_some(index)
+            })
+        else {
+            return false;
+        };
+        matched[index] = true;
+        true
+    })
+}
+
 fn verify_allocated_dataflow(
     context: &Context,
     tasks: &[pliron::context::Ptr<Operation>],
@@ -384,6 +467,88 @@ fn verify_allocated_dataflow(
                 ));
             }
         }
+    }
+    Ok(())
+}
+
+fn verify_task_program_contracts(
+    context: &Context,
+    task_operations: &[pliron::context::Ptr<Operation>],
+    requirements: &BTreeMap<String, RequirementOp>,
+    materials: &BTreeMap<String, MaterialInputOp>,
+    constraints: &[ConstraintOp],
+) -> Result<(), String> {
+    let mut constraints_by_requirement =
+        BTreeMap::<String, Vec<lab_capability::PropertyConstraint>>::new();
+    for constraint in constraints {
+        let requirement = constraint.requirement_id(context);
+        let decoded = constraint.decode(context).map_err(|error| {
+            format!("Capability constraint for Requirement '{requirement}' is invalid: {error}")
+        })?;
+        constraints_by_requirement
+            .entry(requirement)
+            .or_default()
+            .push(decoded);
+    }
+
+    let mut requirements_by_node = BTreeMap::<String, Vec<ProcedureCapabilityRequirement>>::new();
+    for (requirement_id, requirement) in requirements {
+        let node = requirement.procedure_node(context);
+        requirements_by_node
+            .entry(node)
+            .or_default()
+            .push(ProcedureCapabilityRequirement {
+                id: crate::procedure::ProcedureLocalId::new(requirement_id)
+                    .expect("verified Requirement identities are stable"),
+                capability_kind: requirement.semantic_capability_kind(context),
+                minimum_qualification: requirement.semantic_minimum_qualification(context),
+                accepted_control_modes: requirement.semantic_control_modes(context),
+                constraints: constraints_by_requirement
+                    .remove(requirement_id)
+                    .unwrap_or_default(),
+            });
+    }
+    debug_assert!(
+        constraints_by_requirement.is_empty(),
+        "stage verification rejects constraints that reference absent Requirements"
+    );
+
+    let mut materials_by_node = BTreeMap::<String, Vec<crate::procedure::ProcedureLocalId>>::new();
+    for (material_id, material) in materials {
+        materials_by_node
+            .entry(material.procedure_node(context))
+            .or_default()
+            .push(
+                crate::procedure::ProcedureLocalId::new(material_id)
+                    .expect("verified material input identities are stable"),
+            );
+    }
+
+    for operation in task_operations {
+        let task = Operation::get_op::<TaskOp>(*operation, context)
+            .expect("Procedure task list contains only procedure.task operations");
+        let Some(program) = task.semantic_program(context) else {
+            continue;
+        };
+        let node = task.semantic_node_id(context);
+        let validated = program.validate().map_err(|error| {
+            format!("Procedure node '{node}' has an invalid normalized program: {error}")
+        })?;
+        let interface = ProcedureTaskInterface::new(
+            operation.deref(context).operands().count(),
+            materials_by_node.remove(node.as_str()).unwrap_or_default(),
+            task.output_names(context),
+        );
+        let declared_requirements = requirements_by_node
+            .remove(node.as_str())
+            .unwrap_or_default();
+        validated
+            .validate_task_contract(&node, &interface, None, &declared_requirements)
+            .map_err(|error| {
+                format!(
+                    "Procedure node '{node}' does not satisfy its normalized program contract: {error}"
+                )
+            })?;
     }
     Ok(())
 }
@@ -467,7 +632,7 @@ fn verify_candidate(
     let mut requirements = BTreeMap::new();
     let mut constraints = Vec::new();
     let mut parameters = Vec::new();
-    let mut material_inputs = Vec::new();
+    let mut material_inputs = BTreeMap::new();
     let mut task_operations = Vec::new();
 
     for operation in block.deref(context).iter(context) {
@@ -486,8 +651,7 @@ fn verify_candidate(
         }
         if let Some(requirement) = Operation::get_op::<RequirementOp>(operation, context) {
             let id = requirement.requirement_id(context);
-            let node = requirement.procedure_node(context);
-            if requirements.insert(id.clone(), node).is_some() {
+            if requirements.insert(id.clone(), requirement).is_some() {
                 return Err(format!(
                     "method choice '{choice_id}' candidate {candidate} repeats Requirement '{id}'"
                 ));
@@ -498,7 +662,7 @@ fn verify_candidate(
             continue;
         }
         if let Some(constraint) = Operation::get_op::<ConstraintOp>(operation, context) {
-            constraints.push(constraint.requirement_id(context));
+            constraints.push(constraint);
             continue;
         }
         if let Some(parameter) = Operation::get_op::<ParameterOp>(operation, context) {
@@ -516,7 +680,7 @@ fn verify_candidate(
                     "duplicate Procedure material input identity '{id}'"
                 ));
             }
-            material_inputs.push((id, material.procedure_node(context)));
+            material_inputs.insert(id, material);
             continue;
         }
         if Operation::get_op::<YieldOp>(operation, context).is_some() {
@@ -538,24 +702,26 @@ fn verify_candidate(
             "method choice '{choice_id}' candidate {candidate} contains no Procedure task"
         ));
     }
-    for (requirement, node) in &requirements {
-        if !tasks.contains(node) {
+    for (requirement_id, requirement) in &requirements {
+        let node = requirement.procedure_node(context);
+        if !tasks.contains(&node) {
             return Err(format!(
-                "Requirement '{requirement}' references Procedure node '{node}' outside its candidate"
+                "Requirement '{requirement_id}' references Procedure node '{node}' outside its candidate"
             ));
         }
     }
     for node in &tasks {
         if !requirements
             .values()
-            .any(|required_node| required_node == node)
+            .any(|requirement| requirement.procedure_node(context) == *node)
         {
             return Err(format!(
                 "Procedure node '{node}' has no Capability requirement in its candidate"
             ));
         }
     }
-    for requirement in constraints {
+    for constraint in &constraints {
+        let requirement = constraint.requirement_id(context);
         if !requirements.contains_key(&requirement) {
             return Err(format!(
                 "Capability constraint references Requirement '{requirement}' outside its candidate"
@@ -569,13 +735,21 @@ fn verify_candidate(
             ));
         }
     }
-    for (material, node) in material_inputs {
+    for (material_id, material) in &material_inputs {
+        let node = material.procedure_node(context);
         if !tasks.contains(&node) {
             return Err(format!(
-                "Procedure material input '{material}' references Procedure node '{node}' outside its candidate"
+                "Procedure material input '{material_id}' references Procedure node '{node}' outside its candidate"
             ));
         }
     }
+    verify_task_program_contracts(
+        context,
+        &task_operations,
+        &requirements,
+        &material_inputs,
+        &constraints,
+    )?;
     verify_candidate_dataflow(context, choice, candidate, &task_operations, tail)?;
     Ok(())
 }
@@ -741,6 +915,11 @@ mod tests {
     use crate::design::ir::DesignDnaSequenceOp;
     use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
+    use crate::procedure::{
+        FluidPathPolicy, Location, MaterialInput, MaterialOutput, PipettingConstraints,
+        PipettingProgramV1, PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole,
+        Volume,
+    };
     use crate::session::CompilerSession;
 
     use super::*;
@@ -833,6 +1012,165 @@ mod tests {
             error.contains("value is defined outside this candidate"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn refined_alternatives_reject_program_materials_outside_the_task_aggregate() {
+        let (mut context, module, task) = refined_program_with_bound_task();
+        verify_operation(module.get_operation(), &context).unwrap();
+        assert_eq!(
+            detect_stage(&context, module).unwrap(),
+            IrStage::RefinedAlternatives
+        );
+
+        let corrupted = pipetting_program("unbound-material", "sample", "1");
+        task.set_semantic_program(&mut context, &corrupted);
+        verify_operation(module.get_operation(), &context).unwrap();
+        let error = detect_stage(&context, module).unwrap_err();
+        assert!(
+            error.contains("program material `unbound-material` is not declared by the task"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn refined_alternatives_reject_requirements_stale_from_the_canonical_program() {
+        let (mut context, module, task) = refined_program_with_bound_task();
+        verify_operation(module.get_operation(), &context).unwrap();
+        assert_eq!(
+            detect_stage(&context, module).unwrap(),
+            IrStage::RefinedAlternatives
+        );
+
+        let node = task.node_id(&context);
+        let material = format!("{node}::material::medium");
+        let corrupted = pipetting_program(&material, "sample", "2");
+        task.set_semantic_program(&mut context, &corrupted);
+        verify_operation(module.get_operation(), &context).unwrap();
+        let error = detect_stage(&context, module).unwrap_err();
+        assert!(
+            error.contains("does not carry the program-derived constraints"),
+            "{error}"
+        );
+    }
+
+    fn refined_program_with_bound_task() -> (Context, ModuleOp, TaskOp) {
+        let mut context = Context::new();
+        let module = ModuleOp::new(
+            &mut context,
+            Identifier::try_from("bound_refined_demo").unwrap(),
+        );
+        initialize_stage(&mut context, module, IrStage::RefinedAlternatives);
+        let design = DesignDnaSequenceOp::new(&mut context, "sample_sequence", "ACGT");
+        module.append_operation(&mut context, design.get_operation(), 0);
+
+        let method = MethodId::new("https://example.org/method/liquid-transfer").unwrap();
+        let material_type = MaterialType::get(
+            &context,
+            StringAttr::new("https://example.org/material/transferred-sample".to_owned()),
+        )
+        .into();
+        let choice = ChoiceOp::new(
+            &mut context,
+            "transfer",
+            "std.lab.transfer",
+            &[method],
+            ChoicePorts {
+                inputs: vec![],
+                outputs: vec![(ProcedureLocalId::new("sample").unwrap(), material_type)],
+            },
+            None,
+            &[],
+        );
+        let node = "transfer::candidate-0::liquid-transfer";
+        let material_id = format!("{node}::material::medium");
+        let program = pipetting_program(&material_id, "sample", "1");
+        let task = TaskOp::new(
+            &mut context,
+            node,
+            &OperationId::new("https://example.org/procedure/liquid-transfer").unwrap(),
+            vec![],
+            vec![material_type],
+            &[ProcedureLocalId::new("sample").unwrap()],
+        );
+        task.set_semantic_program(&mut context, &program);
+        let result = task.get_operation().deref(&context).get_result(0);
+        choice.append_candidate_operation(&mut context, 0, task.get_operation());
+
+        let material = MaterialInputOp::new(&mut context, &material_id, node, "recovery_medium");
+        choice.append_candidate_operation(&mut context, 0, material.get_operation());
+
+        let validated = program.validate().unwrap();
+        for clause in validated.capability_formula().all_of {
+            let requirement_id = format!("{node}::requirement::{}", clause.role);
+            let requirement = RequirementOp::new(
+                &mut context,
+                &requirement_id,
+                node,
+                &clause.capability_kind,
+                QualificationLevel::Plannable,
+                [ControlMode::ReviewedFile],
+            );
+            choice.append_candidate_operation(&mut context, 0, requirement.get_operation());
+            for constraint in &clause.constraints {
+                let constraint = ConstraintOp::new(&mut context, &requirement_id, constraint);
+                choice.append_candidate_operation(&mut context, 0, constraint.get_operation());
+            }
+        }
+        let r#yield = YieldOp::new(&mut context, vec![result]);
+        choice.append_candidate_operation(&mut context, 0, r#yield.get_operation());
+        module.append_operation(&mut context, choice.get_operation(), 0);
+        (context, module, task)
+    }
+
+    fn pipetting_program(material: &str, output: &str, volume: &str) -> ProcedureProgram {
+        let material = ProcedureLocalId::new(material).unwrap();
+        let output = ProcedureLocalId::new(output).unwrap();
+        let program = PipettingProgramV1::new(
+            vec![MaterialInput {
+                id: material.clone(),
+            }],
+            vec![MaterialOutput { id: output.clone() }],
+            vec![
+                Vessel {
+                    id: ProcedureLocalId::new("source").unwrap(),
+                    role: VesselRole::MaterialSource { material },
+                    positions: 1,
+                    initial_volume_each: Some(Volume::parse_microlitres("10").unwrap()),
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    temperature: None,
+                },
+                Vessel {
+                    id: ProcedureLocalId::new("destination").unwrap(),
+                    role: VesselRole::Product { output },
+                    positions: 1,
+                    initial_volume_each: None,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    temperature: None,
+                },
+            ],
+            vec![PipettingStep::Transfer {
+                id: ProcedureLocalId::new("transfer").unwrap(),
+                source: Location {
+                    vessel: ProcedureLocalId::new("source").unwrap(),
+                    position: 0,
+                },
+                destination: Location {
+                    vessel: ProcedureLocalId::new("destination").unwrap(),
+                    position: 0,
+                },
+                volume: Volume::parse_microlitres(volume).unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: Default::default(),
+            }],
+            PipettingConstraints::default(),
+        )
+        .validate()
+        .unwrap();
+        ProcedureProgram::from_pipetting(&program)
     }
 
     fn refined_program(uncovered_task: bool) -> (Context, ModuleOp) {

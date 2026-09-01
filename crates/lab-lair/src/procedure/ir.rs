@@ -233,10 +233,33 @@ impl Verify for TaskOp {
                     );
                 }
             };
-            if let Err(error) = parsed.validate() {
+            let validated = match parsed.validate() {
+                Ok(validated) => validated,
+                Err(error) => {
+                    return verify_err!(
+                        self.loc(context),
+                        "procedure.task has an invalid normalized program: {error}"
+                    );
+                }
+            };
+            let semantic_outputs = output_names
+                .0
+                .iter()
+                .map(|name| {
+                    LocalId::new(
+                        name.downcast_ref::<StringAttr>()
+                            .expect("output names were verified above")
+                            .as_str(),
+                    )
+                    .expect("output identities were verified above")
+                })
+                .collect::<Vec<_>>();
+            if let Err(error) =
+                validated.validate_task_ports(operation.get_num_operands(), &semantic_outputs)
+            {
                 return verify_err!(
                     self.loc(context),
-                    "procedure.task has an invalid normalized program: {error}"
+                    "procedure.task normalized program does not bind its ports: {error}"
                 );
             }
         }

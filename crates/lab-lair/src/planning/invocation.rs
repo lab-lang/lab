@@ -4,10 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use crate::method::{IntentOperationId, LocalId};
+use crate::procedure::binding::{
+    ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
+};
 use crate::procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use lab_capability::{
     AbsoluteIri, CapabilityKind, ControlMode, MethodId, ProcedureImplementationId,
-    QualificationLevel,
+    PropertyConstraint, QualificationLevel,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -324,7 +327,7 @@ impl AdapterInvocationPlan {
                             message: error.to_string(),
                         }
                     })?;
-                    validate_program_bindings(task, &validated)?;
+                    validate_program_contract(task, &validated)?;
                 }
                 for material in &task.materials {
                     if !materials.insert(material.input.clone()) {
@@ -470,132 +473,47 @@ impl AdapterInvocationPlan {
     }
 }
 
-fn validate_program_bindings(
+fn validate_program_contract(
     task: &AllocatedProcedureTask,
     program: &ValidatedProcedureProgram,
 ) -> Result<(), AdapterInvocationValidationError> {
-    match program {
-        ValidatedProcedureProgram::PipettingV1(program) => {
-            if program.as_program().vessels.iter().any(|vessel| {
-                matches!(
-                    &vessel.role,
-                    crate::procedure::VesselRole::ProcedureInput { input }
-                        if usize::try_from(*input).map_or(true, |input| input >= task.inputs.len())
-                )
-            }) {
-                return Err(AdapterInvocationValidationError::ProcedureInputBindings {
-                    task: task.id.clone(),
-                });
-            }
-            let task_materials = task
-                .materials
+    let interface = ProcedureTaskInterface::new(
+        task.inputs.len(),
+        task.materials.iter().map(|material| material.input.clone()),
+        task.outputs.iter().map(|output| output.name.clone()),
+    );
+    let requirements = task
+        .requirements
+        .iter()
+        .map(|requirement| ProcedureCapabilityRequirement {
+            id: requirement.id.clone(),
+            capability_kind: requirement.capability_kind.clone(),
+            minimum_qualification: requirement.minimum_qualification,
+            accepted_control_modes: requirement.accepted_control_modes.clone(),
+            constraints: requirement
+                .parameters
                 .iter()
-                .map(|material| material.input.as_str())
-                .collect::<BTreeSet<_>>();
-            let program_materials = program
-                .as_program()
-                .materials
-                .iter()
-                .map(|material| material.id.as_str())
-                .collect::<BTreeSet<_>>();
-            if !program_materials.is_subset(&task_materials) {
-                return Err(
-                    AdapterInvocationValidationError::ProcedureMaterialBindings {
-                        task: task.id.clone(),
-                    },
-                );
-            }
-            let task_outputs = task
-                .outputs
-                .iter()
-                .map(|output| output.name.as_str())
-                .collect::<BTreeSet<_>>();
-            let program_outputs = program
-                .as_program()
-                .outputs
-                .iter()
-                .map(|output| output.id.as_str())
-                .collect::<BTreeSet<_>>();
-            if task_outputs != program_outputs {
-                return Err(AdapterInvocationValidationError::ProcedureOutputBindings {
-                    task: task.id.clone(),
-                });
-            }
-        }
-        ValidatedProcedureProgram::ThermalV1(program) => {
-            let program = program.as_program();
-            if usize::try_from(program.load.input).map_or(true, |input| input >= task.inputs.len())
-            {
-                return Err(AdapterInvocationValidationError::ProcedureInputBindings {
-                    task: task.id.clone(),
-                });
-            }
-            if !task.materials.is_empty() {
-                return Err(
-                    AdapterInvocationValidationError::ProcedureMaterialBindings {
-                        task: task.id.clone(),
-                    },
-                );
-            }
-            let task_outputs = task
-                .outputs
-                .iter()
-                .map(|output| output.name.as_str())
-                .collect::<BTreeSet<_>>();
-            let program_outputs = program
-                .load
-                .outputs
-                .iter()
-                .map(|output| output.as_str())
-                .collect::<BTreeSet<_>>();
-            if task_outputs != program_outputs {
-                return Err(AdapterInvocationValidationError::ProcedureOutputBindings {
-                    task: task.id.clone(),
-                });
-            }
-        }
-    }
-    let formula = program.capability_formula();
-    if task.requirements.len() != formula.all_of.len() {
-        return Err(
-            AdapterInvocationValidationError::ProcedureCapabilityBindings {
-                task: task.id.clone(),
-            },
-        );
-    }
-    for clause in &formula.all_of {
-        let expected_id = format!("{}::requirement::{}", task.id, clause.role);
-        let Some(requirement) = task
-            .requirements
-            .iter()
-            .find(|requirement| requirement.id.as_str() == expected_id)
-        else {
-            return Err(
-                AdapterInvocationValidationError::ProcedureCapabilityBindings {
-                    task: task.id.clone(),
-                },
-            );
-        };
-        if requirement.capability_kind != clause.capability_kind
-            || requirement.parameters.len() != clause.constraints.len()
-            || !clause.constraints.iter().all(|constraint| {
-                requirement.parameters.iter().any(|parameter| {
-                    parameter.property_kind == constraint.property_kind
-                        && parameter.relation == constraint.relation
-                        && parameter.required == constraint.required
+                .map(|parameter| PropertyConstraint {
+                    property_kind: parameter.property_kind.clone(),
+                    relation: parameter.relation,
+                    required: parameter.required.clone(),
                 })
-            })
-        {
-            return Err(
-                AdapterInvocationValidationError::ProcedureCapabilityBindings {
-                    task: task.id.clone(),
-                },
-            );
-        }
-    }
-    if formula.binding_scope == BindingScope::AtomicAssetAssembly {
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    let contract = program
+        .validate_task_contract(&task.id, &interface, None, &requirements)
+        .map_err(|error| map_procedure_binding_error(&task.id, error))?;
+    validate_atomic_program_binding(task, contract.capability_formula().binding_scope)
+}
+
+fn validate_atomic_program_binding(
+    task: &AllocatedProcedureTask,
+    scope: BindingScope,
+) -> Result<(), AdapterInvocationValidationError> {
+    if scope == BindingScope::AtomicAssetAssembly {
         let Some(first) = task.requirements.first() else {
-            unreachable!("the formula and requirement cardinalities were checked")
+            unreachable!("the Procedure task contract requires a non-empty capability formula")
         };
         if task.requirements.iter().any(|requirement| {
             requirement.asset != first.asset
@@ -610,6 +528,35 @@ fn validate_program_bindings(
         }
     }
     Ok(())
+}
+
+fn map_procedure_binding_error(
+    task: &LocalId,
+    error: ProcedureBindingError,
+) -> AdapterInvocationValidationError {
+    match error {
+        ProcedureBindingError::UnavailableInput { .. } => {
+            AdapterInvocationValidationError::ProcedureInputBindings { task: task.clone() }
+        }
+        ProcedureBindingError::DuplicateTaskOutput
+        | ProcedureBindingError::OutputMismatch { .. } => {
+            AdapterInvocationValidationError::ProcedureOutputBindings { task: task.clone() }
+        }
+        ProcedureBindingError::DuplicateTaskMaterial
+        | ProcedureBindingError::UndeclaredMaterial { .. }
+        | ProcedureBindingError::UnexpectedThermalMaterials { .. } => {
+            AdapterInvocationValidationError::ProcedureMaterialBindings { task: task.clone() }
+        }
+        ProcedureBindingError::BindingScopeMismatch { .. }
+        | ProcedureBindingError::DuplicateRequirement { .. }
+        | ProcedureBindingError::RequirementCount { .. }
+        | ProcedureBindingError::MissingRequirement { .. }
+        | ProcedureBindingError::RequirementKindMismatch { .. }
+        | ProcedureBindingError::RequirementConstraintsMismatch { .. }
+        | ProcedureBindingError::RequirementPolicyMismatch { .. } => {
+            AdapterInvocationValidationError::ProcedureCapabilityBindings { task: task.clone() }
+        }
+    }
 }
 
 fn validate_allocated_method_graph(

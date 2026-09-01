@@ -5,6 +5,7 @@
 //! facility identities, adapter profiles, or vendor command models.
 
 pub(crate) mod analysis;
+pub mod binding;
 pub mod capability;
 pub mod feature;
 pub mod id;

@@ -15,7 +15,7 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use thiserror::Error;
 
-use crate::allocation::ir::{BindingOp, ContextOp, MaterialBindingOp, MethodOp};
+use crate::allocation::ir::{BindingOp, ContextOp, MaterialBindingOp, MethodOp, ParameterMatchOp};
 use crate::capability::ir::RequirementOp;
 use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::planning::{
@@ -166,8 +166,12 @@ pub(crate) fn apply_facility_solution(
                         requirement: requirement_id.clone(),
                     }
                 })?;
-                let binding = BindingOp::new(context, procedure_node, binding);
-                rewriter.append_operation(context, binding.get_operation());
+                let allocation = BindingOp::new(context, procedure_node, binding);
+                rewriter.append_operation(context, allocation.get_operation());
+                for parameter in &binding.parameters {
+                    let parameter = ParameterMatchOp::new(context, &requirement_id, parameter);
+                    rewriter.append_operation(context, parameter.get_operation());
+                }
             }
         }
         let replacements = yield_op

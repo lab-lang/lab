@@ -3,6 +3,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::method::{IntentOperationId, LocalId, PortType, ProcedureValue};
+use crate::procedure::binding::{
+    ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
+};
 use crate::procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint, PropertyKind,
@@ -453,8 +456,7 @@ fn validate_candidate(
                     message: error.to_string(),
                 }
             })?;
-            validate_program_bindings(task, &validated)?;
-            validate_program_requirements(task, &validated)?;
+            validate_program_contract(task, &validated)?;
         } else if task.binding_scope != BindingScope::Independent {
             return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
                 task: task.id.clone(),
@@ -514,124 +516,64 @@ fn validate_candidate(
     Ok(())
 }
 
-fn validate_program_bindings(
+fn validate_program_contract(
     task: &PlanningProcedureTask,
     program: &ValidatedProcedureProgram,
 ) -> Result<(), PlanningProblemValidationError> {
-    match program {
-        ValidatedProcedureProgram::PipettingV1(program) => {
-            if program.as_program().vessels.iter().any(|vessel| {
-                matches!(
-                    &vessel.role,
-                    crate::procedure::VesselRole::ProcedureInput { input }
-                        if usize::try_from(*input).map_or(true, |input| input >= task.inputs.len())
-                )
-            }) {
-                return Err(PlanningProblemValidationError::ProcedureInputBindings {
-                    task: task.id.clone(),
-                });
-            }
-            let task_materials = task
-                .materials
-                .iter()
-                .map(|material| material.id.as_str())
-                .collect::<BTreeSet<_>>();
-            let program_materials = program
-                .as_program()
-                .materials
-                .iter()
-                .map(|material| material.id.as_str())
-                .collect::<BTreeSet<_>>();
-            if !program_materials.is_subset(&task_materials) {
-                return Err(PlanningProblemValidationError::ProcedureMaterialBindings {
-                    task: task.id.clone(),
-                });
-            }
-            let task_outputs = task
-                .outputs
-                .iter()
-                .map(|output| output.name.as_str())
-                .collect::<BTreeSet<_>>();
-            let program_outputs = program
-                .as_program()
-                .outputs
-                .iter()
-                .map(|output| output.id.as_str())
-                .collect::<BTreeSet<_>>();
-            if task_outputs != program_outputs {
-                return Err(PlanningProblemValidationError::ProcedureOutputBindings {
-                    task: task.id.clone(),
-                });
-            }
-        }
-        ValidatedProcedureProgram::ThermalV1(program) => {
-            let program = program.as_program();
-            if usize::try_from(program.load.input).map_or(true, |input| input >= task.inputs.len())
-            {
-                return Err(PlanningProblemValidationError::ProcedureInputBindings {
-                    task: task.id.clone(),
-                });
-            }
-            if !task.materials.is_empty() {
-                return Err(PlanningProblemValidationError::ProcedureMaterialBindings {
-                    task: task.id.clone(),
-                });
-            }
-            let task_outputs = task
-                .outputs
-                .iter()
-                .map(|output| output.name.as_str())
-                .collect::<BTreeSet<_>>();
-            let program_outputs = program
-                .load
-                .outputs
-                .iter()
-                .map(|output| output.as_str())
-                .collect::<BTreeSet<_>>();
-            if task_outputs != program_outputs {
-                return Err(PlanningProblemValidationError::ProcedureOutputBindings {
-                    task: task.id.clone(),
-                });
-            }
-        }
-    }
-    Ok(())
+    let interface = ProcedureTaskInterface::new(
+        task.inputs.len(),
+        task.materials.iter().map(|material| material.id.clone()),
+        task.outputs.iter().map(|output| output.name.clone()),
+    );
+    let requirements = task
+        .requirements
+        .iter()
+        .map(|requirement| ProcedureCapabilityRequirement {
+            id: requirement.id.clone(),
+            capability_kind: requirement.capability_kind.clone(),
+            minimum_qualification: requirement.minimum_qualification,
+            accepted_control_modes: requirement.accepted_control_modes.clone(),
+            constraints: requirement.constraints.clone(),
+        })
+        .collect::<Vec<_>>();
+    program
+        .validate_task_contract(
+            &task.id,
+            &interface,
+            Some(task.binding_scope),
+            &requirements,
+        )
+        .map(|_| ())
+        .map_err(|error| map_procedure_binding_error(&task.id, error))
 }
 
-fn validate_program_requirements(
-    task: &PlanningProcedureTask,
-    program: &ValidatedProcedureProgram,
-) -> Result<(), PlanningProblemValidationError> {
-    let formula = program.capability_formula();
-    if task.binding_scope != formula.binding_scope
-        || task.requirements.len() != formula.all_of.len()
-    {
-        return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
-            task: task.id.clone(),
-        });
-    }
-    let policy = task.requirements.first().map(|requirement| {
-        (
-            requirement.minimum_qualification,
-            &requirement.accepted_control_modes,
-        )
-    });
-    for (requirement, clause) in task.requirements.iter().zip(formula.all_of) {
-        let expected_id = format!("{}::requirement::{}", task.id, clause.role);
-        if requirement.id.as_str() != expected_id
-            || requirement.capability_kind != clause.capability_kind
-            || requirement.constraints != clause.constraints
-            || policy.is_some_and(|(qualification, modes)| {
-                requirement.minimum_qualification != qualification
-                    || &requirement.accepted_control_modes != modes
-            })
-        {
-            return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
-                task: task.id.clone(),
-            });
+fn map_procedure_binding_error(
+    task: &LocalId,
+    error: ProcedureBindingError,
+) -> PlanningProblemValidationError {
+    match error {
+        ProcedureBindingError::UnavailableInput { .. } => {
+            PlanningProblemValidationError::ProcedureInputBindings { task: task.clone() }
+        }
+        ProcedureBindingError::DuplicateTaskOutput
+        | ProcedureBindingError::OutputMismatch { .. } => {
+            PlanningProblemValidationError::ProcedureOutputBindings { task: task.clone() }
+        }
+        ProcedureBindingError::DuplicateTaskMaterial
+        | ProcedureBindingError::UndeclaredMaterial { .. }
+        | ProcedureBindingError::UnexpectedThermalMaterials { .. } => {
+            PlanningProblemValidationError::ProcedureMaterialBindings { task: task.clone() }
+        }
+        ProcedureBindingError::BindingScopeMismatch { .. }
+        | ProcedureBindingError::DuplicateRequirement { .. }
+        | ProcedureBindingError::RequirementCount { .. }
+        | ProcedureBindingError::MissingRequirement { .. }
+        | ProcedureBindingError::RequirementKindMismatch { .. }
+        | ProcedureBindingError::RequirementConstraintsMismatch { .. }
+        | ProcedureBindingError::RequirementPolicyMismatch { .. } => {
+            PlanningProblemValidationError::ProcedureCapabilityFormula { task: task.clone() }
         }
     }
-    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
