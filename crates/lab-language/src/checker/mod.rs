@@ -387,7 +387,7 @@ mod tests {
     #[test]
     fn compiles_representative_design_module() {
         let module = compile_module(include_str!(
-            "../../../docs/language/specimens/plasmid-design.lab"
+            "../../../../docs/language/specimens/plasmid-design.lab"
         ))
         .unwrap();
         assert!(module.declarations.iter().any(
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn compiles_representative_reactive_workflow_module() {
         let module = compile_module(include_str!(
-            "../../../docs/language/specimens/plasmid-build.lab"
+            "../../../../docs/language/specimens/plasmid-build.lab"
         ))
         .unwrap();
         assert!(module.declarations.iter().any(|declaration| matches!(
@@ -546,27 +546,27 @@ mod tests {
     const GOLDEN_GATE: [(&str, &str); 6] = [
         (
             "golden_gate.designs.inventory",
-            include_str!("../../../examples/golden-gate/src/designs/inventory.lab"),
+            include_str!("../../../../examples/golden-gate/src/designs/inventory.lab"),
         ),
         (
             "golden_gate.designs.plasmids",
-            include_str!("../../../examples/golden-gate/src/designs/plasmids.lab"),
+            include_str!("../../../../examples/golden-gate/src/designs/plasmids.lab"),
         ),
         (
             "golden_gate.designs.strains",
-            include_str!("../../../examples/golden-gate/src/designs/strains.lab"),
+            include_str!("../../../../examples/golden-gate/src/designs/strains.lab"),
         ),
         (
             "golden_gate.workflows.assemble",
-            include_str!("../../../examples/golden-gate/src/workflows/assemble.lab"),
+            include_str!("../../../../examples/golden-gate/src/workflows/assemble.lab"),
         ),
         (
             "golden_gate.workflows.build_strains",
-            include_str!("../../../examples/golden-gate/src/workflows/build_strains.lab"),
+            include_str!("../../../../examples/golden-gate/src/workflows/build_strains.lab"),
         ),
         (
             "golden_gate.programs.reporter_panel",
-            include_str!("../../../examples/golden-gate/src/programs/reporter_panel.lab"),
+            include_str!("../../../../examples/golden-gate/src/programs/reporter_panel.lab"),
         ),
     ];
 

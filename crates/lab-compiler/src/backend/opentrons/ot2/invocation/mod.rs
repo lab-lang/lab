@@ -37,15 +37,15 @@ use crate::{ArtifactBundle, GeneratedArtifact};
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v1";
 const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v1";
 
-const SETUP_TEMPLATE: &str = include_str!("invocation/setup_reaction.py");
-const CYCLE_TEMPLATE: &str = include_str!("invocation/thermal_cycle.py");
-const TRANSFORMATION_TEMPLATE: &str = include_str!("invocation/prepare_transformation.py");
-const RECOVERY_TEMPLATE: &str = include_str!("invocation/add_recovery_medium.py");
-const DILUTION_TEMPLATE: &str = include_str!("invocation/serial_dilution.py");
-const PLATING_TEMPLATE: &str = include_str!("invocation/plate_diluted_culture.py");
-const ASSEMBLY_BATCH_TEMPLATE: &str = include_str!("invocation/assembly_batch.py");
-const TRANSFORMATION_BATCH_TEMPLATE: &str = include_str!("invocation/transformation_batch.py");
-const PLATING_BATCH_TEMPLATE: &str = include_str!("invocation/plating_batch.py");
+const SETUP_TEMPLATE: &str = include_str!("setup_reaction.py");
+const CYCLE_TEMPLATE: &str = include_str!("thermal_cycle.py");
+const TRANSFORMATION_TEMPLATE: &str = include_str!("prepare_transformation.py");
+const RECOVERY_TEMPLATE: &str = include_str!("add_recovery_medium.py");
+const DILUTION_TEMPLATE: &str = include_str!("serial_dilution.py");
+const PLATING_TEMPLATE: &str = include_str!("plate_diluted_culture.py");
+const ASSEMBLY_BATCH_TEMPLATE: &str = include_str!("assembly_batch.py");
+const TRANSFORMATION_BATCH_TEMPLATE: &str = include_str!("transformation_batch.py");
+const PLATING_BATCH_TEMPLATE: &str = include_str!("plating_batch.py");
 const API_LEVEL_SENTINEL: &str = "\"2.21\",  # LAB:API_LEVEL";
 const PLAN_SENTINEL: &str = "\"{}\"  # LAB:INVOCATION_PLAN";
 
