@@ -2,10 +2,13 @@
 
 pub mod artifact;
 pub mod backend;
+pub(crate) mod design;
 pub mod lair;
+pub(crate) mod lowering;
 pub mod method;
 pub mod planning;
 pub mod procedure;
+pub(crate) mod workflow;
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
 pub use lab_language::{
     Analysis, CheckedDeclaration, CheckedModule, Diagnostic, DiagnosticSeverity, MaterialFlowError,

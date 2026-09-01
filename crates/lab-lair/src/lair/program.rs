@@ -14,15 +14,13 @@ use pliron::pass::{Analysis, AnalysisManager};
 use pliron::printable::Printable;
 use thiserror::Error;
 
+use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
 use crate::lair::dialect::attributes::quantity_dict;
-use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
-use crate::lair::dialect::workflow::{
-    DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp,
-};
-use crate::lair::source_lowering::{
+use crate::lair::stage::{IrStage, detect_stage, initialize_stage, set_stage};
+use crate::lowering::{
     BuildArtifactIntent, SourceLoweringError, WorkflowActionIntent, lower_build_intent,
 };
-use crate::lair::stage::{IrStage, detect_stage, initialize_stage, set_stage};
+use crate::workflow::ir::{DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp};
 
 #[derive(Debug, Error)]
 pub enum PortableLairError {
@@ -426,7 +424,7 @@ fn append_workflow(
 }
 
 fn transformed_volume_ul(
-    intent: &crate::lair::source_lowering::StrainArtifactIntent,
+    intent: &crate::lowering::StrainArtifactIntent,
 ) -> Result<u32, PortableLairError> {
     let dna_count = u32::try_from(intent.plasmids.len()).map_err(|_| {
         PortableLairError::Stage(format!(
@@ -446,7 +444,7 @@ fn transformed_volume_ul(
 }
 
 fn recovered_volume_ul(
-    intent: &crate::lair::source_lowering::StrainArtifactIntent,
+    intent: &crate::lowering::StrainArtifactIntent,
 ) -> Result<u32, PortableLairError> {
     transformed_volume_ul(intent)?
         .checked_add(u32::from(intent.chemistry.recovery_volume_ul))
@@ -459,7 +457,7 @@ fn recovered_volume_ul(
 }
 
 fn assembly_chemistry(
-    chemistry: &crate::lair::source_lowering::AssemblyChemistryIntent,
+    chemistry: &crate::lowering::AssemblyChemistryIntent,
     context: &Context,
 ) -> pliron::builtin::attributes::DictAttr {
     quantity_dict(
@@ -504,7 +502,7 @@ fn assembly_chemistry(
 }
 
 fn strain_chemistry(
-    chemistry: &crate::lair::source_lowering::StrainChemistryIntent,
+    chemistry: &crate::lowering::StrainChemistryIntent,
     context: &Context,
 ) -> pliron::builtin::attributes::DictAttr {
     quantity_dict(

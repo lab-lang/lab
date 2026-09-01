@@ -134,7 +134,5 @@ pub(crate) mod attributes {
 pub(crate) mod allocation;
 pub(crate) mod capability;
 pub(crate) mod chemistry;
-pub(crate) mod design;
 pub(crate) mod meta;
 pub(crate) mod scalar;
-pub(crate) mod workflow;

@@ -80,7 +80,7 @@ mod tests {
     use lab_capability::OperationId;
     use pliron::builtin::attributes::StringAttr;
 
-    use crate::lair::dialect::design::{DesignDnaSequenceOp, DesignPlasmidOp};
+    use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp};
     use crate::procedure::ir::{MaterialType, TaskOp};
 
     use crate::lair::analysis::*;

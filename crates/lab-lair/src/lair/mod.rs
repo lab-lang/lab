@@ -9,4 +9,3 @@ pub mod session;
 pub mod stage;
 
 pub(crate) mod planning_problem;
-pub(crate) mod source_lowering;

@@ -25,7 +25,10 @@ The source tree follows semantic ownership and dependency direction:
 
 - `src/method/` owns portable Method definitions and registries together with `method.choice`, bundled methods, and the refinement pass that constructs candidate regions;
 - `src/procedure/` owns `procedure.task` and its typed ports together with canonical pipetting and thermal bodies, task normalization, validation, capability derivation, and exact quantities;
-- `src/lair/` owns the remaining Design, Workflow/Intent, Capability, and Allocation operations; source lowering; planning-problem extraction; solution application; stage contracts; analyses; and textual IR tooling;
+- `src/design/` owns reusable biological design identities and their LAIR operations;
+- `src/workflow/` owns method-neutral Workflow/Intent operations;
+- `src/lowering.rs` translates checked Lab modules into the coupled Design and Workflow portions of a LAIR program;
+- `src/lair/` owns the remaining Capability, Allocation, and core metadata operations; planning-problem extraction; solution application; stage contracts; analyses; and textual IR tooling;
 - `src/planning/` owns the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
 - `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
 - `src/artifact/` owns generated files independently of filesystem persistence;

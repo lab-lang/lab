@@ -23,8 +23,8 @@ use pliron::r#type::{TypeHandle, Typed};
 use pliron::value::Value;
 use pliron::{verify_err, verify_err_noloc};
 
+use crate::design::ir::DesignType;
 use crate::lair::dialect::attributes::string_vec;
-use crate::lair::dialect::design::DesignType;
 
 /// One physical state in a method candidate.
 #[pliron_type(

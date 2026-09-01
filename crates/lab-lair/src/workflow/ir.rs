@@ -16,12 +16,12 @@ use pliron::r#type::{Type, TypeHandle, Typed};
 use pliron::value::Value;
 use pliron::verify_err;
 
+use crate::design::ir::DesignType;
 use crate::lair::dialect::attributes::{
     require_quantity_dict, require_string, require_string_vec, string_vec, u32_attr, u32_value,
     verify_u32_attr,
 };
 use crate::lair::dialect::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
-use crate::lair::dialect::design::DesignType;
 
 /// Abstract material states visible in a source-level build workflow.
 #[pliron_type(name = "workflow.material", format, verifier = "succ")]

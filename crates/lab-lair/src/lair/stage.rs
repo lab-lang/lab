@@ -735,8 +735,8 @@ mod tests {
     use pliron::operation::verify_operation;
     use pliron::printable::Printable;
 
+    use crate::design::ir::DesignDnaSequenceOp;
     use crate::lair::dialect::capability::{ConstraintOp, RequirementOp};
-    use crate::lair::dialect::design::DesignDnaSequenceOp;
     use crate::lair::session::CompilerSession;
     use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
