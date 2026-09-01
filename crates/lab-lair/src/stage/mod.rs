@@ -739,9 +739,9 @@ mod tests {
 
     use crate::capability::ir::{ConstraintOp, RequirementOp};
     use crate::design::ir::DesignDnaSequenceOp;
-    use crate::lair::session::CompilerSession;
     use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
+    use crate::session::CompilerSession;
 
     use super::*;
 

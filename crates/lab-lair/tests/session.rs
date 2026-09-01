@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use lab_lair::{CompilerSession, IrStage, PassPipeline, SessionError};
+use lab_lair::pipeline::PassPipeline;
+use lab_lair::session::{CompilerSession, SessionError};
+use lab_lair::stage::IrStage;
 
 fn allocated_ir() -> &'static str {
     include_str!("fixtures/allocated_acceptance.ir")

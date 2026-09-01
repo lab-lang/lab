@@ -159,7 +159,7 @@ pub enum PassPipelineError {
 
 #[cfg(test)]
 mod tests {
-    use crate::lair::pipeline::*;
+    use crate::pipeline::*;
 
     #[test]
     fn parses_and_prints_module_anchored_pipelines() {

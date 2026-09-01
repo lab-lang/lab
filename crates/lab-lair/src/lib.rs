@@ -6,11 +6,12 @@ pub mod backend;
 pub(crate) mod capability;
 pub(crate) mod design;
 pub(crate) mod ir;
-pub mod lair;
-pub(crate) mod lowering;
 pub mod method;
+pub mod pipeline;
 pub mod planning;
 pub mod procedure;
+pub mod program;
+pub mod session;
 pub mod stage;
 pub(crate) mod workflow;
 pub use artifact::{ArtifactBundle, ArtifactError, GeneratedArtifact};
@@ -22,10 +23,3 @@ pub use lab_language::{
     render_diagnostic, standard_library_manifest,
 };
 pub use lab_runfmt as runfmt;
-pub use lair::pipeline::{PassInfo, PassPipeline, PassPipelineError, registered_passes};
-pub use lair::program::{
-    AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
-    PortableLairProgram, RefinedLairError, RefinedLairProgram,
-};
-pub use lair::session::{CompilerSession, SessionError, SessionOptions};
-pub use stage::{IrStage, StageContract};

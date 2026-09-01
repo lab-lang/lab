@@ -3,8 +3,9 @@
 use std::path::Path;
 
 use lab_lair::method::{MethodDefinition, MethodRegistry, standard_method_definitions};
+use lab_lair::program::PortableLairProgram;
 use lab_lair::{
-    CheckedModule, Diagnostic, ModuleId, PortableLairProgram, SemanticEnvironment, SourceId,
+    CheckedModule, Diagnostic, ModuleId, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
 };
 use lab_project::{FacilityPlanningResult, LabProject, plan_modules_for_package};

@@ -11,11 +11,10 @@ use pliron::pass::{AnalysisManager, PMConfig, Pass};
 use pliron::printable::Printable;
 use thiserror::Error;
 
-use crate::lair::pipeline::{
+use crate::pipeline::{
     PassPipeline, PassPipelineError, RegisteredPass, build_material_linearity_pass,
 };
-use crate::stage::detect_stage;
-use crate::{IrStage, StageContract};
+use crate::stage::{IrStage, StageContract, detect_stage};
 
 #[derive(Debug, Error)]
 pub enum SessionError {

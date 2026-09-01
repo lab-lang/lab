@@ -531,7 +531,7 @@ into LAIR needs an attribute type for it rather than reuse of `StringAttr`.
 
 Two payoffs beyond deleting code. The bespoke verifier is replaced by 109
 machine-checkable spec rules. And ADR 0022's unfinished half comes within reach:
-`source_lowering.rs` currently matches `"plasmid"` and `"strain"` by name and
+`program/lowering.rs` currently matches `"plasmid"` and `"strain"` by name and
 reads fields by name, but a Component carrying type and role terms is generic,
 so the special-casing has somewhere to go.
 
@@ -930,7 +930,7 @@ real part. Each of those kinds now declares `sequence?: DNA`; none of them
 carried prelude fields before, so nothing was displaced.
 
 The third was a desync the widening caused rather than revealed.
-`source_lowering.rs` reads components with a hardcoded
+`program/lowering.rs` reads components with a hardcoded
 `&["Part", "Plasmid"]`, so a design with a promoter component would have checked
 and then failed to lower with a generic invalid-field error. The golden-gate
 examples use only bare parts, so no test would have caught it. The list is
@@ -989,7 +989,7 @@ gains its encoding term. That is what lets a backend stop guessing
 
 **Deep.** Once terms are attributes rather than op identity, `design.plasmid` and `design.strain` stop being distinct ops, and the stage's representation is what should change rather than its attribute list. `IrStage::Design` becomes an `sbol3::Document` and the pliron design op degenerates to a reference carrying an IRI, as argued above. Workflow, Method, Procedure, Capability, and Allocation LAIR are untouched, because that is where pliron's SSA and linearity analysis earn their place.
 
-Both versions push on the same wall: `source_lowering.rs` matching `"plasmid"`
+Both versions push on the same wall: `program/lowering.rs` matching `"plasmid"`
 and `"strain"` by name and reading fields by name. That is the unfinished half
 of [0022](decisions/0022-fixed-grammar-open-vocabulary.md), "this removes
 biology from the frontend only", and a Component carrying roles is what it needs
@@ -1030,9 +1030,9 @@ with the realizing workflow's action site, and `Fused` expresses exactly that
 rather than forcing a choice between them.
 
 So the shape is: a `BTreeMap<DefinitionId, Span>` side-table on `CheckedModule`,
-threaded through `BuildArtifactIntent` in `source_lowering.rs`, which currently
+threaded through `BuildArtifactIntent` in `program/lowering.rs`, which currently
 carries only a name, and `set_loc` called at roughly fifteen construction sites
-in `lair/program.rs`. No new location machinery.
+in `program/mod.rs`. No new location machinery.
 
 That is worth doing for its own sake, and SBOL validation is what makes it pay
 for itself: it is the first pass that produces many precise, structured findings

@@ -18,11 +18,12 @@ use lab_lair::planning::{
     AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
     AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, BuildInventory,
     BuildInventoryError, FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
-    MaterialLotBuildInventory, MethodPin, MethodPinSelector, explain_facility_planning_error,
+    MaterialLotBuildInventory, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
+    explain_facility_planning_error,
 };
-use lab_lair::{
-    AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
-    PortableLairProgram, RefinedLairError,
+use lab_lair::program::{
+    AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
+    RefinedLairError,
 };
 use lab_package::{LabPackage, PlanningAdapterRequirement};
 use thiserror::Error;

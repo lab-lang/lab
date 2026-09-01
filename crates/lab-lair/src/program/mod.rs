@@ -1,5 +1,7 @@
 //! Owned, verified LAIR produced from checked source modules.
 
+mod lowering;
+
 use std::collections::BTreeMap;
 
 use crate::method::MethodRegistry;
@@ -14,13 +16,14 @@ use pliron::pass::{Analysis, AnalysisManager};
 use pliron::printable::Printable;
 use thiserror::Error;
 
+use self::lowering::{BuildArtifactIntent, WorkflowActionIntent, lower_build_intent};
 use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
 use crate::ir::attributes::quantity_dict;
-use crate::lowering::{
-    BuildArtifactIntent, SourceLoweringError, WorkflowActionIntent, lower_build_intent,
-};
 use crate::stage::{IrStage, detect_stage, initialize_stage, set_stage};
 use crate::workflow::ir::{DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp};
+
+pub use self::lowering::SourceLoweringError;
+use crate::planning::PlanningProblemExtractionError;
 
 #[derive(Debug, Error)]
 pub enum PortableLairError {
@@ -41,8 +44,6 @@ pub enum RefinedLairError {
     #[error("generated LAIR does not satisfy the refined-alternatives contract: {0}")]
     Stage(String),
 }
-
-pub use crate::planning::PlanningProblemExtractionError;
 
 #[derive(Debug, Error)]
 pub enum AllocatedLairError {
@@ -424,7 +425,7 @@ fn append_workflow(
 }
 
 fn transformed_volume_ul(
-    intent: &crate::lowering::StrainArtifactIntent,
+    intent: &lowering::StrainArtifactIntent,
 ) -> Result<u32, PortableLairError> {
     let dna_count = u32::try_from(intent.plasmids.len()).map_err(|_| {
         PortableLairError::Stage(format!(
@@ -443,9 +444,7 @@ fn transformed_volume_ul(
         })
 }
 
-fn recovered_volume_ul(
-    intent: &crate::lowering::StrainArtifactIntent,
-) -> Result<u32, PortableLairError> {
+fn recovered_volume_ul(intent: &lowering::StrainArtifactIntent) -> Result<u32, PortableLairError> {
     transformed_volume_ul(intent)?
         .checked_add(u32::from(intent.chemistry.recovery_volume_ul))
         .ok_or_else(|| {
@@ -457,7 +456,7 @@ fn recovered_volume_ul(
 }
 
 fn assembly_chemistry(
-    chemistry: &crate::lowering::AssemblyChemistryIntent,
+    chemistry: &lowering::AssemblyChemistryIntent,
     context: &Context,
 ) -> pliron::builtin::attributes::DictAttr {
     quantity_dict(
@@ -502,7 +501,7 @@ fn assembly_chemistry(
 }
 
 fn strain_chemistry(
-    chemistry: &crate::lowering::StrainChemistryIntent,
+    chemistry: &lowering::StrainChemistryIntent,
     context: &Context,
 ) -> pliron::builtin::attributes::DictAttr {
     quantity_dict(
@@ -560,12 +559,12 @@ mod tests {
     };
 
     use crate::backend::default_adapter_profile;
-    use crate::lair::session::CompilerSession;
     use crate::planning::{
         AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationPlan, AdapterRequirement,
         BuildInventory, FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin,
         MethodPinSelector, PlanningProblem, PlanningValueSource,
     };
+    use crate::session::CompilerSession;
     use crate::stage::IrStage;
 
     use super::PortableLairProgram;

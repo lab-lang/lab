@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use lab_inventory::InventorySnapshot;
 use lab_lair::planning::{ExecutionPlanOptions, build_execution_plan_from_invocations};
+use lab_lair::program::PortableLairProgram;
 use lab_lair::{
-    CheckedDeclaration, DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module,
-    render_diagnostic,
+    CheckedDeclaration, DiagnosticSeverity, SourceId, analyze_module, render_diagnostic,
 };
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{

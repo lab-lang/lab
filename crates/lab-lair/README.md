@@ -32,7 +32,8 @@ The source tree follows semantic ownership and dependency direction:
 - `src/allocation/` owns exact binding operations and application of complete facility decisions to LAIR;
 - `src/stage/` owns the explicit stage marker and whole-module structural contracts;
 - `src/ir/` owns the small set of Pliron attribute helpers shared across domain operations;
-- `src/lair/` temporarily owns only the program wrapper, pass pipeline, and compiler session while those core modules are flattened;
+- `src/program/` owns stage-typed program wrappers and checked-source lowering into coupled Design and Workflow IR;
+- `src/pipeline.rs` and `src/session.rs` own textual pass orchestration and a reusable Pliron compiler session;
 - `src/planning/` owns planning-problem extraction, the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
 - `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
 - `src/artifact/` owns generated files independently of filesystem persistence;
