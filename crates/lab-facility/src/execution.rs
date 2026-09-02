@@ -4,7 +4,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_adapters::AdapterInvocationPlan;
 use lab_capability::{ControlMode, ScalarValue};
+use lab_compiler::allocation::{
+    AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
+};
 use lab_compiler::method::ProcedureValue;
+use lab_compiler::planning::{PlanningValueSource, SelectedMaterialSource};
 use lab_compiler::procedure::BindingScope;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
@@ -14,12 +18,6 @@ use lab_runfmt::{
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-use lab_compiler::planning::{
-    AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, PlanningMaterialSource,
-    PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningValueSource,
-    SelectedMaterialSource,
-};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPlanOptions {
@@ -50,18 +48,11 @@ impl Default for ExecutionPlanOptions {
 /// Build a reviewed plan from the exact selected Method graph and adapter invocations.
 pub fn build_execution_plan_from_invocations(
     invocations: &AdapterInvocationPlan,
-    problem: &PlanningProblem,
     mut options: ExecutionPlanOptions,
 ) -> Result<ExecutionPlanDocument, ExecutionPlanBuildError> {
     invocations
         .validate()
         .map_err(|error| ExecutionPlanBuildError::InvalidInvocations(error.to_string()))?;
-    problem
-        .validate()
-        .map_err(|error| ExecutionPlanBuildError::InvalidProblem(error.to_string()))?;
-    if problem.sha256() != invocations.allocated.problem_sha256 {
-        return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
-    }
     let planning = options
         .planning
         .take()
@@ -376,7 +367,7 @@ pub fn build_execution_plan_from_invocations(
             requirement: requirement.clone(),
         });
     }
-    let dependencies = execution_task_dependencies(invocations, problem, &task_nodes)?;
+    let dependencies = execution_task_dependencies(&invocations.allocated.methods, &task_nodes)?;
     for (node, tasks) in nodes.iter_mut().zip(node_tasks) {
         node.after = tasks
             .iter()
@@ -404,63 +395,37 @@ pub fn build_execution_plan_from_invocations(
     Ok(plan)
 }
 
-type SelectedChoices<'a> = BTreeMap<
-    lab_compiler::method::LocalId,
-    (&'a PlanningMethodChoice, &'a PlanningMethodCandidate),
->;
-
 fn execution_task_dependencies(
-    invocations: &AdapterInvocationPlan,
-    problem: &PlanningProblem,
+    methods: &[AllocatedMethod],
     task_nodes: &BTreeMap<lab_compiler::method::LocalId, Vec<String>>,
 ) -> Result<BTreeMap<lab_compiler::method::LocalId, Vec<String>>, ExecutionPlanBuildError> {
-    let problem_choices = problem
-        .choices
+    let selected = methods
         .iter()
-        .map(|choice| (choice.id.clone(), choice))
+        .map(|method| (method.choice.clone(), method))
         .collect::<BTreeMap<_, _>>();
-    let mut selected = SelectedChoices::new();
-    for method in &invocations.allocated.methods {
-        let Some(choice) = problem_choices.get(&method.choice).copied() else {
-            return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
-        };
-        let Some(candidate) = choice
-            .candidates
-            .iter()
-            .find(|candidate| candidate.method == method.method)
-        else {
-            return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
-        };
-        if method.source_operation != choice.source_operation
-            || !allocated_method_matches_candidate(method, candidate)
-        {
-            return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
-        }
-        selected.insert(method.choice.clone(), (choice, candidate));
-    }
 
     let mut dependencies = BTreeMap::new();
-    for method in &invocations.allocated.methods {
-        let (choice, candidate) = selected
-            .get(&method.choice)
-            .expect("every invocation Method was matched to its planning candidate");
-        let task_material_producers = candidate
+    for method in methods {
+        // A material edge is stronger than a whole-Method completion edge: it should release only
+        // the consuming task. Suppress the blanket `after` edge for any Method whose material is
+        // consumed somewhere in this Method, then attach that producer to the consuming task below.
+        let task_material_producers = method
             .tasks
             .iter()
             .flat_map(|task| &task.materials)
             .filter_map(|material| match &material.source {
-                PlanningMaterialSource::ChoiceOutput { choice } => Some(choice.clone()),
-                PlanningMaterialSource::Inventory => None,
+                SelectedMaterialSource::ChoiceOutput { choice } => Some(choice.clone()),
+                SelectedMaterialSource::MaterialLot { .. } => None,
             })
             .collect::<BTreeSet<_>>();
-        for task in &candidate.tasks {
+        for task in &method.tasks {
             let mut nodes = BTreeSet::new();
-            for producer in choice
+            for producer in method
                 .after
                 .iter()
                 .filter(|producer| !task_material_producers.contains(*producer))
             {
-                let (_, producer_candidate) = selected.get(producer).ok_or_else(|| {
+                let producer_method = selected.get(producer).copied().ok_or_else(|| {
                     ExecutionPlanBuildError::InvalidExecutionDataflow {
                         message: format!(
                             "method choice '{}' depends on unselected choice '{}'",
@@ -468,7 +433,7 @@ fn execution_task_dependencies(
                         ),
                     }
                 })?;
-                for producer_task in &producer_candidate.tasks {
+                for producer_task in &producer_method.tasks {
                     nodes.extend(task_nodes.get(&producer_task.id).cloned().ok_or_else(|| {
                         ExecutionPlanBuildError::InvalidExecutionDataflow {
                             message: format!(
@@ -489,24 +454,24 @@ fn execution_task_dependencies(
                 )?);
             }
             for material in &task.materials {
-                let PlanningMaterialSource::ChoiceOutput { choice: producer } = &material.source
+                let SelectedMaterialSource::ChoiceOutput { choice: producer } = &material.source
                 else {
                     continue;
                 };
-                let (_, producer_candidate) = selected.get(producer).ok_or_else(|| {
+                let producer_method = selected.get(producer).copied().ok_or_else(|| {
                     ExecutionPlanBuildError::InvalidExecutionDataflow {
                         message: format!(
                             "Procedure material input '{}' depends on unselected choice '{}'",
-                            material.id, producer
+                            material.input, producer
                         ),
                     }
                 })?;
-                for producer_task in &producer_candidate.tasks {
+                for producer_task in &producer_method.tasks {
                     nodes.extend(task_nodes.get(&producer_task.id).cloned().ok_or_else(|| {
                         ExecutionPlanBuildError::InvalidExecutionDataflow {
                             message: format!(
                                 "Procedure material input '{}' depends on unknown task '{}'",
-                                material.id, producer_task.id
+                                material.input, producer_task.id
                             ),
                         }
                     })?);
@@ -518,63 +483,10 @@ fn execution_task_dependencies(
     Ok(dependencies)
 }
 
-fn allocated_method_matches_candidate(
-    method: &AllocatedMethod,
-    candidate: &PlanningMethodCandidate,
-) -> bool {
-    method.tasks.len() == candidate.tasks.len()
-        && method
-            .tasks
-            .iter()
-            .zip(&candidate.tasks)
-            .all(|(allocated, planned)| {
-                allocated.id == planned.id
-                    && allocated.operation == planned.operation
-                    && allocated.inputs == planned.inputs
-                    && allocated.outputs == planned.outputs
-                    && allocated.parameters == planned.parameters
-                    && allocated.materials.len() == planned.materials.len()
-                    && allocated.materials.iter().zip(&planned.materials).all(
-                        |(binding, material)| {
-                            binding.input == material.id
-                                && binding.symbol == material.symbol
-                                && allocated_material_matches(&binding.source, &material.source)
-                        },
-                    )
-                    && allocated.requirements.len() == planned.requirements.len()
-                    && allocated
-                        .requirements
-                        .iter()
-                        .zip(&planned.requirements)
-                        .all(|(binding, requirement)| {
-                            binding.id == requirement.id
-                                && binding.capability_kind == requirement.capability_kind
-                                && binding.minimum_qualification
-                                    == requirement.minimum_qualification
-                                && binding.accepted_control_modes
-                                    == requirement.accepted_control_modes
-                        })
-            })
-}
-
-fn allocated_material_matches(
-    allocated: &SelectedMaterialSource,
-    planned: &PlanningMaterialSource,
-) -> bool {
-    match (allocated, planned) {
-        (SelectedMaterialSource::MaterialLot { .. }, PlanningMaterialSource::Inventory) => true,
-        (
-            SelectedMaterialSource::ChoiceOutput { choice: allocated },
-            PlanningMaterialSource::ChoiceOutput { choice: planned },
-        ) => allocated == planned,
-        _ => false,
-    }
-}
-
 fn source_execution_nodes(
     owner: &lab_compiler::method::LocalId,
     source: &PlanningValueSource,
-    selected: &SelectedChoices<'_>,
+    selected: &BTreeMap<lab_compiler::method::LocalId, &AllocatedMethod>,
     task_nodes: &BTreeMap<lab_compiler::method::LocalId, Vec<String>>,
     visiting_inputs: &mut BTreeSet<(lab_compiler::method::LocalId, lab_compiler::method::LocalId)>,
 ) -> Result<Vec<String>, ExecutionPlanBuildError> {
@@ -595,12 +507,12 @@ fn source_execution_nodes(
                     ),
                 });
             }
-            let (choice, _) = selected.get(owner).ok_or_else(|| {
+            let method = selected.get(owner).copied().ok_or_else(|| {
                 ExecutionPlanBuildError::InvalidExecutionDataflow {
                     message: format!("unknown selected method choice '{owner}'"),
                 }
             })?;
-            let port = choice
+            let port = method
                 .inputs
                 .iter()
                 .find(|port| port.name == *input)
@@ -617,12 +529,12 @@ fn source_execution_nodes(
             Ok(nodes)
         }
         PlanningValueSource::ChoiceOutput { choice, output } => {
-            let (_, candidate) = selected.get(choice).ok_or_else(|| {
+            let producer = selected.get(choice).copied().ok_or_else(|| {
                 ExecutionPlanBuildError::InvalidExecutionDataflow {
                     message: format!("unknown producer method choice '{choice}'"),
                 }
             })?;
-            let yielded = candidate
+            let yielded = producer
                 .yields
                 .iter()
                 .find(|yielded| yielded.output == *output)
@@ -644,10 +556,6 @@ fn source_execution_nodes(
 pub enum ExecutionPlanBuildError {
     #[error("adapter invocation plan is invalid: {0}")]
     InvalidInvocations(String),
-    #[error("planning problem is invalid: {0}")]
-    InvalidProblem(String),
-    #[error("adapter invocations do not project from the frozen planning problem")]
-    InvocationProblemMismatch,
     #[error("cannot derive the execution DAG: {message}")]
     InvalidExecutionDataflow { message: String },
     #[error("compiler-derived execution planning requires frozen compiler artifacts")]
@@ -755,5 +663,241 @@ fn render_set(values: &BTreeSet<String>) -> String {
         "none".to_owned()
     } else {
         values.iter().cloned().collect::<Vec<_>>().join(", ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lab_capability::{MethodId, OperationId};
+    use lab_compiler::method::{IntentOperationId, LocalId, PortType};
+    use lab_compiler::planning::{
+        PlanningMethodYield, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
+        SelectedMaterialBinding,
+    };
+
+    use super::*;
+
+    fn id(value: &str) -> LocalId {
+        LocalId::new(value).unwrap()
+    }
+
+    fn task(name: &str, inputs: Vec<PlanningTaskInput>) -> AllocatedProcedureTask {
+        AllocatedProcedureTask {
+            id: id(name),
+            operation: OperationId::new("https://example.org/operation").unwrap(),
+            program: None,
+            inputs,
+            outputs: vec![PlanningTaskOutput {
+                name: id("value"),
+                port_type: PortType::Design,
+            }],
+            parameters: Vec::new(),
+            materials: Vec::new(),
+            requirements: Vec::new(),
+        }
+    }
+
+    fn method(name: &str, tasks: Vec<AllocatedProcedureTask>) -> AllocatedMethod {
+        AllocatedMethod {
+            choice: id(name),
+            source_operation: IntentOperationId::new("example.intent").unwrap(),
+            method: MethodId::new(format!("https://example.org/method/{name}")).unwrap(),
+            after: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            yields: Vec::new(),
+            tasks,
+        }
+    }
+
+    fn input(source: PlanningValueSource) -> PlanningTaskInput {
+        PlanningTaskInput {
+            source,
+            port_type: PortType::Design,
+        }
+    }
+
+    fn task_nodes(methods: &[AllocatedMethod]) -> BTreeMap<LocalId, Vec<String>> {
+        methods
+            .iter()
+            .flat_map(|method| &method.tasks)
+            .map(|task| (task.id.clone(), vec![format!("node-{}", task.id)]))
+            .collect()
+    }
+
+    fn dependencies(
+        methods: &[AllocatedMethod],
+    ) -> Result<BTreeMap<LocalId, Vec<String>>, ExecutionPlanBuildError> {
+        execution_task_dependencies(methods, &task_nodes(methods))
+    }
+
+    #[test]
+    fn task_output_depends_on_the_local_producer() {
+        let methods = vec![method(
+            "choice",
+            vec![
+                task("produce", Vec::new()),
+                task(
+                    "consume",
+                    vec![input(PlanningValueSource::TaskOutput {
+                        task: id("produce"),
+                        output: id("value"),
+                    })],
+                ),
+            ],
+        )];
+
+        let dependencies = dependencies(&methods).unwrap();
+        assert!(dependencies[&id("produce")].is_empty());
+        assert_eq!(dependencies[&id("consume")], ["node-produce"]);
+    }
+
+    #[test]
+    fn choice_input_resolves_through_the_producer_yield() {
+        let mut producer = method("producer", vec![task("produce", Vec::new())]);
+        producer.outputs.push(PlanningPort {
+            name: id("result"),
+            port_type: PortType::Design,
+            source: None,
+        });
+        producer.yields.push(PlanningMethodYield {
+            output: id("result"),
+            source: PlanningValueSource::TaskOutput {
+                task: id("produce"),
+                output: id("value"),
+            },
+        });
+        let mut consumer = method(
+            "consumer",
+            vec![task(
+                "consume",
+                vec![input(PlanningValueSource::ChoiceInput {
+                    input: id("incoming"),
+                })],
+            )],
+        );
+        consumer.inputs.push(PlanningPort {
+            name: id("incoming"),
+            port_type: PortType::Design,
+            source: Some(PlanningValueSource::ChoiceOutput {
+                choice: id("producer"),
+                output: id("result"),
+            }),
+        });
+        let methods = vec![producer, consumer];
+
+        let dependencies = dependencies(&methods).unwrap();
+        assert_eq!(dependencies[&id("consume")], ["node-produce"]);
+    }
+
+    #[test]
+    fn after_depends_on_every_task_in_the_preceding_method() {
+        let producer = method(
+            "producer",
+            vec![task("produce-a", Vec::new()), task("produce-b", Vec::new())],
+        );
+        let mut consumer = method("consumer", vec![task("consume", Vec::new())]);
+        consumer.after.push(id("producer"));
+        let methods = vec![producer, consumer];
+
+        let dependencies = dependencies(&methods).unwrap();
+        assert_eq!(
+            dependencies[&id("consume")],
+            ["node-produce-a", "node-produce-b"]
+        );
+    }
+
+    #[test]
+    fn material_edge_releases_only_the_consuming_task() {
+        let producer = method(
+            "producer",
+            vec![task("produce-a", Vec::new()), task("produce-b", Vec::new())],
+        );
+        let mut material_consumer = task("consume-material", Vec::new());
+        material_consumer.materials.push(SelectedMaterialBinding {
+            input: id("sample"),
+            symbol: "sample".to_owned(),
+            source: SelectedMaterialSource::ChoiceOutput {
+                choice: id("producer"),
+            },
+            interchangeable_alternatives: Vec::new(),
+        });
+        let mut consumer = method(
+            "consumer",
+            vec![material_consumer, task("consume-other", Vec::new())],
+        );
+        consumer.after.push(id("producer"));
+        let methods = vec![producer, consumer];
+
+        let dependencies = dependencies(&methods).unwrap();
+        assert_eq!(
+            dependencies[&id("consume-material")],
+            ["node-produce-a", "node-produce-b"]
+        );
+        assert!(dependencies[&id("consume-other")].is_empty());
+    }
+
+    #[test]
+    fn unbound_choice_input_is_an_execution_root() {
+        let mut root = method(
+            "root",
+            vec![task(
+                "consume",
+                vec![input(PlanningValueSource::ChoiceInput {
+                    input: id("external"),
+                })],
+            )],
+        );
+        root.inputs.push(PlanningPort {
+            name: id("external"),
+            port_type: PortType::Design,
+            source: None,
+        });
+
+        let dependencies = dependencies(&[root]).unwrap();
+        assert!(dependencies[&id("consume")].is_empty());
+    }
+
+    #[test]
+    fn missing_task_and_choice_output_references_are_errors() {
+        let missing_task = vec![method(
+            "choice",
+            vec![task(
+                "consume",
+                vec![input(PlanningValueSource::TaskOutput {
+                    task: id("missing"),
+                    output: id("value"),
+                })],
+            )],
+        )];
+        assert!(matches!(
+            dependencies(&missing_task),
+            Err(ExecutionPlanBuildError::InvalidExecutionDataflow { message })
+                if message.contains("unknown task 'missing'")
+        ));
+
+        let producer = method("producer", vec![task("produce", Vec::new())]);
+        let mut consumer = method(
+            "consumer",
+            vec![task(
+                "consume",
+                vec![input(PlanningValueSource::ChoiceInput {
+                    input: id("incoming"),
+                })],
+            )],
+        );
+        consumer.inputs.push(PlanningPort {
+            name: id("incoming"),
+            port_type: PortType::Design,
+            source: Some(PlanningValueSource::ChoiceOutput {
+                choice: id("producer"),
+                output: id("missing"),
+            }),
+        });
+        assert!(matches!(
+            dependencies(&[producer, consumer]),
+            Err(ExecutionPlanBuildError::InvalidExecutionDataflow { message })
+                if message.contains("no selected output 'missing'")
+        ));
     }
 }

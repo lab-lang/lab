@@ -435,7 +435,6 @@ fn write_facility_plan(
     };
     let mut execution_plan = build_execution_plan_from_invocations(
         invocations,
-        problem,
         ExecutionPlanOptions {
             inventory_document: inventory_document.clone(),
             planning: Some(planning_reference),
