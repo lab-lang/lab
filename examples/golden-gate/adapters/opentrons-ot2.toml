@@ -3,7 +3,7 @@
 # The current lowerer still needs device-specific protocol, layout, and labware mappings. Every field has a checked default; this example writes them out to make that residual implementation boundary explicit.
 
 [protocol]
-api_level = "2.21"
+api_level = "2.20"
 
 # Facility-reviewed realization parameters for portable Procedure techniques.
 [techniques]
@@ -31,7 +31,7 @@ model = "p300_single_gen2"
 mount = "right"
 
 [deck.temperature_module]
-# PUDU uses Opentrons' generic load name, which resolves to Temperature Module GEN1.
+# Opentrons' generic load name resolves to Temperature Module GEN1.
 model = "temperature module"
 slot = "1"
 labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"

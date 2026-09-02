@@ -1,92 +1,23 @@
 /*!
- * Stages 2 and 3: assembled plasmids are introduced into competent cells by
- * heat shock, the recovered culture is serially diluted, and each dilution is
- * spotted onto selective agar.
+ * Stages 2 and 3: cotransform the three plasmids into DH5alpha, recover the
+ * cultures, serially dilute them, and spot the dilutions onto selective agar.
  */
 
 use std.lab.plasmid
 use golden_gate.designs.inventory
 use golden_gate.designs.strains
 
-/**
- * Build the GFP reporter in DH5alpha.
- *
- * Consumes the `composite_plasmid_1` material it transforms, so the compiler
- * knows this strain cannot be built before that plasmid exists. Returns the
- * strain and the selective plate it was recovered on.
- */
-workflow build_composite_strain_1(
-  composite_plasmid_1: Material<Plasmid>,
+workflow build_GVD_strain(
+  GVD0011: Material<Plasmid>,
+  GVD0013: Material<Plasmid>,
+  GVD0015: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
   plate: Material<Plate>,
 ):
-  dependencies = [composite_plasmid_1]
+  dependencies = [GVD0011, GVD0013, GVD0015]
   cells <- provision DH5alpha
-  strain, culture <- transform composite_strain_1 from dependencies into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return strain, plate
-
-/**
- * Build the RFP reporter in DH5alpha.
- *
- * Consumes the `composite_plasmid_2` material it transforms, so the compiler
- * knows this strain cannot be built before that plasmid exists. Returns the
- * strain and the selective plate it was recovered on.
- */
-workflow build_composite_strain_2(
-  composite_plasmid_2: Material<Plasmid>,
-) -> (
-  strain: Material<Strain>,
-  plate: Material<Plate>,
-):
-  dependencies = [composite_plasmid_2]
-  cells <- provision DH5alpha
-  strain, culture <- transform composite_strain_2 from dependencies into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return strain, plate
-
-/**
- * Build the GFP reporter in BL21.
- *
- * Consumes the `composite_plasmid_1` material it transforms, so the compiler
- * knows this strain cannot be built before that plasmid exists. Returns the
- * strain and the selective plate it was recovered on.
- */
-workflow build_composite_strain_3(
-  composite_plasmid_1: Material<Plasmid>,
-) -> (
-  strain: Material<Strain>,
-  plate: Material<Plate>,
-):
-  dependencies = [composite_plasmid_1]
-  cells <- provision BL21
-  strain, culture <- transform composite_strain_3 from dependencies into cells
-  culture <- recover culture for 1 h
-  culture <- dilute culture
-  plate <- plate culture on chloramphenicol
-  return strain, plate
-
-/**
- * Build the RFP reporter in BL21.
- *
- * Consumes the `composite_plasmid_2` material it transforms, so the compiler
- * knows this strain cannot be built before that plasmid exists. Returns the
- * strain and the selective plate it was recovered on.
- */
-workflow build_composite_strain_4(
-  composite_plasmid_2: Material<Plasmid>,
-) -> (
-  strain: Material<Strain>,
-  plate: Material<Plate>,
-):
-  dependencies = [composite_plasmid_2]
-  cells <- provision BL21
-  strain, culture <- transform composite_strain_4 from dependencies into cells
+  strain, culture <- transform GVD_strain from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   plate <- plate culture on chloramphenicol

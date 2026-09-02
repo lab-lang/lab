@@ -192,6 +192,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     for scheduled in preparations:
         preparation = scheduled["execution"]
         destinations = [reaction_plate[name] for name in preparation["reaction_wells"]]
+        dna_sources = []
         for dna_index, placement in enumerate(preparation["dna"]):
             source = dna_plate[placement["source_well"]]
             if placement["source_well"] not in loaded_dna:
@@ -202,7 +203,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                 )
                 source.load_liquid(liquid=dna, volume=placement["load_volume_ul"])
                 loaded_dna.add(placement["source_well"])
-            for destination in destinations:
+            dna_sources.append((placement, source))
+        for destination in destinations:
+            for placement, source in dna_sources:
                 small.pick_up_tip()
                 small.mix(
                     preparation["dna_mix_cycles"],

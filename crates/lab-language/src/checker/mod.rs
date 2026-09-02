@@ -638,7 +638,7 @@ mod tests {
                 else {
                     return None;
                 };
-                (name == "composite_plasmid_1").then(|| {
+                (name == "GVD0011").then(|| {
                     properties
                         .iter()
                         .find(|property| property.name == "components")

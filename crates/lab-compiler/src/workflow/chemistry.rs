@@ -27,8 +27,10 @@ pub(crate) const ASSEMBLY_CHEMISTRY_KEYS: &[&str] = &[
 
 /// Heat-shock transformation and plating parameters carried by a strain.
 pub(crate) const STRAIN_CHEMISTRY_KEYS: &[&str] = &[
+    "cell_aliquot_volume_ul",
     "cell_volume_ul",
     "dna_volume_ul",
+    "recovery_aliquot_volume_ul",
     "recovery_volume_ul",
     "cold_minutes",
     "heat_shock_temperature_c",

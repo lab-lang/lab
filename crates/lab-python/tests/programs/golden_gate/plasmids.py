@@ -1,13 +1,8 @@
-"""Two composite transcription units, each a promoter driving a fluorescent
-reporter through a shared RBS and terminator.
+"""Three plasmids for a single three-way cotransformation.
 
-Sequences are synthetic compiler fixtures, not qualified biological designs.
-Each composite sequence is exactly the concatenation of the parts listed
-under `components`, in that order, so the design stays true once the compiler
-computes an assembled sequence rather than taking one on trust.
-
-The reaction chemistry in each design is scientific intent and travels with
-the artifact; facility allocation determines where it physically happens.
+The sequences below are synthetic compiler fixtures, not qualified
+biological designs.
+Each sequence is exactly the concatenation of its declared parts.
 """
 
 import lab
@@ -19,88 +14,81 @@ from .inventory import B0015, B0034, GFP, J23101, J23106, RFP, BsaI, pSB1C3
 
 module = lab.Module("golden_gate.designs.plasmids", doc=__doc__)
 
-composite_plasmid_1_sequence = lab.Binding(
-    module=module,
-    name="composite_plasmid_1_sequence",
-    annotation="DNA",
-    value=dna(
-        "TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
-        "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
-    ),
-)
-module.declare(composite_plasmid_1_sequence)
-composite_plasmid_2_sequence = lab.Binding(
-    module=module,
-    name="composite_plasmid_2_sequence",
-    annotation="DNA",
-    value=dna(
-        "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGG"
-        "AGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
-    ),
-)
-module.declare(composite_plasmid_2_sequence)
 
-composite_plasmid_1 = Plasmid.build(
-    doc="""A GFP transcription unit in the pSB1C3 backbone.
+def sequence_binding(name: str, sequence: str) -> lab.Binding:
+    binding = lab.Binding(module=module, name=name, annotation="DNA", value=dna(sequence))
+    module.declare(binding)
+    return binding
 
-    J23101 drives GFP through the shared RBS and terminator, assembled by Golden
-    Gate with BsaI. Accepted only if the built sequence matches the design.
-    """,
-    sbol_identity="https://SBOL2Build.org/composite_plasmid_1",
-    sequence=composite_plasmid_1_sequence,
-    backbone=pSB1C3,
-    components=[J23101, B0034, GFP, B0015],
-    restriction_enzyme=BsaI,
-    assembly_replicates=1,
-    reaction_volume=20 * uL,
-    part_volume=2 * uL,
-    enzyme_volume=2 * uL,
-    ligase_volume=4 * uL,
-    buffer_volume=2 * uL,
-    assembly_cycles=75,
-    digest_temperature=42 * C,
-    digest_duration=2 * minutes,
-    ligate_temperature=16 * C,
-    ligate_duration=5 * minutes,
-    lid_temperature=42 * C,
-    final_digest_temperature=60 * C,
-    final_digest_duration=10 * minutes,
-    heat_inactivation_temperature=80 * C,
-    heat_inactivation_duration=10 * minutes,
-    hold_temperature=4 * C,
-    require=[lambda plasmid: plasmid.topology == circular],
-    accept=[lambda plasmid: plasmid.sequence == plasmid.design.sequence],
+
+GVD0011_sequence = sequence_binding(
+    "GVD0011_sequence",
+    "TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
+    "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG",
+)
+GVD0013_sequence = sequence_binding(
+    "GVD0013_sequence",
+    "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGG"
+    "AGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG",
+)
+GVD0015_sequence = sequence_binding(
+    "GVD0015_sequence",
+    "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
+    "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG",
 )
 
-composite_plasmid_2 = Plasmid.build(
-    doc="""An RFP transcription unit in the pSB1C3 backbone.
 
-    Identical in construction to `composite_plasmid_1` but driven by the weaker
-    J23106 promoter, so the panel reports two promoter strengths against two
-    reporters.
-    """,
-    sbol_identity="https://SBOL2Build.org/composite_plasmid_2",
-    sequence=composite_plasmid_2_sequence,
-    backbone=pSB1C3,
-    components=[J23106, B0034, RFP, B0015],
-    restriction_enzyme=BsaI,
-    assembly_replicates=1,
-    reaction_volume=20 * uL,
-    part_volume=2 * uL,
-    enzyme_volume=2 * uL,
-    ligase_volume=4 * uL,
-    buffer_volume=2 * uL,
-    assembly_cycles=75,
-    digest_temperature=42 * C,
-    digest_duration=2 * minutes,
-    ligate_temperature=16 * C,
-    ligate_duration=5 * minutes,
-    lid_temperature=42 * C,
-    final_digest_temperature=60 * C,
-    final_digest_duration=10 * minutes,
-    heat_inactivation_temperature=80 * C,
-    heat_inactivation_duration=10 * minutes,
-    hold_temperature=4 * C,
-    require=[lambda plasmid: plasmid.topology == circular],
-    accept=[lambda plasmid: plasmid.sequence == plasmid.design.sequence],
+def build_plasmid(
+    name: str,
+    documentation: str,
+    sequence: lab.Binding,
+    components: list[object],
+) -> lab.BuildDeclaration[Plasmid]:
+    return Plasmid.build(
+        name=name,
+        doc=documentation,
+        sbol_identity=f"https://SBOL2Build.org/{name}",
+        sequence=sequence,
+        backbone=pSB1C3,
+        components=components,
+        restriction_enzyme=BsaI,
+        assembly_replicates=1,
+        reaction_volume=25 * uL,
+        part_volume=2 * uL,
+        enzyme_volume=2 * uL,
+        ligase_volume=4 * uL,
+        buffer_volume=2 * uL,
+        assembly_cycles=75,
+        digest_temperature=42 * C,
+        digest_duration=2 * minutes,
+        ligate_temperature=16 * C,
+        ligate_duration=5 * minutes,
+        lid_temperature=42 * C,
+        final_digest_temperature=60 * C,
+        final_digest_duration=10 * minutes,
+        heat_inactivation_temperature=80 * C,
+        heat_inactivation_duration=10 * minutes,
+        hold_temperature=4 * C,
+        require=[lambda plasmid: plasmid.topology == circular],
+        accept=[lambda plasmid: plasmid.sequence == plasmid.design.sequence],
+    )
+
+
+GVD0011 = build_plasmid(
+    "GVD0011",
+    "Synthetic Golden Gate fixture named `GVD0011`.",
+    GVD0011_sequence,
+    [J23101, B0034, GFP, B0015],
+)
+GVD0013 = build_plasmid(
+    "GVD0013",
+    "Synthetic Golden Gate fixture named `GVD0013`.",
+    GVD0013_sequence,
+    [J23106, B0034, RFP, B0015],
+)
+GVD0015 = build_plasmid(
+    "GVD0015",
+    "Synthetic Golden Gate fixture named `GVD0015`.",
+    GVD0015_sequence,
+    [J23106, B0034, GFP, B0015],
 )

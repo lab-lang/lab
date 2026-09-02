@@ -59,18 +59,20 @@ class Plasmid(ArtifactKind, LabType):
 class Strain(ArtifactKind, LabType):
     """What heat-shock transformation and plating need to build a strain.
 
-    Properties: cell_volume?: Quantity<uL>, cold_incubation?: Quantity<min>, colony_volume?:
-    Quantity<uL>, culture_volume?: Quantity<uL>, dna_volume?: Quantity<uL>,
-    heat_shock_duration?: Quantity<min>, heat_shock_temperature?: Quantity<C>,
-    medium_volume?: Quantity<uL>, plating_replicates?: Integer, recovery_duration?:
-    Quantity<min>, recovery_temperature?: Quantity<C>, recovery_volume?: Quantity<uL>,
-    serial_dilutions?: Integer, transformation_replicates?: Integer.
+    Properties: cell_aliquot_volume?: Quantity<uL>, cell_volume?: Quantity<uL>,
+    cold_incubation?: Quantity<min>, colony_volume?: Quantity<uL>, culture_volume?:
+    Quantity<uL>, dna_volume?: Quantity<uL>, heat_shock_duration?: Quantity<min>,
+    heat_shock_temperature?: Quantity<C>, medium_volume?: Quantity<uL>, plating_replicates?:
+    Integer, recovery_aliquot_volume?: Quantity<uL>, recovery_duration?: Quantity<min>,
+    recovery_temperature?: Quantity<C>, recovery_volume?: Quantity<uL>, serial_dilutions?:
+    Integer, transformation_replicates?: Integer.
     """
 
     word = "strain"
     uses = ("std.bio.designs", "std.bio.golden_gate")
     __lab_uses__ = ("std.bio.designs", "std.bio.golden_gate")
     properties = (
+        "cell_aliquot_volume",
         "cell_volume",
         "cold_incubation",
         "colony_volume",
@@ -80,6 +82,7 @@ class Strain(ArtifactKind, LabType):
         "heat_shock_temperature",
         "medium_volume",
         "plating_replicates",
+        "recovery_aliquot_volume",
         "recovery_duration",
         "recovery_temperature",
         "recovery_volume",

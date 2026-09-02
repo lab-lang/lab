@@ -38,8 +38,10 @@ artifact Plasmid:
 
 /** What heat-shock transformation and plating need to build a strain. */
 artifact Strain:
+  cell_aliquot_volume?: Quantity<uL>
   cell_volume?: Quantity<uL>
   dna_volume?: Quantity<uL>
+  recovery_aliquot_volume?: Quantity<uL>
   recovery_volume?: Quantity<uL>
   heat_shock_duration?: Quantity<min>
   medium_volume?: Quantity<uL>

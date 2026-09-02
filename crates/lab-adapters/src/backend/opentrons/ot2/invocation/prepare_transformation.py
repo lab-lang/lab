@@ -131,6 +131,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         new_tip="once",
     )
 
+    dna_sources = []
     for dna_index, placement in enumerate(execution["dna"]):
         source = dna_plate[placement["source_well"]]
         dna_liquid = protocol.define_liquid(
@@ -139,7 +140,12 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             display_color="#9370DB",
         )
         source.load_liquid(liquid=dna_liquid, volume=placement["load_volume_ul"])
-        for destination in reactions:
+        dna_sources.append((placement, source))
+
+    # Complete one cotransformation well before moving to the next replicate.
+    # This keeps every plasmid addition for a replicate contiguous in the trace.
+    for destination in reactions:
+        for placement, source in dna_sources:
             small.pick_up_tip()
             small.mix(
                 execution["dna_mix_cycles"],

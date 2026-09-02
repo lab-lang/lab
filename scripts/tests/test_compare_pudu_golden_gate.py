@@ -110,7 +110,7 @@ Dropping tip into Trash Bin on slot 12
             ),
         )
 
-    def test_additional_fresh_tip_boundary_is_a_safe_refinement(self) -> None:
+    def test_additional_fresh_tip_boundary_is_not_exactly_equivalent(self) -> None:
         pudu = """\
 Picking up tip from A1 of Opentrons OT-2 96 Filter Tip Rack 200 µL on slot 1
 Aspirating 20.0 uL from A1 of Opentrons 15 Tube Rack with Falcon 15 mL Conical on slot 4 at 92.86 uL/sec
@@ -136,7 +136,7 @@ Dropping tip into Trash Bin on slot 12
             comparison.normalize_liquid_trace(lab, stage="plating")
         )
 
-        self.assertTrue(comparison.robot_actions_equivalent(pudu_actions, lab_actions))
+        self.assertFalse(comparison.robot_actions_equivalent(pudu_actions, lab_actions))
         self.assertFalse(comparison.robot_actions_equivalent(lab_actions, pudu_actions))
         self.assertEqual(pudu_actions["tips_used"], 1)
         self.assertEqual(lab_actions["tips_used"], 2)

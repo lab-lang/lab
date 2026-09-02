@@ -3,34 +3,14 @@ use golden_gate.workflows.assemble
 use golden_gate.workflows.build_strains
 
 /**
- * Build the four-strain reporter panel.
- *
- * The runnable entry point. It calls the workflows that make up the panel; the
- * compiler derives the build order from the material each call consumes rather
- * than from the order written here.
+ * Assemble all three GVD plasmids, then perform their three-replicate DH5alpha
+ * cotransformation as one lineage-preserving workflow.
  */
-workflow main() -> (
-  strain_1: Material<Strain>,
-  strain_2: Material<Strain>,
-  strain_3: Material<Strain>,
-  strain_4: Material<Strain>,
-):
-  composite_plasmid_1 <- assemble_composite_plasmid_1
-  composite_plasmid_2 <- assemble_composite_plasmid_2
+workflow main() -> Material<Strain>:
+  GVD0011 <- assemble_GVD0011
+  GVD0013 <- assemble_GVD0013
+  GVD0015 <- assemble_GVD0015
 
-  // Each plasmid goes into two chassis. Material is affine, so a transformation
-  // consumes an aliquot of its own rather than the same value twice.
-  for_dh5alpha_1, for_bl21_1 <- split composite_plasmid_1
-  for_dh5alpha_2, for_bl21_2 <- split composite_plasmid_2
-
-  strain_1, plate_1 <- build_composite_strain_1 for_dh5alpha_1
-  strain_2, plate_2 <- build_composite_strain_2 for_dh5alpha_2
-  strain_3, plate_3 <- build_composite_strain_3 for_bl21_1
-  strain_4, plate_4 <- build_composite_strain_4 for_bl21_2
-
-  <- dispose plate_1
-  <- dispose plate_2
-  <- dispose plate_3
-  <- dispose plate_4
-
-  return strain_1, strain_2, strain_3, strain_4
+  strain, plate <- build_GVD_strain GVD0011 GVD0013 GVD0015
+  <- dispose plate
+  return strain

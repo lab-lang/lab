@@ -1,29 +1,16 @@
-/*!
- * Stage 1 of the Golden Gate workflow: parts and backbone are cut and ligated
- * into a circular product.
- */
+/*! Stage 1: assemble the three plasmids consumed by the transformation. */
 
 use std.bio.build
 use golden_gate.designs.plasmids
 
-/**
- * Assemble the GFP reporter plasmid.
- *
- * Returns the plasmid it produces and takes no material input, so the compiler
- * places this build ahead of everything that consumes the plasmid without any
- * declared order.
- */
-workflow assemble_composite_plasmid_1() -> Material<Plasmid>:
-  product <- realize composite_plasmid_1
+workflow assemble_GVD0011() -> Material<Plasmid>:
+  product <- realize GVD0011
   return product
 
-/**
- * Assemble the RFP reporter plasmid.
- *
- * The companion to `assemble_composite_plasmid_1`, differing only in the
- * design it realizes. The two builds share no material and may run in either
- * order.
- */
-workflow assemble_composite_plasmid_2() -> Material<Plasmid>:
-  product <- realize composite_plasmid_2
+workflow assemble_GVD0013() -> Material<Plasmid>:
+  product <- realize GVD0013
+  return product
+
+workflow assemble_GVD0015() -> Material<Plasmid>:
+  product <- realize GVD0015
   return product

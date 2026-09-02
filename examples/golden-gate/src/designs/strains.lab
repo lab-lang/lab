@@ -1,13 +1,6 @@
 /*!
- * Four engineered organisms: each composite plasmid in each of two chassis.
- *
- * The same plasmid appearing in two strains is the point. A strain is its own
- * artifact, so DH5alpha carrying composite_plasmid_1 and BL21 carrying the same
- * plasmid are two distinct things to build, accept, and store. Neither is a
- * property of the plasmid.
- *
- * The heat-shock and plating parameters are shared across all four, because one
- * robot run holds every strain in a single thermocycler block.
+ * A single cotransformation in which DH5alpha receives all three GVD plasmids
+ * in each of three replicate wells.
  */
 
 use std.bio.designs
@@ -16,72 +9,20 @@ use std.bio.golden_gate
 use golden_gate.designs.inventory
 use golden_gate.designs.plasmids
 
-/** The GFP reporter carried in the DH5alpha cloning strain. */
-build strain composite_strain_1:
-  sbol_identity = "https://SBOL2Build.org/composite_strain_1"
+/** DH5alpha cotransformed with GVD0011, GVD0013, and GVD0015. */
+build strain GVD_strain:
+  sbol_identity = "https://SBOL2Build.org/GVD_strain"
   chassis = DH5alpha
-  plasmids = [composite_plasmid_1]
+  plasmids = [GVD0011, GVD0013, GVD0015]
   selection = chloramphenicol
-  transformation_replicates = 2
+  transformation_replicates = 3
   plating_replicates = 1
   serial_dilutions = 2
 
+  cell_aliquot_volume = 150 uL
   cell_volume = 20 uL
-  dna_volume = 2 uL
-  recovery_volume = 60 uL
-  heat_shock_duration = 1 min
-  medium_volume = 18 uL
-  culture_volume = 2 uL
-  colony_volume = 4 uL
-
-/** The RFP reporter carried in the DH5alpha cloning strain. */
-build strain composite_strain_2:
-  sbol_identity = "https://SBOL2Build.org/composite_strain_2"
-  chassis = DH5alpha
-  plasmids = [composite_plasmid_2]
-  selection = chloramphenicol
-  transformation_replicates = 2
-  plating_replicates = 1
-  serial_dilutions = 2
-
-  cell_volume = 20 uL
-  dna_volume = 2 uL
-  recovery_volume = 60 uL
-  heat_shock_duration = 1 min
-  medium_volume = 18 uL
-  culture_volume = 2 uL
-  colony_volume = 4 uL
-
-/** The GFP reporter carried in the BL21 expression strain. */
-build strain composite_strain_3:
-  sbol_identity = "https://SBOL2Build.org/composite_strain_3"
-  chassis = BL21
-  plasmids = [composite_plasmid_1]
-  selection = chloramphenicol
-  transformation_replicates = 2
-  plating_replicates = 1
-  serial_dilutions = 2
-
-  cell_volume = 20 uL
-  dna_volume = 2 uL
-  recovery_volume = 60 uL
-  heat_shock_duration = 1 min
-  medium_volume = 18 uL
-  culture_volume = 2 uL
-  colony_volume = 4 uL
-
-/** The RFP reporter carried in the BL21 expression strain. */
-build strain composite_strain_4:
-  sbol_identity = "https://SBOL2Build.org/composite_strain_4"
-  chassis = BL21
-  plasmids = [composite_plasmid_2]
-  selection = chloramphenicol
-  transformation_replicates = 2
-  plating_replicates = 1
-  serial_dilutions = 2
-
-  cell_volume = 20 uL
-  dna_volume = 2 uL
+  dna_volume = 5 uL
+  recovery_aliquot_volume = 1200 uL
   recovery_volume = 60 uL
   heat_shock_duration = 1 min
   medium_volume = 18 uL

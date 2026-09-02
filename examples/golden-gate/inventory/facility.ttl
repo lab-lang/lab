@@ -409,12 +409,6 @@ canvas:DH5alpha
     sbol:hasNamespace <https://sbolcanvas.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
-canvas:BL21
-    a sbol:Component ;
-    sbol:displayId "BL21" ;
-    sbol:hasNamespace <https://sbolcanvas.org> ;
-    sbol:type <https://identifiers.org/SBO:0000241> .
-
 materials:chloramphenicol
     a sbol:Component ;
     sbol:displayId "chloramphenicol" ;
@@ -427,39 +421,27 @@ materials:reference_gfp
     sbol:hasNamespace <https://example.org/golden-gate/materials> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-build:composite_plasmid_1
+build:GVD0011
     a sbol:Component ;
-    sbol:displayId "composite_plasmid_1" ;
+    sbol:displayId "GVD0011" ;
     sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-build:composite_plasmid_2
+build:GVD0013
     a sbol:Component ;
-    sbol:displayId "composite_plasmid_2" ;
+    sbol:displayId "GVD0013" ;
     sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-build:composite_strain_1
+build:GVD0015
     a sbol:Component ;
-    sbol:displayId "composite_strain_1" ;
+    sbol:displayId "GVD0015" ;
     sbol:hasNamespace <https://SBOL2Build.org> ;
-    sbol:type <https://identifiers.org/SBO:0000241> .
+    sbol:type <https://identifiers.org/SBO:0000251> .
 
-build:composite_strain_2
+build:GVD_strain
     a sbol:Component ;
-    sbol:displayId "composite_strain_2" ;
-    sbol:hasNamespace <https://SBOL2Build.org> ;
-    sbol:type <https://identifiers.org/SBO:0000241> .
-
-build:composite_strain_3
-    a sbol:Component ;
-    sbol:displayId "composite_strain_3" ;
-    sbol:hasNamespace <https://SBOL2Build.org> ;
-    sbol:type <https://identifiers.org/SBO:0000241> .
-
-build:composite_strain_4
-    a sbol:Component ;
-    sbol:displayId "composite_strain_4" ;
+    sbol:displayId "GVD_strain" ;
     sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
@@ -600,16 +582,6 @@ lots:DH5alpha_lot
     sbol:displayId "DH5alpha_lot" ;
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:DH5alpha ;
-    fac:materialKind inv:BacterialStock ;
-    fac:facility ex:facility ;
-    fac:locatedIn ex:stock_storage ;
-    fac:isActive true .
-
-lots:BL21_lot
-    a sbol:Implementation ;
-    sbol:displayId "BL21_lot" ;
-    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
-    sbol:built canvas:BL21 ;
     fac:materialKind inv:BacterialStock ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;

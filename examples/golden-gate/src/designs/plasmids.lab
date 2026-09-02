@@ -1,14 +1,9 @@
 /*!
- * Two composite transcription units, each a promoter driving a fluorescent
- * reporter through a shared RBS and terminator.
+ * Three plasmids for a single three-way cotransformation.
  *
- * Sequences are synthetic compiler fixtures, not qualified biological designs.
- * Each composite sequence is exactly the concatenation of the parts listed
- * under `components`, in that order, so the design stays true once the compiler
- * computes an assembled sequence rather than taking one on trust.
- *
- * The reaction chemistry in each design is scientific intent and travels with
- * the artifact; facility allocation determines where it physically happens.
+ * The sequences below are synthetic compiler fixtures, not qualified
+ * biological designs.
+ * Each sequence is exactly the concatenation of its declared parts.
  */
 
 use std.bio.designs
@@ -16,24 +11,22 @@ use std.bio.golden_gate
 
 use golden_gate.designs.inventory
 
-composite_plasmid_1_sequence: DNA = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
-composite_plasmid_2_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+GVD0011_sequence: DNA = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+GVD0013_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
+GVD0015_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
 
-/**
- * A GFP transcription unit in the pSB1C3 backbone.
- *
- * J23101 drives GFP through the shared RBS and terminator, assembled by Golden
- * Gate with BsaI. Accepted only if the built sequence matches the design.
- */
-build plasmid composite_plasmid_1:
-  sbol_identity = "https://SBOL2Build.org/composite_plasmid_1"
-  sequence = composite_plasmid_1_sequence
+/** Synthetic Golden Gate fixture named `GVD0011`. */
+build plasmid GVD0011:
+  sbol_identity = "https://SBOL2Build.org/GVD0011"
+  sequence = GVD0011_sequence
   backbone = pSB1C3
   components = [J23101, B0034, GFP, B0015]
   restriction_enzyme = BsaI
   assembly_replicates = 1
 
-  reaction_volume = 20 uL
+  // Producing a 25 uL assembly preserves the available-volume contract at the
+  // transformation handoff.
+  reaction_volume = 25 uL
   part_volume = 2 uL
   enzyme_volume = 2 uL
   ligase_volume = 4 uL
@@ -53,22 +46,45 @@ build plasmid composite_plasmid_1:
   require topology == circular
   accept sequence == design.sequence
 
-/**
- * An RFP transcription unit in the pSB1C3 backbone.
- *
- * Identical in construction to `composite_plasmid_1` but driven by the weaker
- * J23106 promoter, so the panel reports two promoter strengths against two
- * reporters.
- */
-build plasmid composite_plasmid_2:
-  sbol_identity = "https://SBOL2Build.org/composite_plasmid_2"
-  sequence = composite_plasmid_2_sequence
+/** Synthetic Golden Gate fixture named `GVD0013`. */
+build plasmid GVD0013:
+  sbol_identity = "https://SBOL2Build.org/GVD0013"
+  sequence = GVD0013_sequence
   backbone = pSB1C3
   components = [J23106, B0034, RFP, B0015]
   restriction_enzyme = BsaI
   assembly_replicates = 1
 
-  reaction_volume = 20 uL
+  reaction_volume = 25 uL
+  part_volume = 2 uL
+  enzyme_volume = 2 uL
+  ligase_volume = 4 uL
+  buffer_volume = 2 uL
+  assembly_cycles = 75
+  digest_temperature = 42 C
+  digest_duration = 2 min
+  ligate_temperature = 16 C
+  ligate_duration = 5 min
+  lid_temperature = 42 C
+  final_digest_temperature = 60 C
+  final_digest_duration = 10 min
+  heat_inactivation_temperature = 80 C
+  heat_inactivation_duration = 10 min
+  hold_temperature = 4 C
+
+  require topology == circular
+  accept sequence == design.sequence
+
+/** Synthetic Golden Gate fixture named `GVD0015`. */
+build plasmid GVD0015:
+  sbol_identity = "https://SBOL2Build.org/GVD0015"
+  sequence = GVD0015_sequence
+  backbone = pSB1C3
+  components = [J23106, B0034, GFP, B0015]
+  restriction_enzyme = BsaI
+  assembly_replicates = 1
+
+  reaction_volume = 25 uL
   part_volume = 2 uL
   enzyme_volume = 2 uL
   ligase_volume = 4 uL

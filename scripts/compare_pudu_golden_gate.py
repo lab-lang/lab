@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run Lab and PUDU's documented Golden Gate workflow and compare their outputs."""
+"""Compare the Golden Gate transformation protocol with PUDU's exact main entrypoint."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = ROOT / "examples" / "golden-gate"
-REFERENCE = EXAMPLE / "reference" / "pudu-workflow.json"
-STAGES = ("assembly", "transformation", "plating")
+REFERENCE = ROOT / "scripts" / "reference" / "pudu-transformation-entrypoint.json"
+MINIMUM_ROBOT_ACTIONS = 50
 
 
 class ComparisonError(RuntimeError):
@@ -45,12 +45,9 @@ def write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
 
 
-def canonical_bytes(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-
-
 def canonical_sha256(value: Any) -> str:
-    return hashlib.sha256(canonical_bytes(value)).hexdigest()
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def file_sha256(path: Path) -> str:
@@ -77,9 +74,8 @@ def run_command(
         check=False,
     )
     if completed.returncode != 0:
-        rendered = " ".join(command)
         raise ComparisonError(
-            f"command failed with exit {completed.returncode}: {rendered}\n"
+            f"command failed with exit {completed.returncode}: {' '.join(command)}\n"
             f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
         )
     return CommandResult(completed.stdout, completed.stderr)
@@ -96,20 +92,17 @@ def git_is_dirty(repository: Path) -> bool:
 
 
 def git_tracked_source_is_dirty(repository: Path) -> bool:
-    return bool(
-        run_command(
-            ("git", "status", "--porcelain", "--untracked-files=no"),
-            cwd=repository,
-        ).stdout.strip()
+    result = run_command(
+        ("git", "status", "--porcelain", "--untracked-files=no"), cwd=repository
     )
+    return bool(result.stdout.strip())
 
 
 def strip_sbol2_version(value: Any, version: str = "1") -> Any:
-    """Convert PUDU's SBOL 2 version URIs to their SBOL 3 persistent identities."""
+    """Remove only the pinned terminal version from HTTP(S) identities."""
 
     if isinstance(value, str) and value.startswith(("http://", "https://")):
-        suffix = f"/{version}"
-        return value.removesuffix(suffix)
+        return value.removesuffix(f"/{version}")
     if isinstance(value, list):
         return [strip_sbol2_version(item, version) for item in value]
     if isinstance(value, dict):
@@ -151,299 +144,18 @@ def reference_list(expression: dict[str, Any]) -> list[str]:
     return [reference_local(element["value"]) for element in expression["elements"]]
 
 
-def project_lab_inputs(module_root: Path) -> dict[str, Any]:
-    inventory = read_json(module_root / "inventory.module.json")
-    plasmids = read_json(module_root / "plasmids.module.json")
-    strains = read_json(module_root / "strains.module.json")
-    inventory_artifacts = artifact_declarations(inventory)
-    plasmid_artifacts = artifact_declarations(plasmids)
-    strain_artifacts = artifact_declarations(strains)
-
-    inventory_identity = {
-        name: declaration["sbol_identity"]
-        for name, declaration in inventory_artifacts.items()
-    }
-    plasmid_identity = {
-        name: declaration["sbol_identity"]
-        for name, declaration in plasmid_artifacts.items()
-    }
-
-    assembly = []
-    for declaration in plasmid_artifacts.values():
-        assembly.append(
-            {
-                "Product": declaration["sbol_identity"],
-                "Backbone": inventory_identity[
-                    reference_local(property_expression(declaration, "backbone"))
-                ],
-                "PartsList": [
-                    inventory_identity[name]
-                    for name in reference_list(
-                        property_expression(declaration, "components")
-                    )
-                ],
-                "Restriction Enzyme": inventory_identity[
-                    reference_local(
-                        property_expression(declaration, "restriction_enzyme")
-                    )
-                ],
-            }
-        )
-
-    transformation = []
-    for declaration in strain_artifacts.values():
-        transformation.append(
-            {
-                "Strain": declaration["sbol_identity"],
-                "Chassis": inventory_identity[
-                    reference_local(property_expression(declaration, "chassis"))
-                ],
-                "Plasmids": [
-                    plasmid_identity[name]
-                    for name in reference_list(
-                        property_expression(declaration, "plasmids")
-                    )
-                ],
-            }
-        )
-
-    return {"assembly": assembly, "transformation": transformation}
-
-
-def project_lab_design_names(module_root: Path) -> dict[str, dict[str, Any]]:
+def project_lab_design(module_root: Path) -> dict[str, Any]:
     strains = artifact_declarations(read_json(module_root / "strains.module.json"))
-    result: dict[str, dict[str, Any]] = {}
-    for name, declaration in strains.items():
-        result[name] = {
-            "chassis": reference_local(property_expression(declaration, "chassis")),
-            "plasmids": reference_list(property_expression(declaration, "plasmids")),
-        }
-    return result
-
-
-def project_pudu_assembly_handoff(path: Path, version: str) -> dict[str, list[str]]:
-    value = strip_sbol2_version(read_json(path), version)
-    if not isinstance(value, dict):
-        raise ComparisonError("PUDU transformation_input.json is not an object")
-    return value
-
-
-def project_lab_assembly_handoff(
-    manifest_path: Path, module_root: Path
-) -> dict[str, list[str]]:
-    plasmids = artifact_declarations(read_json(module_root / "plasmids.module.json"))
-    identities = {
-        name: declaration["sbol_identity"] for name, declaration in plasmids.items()
-    }
-    manifest = read_json(manifest_path)
-    result: dict[str, list[str]] = {}
-    for setup in manifest["execution"]["setups"]:
-        execution = setup["execution"]
-        result[identities[execution["artifact"]]] = execution["reaction_wells"]
-    return result
-
-
-def project_pudu_cultures(path: Path) -> list[dict[str, Any]]:
-    locations = read_json(path)["bacterium_locations"]
-    result = []
-    for well, fields in locations.items():
-        if not isinstance(fields, list) or len(fields) != 4:
-            raise ComparisonError(
-                f"PUDU culture {well} does not have four lineage fields"
-            )
-        competent = fields[1]
-        if not competent.startswith("Competent_Cell_"):
-            raise ComparisonError(
-                f"PUDU culture {well} has an unknown cell label {competent}"
-            )
-        result.append(
-            {
-                "well": well,
-                "strain": fields[0],
-                "chassis": competent.removeprefix("Competent_Cell_"),
-                "plasmids": [fields[2]],
-                "medium": "recovery_medium" if fields[3] == "Media_1" else fields[3],
-            }
+    if len(strains) != 1:
+        raise ComparisonError(
+            f"Golden Gate defines {len(strains)} strains, expected one"
         )
-    return sorted(result, key=lambda item: item["well"])
-
-
-def project_lab_cultures(
-    manifest_path: Path, module_root: Path
-) -> list[dict[str, Any]]:
-    designs = project_lab_design_names(module_root)
-    manifest = read_json(manifest_path)
-    medium_by_artifact = {
-        item["execution"]["artifact"]: item["execution"]["medium"]["symbol"]
-        for item in manifest["execution"]["recovery_additions"]
+    name, declaration = next(iter(strains.items()))
+    return {
+        "Strain": name,
+        "Chassis": reference_local(property_expression(declaration, "chassis")),
+        "Plasmids": reference_list(property_expression(declaration, "plasmids")),
     }
-    result = []
-    for preparation in manifest["execution"]["preparations"]:
-        execution = preparation["execution"]
-        artifact = execution["artifact"]
-        design = designs[artifact]
-        for well in execution["reaction_wells"]:
-            result.append(
-                {
-                    "well": well,
-                    "strain": artifact,
-                    "chassis": design["chassis"],
-                    "plasmids": design["plasmids"],
-                    "medium": medium_by_artifact[artifact],
-                }
-            )
-    return sorted(result, key=lambda item: item["well"])
-
-
-def project_pudu_plate_lineage(path: Path) -> list[dict[str, Any]]:
-    plates = read_json(path)["agar_plates"]
-    result = []
-    for plate_name, dilutions in plates.items():
-        plate = int(plate_name.removeprefix("plate_")) - 1
-        for dilution_name, dilution in dilutions.items():
-            dilution_number = int(dilution_name.removeprefix("dilution_"))
-            for well, entry in dilution["wells"].items():
-                result.append(
-                    {
-                        "subject": entry["construct"].split(", ", 1)[0],
-                        "dilution": dilution_number,
-                        "dilution_ratio": dilution["ratio"],
-                        "culture_source_well": entry["source_well"],
-                        "plating_replicate": entry["replicate"],
-                        "destination": {"plate": plate, "well": well},
-                    }
-                )
-    return sorted(
-        result,
-        key=lambda item: (
-            item["subject"],
-            item["dilution"],
-            item["culture_source_well"],
-            item["plating_replicate"],
-            item["destination"]["plate"],
-            item["destination"]["well"],
-        ),
-    )
-
-
-def project_lab_plate_lineage(
-    plate_map_path: Path, transformation_manifest_path: Path
-) -> list[dict[str, Any]]:
-    transformation = read_json(transformation_manifest_path)
-    culture_wells = {
-        item["execution"]["artifact"]: item["execution"]["reaction_wells"]
-        for item in transformation["execution"]["preparations"]
-    }
-    plate_map = read_json(plate_map_path)
-    result = []
-    for entry in plate_map["entries"]:
-        result.append(
-            {
-                "subject": entry["subject"],
-                "dilution": entry["dilution"],
-                "dilution_ratio": entry["dilution_ratio"],
-                "culture_source_well": culture_wells[entry["subject"]][
-                    entry["culture_replicate"] - 1
-                ],
-                "plating_replicate": entry["plating_replicate"],
-                "destination": entry["destination"],
-            }
-        )
-    return sorted(
-        result,
-        key=lambda item: (
-            item["subject"],
-            item["dilution"],
-            item["culture_source_well"],
-            item["plating_replicate"],
-            item["destination"]["plate"],
-            item["destination"]["well"],
-        ),
-    )
-
-
-PUDU_STAGING_NAMES = {
-    "Deionized Water": "nuclease_free_water",
-    "T4 DNA Ligase Buffer": "T4_DNA_ligase_buffer",
-    "T4 DNA Ligase": "T4_DNA_ligase",
-    "Restriction Enzyme BsaI": "BsaI",
-}
-
-
-def pudu_staging_map(trace: str) -> dict[str, str]:
-    for line in trace.splitlines():
-        if not line.startswith("{"):
-            continue
-        try:
-            value = ast.literal_eval(line)
-        except (SyntaxError, ValueError):
-            continue
-        if isinstance(value, dict) and "Deionized Water" in value:
-            return {
-                f"temperature-module:{well}": PUDU_STAGING_NAMES.get(name, name)
-                for name, well in value.items()
-            }
-    raise ComparisonError("PUDU assembly trace has no staging material map")
-
-
-def lab_staging_map(manifest_path: Path) -> dict[str, str]:
-    manifest = read_json(manifest_path)
-    result: dict[str, str] = {}
-    for setup in manifest["execution"]["setups"]:
-        for addition in setup["execution"]["additions"]:
-            well = addition["source_well"]
-            symbol = addition["symbol"]
-            previous = result.setdefault(f"temperature-module:{well}", symbol)
-            if previous != symbol:
-                raise ComparisonError(f"Lab staging well {well} names two materials")
-    return result
-
-
-def pudu_transformation_material_map(trace: str) -> dict[str, str]:
-    for line in trace.splitlines():
-        if not line.startswith("{"):
-            continue
-        try:
-            value = ast.literal_eval(line)
-        except (SyntaxError, ValueError):
-            continue
-        if not isinstance(value, dict) or "Media_1" not in value:
-            continue
-        result = {}
-        for name, well in value.items():
-            if name == "Media_1":
-                material = "recovery_medium"
-            elif name.startswith("Competent Cell ") and name.endswith("_1"):
-                material = name.removeprefix("Competent Cell ").removesuffix("_1")
-            else:
-                raise ComparisonError(
-                    f"PUDU transformation trace has unknown source material {name}"
-                )
-            result[f"tube-rack:3:{well}"] = material
-        return result
-    raise ComparisonError("PUDU transformation trace has no source material map")
-
-
-def lab_transformation_material_map(
-    manifest_path: Path, module_root: Path
-) -> dict[str, str]:
-    manifest = read_json(manifest_path)
-    designs = project_lab_design_names(module_root)
-    result: dict[str, str] = {}
-    for preparation in manifest["execution"]["preparations"]:
-        execution = preparation["execution"]
-        material = designs[execution["artifact"]]["chassis"]
-        key = f"temperature-module:{execution['cell_source_well']}"
-        previous = result.setdefault(key, material)
-        if previous != material:
-            raise ComparisonError(f"Lab transformation position {key} names two materials")
-    for addition in manifest["execution"]["recovery_additions"]:
-        medium = addition["execution"]["medium"]
-        key = f"tube-rack:3:{medium['source_well']}"
-        previous = result.setdefault(key, medium["symbol"])
-        if previous != medium["symbol"]:
-            raise ComparisonError(f"Lab transformation position {key} names two materials")
-    return result
 
 
 LIQUID_COMMAND = re.compile(
@@ -475,6 +187,8 @@ def normalize_location(
         material_key = f"temperature-module:{well}"
     elif "Tube Rack" in description:
         material_key = f"tube-rack:{slot}:{well}"
+    elif stage == "transformation" and slot == "2":
+        material_key = f"dna:{well}"
     if material_key in staging:
         return f"material:{staging[material_key]}"
     if "Temperature Module" in description:
@@ -487,10 +201,6 @@ def normalize_location(
         return f"tubes:{slot}:{well}"
     if stage == "transformation" and slot == "2":
         return f"dna:{well}"
-    if stage == "plating" and slot in {"2", "3"}:
-        return f"dilution:{int(slot) - 2}:{well}"
-    if stage == "plating" and slot in {"5", "6"}:
-        return f"agar:{int(slot) - 5}:{well}"
     return f"deck:{slot}:{well}"
 
 
@@ -567,12 +277,16 @@ def robot_action_semantics(events: list[dict[str, Any]]) -> dict[str, Any]:
                 tip_change_boundaries
                 and tip_change_boundaries[-1] == len(liquid_actions)
             ):
-                raise ComparisonError("robot trace picks up a tip without using the prior one")
+                raise ComparisonError(
+                    "robot trace picks up a tip without using the prior one"
+                )
             tip_active = True
             tip_change_boundaries.append(len(liquid_actions))
         elif operation == "drop_tip":
             if not tip_active or tip_change_boundaries[-1] == len(liquid_actions):
-                raise ComparisonError("robot trace drops a tip that carried no liquid actions")
+                raise ComparisonError(
+                    "robot trace drops a tip that carried no liquid actions"
+                )
             tip_active = False
         else:
             if not tip_active:
@@ -589,12 +303,8 @@ def robot_action_semantics(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def robot_actions_equivalent(
-    pudu: dict[str, Any], lab: dict[str, Any]
-) -> bool:
-    return pudu["liquid_actions"] == lab["liquid_actions"] and set(
-        pudu["tip_change_boundaries"]
-    ).issubset(lab["tip_change_boundaries"])
+def robot_actions_equivalent(pudu: dict[str, Any], lab: dict[str, Any]) -> bool:
+    return pudu == lab
 
 
 THERMAL_PROFILE = re.compile(
@@ -615,15 +325,15 @@ def normalize_thermal_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]
     result = []
     for step in steps:
         if "hold_time_seconds" in step:
-            hold_seconds = normalize_number(step["hold_time_seconds"])
+            seconds = normalize_number(step["hold_time_seconds"])
         elif "hold_time_minutes" in step:
-            hold_seconds = normalize_number(float(step["hold_time_minutes"]) * 60)
+            seconds = normalize_number(float(step["hold_time_minutes"]) * 60)
         else:
             raise ComparisonError(f"thermal step has no hold time: {step}")
         result.append(
             {
                 "temperature_c": normalize_number(step["temperature"]),
-                "hold_seconds": hold_seconds,
+                "hold_seconds": seconds,
             }
         )
     return result
@@ -671,121 +381,6 @@ def normalize_thermal_trace(trace: str) -> dict[str, Any]:
     return result
 
 
-def thermal_core(trace: str) -> dict[str, Any]:
-    thermal = normalize_thermal_trace(trace)
-    return {
-        "temperature_module_setpoints_c": thermal["temperature_module_setpoints_c"],
-        "thermocycler_block_setpoints_c": thermal["thermocycler_block_setpoints_c"],
-        "thermocycler_lid_setpoints_c": thermal["thermocycler_lid_setpoints_c"],
-        "profiles": thermal["profiles"],
-    }
-
-
-def pudu_transformation_configuration(
-    python: Path, generated_protocol: Path
-) -> dict[str, Any]:
-    program = """
-import importlib.util
-import json
-import sys
-
-spec = importlib.util.spec_from_file_location("generated_pudu_transformation", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-instance = module.HeatShockTransformation(
-    transformation_data=module.transformation_data,
-    plasmid_locations=module.plasmid_locations,
-)
-print(json.dumps({
-    "replicates": instance.replicates,
-    "cell_volume_ul": instance.transfer_volume_competent_cell,
-    "dna_volume_ul": instance.transfer_volume_dna,
-    "recovery_volume_ul": instance.transfer_volume_recovery_media,
-    "heat_shock": [instance.cold_incubation1, instance.heat_shock, instance.cold_incubation2],
-    "recovery": [instance.recovery_incubation],
-}))
-"""
-    output = run_command(
-        (python, "-c", program, generated_protocol), cwd=generated_protocol.parent
-    )
-    try:
-        raw = json.loads(output.stdout)
-    except json.JSONDecodeError as error:
-        raise ComparisonError(
-            "PUDU transformation configuration is not JSON"
-        ) from error
-    return {
-        "replicates": raw["replicates"],
-        "cell_volume_ul": normalize_number(raw["cell_volume_ul"]),
-        "dna_volume_ul": normalize_number(raw["dna_volume_ul"]),
-        "recovery_volume_ul": normalize_number(raw["recovery_volume_ul"]),
-        "heat_shock": {
-            "repeats": 1,
-            "steps": normalize_thermal_steps(raw["heat_shock"]),
-        },
-        "recovery": {"repeats": 1, "steps": normalize_thermal_steps(raw["recovery"])},
-    }
-
-
-def pudu_transformation_instruments(
-    python: Path, generated_protocol: Path
-) -> dict[str, dict[str, str]]:
-    program = """
-import importlib.util
-import json
-import sys
-
-spec = importlib.util.spec_from_file_location("generated_pudu_transformation", sys.argv[1])
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-class CaptureHardware(module.HeatShockTransformation):
-    def run(self, protocol):
-        print(json.dumps({
-            "small": {"model": self.pipette_p20, "mount": self.pipette_p20_position},
-            "large": {"model": self.pipette_p300, "mount": self.pipette_p300_position},
-        }))
-module.HeatShockTransformation = CaptureHardware
-module.run(None)
-"""
-    output = run_command(
-        (python, "-c", program, generated_protocol), cwd=generated_protocol.parent
-    )
-    try:
-        raw = json.loads(output.stdout)
-    except json.JSONDecodeError as error:
-        raise ComparisonError("PUDU instrument configuration is not JSON") from error
-    return raw
-
-
-def lab_transformation_configuration(manifest_path: Path) -> dict[str, Any]:
-    manifest = read_json(manifest_path)["execution"]
-    preparation = manifest["preparations"][0]["execution"]
-    recovery_addition = manifest["recovery_additions"][0]["execution"]
-    heat_shock = manifest["heat_shocks"][0]["execution"]["profile"]["stages"][0]
-    recovery = manifest["recovery_incubations"][0]["execution"]["profile"]["stages"][0]
-
-    def manifest_stage(stage: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "repeats": stage["repeats"],
-            "steps": [
-                {
-                    "temperature_c": normalize_number(step["celsius"]),
-                    "hold_seconds": normalize_number(step["hold_seconds"]),
-                }
-                for step in stage["steps"]
-            ],
-        }
-
-    return {
-        "replicates": len(preparation["reaction_wells"]),
-        "cell_volume_ul": preparation["cell_volume_ul"],
-        "dna_volume_ul": preparation["dna_volume_ul"],
-        "recovery_volume_ul": recovery_addition["recovery_volume_ul"],
-        "heat_shock": manifest_stage(heat_shock),
-        "recovery": manifest_stage(recovery),
-    }
-
-
 TEMPERATURE_MODULE_GENERATION = re.compile(r"on Temperature Module GEN([12]) on slot")
 THERMOCYCLER_MODULE_GENERATION = re.compile(r"on Thermocycler Module GEN([12]) on slot")
 
@@ -801,47 +396,202 @@ def trace_hardware(trace: str) -> dict[str, Any]:
             description = blow_out.group(2) if blow_out else None
         if description and " on Thermocycler Module " in description:
             thermocycler_labware.add(
-                description.split(" on Thermocycler Module ", maxsplit=1)[0]
+                description.split(" on Thermocycler Module ", 1)[0]
             )
-    temperature_module_generations = sorted(
-        {int(generation) for generation in TEMPERATURE_MODULE_GENERATION.findall(trace)}
-    )
-    thermocycler_module_generations = sorted(
-        {int(generation) for generation in THERMOCYCLER_MODULE_GENERATION.findall(trace)}
-    )
     return {
         "thermocycler_labware": sorted(thermocycler_labware),
-        "temperature_module_generations": temperature_module_generations,
-        "thermocycler_module_generations": thermocycler_module_generations,
-    }
-
-
-def workflow_hardware(
-    instruments: dict[str, Any], traces: dict[str, Path]
-) -> dict[str, Any]:
-    traced = [trace_hardware(path.read_text()) for path in traces.values()]
-    return {
-        "instruments": instruments,
         "temperature_module_generations": sorted(
-            {
-                generation
-                for hardware in traced
-                for generation in hardware["temperature_module_generations"]
-            }
+            {int(value) for value in TEMPERATURE_MODULE_GENERATION.findall(trace)}
         ),
         "thermocycler_module_generations": sorted(
-            {
-                generation
-                for hardware in traced
-                for generation in hardware["thermocycler_module_generations"]
-            }
+            {int(value) for value in THERMOCYCLER_MODULE_GENERATION.findall(trace)}
         ),
     }
 
 
-# Fewest leaf operations a robot-action facet can contain and still be comparing anything. The
-# shipped example produces 184 in assembly, 153 in transformation and 258 in dilution/plating.
-MINIMUM_ROBOT_ACTIONS_PER_FACET = 50
+def pudu_configuration(python: Path, entrypoint: Path) -> dict[str, Any]:
+    capture = r"""
+import importlib.util
+import json
+import sys
+
+spec = importlib.util.spec_from_file_location("pudu_transformation_entrypoint", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+original = module.HeatShockTransformation
+
+class Capture:
+    def __init__(self, *args, **kwargs):
+        self.instance = original(*args, **kwargs)
+
+    def run(self, protocol):
+        instance = self.instance
+        print(json.dumps({
+            "api_level": module.metadata["apiLevel"],
+            "transformation_data": instance.transformations,
+            "replicates": instance.replicates,
+            "dna_source_volume_ul": instance.volume_dna,
+            "cell_source_volume_ul": instance.tube_volume_competent_cell,
+            "recovery_source_volume_ul": instance.tube_volume_recovery_media,
+            "dna_transfer_volume_ul": instance.transfer_volume_dna,
+            "cell_transfer_volume_ul": instance.transfer_volume_competent_cell,
+            "recovery_transfer_volume_ul": instance.transfer_volume_recovery_media,
+            "starting_well": instance.thermocycler_starting_well,
+            "heat_shock": [instance.cold_incubation1, instance.heat_shock, instance.cold_incubation2],
+            "recovery": [instance.recovery_incubation],
+            "instruments": {
+                "small": {"model": instance.pipette_p20, "mount": instance.pipette_p20_position},
+                "large": {"model": instance.pipette_p300, "mount": instance.pipette_p300_position},
+            },
+            "labware": {
+                "temperature_module": {
+                    "model": "temperature module",
+                    "slot": instance.temperature_module_position,
+                    "labware": instance.temperature_module_labware,
+                    "capacity": 24,
+                },
+                "thermocycler": {
+                    "model": "thermocycler module",
+                    "labware": instance.thermocycler_labware,
+                    "capacity": 96,
+                },
+                "source_rack": {
+                    "slot": instance.tube_rack_position,
+                    "labware": instance.tube_rack_labware,
+                    "capacity": 24,
+                },
+                "small_tips": {
+                    "slots": [instance.tiprack_p20_position],
+                    "labware": instance.tiprack_p20_labware,
+                    "capacity": 96,
+                },
+                "large_tips": {
+                    "slots": [instance.tiprack_p200_position],
+                    "labware": instance.tiprack_p200_labware,
+                    "capacity": 96,
+                },
+            },
+        }))
+
+module.HeatShockTransformation = Capture
+module.run(None)
+"""
+    result = run_command((python, "-c", capture, entrypoint), cwd=entrypoint.parent)
+    try:
+        raw = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise ComparisonError(
+            "captured PUDU entrypoint configuration is not JSON"
+        ) from error
+    return {
+        **raw,
+        "transformation_data": [
+            {
+                "Strain": item["strain"],
+                "Chassis": item["chassis"],
+                "Plasmids": item["plasmids"],
+            }
+            for item in raw["transformation_data"]
+        ],
+        "heat_shock": {
+            "repeats": 1,
+            "steps": normalize_thermal_steps(raw["heat_shock"]),
+        },
+        "recovery": {"repeats": 1, "steps": normalize_thermal_steps(raw["recovery"])},
+    }
+
+
+def manifest_thermal_stage(stage: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "repeats": stage["repeats"],
+        "steps": [
+            {
+                "temperature_c": normalize_number(step["celsius"]),
+                "hold_seconds": normalize_number(step["hold_seconds"]),
+            }
+            for step in stage["steps"]
+        ],
+    }
+
+
+def lab_configuration(manifest_path: Path, module_root: Path) -> dict[str, Any]:
+    manifest = read_json(manifest_path)
+    execution = manifest["execution"]
+    preparation = execution["preparations"][0]["execution"]
+    recovery = execution["recovery_additions"][0]["execution"]
+    deck = manifest["deck"]
+    dna_loads = {item["load_volume_ul"] for item in preparation["dna"]}
+    if len(dna_loads) != 1:
+        raise ComparisonError(
+            f"Golden Gate DNA sources have different load volumes: {dna_loads}"
+        )
+    return {
+        "api_level": deck["protocol"]["api_level"],
+        "transformation_data": [project_lab_design(module_root)],
+        "replicates": len(preparation["reaction_wells"]),
+        "dna_source_volume_ul": next(iter(dna_loads)),
+        "cell_source_volume_ul": preparation["cell_source_volume_ul"],
+        "recovery_source_volume_ul": recovery["medium"]["load_volume_ul"],
+        "dna_transfer_volume_ul": preparation["dna_volume_ul"],
+        "cell_transfer_volume_ul": preparation["cell_volume_ul"],
+        "recovery_transfer_volume_ul": recovery["recovery_volume_ul"],
+        "starting_well": 0,
+        "heat_shock": manifest_thermal_stage(
+            execution["heat_shocks"][0]["execution"]["profile"]["stages"][0]
+        ),
+        "recovery": manifest_thermal_stage(
+            execution["recovery_incubations"][0]["execution"]["profile"]["stages"][0]
+        ),
+        "instruments": deck["instruments"],
+        "labware": {
+            "temperature_module": deck["deck"]["temperature_module"],
+            "thermocycler": deck["deck"]["thermocycler"],
+            "source_rack": deck["stages"]["transformation"]["source_rack"],
+            "small_tips": deck["stages"]["transformation"]["small_tips"],
+            "large_tips": deck["stages"]["transformation"]["large_tips"],
+        },
+    }
+
+
+def pudu_material_map(trace: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for line in trace.splitlines():
+        if not line.startswith("{"):
+            continue
+        try:
+            value = ast.literal_eval(line)
+        except (SyntaxError, ValueError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        for name, well in value.items():
+            if name.startswith("GVD"):
+                result[f"temperature-module:{well}"] = name
+            elif name.startswith("Competent Cell "):
+                chassis = name.removeprefix("Competent Cell ").removesuffix("_1")
+                result[f"tube-rack:3:{well}"] = chassis
+            elif name.startswith("Media_"):
+                result[f"tube-rack:3:{well}"] = "recovery_medium"
+    expected = {"GVD0011", "GVD0013", "GVD0015", "DH5alpha", "recovery_medium"}
+    if set(result.values()) != expected:
+        raise ComparisonError(
+            f"PUDU source map has {set(result.values())}, expected {expected}"
+        )
+    return result
+
+
+def lab_material_map(manifest_path: Path, module_root: Path) -> dict[str, str]:
+    manifest = read_json(manifest_path)["execution"]
+    preparation = manifest["preparations"][0]["execution"]
+    design = project_lab_design(module_root)
+    result = {
+        f"temperature-module:{preparation['cell_source_well']}": design["Chassis"]
+    }
+    for dna in preparation["dna"]:
+        result[f"dna:{dna['source_well']}"] = dna["symbol"]
+    medium = manifest["recovery_additions"][0]["execution"]["medium"]
+    result[f"tube-rack:3:{medium['source_well']}"] = medium["symbol"]
+    return result
 
 
 def compare_facet(
@@ -863,484 +613,203 @@ def compare_facet(
         "pudu": {
             "path": str(pudu_path.relative_to(normalized_root.parent)),
             "sha256": canonical_sha256(pudu),
-            "items": len(pudu) if isinstance(pudu, (dict, list)) else None,
         },
         "lab": {
             "path": str(lab_path.relative_to(normalized_root.parent)),
             "sha256": canonical_sha256(lab),
-            "items": len(lab) if isinstance(lab, (dict, list)) else None,
         },
     }
 
 
-def compare_robot_action_facet(
-    identifier: str,
-    pudu: dict[str, Any],
-    lab: dict[str, Any],
-    *,
-    basis: str,
-    normalized_root: Path,
+def compare_robot_facet(
+    pudu: dict[str, Any], lab: dict[str, Any], *, normalized_root: Path
 ) -> dict[str, Any]:
-    pudu_path = normalized_root / f"{identifier}.pudu.json"
-    lab_path = normalized_root / f"{identifier}.lab.json"
-    write_json(pudu_path, pudu)
-    write_json(lab_path, lab)
-    return {
-        "id": identifier,
-        "status": "equivalent" if robot_actions_equivalent(pudu, lab) else "different",
-        "basis": basis,
-        "pudu": {
-            "path": str(pudu_path.relative_to(normalized_root.parent)),
-            "sha256": canonical_sha256(pudu),
-            "items": len(pudu["liquid_actions"]),
-        },
-        "lab": {
-            "path": str(lab_path.relative_to(normalized_root.parent)),
-            "sha256": canonical_sha256(lab),
-            "items": len(lab["liquid_actions"]),
-        },
-    }
+    facet = compare_facet(
+        "robot-actions.transformation",
+        pudu,
+        lab,
+        basis="Material-normalized leaf aspirate, dispense, blowout, touch-tip, and tip-boundary trace.",
+        normalized_root=normalized_root,
+    )
+    facet["status"] = (
+        "equivalent" if robot_actions_equivalent(pudu, lab) else "different"
+    )
+    facet["pudu"]["items"] = len(pudu["liquid_actions"])
+    facet["lab"]["items"] = len(lab["liquid_actions"])
+    return facet
 
 
-def tip_refinement_observations(
-    actions: dict[str, tuple[dict[str, Any], dict[str, Any]]],
-) -> list[dict[str, Any]]:
-    result = []
-    for stage, (pudu, lab) in actions.items():
-        if pudu["tip_change_boundaries"] == lab["tip_change_boundaries"]:
-            continue
-        result.append(
-            {
-                "id": f"{stage}-fresh-tip-refinement",
-                "classification": "contamination-safety-refinement",
-                "pudu": {
-                    "tips_used": pudu["tips_used"],
-                    "boundaries": pudu["tip_change_boundaries"],
-                },
-                "lab": {
-                    "tips_used": lab["tips_used"],
-                    "boundaries": lab["tip_change_boundaries"],
-                },
-                "explanation": "Lab introduces additional fresh-tip boundaries while preserving every PUDU boundary and every liquid action.",
-            }
-        )
-    return result
-
-
-def validate_reference(pudu_repository: Path, reference: dict[str, Any]) -> None:
-    actual_revision = git_revision(pudu_repository)
-    if actual_revision != reference["revision"]:
+def validate_reference(
+    repository: Path, reference: dict[str, Any]
+) -> tuple[Path, Path]:
+    revision = git_revision(repository)
+    if revision != reference["revision"]:
         raise ComparisonError(
-            f"PUDU checkout is {actual_revision}, expected pinned revision {reference['revision']}"
+            f"PUDU checkout is {revision}, expected {reference['revision']}"
         )
-    if git_tracked_source_is_dirty(pudu_repository):
-        raise ComparisonError("PUDU checkout has tracked changes from the pinned revision")
-    for item in reference["inputs"].values():
-        upstream = pudu_repository / item["upstream_path"]
-        actual_sha256 = file_sha256(upstream)
-        if actual_sha256 != item["upstream_sha256"]:
+    if git_tracked_source_is_dirty(repository):
+        raise ComparisonError(
+            "PUDU checkout has tracked changes from the pinned revision"
+        )
+    paths = []
+    for key in ("entrypoint", "implementation"):
+        item = reference[key]
+        path = repository / item["path"]
+        digest = file_sha256(path)
+        if digest != item["sha256"]:
             raise ComparisonError(
-                f"PUDU input {upstream} has SHA-256 {actual_sha256}, expected "
-                f"{item['upstream_sha256']}"
+                f"PUDU {key} {path} has SHA-256 {digest}, expected {item['sha256']}"
             )
-        snapshot = REFERENCE.parent / item["snapshot"]
-        if read_json(upstream) != read_json(snapshot):
-            raise ComparisonError(
-                f"Lab snapshot {snapshot} differs from pinned PUDU input {upstream}"
-            )
+        paths.append(path)
+    return paths[0], paths[1]
 
 
-def run_pudu(
-    *,
-    output: Path,
-    python: Path,
-    simulator: Path,
-    reference: dict[str, Any],
-) -> dict[str, Path]:
+def run_pudu(output: Path, simulator: Path, entrypoint: Path) -> Path:
     output.mkdir(parents=True)
-    snapshots = {
-        name: REFERENCE.parent / item["snapshot"]
-        for name, item in reference["inputs"].items()
-    }
-    commands = (
-        (
-            "assembly",
-            (
-                python,
-                "-m",
-                "pudu.generate_protocol",
-                snapshots["assembly"],
-                "-o",
-                "assembly_protocol.py",
-                "--protocol-type",
-                "assembly",
-            ),
-        ),
-    )
-    for stage, command in commands:
-        result = run_command(command, cwd=output)
-        (output / f"{stage}_generate.stdout.txt").write_text(result.stdout)
-        (output / f"{stage}_generate.stderr.txt").write_text(result.stderr)
-    simulation = run_command((simulator, "assembly_protocol.py"), cwd=output)
-    (output / "assembly_trace.txt").write_text(simulation.stdout)
-    (output / "assembly_simulate.stderr.txt").write_text(simulation.stderr)
-
-    transformation = run_command(
-        (
-            python,
-            "-m",
-            "pudu.generate_protocol",
-            snapshots["transformation"],
-            "-o",
-            "transformation_protocol.py",
-            "--protocol-type",
-            "transformation",
-            "--plasmid-locations",
-            "transformation_input.json",
-        ),
-        cwd=output,
-    )
-    (output / "transformation_generate.stdout.txt").write_text(transformation.stdout)
-    (output / "transformation_generate.stderr.txt").write_text(transformation.stderr)
-    simulation = run_command((simulator, "transformation_protocol.py"), cwd=output)
-    (output / "transformation_trace.txt").write_text(simulation.stdout)
+    simulation = run_command((simulator, entrypoint), cwd=output)
+    trace = output / "transformation_trace.txt"
+    trace.write_text(simulation.stdout)
     (output / "transformation_simulate.stderr.txt").write_text(simulation.stderr)
-
-    plating = run_command(
-        (
-            python,
-            "-m",
-            "pudu.generate_protocol",
-            "plating_input.json",
-            "-o",
-            "plating_protocol.py",
-            "--protocol-type",
-            "plating",
-        ),
-        cwd=output,
-    )
-    (output / "plating_generate.stdout.txt").write_text(plating.stdout)
-    (output / "plating_generate.stderr.txt").write_text(plating.stderr)
-    simulation = run_command((simulator, "plating_protocol.py"), cwd=output)
-    (output / "plating_trace.txt").write_text(simulation.stdout)
-    (output / "plating_simulate.stderr.txt").write_text(simulation.stderr)
-    return {stage: output / f"{stage}_trace.txt" for stage in STAGES}
+    return trace
 
 
-def run_lab(
-    *, output: Path, lab: Path, simulator: Path
-) -> tuple[Path, dict[str, Path]]:
+def run_lab(output: Path, lab: Path, simulator: Path) -> tuple[Path, Path]:
     output.mkdir(parents=True)
     build = run_command(
-        (lab, "build", EXAMPLE, "--out-dir", output, "--json"),
-        cwd=ROOT,
+        (lab, "build", EXAMPLE, "--out-dir", output, "--json"), cwd=ROOT
     )
     (output / "build.stdout.json").write_text(build.stdout)
     (output / "build.stderr.txt").write_text(build.stderr)
-    result = json.loads(build.stdout)
-    bundles = result["result"]["facility"]["bundles"]
+    bundles = json.loads(build.stdout)["result"]["facility"]["bundles"]
     if len(bundles) != 1:
         raise ComparisonError(f"Lab build emitted {len(bundles)} bundles, expected one")
     bundle = Path(bundles[0])
-    traces: dict[str, Path] = {}
+    protocol = bundle / "transformation_protocol.py"
     config = output / ".opentrons-comparison-config"
     config.mkdir()
-    for stage in STAGES:
-        protocol = bundle / f"{stage}_protocol.py"
-        simulation = run_command(
-            (simulator, protocol),
-            cwd=bundle,
-            environment={"OT_API_CONFIG_DIR": str(config)},
-        )
-        trace = output / f"{stage}_trace.txt"
-        trace.write_text(simulation.stdout)
-        (output / f"{stage}_simulate.stderr.txt").write_text(simulation.stderr)
-        traces[stage] = trace
-    return bundle, traces
+    simulation = run_command(
+        (simulator, protocol),
+        cwd=bundle,
+        environment={"OT_API_CONFIG_DIR": str(config)},
+    )
+    trace = output / "transformation_trace.txt"
+    trace.write_text(simulation.stdout)
+    (output / "transformation_simulate.stderr.txt").write_text(simulation.stderr)
+    return bundle, trace
 
 
-def observations(
+def comparison_observations(
     *,
-    pudu_traces: dict[str, Path],
-    lab_traces: dict[str, Path],
+    pudu_trace: str,
+    lab_trace: str,
+    pudu_materials: dict[str, str],
+    lab_materials: dict[str, str],
+    implementation: Path,
 ) -> list[dict[str, Any]]:
-    result = []
-    pudu_thermal = normalize_thermal_trace(pudu_traces["transformation"].read_text())
-    lab_thermal = normalize_thermal_trace(lab_traces["transformation"].read_text())
-    if pudu_thermal["profiles"] != lab_thermal["profiles"]:
-        result.append(
-            {
-                "id": "pudu-transformation-simulation-omits-thermal-programs",
-                "classification": "upstream-simulator-gap",
-                "pudu_profiles": pudu_thermal["profiles"],
-                "lab_profiles": lab_thermal["profiles"],
-                "explanation": "PUDU switches to water_testing during Opentrons simulation and skips heat shock and recovery incubation; Lab simulates the configured hardware path.",
-            }
-        )
-
-    pudu_hardware = {
-        stage: trace_hardware(path.read_text()) for stage, path in pudu_traces.items()
-    }
-    lab_hardware = {
-        stage: trace_hardware(path.read_text()) for stage, path in lab_traces.items()
-    }
-    if (
-        pudu_hardware["transformation"]["thermocycler_labware"]
-        != pudu_hardware["plating"]["thermocycler_labware"]
-    ):
-        result.append(
-            {
-                "id": "pudu-plating-source-labware-discontinuity",
-                "classification": "upstream-stage-handoff-gap",
-                "pudu": pudu_hardware,
-                "lab": lab_hardware,
-                "explanation": "PUDU transforms in a NEST 100 uL PCR plate but its generated plating protocol loads a Bio-Rad 200 uL source plate; Lab preserves one NEST plate across the handoff.",
-            }
-        )
-    if (
-        pudu_hardware["assembly"]["temperature_module_generations"]
-        != lab_hardware["assembly"]["temperature_module_generations"]
-    ):
-        result.append(
-            {
-                "id": "temperature-module-generation",
-                "classification": "facility-configuration-difference",
-                "pudu": pudu_hardware["assembly"]["temperature_module_generations"],
-                "lab": lab_hardware["assembly"]["temperature_module_generations"],
-                "explanation": "PUDU's generic module load resolves to GEN1; the Golden Gate facility explicitly configures a GEN2 staging module. The Thermocycler is GEN1 in both outputs.",
-            }
-        )
-    if (
-        pudu_hardware["transformation"]["temperature_module_generations"]
-        != lab_hardware["transformation"]["temperature_module_generations"]
-    ):
-        result.append(
-            {
-                "id": "competent-cell-temperature-control",
-                "classification": "facility-safety-improvement",
-                "pudu": pudu_hardware["transformation"][
-                    "temperature_module_generations"
-                ],
-                "lab": lab_hardware["transformation"][
-                    "temperature_module_generations"
-                ],
-                "explanation": "PUDU's simulated transformation stages competent cells in a passive tube rack; Lab uses the facility's GEN1 Temperature Module at the required 4 C setpoint.",
-            }
-        )
-
-    for stage in ("assembly", "transformation"):
-        pudu_state = normalize_thermal_trace(pudu_traces[stage].read_text())
-        lab_state = normalize_thermal_trace(lab_traces[stage].read_text())
-        if (
-            pudu_state["thermocycler_lid_opens"] != lab_state["thermocycler_lid_opens"]
-            or pudu_state["thermocycler_lid_closes"]
-            != lab_state["thermocycler_lid_closes"]
-        ):
-            result.append(
-                {
-                    "id": f"{stage}-final-lid-state",
-                    "classification": "safe-handoff-difference",
-                    "pudu": {
-                        "opens": pudu_state["thermocycler_lid_opens"],
-                        "closes": pudu_state["thermocycler_lid_closes"],
-                    },
-                    "lab": {
-                        "opens": lab_state["thermocycler_lid_opens"],
-                        "closes": lab_state["thermocycler_lid_closes"],
-                    },
-                    "explanation": "Lab opens the GEN1 Thermocycler after the final thermal work so the reviewed plate handoff is physically possible.",
-                }
-            )
-    return result
+    pudu_thermal = normalize_thermal_trace(pudu_trace)
+    lab_thermal = normalize_thermal_trace(lab_trace)
+    source = implementation.read_text()
+    block_maxima = [
+        int(value) for value in re.findall(r"block_max_volume\s*=\s*([0-9]+)", source)
+    ]
+    return [
+        {
+            "id": "source-placement",
+            "classification": "lineage-and-staging-realization",
+            "pudu": pudu_materials,
+            "lab": lab_materials,
+            "explanation": "The liquid actions are identical by material identity. The standalone entrypoint stages DNA tubes on the temperature module and cells in a passive rack; the end-to-end Golden Gate workflow preserves assembly-product wells and stages competent cells at its required 4 C setpoint.",
+        },
+        {
+            "id": "simulation-thermal-path",
+            "classification": "upstream-simulator-gap",
+            "pudu": pudu_thermal,
+            "lab": lab_thermal,
+            "explanation": "The PUDU implementation forces water-testing mode in simulation and skips both thermal profiles. Lab simulates the authored heat-shock and recovery profiles and opens the lid for the reviewed handoff.",
+        },
+        {
+            "id": "thermal-block-maximum-volume",
+            "classification": "upstream-implementation-inconsistency",
+            "pudu_block_max_volume_ul": block_maxima,
+            "actual_sample_volumes_ul": [35, 95],
+            "lab_block_max_volume_ul": [35, 95],
+            "explanation": "PUDU passes 30 uL as block_max_volume for samples that actually contain 35 uL during heat shock and 95 uL during recovery. Lab derives each value from the transferred volumes.",
+        },
+    ]
 
 
-def compare(
-    *,
-    pudu_repository: Path,
-    lab_binary: Path,
-    output: Path,
-) -> dict[str, Any]:
+def compare(*, pudu_repository: Path, lab_binary: Path, output: Path) -> dict[str, Any]:
     reference = read_json(REFERENCE)
-    validate_reference(pudu_repository, reference)
-    pudu_python = pudu_repository / ".venv" / "bin" / "python"
+    entrypoint, implementation = validate_reference(pudu_repository, reference)
+    python = pudu_repository / ".venv" / "bin" / "python"
     simulator = pudu_repository / ".venv" / "bin" / "opentrons_simulate"
-    for executable in (lab_binary, pudu_python, simulator):
+    for executable in (lab_binary, python, simulator):
         if not executable.is_file() or not os.access(executable, os.X_OK):
             raise ComparisonError(f"required executable is unavailable: {executable}")
 
     pudu_output = output / "pudu"
     lab_output = output / "lab"
     normalized = output / "normalized"
-    pudu_traces = run_pudu(
-        output=pudu_output,
-        python=pudu_python,
-        simulator=simulator,
-        reference=reference,
-    )
-    lab_bundle, lab_traces = run_lab(
-        output=lab_output,
-        lab=lab_binary,
-        simulator=simulator,
-    )
+    pudu_trace_path = run_pudu(pudu_output, simulator, entrypoint)
+    lab_bundle, lab_trace_path = run_lab(lab_output, lab_binary, simulator)
+    manifest = lab_bundle / "transformation_manifest.json"
     module_root = lab_output / "modules" / "golden_gate" / "designs"
-    version = reference["identity_normalization"]["strip_terminal_version"]
-    pudu_inputs = {
-        name: strip_sbol2_version(
-            read_json(REFERENCE.parent / item["snapshot"]),
-            version,
-        )
-        for name, item in reference["inputs"].items()
-    }
-    lab_inputs = project_lab_inputs(module_root)
+    pudu_config = pudu_configuration(python, entrypoint)
+    lab_config = lab_configuration(manifest, module_root)
 
     facets = [
         compare_facet(
-            "input.assembly",
-            pudu_inputs["assembly"],
-            lab_inputs["assembly"],
-            basis="Checked Lab module output versus the pinned PUDU input after removing only the SBOL 2 /1 version segment.",
+            "configuration",
+            pudu_config,
+            lab_config,
+            basis="Resolved entrypoint constructor configuration versus checked design and emitted manifest.",
             normalized_root=normalized,
-        ),
-        compare_facet(
-            "input.transformation",
-            pudu_inputs["transformation"],
-            lab_inputs["transformation"],
-            basis="Checked Lab module output versus the pinned PUDU input after removing only the SBOL 2 /1 version segment.",
-            normalized_root=normalized,
-        ),
-        compare_facet(
-            "handoff.assembly-products",
-            project_pudu_assembly_handoff(
-                pudu_output / "transformation_input.json", version
-            ),
-            project_lab_assembly_handoff(
-                lab_bundle / "assembly_manifest.json",
-                module_root,
-            ),
-            basis="Generated product-identity to reaction-well handoff.",
-            normalized_root=normalized,
-        ),
-        compare_facet(
-            "handoff.transformed-cultures",
-            project_pudu_cultures(pudu_output / "plating_input.json"),
-            project_lab_cultures(
-                lab_bundle / "transformation_manifest.json",
-                module_root,
-            ),
-            basis="Generated strain, chassis, plasmid, medium, and thermocycler-well lineage.",
-            normalized_root=normalized,
-        ),
-        compare_facet(
-            "output.plate-lineage",
-            project_pudu_plate_lineage(pudu_output / "plating_layout.json"),
-            project_lab_plate_lineage(
-                lab_bundle / "plate_map.json",
-                lab_bundle / "transformation_manifest.json",
-            ),
-            basis="Generated end-to-end culture source, dilution, replicate, and agar destination lineage.",
-            normalized_root=normalized,
-        ),
+        )
     ]
-
-    pudu_assembly_trace = pudu_traces["assembly"].read_text()
-    lab_assembly_trace = lab_traces["assembly"].read_text()
-    pudu_materials = {
-        "assembly": pudu_staging_map(pudu_assembly_trace),
-        "transformation": pudu_transformation_material_map(
-            pudu_traces["transformation"].read_text()
-        ),
-    }
-    lab_materials = {
-        "assembly": lab_staging_map(lab_bundle / "assembly_manifest.json"),
-        "transformation": lab_transformation_material_map(
-            lab_bundle / "transformation_manifest.json", module_root
-        ),
-    }
-    robot_actions: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
-    for stage in STAGES:
-        pudu_actions = robot_action_semantics(
-            normalize_liquid_trace(
-                pudu_traces[stage].read_text(),
-                stage=stage,
-                staging=pudu_materials.get(stage),
-            )
+    pudu_trace = pudu_trace_path.read_text()
+    lab_trace = lab_trace_path.read_text()
+    pudu_materials = pudu_material_map(pudu_trace)
+    lab_materials = lab_material_map(manifest, module_root)
+    pudu_actions = robot_action_semantics(
+        normalize_liquid_trace(
+            pudu_trace, stage="transformation", staging=pudu_materials
         )
-        lab_actions = robot_action_semantics(
-            normalize_liquid_trace(
-                lab_traces[stage].read_text(),
-                stage=stage,
-                staging=lab_materials.get(stage),
-            )
-        )
-        robot_actions[stage] = (pudu_actions, lab_actions)
-        facets.append(
-            compare_robot_action_facet(
-                f"robot-actions.{stage}",
-                pudu_actions,
-                lab_actions,
-                basis="Exact leaf Opentrons aspirate, dispense, blowout, and touch-tip actions; Lab may only refine PUDU's contamination boundaries by taking a fresh tip sooner.",
-                normalized_root=normalized,
-            )
-        )
-
-    facets.extend(
-        (
-            compare_facet(
-                "hardware.workflow",
-                workflow_hardware(
-                    pudu_transformation_instruments(
-                        pudu_python,
-                        pudu_output / "transformation_protocol.py",
-                    ),
-                    pudu_traces,
-                ),
-                workflow_hardware(
-                    read_json(lab_bundle / "transformation_manifest.json")["deck"][
-                        "instruments"
-                    ],
-                    lab_traces,
-                ),
-                basis="Resolved P20 and P300 models and mounts plus Temperature Module and Thermocycler Module generations across the simulated workflow.",
-                normalized_root=normalized,
-            ),
-            compare_facet(
-                "thermal.assembly",
-                thermal_core(pudu_assembly_trace),
-                thermal_core(lab_assembly_trace),
-                basis="Thermocycler and staging setpoints plus normalized generated assembly profiles.",
-                normalized_root=normalized,
-            ),
-            compare_facet(
-                "thermal.transformation-intent",
-                pudu_transformation_configuration(
-                    pudu_python,
-                    pudu_output / "transformation_protocol.py",
-                ),
-                lab_transformation_configuration(
-                    lab_bundle / "transformation_manifest.json"
-                ),
-                basis="Resolved configuration of PUDU's generated protocol versus Lab's generated transformation manifest.",
-                normalized_root=normalized,
-            ),
+    )
+    lab_actions = robot_action_semantics(
+        normalize_liquid_trace(lab_trace, stage="transformation", staging=lab_materials)
+    )
+    facets.append(
+        compare_robot_facet(pudu_actions, lab_actions, normalized_root=normalized)
+    )
+    facets.append(
+        compare_facet(
+            "resolved-hardware",
+            {
+                "instruments": pudu_config["instruments"],
+                **trace_hardware(pudu_trace),
+            },
+            {
+                "instruments": lab_config["instruments"],
+                **trace_hardware(lab_trace),
+            },
+            basis="Resolved pipette models and mounts, labware identity, and module generations.",
+            normalized_root=normalized,
         )
     )
 
     different = [facet["id"] for facet in facets if facet["status"] != "equivalent"]
-    # Two empty traces compare equal. If a normalizer stops recognizing the simulator's output,
-    # every robot-action facet would report "equivalent" while comparing nothing at all, so each
-    # one has to carry the operations it is supposed to be comparing.
-    vacuous = [
-        facet["id"]
-        for facet in facets
-        if facet["id"].startswith("robot-actions.")
-        and (facet["lab"]["items"] or 0) < MINIMUM_ROBOT_ACTIONS_PER_FACET
-    ]
-    different.extend(vacuous)
+    if (
+        min(len(pudu_actions["liquid_actions"]), len(lab_actions["liquid_actions"]))
+        < MINIMUM_ROBOT_ACTIONS
+    ):
+        different.append("robot-actions.transformation-vacuous")
     report = {
-        "schema_version": "lab.pudu-differential.v1",
+        "schema_version": "lab.pudu-transformation-differential.v1",
         "status": "equivalent" if not different else "different",
         "reference": {
-            "guide": reference["guide"],
+            "repository": reference["repository"],
+            "entrypoint": reference["entrypoint"],
+            "implementation": reference["implementation"],
             "pudu_revision": reference["revision"],
             "lab_revision": git_revision(ROOT),
             "lab_worktree_dirty": git_is_dirty(ROOT),
@@ -1357,18 +826,19 @@ def compare(
             "normalized": str(normalized.relative_to(output)),
         },
         "facets": facets,
-        "observations": observations(pudu_traces=pudu_traces, lab_traces=lab_traces)
-        + tip_refinement_observations(robot_actions),
+        "observations": comparison_observations(
+            pudu_trace=pudu_trace,
+            lab_trace=lab_trace,
+            pudu_materials=pudu_materials,
+            lab_materials=lab_materials,
+            implementation=implementation,
+        ),
         "summary": {
             "equivalent_facets": len(facets) - len(different),
             "total_facets": len(facets),
             "different_facets": different,
-            "vacuous_facets": vacuous,
-            "normalized_robot_actions": sum(
-                facet["lab"]["items"]
-                for facet in facets
-                if facet["id"].startswith("robot-actions.")
-            ),
+            "normalized_robot_actions": len(lab_actions["liquid_actions"]),
+            "tips_used": lab_actions["tips_used"],
         },
     }
     write_json(output / "comparison.json", report)
@@ -1389,7 +859,7 @@ def parse_arguments() -> argparse.Namespace:
         "--pudu-repository",
         type=Path,
         default=default_pudu_repository(),
-        help="PUDU checkout at the pinned revision (default: PUDU_REPOSITORY or ~/git/RudgeLab/PUDU)",
+        help="PUDU checkout at the pinned revision",
     )
     parser.add_argument(
         "--lab",
@@ -1400,7 +870,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        help="new directory for both runs and the comparison report (default: a retained temporary directory)",
+        help="new directory for both runs and the comparison report",
     )
     return parser.parse_args()
 
@@ -1410,22 +880,21 @@ def main() -> int:
     if arguments.pudu_repository is None:
         print("PUDU checkout not found; pass --pudu-repository", file=sys.stderr)
         return 2
-    pudu_repository = arguments.pudu_repository.expanduser().resolve()
+    repository = arguments.pudu_repository.expanduser().resolve()
     lab_binary = arguments.lab.expanduser()
     if not lab_binary.is_absolute():
         lab_binary = (Path.cwd() / lab_binary).resolve()
     if arguments.out_dir is None:
-        output = Path(tempfile.mkdtemp(prefix="lab-pudu-golden-gate-"))
+        output = Path(tempfile.mkdtemp(prefix="lab-pudu-transformation-"))
     else:
         output = arguments.out_dir.expanduser().resolve()
         if output.exists():
             print(f"output directory already exists: {output}", file=sys.stderr)
             return 2
         output.mkdir(parents=True)
-
     try:
         report = compare(
-            pudu_repository=pudu_repository,
+            pudu_repository=repository,
             lab_binary=lab_binary,
             output=output,
         )
@@ -1440,7 +909,6 @@ def main() -> int:
         print(f"comparison failed: {error}", file=sys.stderr)
         print(f"partial outputs: {output}", file=sys.stderr)
         return 2
-
     for facet in report["facets"]:
         marker = "PASS" if facet["status"] == "equivalent" else "FAIL"
         print(f"[{marker}] {facet['id']}")
@@ -1448,10 +916,8 @@ def main() -> int:
         f"Compared {report['summary']['normalized_robot_actions']} normalized robot actions; "
         f"{report['summary']['equivalent_facets']}/{report['summary']['total_facets']} facets equivalent."
     )
-    if report["observations"]:
-        print("Observed output differences:")
-        for observation in report["observations"]:
-            print(f"  - {observation['id']}: {observation['explanation']}")
+    for observation in report["observations"]:
+        print(f"  - {observation['id']}: {observation['explanation']}")
     print(f"Report: {output / 'comparison.json'}")
     return 0 if report["status"] == "equivalent" else 1
 

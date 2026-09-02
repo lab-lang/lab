@@ -63,7 +63,7 @@ class GoldenGateTests(unittest.TestCase):
                 )
 
     def test_declarations_are_named_after_their_python_bindings(self) -> None:
-        self.assertEqual(plasmids.composite_plasmid_1.name, "composite_plasmid_1")
+        self.assertEqual(plasmids.GVD0011.name, "GVD0011")
         self.assertEqual(inventory.BsaI.name, "BsaI")
 
 

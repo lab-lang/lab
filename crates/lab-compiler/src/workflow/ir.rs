@@ -332,6 +332,7 @@ impl Verify for TransformOp {
         recover_duration_unit: StringAttr,
         recover_replicates: IntegerAttr,
         recover_initial_volume_ul: IntegerAttr,
+        recover_medium_aliquot_volume_ul: IntegerAttr,
         recover_medium_volume_ul: IntegerAttr,
         recover_temperature_c: IntegerAttr
     ),
@@ -351,6 +352,7 @@ impl RecoverOp {
         duration_unit: impl Into<String>,
         replicates: u8,
         initial_volume_ul: u32,
+        medium_aliquot_volume_ul: u16,
         medium_volume_ul: u16,
         temperature_c: u16,
     ) -> Self {
@@ -369,6 +371,10 @@ impl RecoverOp {
         result.set_attr_recover_duration_unit(ctx, StringAttr::new(duration_unit.into()));
         result.set_attr_recover_replicates(ctx, u32_attr(ctx, replicates.into()));
         result.set_attr_recover_initial_volume_ul(ctx, u32_attr(ctx, initial_volume_ul));
+        result.set_attr_recover_medium_aliquot_volume_ul(
+            ctx,
+            u32_attr(ctx, medium_aliquot_volume_ul.into()),
+        );
         result.set_attr_recover_medium_volume_ul(ctx, u32_attr(ctx, medium_volume_ul.into()));
         result.set_attr_recover_temperature_c(ctx, u32_attr(ctx, temperature_c.into()));
         result
@@ -397,6 +403,10 @@ impl Verify for RecoverOp {
             (
                 self.get_attr_recover_initial_volume_ul(ctx),
                 "recover_initial_volume_ul",
+            ),
+            (
+                self.get_attr_recover_medium_aliquot_volume_ul(ctx),
+                "recover_medium_aliquot_volume_ul",
             ),
             (
                 self.get_attr_recover_medium_volume_ul(ctx),

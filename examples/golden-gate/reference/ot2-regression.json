@@ -1,9 +1,9 @@
 {
   "schema_version": "lab.golden-gate-ot2-regression.v1",
-  "purpose": "Internal assertions over Lab's generated OT-2 manifests and protocols; external PUDU equivalence is established by scripts/compare_pudu_golden_gate.py.",
+  "purpose": "Internal assertions over the generated OT-2 manifests and protocols.",
   "hardware": {
     "robot_type": "OT-2",
-    "api_level": "2.21",
+    "api_level": "2.20",
     "p20_model": "p20_single_gen2",
     "p20_mount": "left",
     "p300_model": "p300_single_gen2",
@@ -14,7 +14,7 @@
     "thermocycler_load_name": "thermocycler module"
   },
   "assembly": {
-    "reaction_volume_ul": 20,
+    "reaction_volume_ul": 25,
     "source_temperature_c": 4,
     "deactivate_sources_before_thermal": true,
     "source_order": [
@@ -81,17 +81,18 @@
     }
   },
   "transformation": {
-    "replicates": 2,
+    "replicates": 3,
     "competent_cells": {
+      "source_volume_ul": 150,
       "volume_ul": 20,
       "source_mix_cycles": 3,
       "source_mix_volume_ul": 50,
       "distribution_disposal_volume_ul": 0
     },
     "dna": {
-      "volume_ul": 2,
+      "volume_ul": 5,
       "source_mix_cycles": 3,
-      "source_mix_volume_ul": 2,
+      "source_mix_volume_ul": 5,
       "transfer_blow_out": true,
       "bubble_clear_cycles": 2,
       "bubble_clear_volume_ul": 20,
@@ -100,7 +101,7 @@
       "touch_tip_after_bubble_clear": true
     },
     "heat_shock": {
-      "volume_ul": 22,
+      "volume_ul": 35,
       "steps": [
         {
           "temperature_c": 4,
@@ -117,12 +118,13 @@
       ]
     },
     "recovery": {
+      "source_volume_ul": 1200,
       "medium_volume_ul": 60,
       "dispense_above_liquid_mm": 2,
       "air_gap_ul": 10,
       "incubation_temperature_c": 37,
       "incubation_seconds": 3600,
-      "incubation_volume_ul": 82
+      "incubation_volume_ul": 95
     }
   },
   "plating": {
@@ -142,23 +144,28 @@
     "assembly_product_well": "A1",
     "transformation_wells": [
       "A1",
-      "B1"
+      "B1",
+      "C1"
     ],
     "dilution_1_wells": [
       "A1",
-      "B1"
+      "B1",
+      "C1"
     ],
     "dilution_2_wells": [
       "A7",
-      "B7"
+      "B7",
+      "C7"
     ],
     "agar_dilution_1_wells": [
       "A1",
-      "B1"
+      "B1",
+      "C1"
     ],
     "agar_dilution_2_wells": [
       "A7",
-      "B7"
+      "B7",
+      "C7"
     ]
   }
 }

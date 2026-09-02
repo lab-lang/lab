@@ -404,6 +404,7 @@ fn append_workflow(
                     duration_unit.clone(),
                     intent.transformation_replicates,
                     transformed_volume,
+                    intent.chemistry.recovery_aliquot_volume_ul,
                     intent.chemistry.recovery_volume_ul,
                     intent.chemistry.recovery_temperature_c,
                 );
@@ -537,8 +538,16 @@ fn strain_chemistry(
 ) -> pliron::builtin::attributes::DictAttr {
     quantity_dict(
         &[
+            (
+                "cell_aliquot_volume_ul",
+                chemistry.cell_aliquot_volume_ul.into(),
+            ),
             ("cell_volume_ul", chemistry.cell_volume_ul.into()),
             ("dna_volume_ul", chemistry.dna_volume_ul.into()),
+            (
+                "recovery_aliquot_volume_ul",
+                chemistry.recovery_aliquot_volume_ul.into(),
+            ),
             ("recovery_volume_ul", chemistry.recovery_volume_ul.into()),
             ("cold_minutes", chemistry.cold_minutes.into()),
             (

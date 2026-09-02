@@ -1,0 +1,13 @@
+{
+  "schema_version": "lab.pudu-transformation-entrypoint-reference.v1",
+  "repository": "https://github.com/RudgeLab/PUDU",
+  "revision": "1214d2f9efd557aa84bc96502379554174355eae",
+  "entrypoint": {
+    "path": "scripts/automated_ot2/run_sbol2transformation_with_params.py",
+    "sha256": "557a4c92494679849324fb4dc528ef575e8cbaa531876f8313c0571ddd9d32a2"
+  },
+  "implementation": {
+    "path": "src/pudu/transformation.py",
+    "sha256": "1723e05b08106c5a9d8aaf00a09c7358127a42e3686e912c5c2dcd1bcf0b5ff3"
+  }
+}

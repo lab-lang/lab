@@ -137,7 +137,7 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert thermal.program.contract == procedures.THERMAL_PROGRAM_V1
     assert isinstance(thermal.program.body, procedures.ThermalProgramV1)
     assert thermal.program.body.load.sample_count == 1
-    assert thermal.program.body.load.volume_each.value == Decimal("20")
+    assert thermal.program.body.load.volume_each.value == Decimal("25")
     assert thermal.program.body.lid_temperature == procedures.Temperature(Decimal("42"))
     assert thermal.program.body.stages[0].repeats == 75
     assert thermal.program.body.stages[0].steps[0].hold.value == Decimal("120")

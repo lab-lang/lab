@@ -233,8 +233,10 @@ impl AssemblyChemistryIntent {
 /// Heat-shock transformation and plating chemistry stated by a strain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct StrainChemistryIntent {
+    pub cell_aliquot_volume_ul: u16,
     pub cell_volume_ul: u16,
     pub dna_volume_ul: u16,
+    pub recovery_aliquot_volume_ul: u16,
     pub recovery_volume_ul: u16,
     pub cold_minutes: u16,
     pub heat_shock_temperature_c: u16,
@@ -462,8 +464,10 @@ fn lower_artifact(
             plating_replicates: count("plating_replicates", 2)?,
             serial_dilutions: count("serial_dilutions", 2)?,
             chemistry: StrainChemistryIntent {
+                cell_aliquot_volume_ul: quantity("cell_aliquot_volume", "uL", 100)?,
                 cell_volume_ul: quantity("cell_volume", "uL", 20)?,
                 dna_volume_ul: quantity("dna_volume", "uL", 2)?,
+                recovery_aliquot_volume_ul: quantity("recovery_aliquot_volume", "uL", 1_200)?,
                 recovery_volume_ul: quantity("recovery_volume", "uL", 60)?,
                 cold_minutes: quantity("cold_incubation", "min", 30)?,
                 heat_shock_temperature_c: quantity("heat_shock_temperature", "C", 42)?,

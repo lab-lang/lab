@@ -356,6 +356,15 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
         );
         insert_integer(
             &mut parameters,
+            "recovery_aliquot_volume_ul",
+            u32_value(
+                &recover
+                    .get_attr_recover_medium_aliquot_volume_ul(context)
+                    .unwrap(),
+            ),
+        );
+        insert_integer(
+            &mut parameters,
             "recovery_volume_ul",
             u32_value(&recover.get_attr_recover_medium_volume_ul(context).unwrap()),
         );

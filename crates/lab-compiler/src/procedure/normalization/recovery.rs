@@ -28,6 +28,7 @@ pub(super) fn normalize_add_medium(
     let medium = view.one_material("medium")?;
     let replicates = positive(&view, "replicates", None)?;
     let initial_volume = positive(&view, "initial_volume_ul", Some(MICROLITRE))?;
+    let recovery_aliquot_volume = positive(&view, "recovery_aliquot_volume_ul", Some(MICROLITRE))?;
     let recovery_volume = positive(&view, "recovery_volume_ul", Some(MICROLITRE))?;
     let air_gap = positive(&view, "air_gap_ul", Some(MICROLITRE))?;
     let medium_id = procedure_id(medium.id.as_str())?;
@@ -54,7 +55,7 @@ pub(super) fn normalize_add_medium(
                 positions: 1,
                 working_capacity_each: None,
                 dead_volume_each: None,
-                initial_volume_each: None,
+                initial_volume_each: Some(volume(recovery_aliquot_volume)?),
                 temperature: None,
             },
             Vessel {

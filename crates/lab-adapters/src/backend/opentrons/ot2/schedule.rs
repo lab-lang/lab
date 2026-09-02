@@ -795,6 +795,7 @@ fn allocate_transformation(
     let mut dna_requirements = BTreeMap::<String, u32>::new();
     let mut external_dna_keys = BTreeSet::new();
     let mut recovery_loads = BTreeMap::<String, u32>::new();
+    let mut recovery_aliquots = BTreeMap::<String, u32>::new();
     let mut recovery_consumed = BTreeMap::<String, u32>::new();
     for (prepare, heat) in prepare_heat {
         let recovery = *recovery_by_heat.get(heat).ok_or_else(|| {
@@ -870,10 +871,16 @@ fn allocate_transformation(
         );
         source_keys.insert(recovery_key.clone());
         let consumed = recovery_consumed.entry(recovery_key.clone()).or_default();
-        let load = recovery_loads.entry(recovery_key).or_default();
+        let load = recovery_loads.entry(recovery_key.clone()).or_default();
         medium_demand
             .fold(consumed, load)
             .map_err(|error| format!("OT-2 recovery batch: {error}"))?;
+        if let Some(stated) = medium_demand.stated_initial_ul {
+            recovery_aliquots
+                .entry(recovery_key)
+                .and_modify(|volume| *volume = (*volume).max(stated))
+                .or_insert(stated);
+        }
     }
     // A competent-cell aliquot is a physical tube of a stated size. Fusing more work onto one
     // than it holds is not a load the operator can perform, so it is refused rather than printed.
@@ -886,7 +893,25 @@ fn allocate_transformation(
             ));
         }
     }
-    let cell_loads = cell_requirements.clone();
+    let cell_loads = cell_requirements
+        .iter()
+        .map(|(key, needed)| {
+            (
+                key.clone(),
+                cell_aliquots
+                    .get(key)
+                    .copied()
+                    .unwrap_or(*needed)
+                    .max(*needed),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    for (key, stated) in recovery_aliquots {
+        recovery_loads
+            .entry(key)
+            .and_modify(|required| *required = (*required).max(stated))
+            .or_insert(stated);
+    }
     let dna_loads = dna_requirements.clone();
     let dna_plate_wells = plate_wells(profile.stages.transformation.dna_plate.capacity);
     let product_positions = product_wells
