@@ -7,10 +7,10 @@ mod extraction;
 mod inventory;
 mod invocation;
 mod lowering;
-mod model;
+mod material_inventory;
 mod problem;
-mod resolution;
 mod schedule;
+mod solution;
 mod solver;
 
 pub use crate::allocation::{
@@ -27,7 +27,7 @@ pub use execution::{
 pub use explain::explain_facility_planning_error;
 pub use extraction::PlanningProblemExtractionError;
 pub(crate) use extraction::extract_planning_problem;
-pub use inventory::BuildInventoryError;
+pub use inventory::{MaterialLotInventoryError, build_material_lot_inventory};
 pub(crate) use invocation::hex_sha256;
 pub use invocation::{
     ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
@@ -37,10 +37,8 @@ pub use lowering::{
     FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
     FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
 };
-pub use model::{
-    ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,
-    DependencyBuildManifest, DependencyBuildStatus, DependencyEdge, DependencyInventorySource,
-    DependencyNode, LegacyBuildInventory, MaterialLotBinding, MaterialLotBuildInventory,
+pub use material_inventory::{
+    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
 };
 pub use problem::{
     PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
@@ -48,20 +46,21 @@ pub use problem::{
     PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
-pub use resolution::{DependencyGraphError, resolve_dependency_graph};
 pub use schedule::{
     ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION, AllocatedExecutionGroup,
     AllocatedProcedureSchedule, AllocatedProcedureScheduleError, ScheduledPhysicalLocation,
     ScheduledValueRef,
 };
+pub use solution::{
+    AdapterRequirement, AssetPin, AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
+    FacilityPlanningPolicy, FacilityPlanningSolution, FacilityPlanningSolutionValidationError,
+    MethodPin, MethodPinSelector, PlanningCandidateRejectionReason, PlanningRejectedOffering,
+    SelectedAdapter, SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    SelectedMethod, SelectedProcedureTask, SelectedRequirementBinding,
+};
 pub use solver::{
-    AdapterRequirement, AlternativeMaterialBinding, AlternativeMethod,
-    AlternativeRequirementBinding, AssetPin, AssetPinSelector,
-    FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningError, FacilityPlanningPolicy,
-    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MethodPin,
-    MethodPinSelector, PlanningAlternative, PlanningCandidateRejectionReason,
-    PlanningMaterialRejectionReason, PlanningRejectedOffering, RejectedMethodCandidate,
-    RejectedPlanningMaterial, RejectedPlanningRequirement, SelectedAdapter,
-    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod,
-    SelectedProcedureTask, SelectedRequirementBinding,
+    AlternativeMaterialBinding, AlternativeMethod, AlternativeRequirementBinding,
+    FacilityPlanningError, PlanningAlternative, PlanningMaterialRejectionReason,
+    RejectedMethodCandidate, RejectedPlanningMaterial, RejectedPlanningRequirement,
+    solve_facility_planning,
 };

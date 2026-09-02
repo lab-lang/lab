@@ -20,10 +20,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use super::model::MaterialLotCandidates;
 #[cfg(test)]
 use super::{FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem};
-use super::{MaterialLotBuildInventory, SelectedMaterialBinding, SelectedMaterialSource};
+use super::{
+    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
+    SelectedMaterialBinding, SelectedMaterialSource,
+};
 
 pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v1";
 
@@ -35,7 +37,7 @@ pub struct AdapterInvocationPlan {
     pub allocated_lair_sha256: String,
     pub inventory_sha256: String,
     pub facility: String,
-    pub material_inventory: MaterialLotBuildInventory,
+    pub material_inventory: MaterialLotInventory,
     pub methods: Vec<AllocatedMethod>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invocations: Vec<AdapterInvocation>,
@@ -65,7 +67,7 @@ impl AdapterInvocationPlan {
         problem: &PlanningProblem,
         solution: &FacilityPlanningSolution,
         allocated_lair_sha256: String,
-        material_inventory: MaterialLotBuildInventory,
+        material_inventory: MaterialLotInventory,
     ) -> Result<Self, AdapterInvocationError> {
         solution.validate_against(problem)?;
         let selections = solution
@@ -172,7 +174,7 @@ impl AdapterInvocationPlan {
     pub fn from_allocated(
         allocated: AllocatedProgram,
         allocated_lair_sha256: String,
-        material_inventory: MaterialLotBuildInventory,
+        material_inventory: MaterialLotInventory,
     ) -> Result<Self, AdapterInvocationValidationError> {
         let AllocatedProgram {
             problem_sha256,
@@ -831,42 +833,13 @@ fn validate_allocated_material_linearity(
 fn validate_material_inventory(
     plan: &AdapterInvocationPlan,
 ) -> Result<(), AdapterInvocationValidationError> {
-    if plan.material_inventory.source_sha256 != plan.inventory_sha256
-        || plan.material_inventory.facility != plan.facility
+    plan.material_inventory
+        .validate()
+        .map_err(AdapterInvocationValidationError::InvalidMaterialInventory)?;
+    if plan.material_inventory.source_sha256() != plan.inventory_sha256
+        || plan.material_inventory.facility() != plan.facility
     {
         return Err(AdapterInvocationValidationError::MaterialInventoryMismatch);
-    }
-    for (kind, entries) in [
-        ("material", &plan.material_inventory.materials),
-        ("artifact", &plan.material_inventory.artifacts),
-    ] {
-        for (symbol, candidates) in entries {
-            if symbol.is_empty() {
-                return Err(AdapterInvocationValidationError::InvalidMaterialInventory {
-                    kind,
-                    symbol: symbol.clone(),
-                });
-            }
-            let MaterialLotCandidates::Identified {
-                component,
-                material_lots,
-            } = candidates
-            else {
-                continue;
-            };
-            let strictly_sorted = material_lots.windows(2).all(|lots| lots[0] < lots[1]);
-            if AbsoluteIri::new(component).is_err()
-                || material_lots
-                    .iter()
-                    .any(|material_lot| AbsoluteIri::new(material_lot).is_err())
-                || !strictly_sorted
-            {
-                return Err(AdapterInvocationValidationError::InvalidMaterialInventory {
-                    kind,
-                    symbol: symbol.clone(),
-                });
-            }
-        }
     }
     Ok(())
 }
@@ -874,7 +847,7 @@ fn validate_material_inventory(
 fn valid_material_binding(
     binding: &SelectedMaterialBinding,
     choices: &BTreeSet<LocalId>,
-    inventory: &MaterialLotBuildInventory,
+    inventory: &MaterialLotInventory,
 ) -> bool {
     if binding.symbol.is_empty() {
         return false;
@@ -897,10 +870,7 @@ fn valid_material_binding(
             let Some(MaterialLotCandidates::Identified {
                 component: expected_component,
                 material_lots,
-            }) = inventory
-                .materials
-                .get(&binding.symbol)
-                .or_else(|| inventory.artifacts.get(&binding.symbol))
+            }) = inventory.candidates(&binding.symbol)
             else {
                 return false;
             };
@@ -1003,8 +973,8 @@ pub enum AdapterInvocationValidationError {
     InvalidFacility,
     #[error("adapter invocation material inventory does not match its inventory hash and facility")]
     MaterialInventoryMismatch,
-    #[error("adapter invocation material inventory contains invalid {kind} `{symbol}`")]
-    InvalidMaterialInventory { kind: &'static str, symbol: String },
+    #[error("adapter invocation contains invalid material inventory: {0}")]
+    InvalidMaterialInventory(#[source] MaterialLotInventoryValidationError),
     #[error("adapter invocations contain no selected Methods")]
     EmptyMethods,
     #[error("adapter invocations repeat Method choice `{choice}`")]
@@ -1184,13 +1154,13 @@ mod tests {
         }
     }
 
-    fn inventory() -> MaterialLotBuildInventory {
-        MaterialLotBuildInventory {
-            source_sha256: "b".repeat(64),
-            facility: "https://example.org/facility".to_owned(),
-            materials: BTreeMap::new(),
-            artifacts: BTreeMap::new(),
-        }
+    fn inventory() -> MaterialLotInventory {
+        MaterialLotInventory::new(
+            "b".repeat(64),
+            "https://example.org/facility",
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
     }
 
     fn valid_plan() -> AdapterInvocationPlan {
@@ -1307,12 +1277,19 @@ mod tests {
         let mut plan = valid_plan();
         let selected = "https://example.org/lot/a".to_owned();
         let alternative = "https://example.org/lot/b".to_owned();
-        plan.material_inventory.materials.insert(
+        let mut materials = plan.material_inventory.materials().clone();
+        materials.insert(
             "sample".to_owned(),
             MaterialLotCandidates::Identified {
                 component: "https://example.org/component/sample".to_owned(),
                 material_lots: vec![selected.clone(), alternative.clone()],
             },
+        );
+        plan.material_inventory = MaterialLotInventory::new(
+            plan.material_inventory.source_sha256(),
+            plan.material_inventory.facility(),
+            materials,
+            plan.material_inventory.artifacts().clone(),
         );
         plan.methods[0].tasks[0]
             .materials

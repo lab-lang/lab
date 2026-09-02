@@ -16,10 +16,10 @@ use lab_lair::backend::{AdapterProfileContractError, validate_adapter_profile};
 use lab_lair::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_lair::planning::{
     AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, BuildInventory,
-    BuildInventoryError, FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
-    MaterialLotBuildInventory, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
-    explain_facility_planning_error,
+    AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningError,
+    FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotInventory,
+    MaterialLotInventoryError, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
+    build_material_lot_inventory, explain_facility_planning_error, solve_facility_planning,
 };
 use lab_lair::program::{
     AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
@@ -112,7 +112,7 @@ pub enum FacilityProjectError {
     #[error("failed to index active SBOLInventory MaterialLots")]
     MaterialLots(#[source] MaterialLotCatalogError),
     #[error("failed to bind checked designs to SBOLInventory MaterialLots")]
-    MaterialInventory(#[source] BuildInventoryError),
+    MaterialInventory(#[source] MaterialLotInventoryError),
     #[error("failed to lower the checked program into Design and Intent LAIR")]
     PortableLair(#[source] PortableLairError),
     #[error("failed to refine workflow intent into Method alternatives")]
@@ -200,7 +200,7 @@ fn plan_modules_with_inventory(
         .map_err(FacilityProjectError::PlanningProblem)?;
     let adapter_bindings = resolve_package_adapter_bindings(package, &inventory)?;
     let material_inventory = semantic_material_inventory(modules, &inventory)?;
-    let solution = FacilityPlanningSolution::solve(
+    let solution = solve_facility_planning(
         &problem,
         &inventory,
         &material_inventory,
@@ -312,7 +312,7 @@ pub fn resolve_package_adapter_bindings(
 fn semantic_material_inventory(
     modules: &[&lab_language::CheckedModule],
     snapshot: &InventorySnapshot,
-) -> Result<MaterialLotBuildInventory, FacilityProjectError> {
+) -> Result<MaterialLotInventory, FacilityProjectError> {
     let material_lots = snapshot
         .active_material_lots()
         .map_err(FacilityProjectError::MaterialLots)?;
@@ -325,17 +325,13 @@ fn semantic_material_inventory(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let inventory = BuildInventory::from_material_lots(
+    build_material_lot_inventory(
         modules,
         snapshot.source_sha256(),
         snapshot.facility().as_str(),
         &lots_by_component,
     )
-    .map_err(FacilityProjectError::MaterialInventory)?;
-    let BuildInventory::MaterialLots(inventory) = inventory else {
-        unreachable!("SBOLInventory material binding always creates semantic inventory")
-    };
-    Ok(inventory)
+    .map_err(FacilityProjectError::MaterialInventory)
 }
 
 fn facility_planning_policy(

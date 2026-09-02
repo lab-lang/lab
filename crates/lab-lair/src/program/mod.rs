@@ -299,7 +299,7 @@ impl AllocatedLairProgram {
     /// Project the exact backend-facing ABI from this verifier-valid allocated program.
     pub fn adapter_invocations(
         &self,
-        material_inventory: crate::planning::MaterialLotBuildInventory,
+        material_inventory: crate::planning::MaterialLotInventory,
     ) -> Result<crate::planning::AdapterInvocationPlan, crate::planning::AdapterInvocationError>
     {
         let allocated_lair_sha256 = self.sha256();
@@ -600,8 +600,8 @@ mod tests {
     use crate::backend::default_adapter_profile;
     use crate::planning::{
         AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationPlan, AdapterRequirement,
-        BuildInventory, FacilityPlanningPolicy, FacilityPlanningSolution, MethodPin,
-        MethodPinSelector, PlanningProblem, PlanningValueSource,
+        FacilityPlanningPolicy, MethodPin, MethodPinSelector, PlanningProblem, PlanningValueSource,
+        build_material_lot_inventory, solve_facility_planning,
     };
     use crate::session::CompilerSession;
     use crate::stage::IrStage;
@@ -1430,16 +1430,14 @@ workflow main() -> Material<Plasmid>:
                 )
             })
             .collect();
-        let BuildInventory::MaterialLots(material_inventory) = BuildInventory::from_material_lots(
+        let material_inventory = build_material_lot_inventory(
             &[&checked],
             inventory.source_sha256(),
             inventory.facility().as_str(),
             &lots_by_component,
         )
-        .unwrap() else {
-            unreachable!()
-        };
-        let solution = FacilityPlanningSolution::solve(
+        .unwrap();
+        let solution = solve_facility_planning(
             &problem,
             &inventory,
             &material_inventory,
@@ -1519,7 +1517,12 @@ workflow main() -> Material<Plasmid>:
         decoded.validate().unwrap();
         assert_eq!(decoded, invocations);
         let mut mismatched_inventory = decoded.clone();
-        mismatched_inventory.material_inventory.source_sha256 = "0".repeat(64);
+        mismatched_inventory.material_inventory = crate::planning::MaterialLotInventory::new(
+            "0".repeat(64),
+            mismatched_inventory.material_inventory.facility(),
+            mismatched_inventory.material_inventory.materials().clone(),
+            mismatched_inventory.material_inventory.artifacts().clone(),
+        );
         assert!(matches!(
             mismatched_inventory.validate(),
             Err(crate::planning::AdapterInvocationValidationError::MaterialInventoryMismatch)

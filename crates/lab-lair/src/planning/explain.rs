@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-use crate::planning::solver::{
+use crate::planning::{
     AlternativeMethod, FacilityPlanningError, PlanningAlternative,
     PlanningCandidateRejectionReason, PlanningMaterialRejectionReason, PlanningRejectedOffering,
     RejectedMethodCandidate,

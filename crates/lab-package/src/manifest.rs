@@ -151,17 +151,12 @@ pub struct MethodPinMetadata {
 /// The facility catalog a package may plan against.
 ///
 /// `document` selects the portable SBOLInventory graph and `facility` disambiguates
-/// that graph when it contains several facilities. The symbolic sets remain only
-/// as a mutually exclusive migration form for existing packages.
+/// that graph when it contains several facilities.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InventoryMetadata {
     pub document: Option<PathBuf>,
     pub facility: Option<String>,
-    #[serde(default)]
-    pub materials: BTreeSet<String>,
-    #[serde(default)]
-    pub artifacts: BTreeSet<String>,
 }
 
 /// Local operational bindings from exact SBOLInventory Assets to Lab adapters.
@@ -417,18 +412,8 @@ impl PlanningMetadata {
 }
 
 impl InventoryMetadata {
-    pub fn uses_legacy_symbols(&self) -> bool {
-        !self.materials.is_empty() || !self.artifacts.is_empty()
-    }
-
     fn validate(&self) -> Result<(), PackageError> {
         if let Some(document) = &self.document {
-            if self.uses_legacy_symbols() {
-                return Err(PackageError::InvalidInventory(
-                    "'document' cannot be combined with legacy 'materials' or 'artifacts'"
-                        .to_owned(),
-                ));
-            }
             let invalid = document.as_os_str().is_empty()
                 || document.is_absolute()
                 || document.components().any(|component| {
@@ -641,8 +626,8 @@ target = "opentrons-ot2"
     }
 
     #[test]
-    fn reads_the_legacy_symbolic_inventory() {
-        let manifest = PackageManifest::parse(
+    fn rejects_the_removed_symbolic_inventory() {
+        let materials = PackageManifest::parse(
             r#"[package]
 name = "tet-reporter"
 version = "0.1.0"
@@ -651,15 +636,11 @@ version = "0.1.0"
 materials = ["BsaI", "pSB1C3", "BsaI"]
 artifacts = ["composite_plasmid_1"]
 "#,
-        )
-        .unwrap();
-        assert_eq!(manifest.inventory.materials.len(), 2, "names are a set");
-        assert!(manifest.inventory.materials.contains("pSB1C3"));
-        assert_eq!(
-            manifest.inventory.artifacts.iter().collect::<Vec<_>>(),
-            ["composite_plasmid_1"]
         );
-        manifest.validate().unwrap();
+        assert!(
+            materials.is_err(),
+            "symbolic inventory is not physical evidence"
+        );
 
         let empty =
             PackageManifest::parse("[package]\nname = \"t\"\nversion = \"0.1.0\"\n").unwrap();
@@ -962,7 +943,7 @@ profile = "adapters/star.toml"
 
     #[test]
     fn rejects_ambiguous_or_non_portable_inventory_configuration() {
-        let mixed = PackageManifest::parse(
+        let removed_symbols = PackageManifest::parse(
             r#"[package]
 name = "test"
 version = "0.1.0"
@@ -971,12 +952,8 @@ version = "0.1.0"
 document = "inventory/catalog.ttl"
 materials = ["BsaI"]
 "#,
-        )
-        .unwrap();
-        assert!(matches!(
-            mixed.validate(),
-            Err(PackageError::InvalidInventory(_))
-        ));
+        );
+        assert!(removed_symbols.is_err());
 
         let escaping = PackageManifest::parse(
             "[package]\nname = \"test\"\nversion = \"0.1.0\"\n\n[inventory]\ndocument = \"../catalog.ttl\"\n",

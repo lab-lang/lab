@@ -17,7 +17,7 @@ checked modules
     -> one facility-wide execution plan
 ```
 
-`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_lair::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `FacilityPlanningSolution::solve` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `AllocatedLairProgram::adapter_invocations` is the only production backend projection.
+`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_lair::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `solve_facility_planning` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `AllocatedLairProgram::adapter_invocations` is the only production backend projection.
 
 Verifier-valid Allocated Procedure LAIR is the only input device lowering is projected from. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
 
@@ -34,7 +34,7 @@ The source tree follows semantic ownership and dependency direction:
 - `src/ir/` owns the small set of Pliron attribute helpers shared across domain operations;
 - `src/program/` owns stage-typed program wrappers and checked-source lowering into coupled Design and Workflow IR;
 - `src/pipeline.rs` and `src/session.rs` own textual pass orchestration and a reusable Pliron compiler session;
-- `src/planning/` owns planning-problem extraction, the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshot, graph-wide solver, immutable adapter-invocation projection, reviewed execution-plan construction, and dependency reporting;
+- `src/planning/` owns planning-problem extraction, the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshots, graph-wide solving, immutable adapter-invocation projection, and reviewed execution-plan construction;
 - `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
 - `src/artifact/` owns generated files independently of filesystem persistence;
 - `lab-runfmt` owns the versioned reviewed documents interpreted by the runtime; and

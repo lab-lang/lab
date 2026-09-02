@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use lab_language::{CheckedDeclaration, CheckedModule};
 use thiserror::Error;
 
-use super::model::{BuildInventory, MaterialLotBuildInventory, MaterialLotCandidates};
+use super::{MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError};
 
 #[derive(Debug, Error)]
-pub enum BuildInventoryError {
+pub enum MaterialLotInventoryError {
     #[error(
         "inventory lookup key `{symbol}` refers to both SBOL Components `{first}` and `{second}`"
     )]
@@ -15,69 +15,66 @@ pub enum BuildInventoryError {
         first: String,
         second: String,
     },
+    #[error(transparent)]
+    InvalidInventory(#[from] MaterialLotInventoryValidationError),
 }
 
-impl BuildInventory {
-    /// Binds checked declaration identities to every active candidate lot in one facility snapshot.
-    ///
-    /// Candidate preservation is intentional. Selecting among several lots is allocation policy,
-    /// so dependency planning reports ambiguity if it actually needs such a declaration.
-    pub fn from_material_lots(
-        modules: &[&CheckedModule],
-        source_sha256: impl Into<String>,
-        facility: impl Into<String>,
-        lots_by_component: &BTreeMap<String, Vec<String>>,
-    ) -> Result<Self, BuildInventoryError> {
-        let mut materials = BTreeMap::new();
-        let mut artifacts = BTreeMap::new();
-        for declaration in modules.iter().flat_map(|module| module.declarations.iter()) {
-            match declaration {
-                CheckedDeclaration::Catalog {
-                    name,
-                    sbol_identity,
-                    supplier_identity,
-                    ..
-                } => {
-                    insert_declaration(
-                        &mut materials,
-                        name,
-                        sbol_identity.as_deref(),
-                        lots_by_component,
-                    )?;
-                    if supplier_identity != name {
-                        insert_declaration(
-                            &mut materials,
-                            supplier_identity,
-                            sbol_identity.as_deref(),
-                            lots_by_component,
-                        )?;
-                    }
-                }
-                CheckedDeclaration::Artifact {
-                    name,
-                    sbol_identity,
-                    ..
-                } => insert_declaration(
-                    &mut artifacts,
+/// Bind checked declaration identities to every active candidate lot in one facility snapshot.
+///
+/// Candidate preservation is intentional. Selecting among several equally usable lots is
+/// facility allocation policy, so the chosen lot and its alternatives remain reviewable.
+pub fn build_material_lot_inventory(
+    modules: &[&CheckedModule],
+    source_sha256: impl Into<String>,
+    facility: impl Into<String>,
+    lots_by_component: &BTreeMap<String, Vec<String>>,
+) -> Result<MaterialLotInventory, MaterialLotInventoryError> {
+    let mut materials = BTreeMap::new();
+    let mut artifacts = BTreeMap::new();
+    for declaration in modules.iter().flat_map(|module| module.declarations.iter()) {
+        match declaration {
+            CheckedDeclaration::Catalog {
+                name,
+                sbol_identity,
+                supplier_identity,
+                ..
+            } => {
+                insert_declaration(
+                    &mut materials,
                     name,
                     sbol_identity.as_deref(),
                     lots_by_component,
-                )?,
-                _ => {}
+                )?;
+                if supplier_identity != name {
+                    insert_declaration(
+                        &mut materials,
+                        supplier_identity,
+                        sbol_identity.as_deref(),
+                        lots_by_component,
+                    )?;
+                }
             }
+            CheckedDeclaration::Artifact {
+                name,
+                sbol_identity,
+                ..
+            } => insert_declaration(
+                &mut artifacts,
+                name,
+                sbol_identity.as_deref(),
+                lots_by_component,
+            )?,
+            _ => {}
         }
-        for (symbol, material) in &materials {
-            if let Some(artifact) = artifacts.get(symbol) {
-                ensure_compatible(symbol, material, artifact)?;
-            }
-        }
-        Ok(Self::MaterialLots(MaterialLotBuildInventory {
-            source_sha256: source_sha256.into(),
-            facility: facility.into(),
-            materials,
-            artifacts,
-        }))
     }
+    for (symbol, material) in &materials {
+        if let Some(artifact) = artifacts.get(symbol) {
+            ensure_compatible(symbol, material, artifact)?;
+        }
+    }
+    let inventory = MaterialLotInventory::new(source_sha256, facility, materials, artifacts);
+    inventory.validate()?;
+    Ok(inventory)
 }
 
 fn insert_declaration(
@@ -85,7 +82,7 @@ fn insert_declaration(
     lookup_key: &str,
     identity: Option<&str>,
     lots_by_component: &BTreeMap<String, Vec<String>>,
-) -> Result<(), BuildInventoryError> {
+) -> Result<(), MaterialLotInventoryError> {
     let candidate = if let Some(identity) = identity {
         let mut material_lots = lots_by_component.get(identity).cloned().unwrap_or_default();
         material_lots.sort();
@@ -110,7 +107,7 @@ fn ensure_compatible(
     symbol: &str,
     first: &MaterialLotCandidates,
     second: &MaterialLotCandidates,
-) -> Result<(), BuildInventoryError> {
+) -> Result<(), MaterialLotInventoryError> {
     match (first, second) {
         (
             MaterialLotCandidates::Identified {
@@ -119,14 +116,14 @@ fn ensure_compatible(
             MaterialLotCandidates::Identified {
                 component: second, ..
             },
-        ) if first != second => Err(BuildInventoryError::ConflictingDesignIdentity {
+        ) if first != second => Err(MaterialLotInventoryError::ConflictingDesignIdentity {
             symbol: symbol.to_owned(),
             first: first.clone(),
             second: second.clone(),
         }),
         (MaterialLotCandidates::Unidentified, MaterialLotCandidates::Identified { .. })
         | (MaterialLotCandidates::Identified { .. }, MaterialLotCandidates::Unidentified) => {
-            Err(BuildInventoryError::ConflictingDesignIdentity {
+            Err(MaterialLotInventoryError::ConflictingDesignIdentity {
                 symbol: symbol.to_owned(),
                 first: render_identity(first),
                 second: render_identity(second),
@@ -170,28 +167,28 @@ build part product:
 "#,
         )
         .unwrap();
-        let inventory = BuildInventory::from_material_lots(
+        let inventory = build_material_lot_inventory(
             &[&checked],
-            "abc123",
+            "a".repeat(64),
             "https://example.org/inventory/facility",
             &lots(),
         )
         .unwrap();
 
-        let BuildInventory::MaterialLots(inventory) = inventory else {
-            panic!("an SBOLInventory document creates semantic inventory");
-        };
-        assert_eq!(inventory.facility, "https://example.org/inventory/facility");
-        assert!(inventory.materials.contains_key("SKU-1"));
-        assert!(inventory.materials.contains_key("source"));
+        assert_eq!(
+            inventory.facility(),
+            "https://example.org/inventory/facility"
+        );
+        assert!(inventory.materials().contains_key("SKU-1"));
+        assert!(inventory.materials().contains_key("source"));
         let expected = MaterialLotCandidates::Identified {
             component: "https://example.org/inventory/input".to_owned(),
             material_lots: vec!["https://example.org/inventory/input_lot".to_owned()],
         };
-        assert_eq!(inventory.materials["SKU-1"], expected);
-        assert_eq!(inventory.materials["source"], expected);
+        assert_eq!(inventory.materials()["SKU-1"], expected);
+        assert_eq!(inventory.materials()["source"], expected);
         assert_eq!(
-            inventory.artifacts["product"],
+            inventory.artifacts()["product"],
             MaterialLotCandidates::Identified {
                 component: "https://example.org/inventory/product".to_owned(),
                 material_lots: Vec::new(),
@@ -214,9 +211,9 @@ buy part second:
 "#,
         )
         .unwrap();
-        let error = BuildInventory::from_material_lots(
+        let error = build_material_lot_inventory(
             &[&checked],
-            "abc123",
+            "a".repeat(64),
             "https://example.org/inventory/facility",
             &lots(),
         )
@@ -224,7 +221,8 @@ buy part second:
 
         assert!(matches!(
             error,
-            BuildInventoryError::ConflictingDesignIdentity { symbol, .. } if symbol == "same-sku"
+            MaterialLotInventoryError::ConflictingDesignIdentity { symbol, .. }
+                if symbol == "same-sku"
         ));
     }
 }

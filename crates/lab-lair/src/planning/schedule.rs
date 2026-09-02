@@ -545,9 +545,6 @@ pub enum AllocatedProcedureScheduleError {
 mod tests {
     use std::path::PathBuf;
 
-    use super::super::model::MaterialLotCandidates;
-    use super::super::solver::SelectedMaterialBinding;
-    use super::super::solver::SelectedMaterialSource;
     use crate::method::{IntentOperationId, PortType};
     use lab_capability::{
         AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
@@ -556,8 +553,9 @@ mod tests {
     use super::*;
     use crate::planning::{
         ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocationPlan, AllocatedMethod,
-        AllocatedProcedureTask, AllocatedRequirementBinding, MaterialLotBuildInventory,
-        PlanningPort, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+        AllocatedProcedureTask, AllocatedRequirementBinding, MaterialLotCandidates,
+        MaterialLotInventory, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
+        PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
     };
 
     fn id(value: &str) -> LocalId {
@@ -644,12 +642,12 @@ mod tests {
             allocated_lair_sha256: "c".repeat(64),
             inventory_sha256: "d".repeat(64),
             facility: "https://example.org/facility".to_owned(),
-            material_inventory: MaterialLotBuildInventory {
-                source_sha256: "d".repeat(64),
-                facility: "https://example.org/facility".to_owned(),
-                materials: BTreeMap::new(),
-                artifacts: BTreeMap::new(),
-            },
+            material_inventory: MaterialLotInventory::new(
+                "d".repeat(64),
+                "https://example.org/facility",
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
             methods: vec![AllocatedMethod {
                 choice: id("method"),
                 source_operation: IntentOperationId::new("https://example.org/intent").unwrap(),
@@ -723,8 +721,9 @@ mod tests {
 
     /// Registers a lot so the plan's own material validation accepts the binding.
     fn with_material_inventory(plan: &mut AdapterInvocationPlan, inputs: &[(&str, &str)]) {
+        let mut materials = plan.material_inventory.materials().clone();
         for (input, lot) in inputs {
-            plan.material_inventory.materials.insert(
+            materials.insert(
                 (*input).to_owned(),
                 MaterialLotCandidates::Identified {
                     component: format!("https://example.org/component/{input}"),
@@ -732,6 +731,12 @@ mod tests {
                 },
             );
         }
+        plan.material_inventory = MaterialLotInventory::new(
+            plan.material_inventory.source_sha256(),
+            plan.material_inventory.facility(),
+            materials,
+            plan.material_inventory.artifacts().clone(),
+        );
     }
 
     #[test]
@@ -804,13 +809,7 @@ mod tests {
                 }];
             }
         }
-        plan.material_inventory.materials.insert(
-            "buffer".to_owned(),
-            MaterialLotCandidates::Identified {
-                component: "https://example.org/component/buffer".to_owned(),
-                material_lots: vec!["https://example.org/lots/buffer".to_owned()],
-            },
-        );
+        with_material_inventory(&mut plan, &[("buffer", "https://example.org/lots/buffer")]);
         let shared = |task: usize, input: &str| ScheduledPhysicalLocation {
             value: ScheduledValueRef::MaterialInput {
                 task: invocation.tasks[task].clone(),

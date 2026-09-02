@@ -1367,7 +1367,7 @@ mod tests {
     use crate::method::IntentOperationId;
     use crate::planning::{
         AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
-        MaterialLotBuildInventory,
+        MaterialLotInventory,
     };
     use lab_capability::{MethodId, OperationId, QualificationLevel};
 
@@ -1604,12 +1604,12 @@ mod tests {
             allocated_lair_sha256: "c".repeat(64),
             inventory_sha256: "d".repeat(64),
             facility: "https://example.org/facility".to_owned(),
-            material_inventory: MaterialLotBuildInventory {
-                source_sha256: "d".repeat(64),
-                facility: "https://example.org/facility".to_owned(),
-                materials: BTreeMap::new(),
-                artifacts: BTreeMap::new(),
-            },
+            material_inventory: MaterialLotInventory::new(
+                "d".repeat(64),
+                "https://example.org/facility",
+                BTreeMap::new(),
+                BTreeMap::new(),
+            ),
             methods: vec![first_method, second_method],
             invocations: vec![first.clone(), second.clone()],
         };

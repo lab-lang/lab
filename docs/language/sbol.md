@@ -898,7 +898,7 @@ things, and guessing wrong produces a parse error that blames the document
 rather than the guess. An SBOL document names its serialization in its
 extension or it is not discovered.
 
-**Moving designs into SBOL does not change what an order names.** An imported Component carries its registry IRI as `sbol_identity`; a bought declaration separately carries `supplier_identity`, defaulting to its Lab symbol when no order identifier is stated. Inventory-backed planning follows only `sbol_identity -> sbol:built -> MaterialLot`, while device manifests may still use the supplier identifier. The symbolic `[inventory] materials` array remains a legacy migration form and no longer defines the semantic model.
+**Moving designs into SBOL does not change what an order names.** An imported Component carries its registry IRI as `sbol_identity`; a bought declaration separately carries `supplier_identity`, defaulting to its Lab symbol when no order identifier is stated. Inventory-backed planning follows only `sbol_identity -> sbol:built -> MaterialLot`, while device manifests may still use the supplier identifier.
 
 ### Widening the mapping found three real modelling gaps
 
@@ -1217,7 +1217,7 @@ and the RDF I/O stack are not obviously fine. This is why the validation pass
 runs from `lab-project` rather than from `compile_parsed_module`, and it needs
 measuring rather than assuming.
 
-**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. The dependency manifest independently moved to `lab.dependency-build.v1` when it began recording inventory source provenance and exact Component-to-MaterialLot bindings.
+**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. Facility planning now retains exact Component-to-MaterialLot candidates alongside the inventory digest and freezes the selected binding in allocated LAIR.
 
 The checker's tables are the bulk of the mechanical work: fifteen
 `HashMap<String, _>` and `BTreeSet<String>` fields on `SemanticContext`, plus
