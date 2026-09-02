@@ -3,11 +3,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use lab_compiler::program::PortableLairProgram;
-use lab_compiler::{
-    CheckedDeclaration, DiagnosticSeverity, SourceId, analyze_module, render_diagnostic,
-};
 use lab_facility::{ExecutionPlanOptions, build_execution_plan_from_invocations};
 use lab_inventory::InventorySnapshot;
+use lab_language::{
+    CheckedDeclaration, CheckedModule, DiagnosticSeverity, SourceId, analyze_module,
+    render_diagnostic,
+};
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{
     CompiledModule, CompiledProject, LOCK_FILE, LabProject, load_package_inventory,
@@ -552,7 +553,7 @@ fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
 }
 
 fn write_unallocated_compiler_frontier(
-    modules: &[&lab_compiler::CheckedModule],
+    modules: &[&CheckedModule],
     methods: &lab_compiler::method::MethodRegistry,
     output_root: &Path,
 ) -> Result<BuildCompilerIndex> {

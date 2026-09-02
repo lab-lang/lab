@@ -3,7 +3,7 @@
 mod application;
 mod extraction;
 pub(crate) mod ir;
-pub mod model;
+mod model;
 mod validation;
 
 pub use application::AllocationApplicationError;

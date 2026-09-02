@@ -5,9 +5,6 @@ mod material_inventory;
 mod problem;
 mod solution;
 
-pub use crate::allocation::{
-    AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
-};
 pub use extraction::PlanningProblemExtractionError;
 pub(crate) use extraction::extract_planning_problem;
 pub use material_inventory::{

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use lab_compiler::method::{MethodDefinition, MethodRegistry, standard_method_definitions};
 use lab_compiler::program::PortableLairProgram;
-use lab_compiler::{
+use lab_language::{
     CheckedModule, Diagnostic, ModuleId, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
 };

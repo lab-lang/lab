@@ -20,6 +20,7 @@ crate-type = ["cdylib", "rlib"]
 lab-adapters.workspace = true
 lab-facility.workspace = true
 lab-compiler.workspace = true
+lab-language.workspace = true
 lab-project.workspace = true
 pyo3.workspace = true
 serde.workspace = true
