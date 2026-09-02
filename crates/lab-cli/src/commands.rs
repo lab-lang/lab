@@ -418,6 +418,7 @@ fn write_facility_plan(
         allocated_lair: allocated_lair_reference,
         adapter_invocations: adapter_invocations_reference,
         methods: invocations
+            .allocated
             .methods
             .iter()
             .map(|method| ExecutionMethodSelection {
@@ -469,9 +470,10 @@ fn write_facility_plan(
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         output: output_root.to_path_buf(),
-        facility: invocations.facility.clone(),
-        selected_methods: invocations.methods.len(),
+        facility: invocations.allocated.facility.clone(),
+        selected_methods: invocations.allocated.methods.len(),
         allocated_requirements: invocations
+            .allocated
             .methods
             .iter()
             .flat_map(|method| &method.tasks)

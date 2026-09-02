@@ -931,6 +931,7 @@ fn validate_invocation_implementation(
     let invocation_tasks = invocation.tasks.iter().collect::<BTreeSet<_>>();
     let invocation_requirements = invocation.requirements.iter().collect::<BTreeSet<_>>();
     for task in invocation_plan
+        .allocated
         .methods
         .iter()
         .flat_map(|method| &method.tasks)
@@ -1025,6 +1026,7 @@ fn lower_simulator_invocation(
     invocation: &AdapterInvocation,
 ) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
     let requirements = invocation_plan
+        .allocated
         .methods
         .iter()
         .flat_map(|method| &method.tasks)
@@ -1366,7 +1368,8 @@ mod tests {
     use super::*;
     use lab_capability::{MethodId, OperationId, QualificationLevel};
     use lab_lair::allocation::{
-        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+        AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
+        InvocationAdapter,
     };
     use lab_lair::method::IntentOperationId;
     use lab_lair::planning::MaterialLotInventory;
@@ -1599,17 +1602,19 @@ mod tests {
         let second = make_invocation(second_asset, second_task, second_requirement.clone());
         let plan = AdapterInvocationPlan {
             schema_version: crate::ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
-            problem_sha256: "a".repeat(64),
+            allocated: AllocatedProgram {
+                problem_sha256: "a".repeat(64),
+                inventory_sha256: "d".repeat(64),
+                facility: "https://example.org/facility".to_owned(),
+                methods: vec![first_method, second_method],
+            },
             allocated_lair_sha256: "c".repeat(64),
-            inventory_sha256: "d".repeat(64),
-            facility: "https://example.org/facility".to_owned(),
             material_inventory: MaterialLotInventory::new(
                 "d".repeat(64),
                 "https://example.org/facility",
                 BTreeMap::new(),
                 BTreeMap::new(),
             ),
-            methods: vec![first_method, second_method],
             invocations: vec![first.clone(), second.clone()],
         };
         plan.validate().unwrap();

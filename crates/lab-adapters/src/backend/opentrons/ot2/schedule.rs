@@ -94,11 +94,13 @@ struct TaskGraph<'a> {
 impl<'a> TaskGraph<'a> {
     fn new(plan: &'a AdapterInvocationPlan) -> Self {
         let methods = plan
+            .allocated
             .methods
             .iter()
             .map(|method| (method.choice.clone(), method))
             .collect::<BTreeMap<_, _>>();
         let method_by_task = plan
+            .allocated
             .methods
             .iter()
             .flat_map(|method| {
@@ -109,6 +111,7 @@ impl<'a> TaskGraph<'a> {
             })
             .collect::<BTreeMap<_, _>>();
         let task_by_id = plan
+            .allocated
             .methods
             .iter()
             .flat_map(|method| &method.tasks)

@@ -103,8 +103,8 @@ pub(crate) fn lower_adapter_invocations(
     invocation_plan
         .validate()
         .context("allocated adapter invocations are invalid")?;
-    if invocation_plan.inventory_sha256 != inventory.source_sha256()
-        || invocation_plan.facility != inventory.facility().as_str()
+    if invocation_plan.allocated.inventory_sha256 != inventory.source_sha256()
+        || invocation_plan.allocated.facility != inventory.facility().as_str()
     {
         bail!("adapter invocations and the selected inventory snapshot do not match");
     }
@@ -115,6 +115,7 @@ pub(crate) fn lower_adapter_invocations(
         .map(|descriptor| (descriptor.id.as_str(), descriptor))
         .collect::<BTreeMap<_, _>>();
     let requirements = invocation_plan
+        .allocated
         .methods
         .iter()
         .flat_map(|method| &method.tasks)
@@ -277,8 +278,8 @@ pub(crate) fn lower_adapter_invocations(
     Ok(FacilityLoweringOutput {
         manifest: FacilityLoweringManifest {
             schema_version: FACILITY_LOWERING_SCHEMA_VERSION.to_owned(),
-            inventory_sha256: invocation_plan.inventory_sha256.clone(),
-            facility: invocation_plan.facility.clone(),
+            inventory_sha256: invocation_plan.allocated.inventory_sha256.clone(),
+            facility: invocation_plan.allocated.facility.clone(),
             routes,
         },
         protocols,

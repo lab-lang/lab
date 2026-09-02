@@ -1,25 +1,13 @@
 //! Immutable adapter invocations projected from one exact allocated Procedure program.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path};
 
-use lab_capability::{AbsoluteIri, ControlMode, PropertyConstraint, QualificationLevel};
 use lab_lair::allocation::{
-    AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedProgramExtractionError,
-    InvocationAdapter,
+    AllocatedMethod, AllocatedProgram, AllocatedProgramExtractionError,
+    AllocatedProgramValidationError, InvocationAdapter,
 };
 use lab_lair::method::LocalId;
-use lab_lair::planning::{
-    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
-    PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
-};
-use lab_lair::procedure::binding::{
-    ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
-};
-use lab_lair::procedure::{
-    BindingScope, ProcedureTaskProgramValidationError, ValidatedProcedureProgram,
-    validate_task_program,
-};
+use lab_lair::planning::MaterialLotInventory;
 use lab_lair::program::AllocatedLairProgram;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,12 +20,10 @@ pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v1
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AdapterInvocationPlan {
     pub schema_version: String,
-    pub problem_sha256: String,
+    #[serde(flatten)]
+    pub allocated: AllocatedProgram,
     pub allocated_lair_sha256: String,
-    pub inventory_sha256: String,
-    pub facility: String,
     pub material_inventory: MaterialLotInventory,
-    pub methods: Vec<AllocatedMethod>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invocations: Vec<AdapterInvocation>,
 }
@@ -53,28 +39,45 @@ pub struct AdapterInvocation {
     pub requirements: Vec<LocalId>,
 }
 
+#[derive(Serialize)]
+struct CanonicalAdapterInvocationPlan<'a> {
+    schema_version: &'a str,
+    problem_sha256: &'a str,
+    allocated_lair_sha256: &'a str,
+    inventory_sha256: &'a str,
+    facility: &'a str,
+    material_inventory: &'a MaterialLotInventory,
+    methods: &'a [AllocatedMethod],
+    #[serde(skip_serializing_if = "<[AdapterInvocation]>::is_empty")]
+    invocations: &'a [AdapterInvocation],
+}
+
 impl AdapterInvocationPlan {
     /// Digest the canonical serde representation consumed by execution scheduling and adapters.
     pub fn sha256(&self) -> String {
-        let bytes = serde_json::to_vec(self)
-            .expect("AdapterInvocationPlan contains only infallibly serializable semantic values");
+        // Preserve the v1 canonical field order even though the owned allocation is serde-flattened.
+        let bytes = serde_json::to_vec(&CanonicalAdapterInvocationPlan {
+            schema_version: &self.schema_version,
+            problem_sha256: &self.allocated.problem_sha256,
+            allocated_lair_sha256: &self.allocated_lair_sha256,
+            inventory_sha256: &self.allocated.inventory_sha256,
+            facility: &self.allocated.facility,
+            material_inventory: &self.material_inventory,
+            methods: &self.allocated.methods,
+            invocations: &self.invocations,
+        })
+        .expect("AdapterInvocationPlan contains only infallibly serializable semantic values");
         hex_sha256(&bytes)
     }
 
     /// Project backend invocations from an exact semantic allocation.
-    pub fn from_allocated(
+    fn from_allocated(
         allocated: AllocatedProgram,
         allocated_lair_sha256: String,
         material_inventory: MaterialLotInventory,
     ) -> Result<Self, AdapterInvocationValidationError> {
-        let AllocatedProgram {
-            problem_sha256,
-            inventory_sha256,
-            facility,
-            methods,
-        } = allocated;
         let mut groups = BTreeMap::<(String, InvocationAdapter), InvocationMembers>::new();
-        for method in &methods {
+        for method in &allocated.methods {
             for task in &method.tasks {
                 for requirement in &task.requirements {
                     if let Some(adapter) = &requirement.adapter {
@@ -99,12 +102,9 @@ impl AdapterInvocationPlan {
             .collect();
         let plan = Self {
             schema_version: ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
-            problem_sha256,
+            allocated,
             allocated_lair_sha256,
-            inventory_sha256,
-            facility,
             material_inventory,
-            methods,
             invocations,
         };
         plan.validate()?;
@@ -129,180 +129,31 @@ impl AdapterInvocationPlan {
                 found: self.schema_version.clone(),
             });
         }
-        for (label, digest) in [
-            ("planning problem", &self.problem_sha256),
-            ("allocated LAIR", &self.allocated_lair_sha256),
-            ("inventory", &self.inventory_sha256),
-        ] {
-            if !is_sha256(digest) {
-                return Err(AdapterInvocationValidationError::InvalidDigest { label });
-            }
+        if !is_sha256(&self.allocated_lair_sha256) {
+            return Err(AdapterInvocationValidationError::InvalidDigest {
+                label: "allocated LAIR",
+            });
         }
-        if AbsoluteIri::new(&self.facility).is_err() {
-            return Err(AdapterInvocationValidationError::InvalidFacility);
-        }
-        validate_material_inventory(self)?;
-        if self.methods.is_empty() {
-            return Err(AdapterInvocationValidationError::EmptyMethods);
-        }
-        let known_choices = self
+        self.allocated
+            .validate_against_material_inventory(&self.material_inventory)?;
+        let tasks = self
+            .allocated
             .methods
             .iter()
-            .map(|method| method.choice.clone())
+            .flat_map(|method| &method.tasks)
+            .map(|task| task.id.clone())
             .collect::<BTreeSet<_>>();
-        let known_methods = self
+        let requirements = self
+            .allocated
             .methods
             .iter()
-            .map(|method| (method.choice.clone(), method))
+            .flat_map(|method| &method.tasks)
+            .flat_map(|task| {
+                task.requirements.iter().map(move |requirement| {
+                    (requirement.id.clone(), (task.id.clone(), requirement))
+                })
+            })
             .collect::<BTreeMap<_, _>>();
-        let mut choices = BTreeSet::new();
-        let mut tasks = BTreeSet::new();
-        let mut parameters = BTreeSet::new();
-        let mut materials = BTreeSet::new();
-        let mut requirements = BTreeMap::new();
-        for method in &self.methods {
-            if !choices.insert(method.choice.clone()) {
-                return Err(AdapterInvocationValidationError::DuplicateChoice {
-                    choice: method.choice.clone(),
-                });
-            }
-            if method.tasks.is_empty() {
-                return Err(AdapterInvocationValidationError::EmptyMethod {
-                    choice: method.choice.clone(),
-                });
-            }
-            validate_allocated_method_graph(method, &known_methods)?;
-            for task in &method.tasks {
-                if !tasks.insert(task.id.clone()) {
-                    return Err(AdapterInvocationValidationError::DuplicateTask {
-                        task: task.id.clone(),
-                    });
-                }
-                if task.requirements.is_empty() {
-                    return Err(AdapterInvocationValidationError::EmptyTask {
-                        task: task.id.clone(),
-                    });
-                }
-                for parameter in &task.parameters {
-                    if !parameters.insert(parameter.id.clone()) {
-                        return Err(
-                            AdapterInvocationValidationError::DuplicateProcedureParameter {
-                                parameter: parameter.id.clone(),
-                            },
-                        );
-                    }
-                }
-                let validated = validate_task_program(
-                    &task.id,
-                    &task.operation,
-                    task.inputs.len(),
-                    &task
-                        .outputs
-                        .iter()
-                        .map(|output| output.name.clone())
-                        .collect::<Vec<_>>(),
-                    task.parameters
-                        .iter()
-                        .map(|parameter| (&parameter.id, &parameter.value)),
-                    task.materials
-                        .iter()
-                        .map(|material| (&material.input, material.symbol.as_str())),
-                    task.program.as_ref(),
-                )?;
-                if let Some(validated) = validated {
-                    validate_program_contract(task, &validated)?;
-                }
-                for material in &task.materials {
-                    if !materials.insert(material.input.clone()) {
-                        return Err(AdapterInvocationValidationError::DuplicateMaterialInput {
-                            input: material.input.clone(),
-                        });
-                    }
-                    if !valid_material_binding(material, &known_choices, &self.material_inventory) {
-                        return Err(AdapterInvocationValidationError::InvalidMaterialBinding {
-                            input: material.input.clone(),
-                        });
-                    }
-                }
-                for requirement in &task.requirements {
-                    if requirement.accepted_control_modes.is_empty()
-                        || requirement
-                            .accepted_control_modes
-                            .contains(&ControlMode::Unspecified)
-                    {
-                        return Err(AdapterInvocationValidationError::InvalidControlPolicy {
-                            requirement: requirement.id.clone(),
-                        });
-                    }
-                    if AbsoluteIri::new(&requirement.offering).is_err()
-                        || AbsoluteIri::new(&requirement.asset).is_err()
-                    {
-                        return Err(AdapterInvocationValidationError::InvalidBinding {
-                            requirement: requirement.id.clone(),
-                        });
-                    }
-                    let observed_qualification =
-                        QualificationLevel::try_from(requirement.observed_qualification.as_str())
-                            .map_err(|_| AdapterInvocationValidationError::InvalidBinding {
-                            requirement: requirement.id.clone(),
-                        })?;
-                    let observed_control = ControlMode::try_from(requirement.control_mode.as_str())
-                        .map_err(|_| AdapterInvocationValidationError::InvalidBinding {
-                            requirement: requirement.id.clone(),
-                        })?;
-                    if !requirement
-                        .minimum_qualification
-                        .is_satisfied_by(observed_qualification)
-                        || !requirement
-                            .accepted_control_modes
-                            .contains(&observed_control)
-                    {
-                        return Err(AdapterInvocationValidationError::InvalidBinding {
-                            requirement: requirement.id.clone(),
-                        });
-                    }
-                    let mut offering_parameters = BTreeSet::new();
-                    for parameter in &requirement.parameters {
-                        let constraint = PropertyConstraint {
-                            property_kind: parameter.property_kind.clone(),
-                            relation: parameter.relation,
-                            required: parameter.required.clone(),
-                        };
-                        if AbsoluteIri::new(&parameter.offering_parameter).is_err()
-                            || !offering_parameters.insert(parameter.offering_parameter.as_str())
-                            || constraint.is_satisfied_by(&parameter.observed) != Ok(true)
-                        {
-                            return Err(
-                                AdapterInvocationValidationError::InvalidParameterBinding {
-                                    requirement: requirement.id.clone(),
-                                    offering_parameter: parameter.offering_parameter.clone(),
-                                },
-                            );
-                        }
-                    }
-                    let needs_implementation =
-                        task.program.is_some() && requirement.adapter.is_some();
-                    if requirement.procedure_implementation.is_some() != needs_implementation {
-                        return Err(
-                            AdapterInvocationValidationError::ProcedureImplementationBinding {
-                                task: task.id.clone(),
-                                requirement: requirement.id.clone(),
-                            },
-                        );
-                    }
-                    if requirements
-                        .insert(requirement.id.clone(), (task.id.clone(), requirement))
-                        .is_some()
-                    {
-                        return Err(AdapterInvocationValidationError::DuplicateRequirement {
-                            requirement: requirement.id.clone(),
-                        });
-                    }
-                }
-            }
-        }
-        validate_allocated_method_dependencies(&self.methods)?;
-        validate_allocated_material_linearity(&self.methods)?;
 
         let mut invocation_ids = BTreeSet::new();
         let mut invoked_requirements = BTreeSet::new();
@@ -314,27 +165,6 @@ impl AdapterInvocationPlan {
             }
             if !invocation_ids.insert(invocation.id.as_str()) {
                 return Err(AdapterInvocationValidationError::DuplicateInvocation {
-                    invocation: invocation.id.clone(),
-                });
-            }
-            if AbsoluteIri::new(&invocation.asset).is_err()
-                || invocation.adapter.driver.is_empty()
-                || !is_relative_path(&invocation.adapter.profile_path)
-                || invocation.adapter.profile_path.to_str().is_none()
-                || !is_sha256(&invocation.adapter.profile_sha256)
-                || invocation
-                    .adapter
-                    .features
-                    .iter()
-                    .any(|feature| feature.is_empty())
-                || invocation
-                    .adapter
-                    .accepted_run_formats
-                    .iter()
-                    .chain(&invocation.adapter.emitted_run_formats)
-                    .any(|format| format.is_empty())
-            {
-                return Err(AdapterInvocationValidationError::InvalidInvocation {
                     invocation: invocation.id.clone(),
                 });
             }
@@ -393,412 +223,6 @@ impl AdapterInvocationPlan {
     }
 }
 
-fn validate_program_contract(
-    task: &AllocatedProcedureTask,
-    program: &ValidatedProcedureProgram,
-) -> Result<(), AdapterInvocationValidationError> {
-    let interface = ProcedureTaskInterface::new(
-        task.inputs.len(),
-        task.materials.iter().map(|material| material.input.clone()),
-        task.outputs.iter().map(|output| output.name.clone()),
-    );
-    let requirements = task
-        .requirements
-        .iter()
-        .map(|requirement| ProcedureCapabilityRequirement {
-            id: requirement.id.clone(),
-            capability_kind: requirement.capability_kind.clone(),
-            minimum_qualification: requirement.minimum_qualification,
-            accepted_control_modes: requirement.accepted_control_modes.clone(),
-            constraints: requirement
-                .parameters
-                .iter()
-                .map(|parameter| PropertyConstraint {
-                    property_kind: parameter.property_kind.clone(),
-                    relation: parameter.relation,
-                    required: parameter.required.clone(),
-                })
-                .collect(),
-        })
-        .collect::<Vec<_>>();
-    let contract = program
-        .validate_task_contract(&task.id, &interface, None, &requirements)
-        .map_err(|error| map_procedure_binding_error(&task.id, error))?;
-    validate_atomic_program_binding(task, contract.capability_formula().binding_scope)
-}
-
-fn validate_atomic_program_binding(
-    task: &AllocatedProcedureTask,
-    scope: BindingScope,
-) -> Result<(), AdapterInvocationValidationError> {
-    if scope == BindingScope::AtomicAssetAssembly {
-        let Some(first) = task.requirements.first() else {
-            unreachable!("the Procedure task contract requires a non-empty capability formula")
-        };
-        if task.requirements.iter().any(|requirement| {
-            requirement.asset != first.asset
-                || requirement.adapter != first.adapter
-                || requirement.procedure_implementation != first.procedure_implementation
-        }) {
-            return Err(
-                AdapterInvocationValidationError::ProcedureCapabilityBindings {
-                    task: task.id.clone(),
-                },
-            );
-        }
-    }
-    Ok(())
-}
-
-fn map_procedure_binding_error(
-    task: &LocalId,
-    error: ProcedureBindingError,
-) -> AdapterInvocationValidationError {
-    match error {
-        ProcedureBindingError::UnavailableInput { .. } => {
-            AdapterInvocationValidationError::ProcedureInputBindings { task: task.clone() }
-        }
-        ProcedureBindingError::DuplicateTaskOutput
-        | ProcedureBindingError::OutputMismatch { .. } => {
-            AdapterInvocationValidationError::ProcedureOutputBindings { task: task.clone() }
-        }
-        ProcedureBindingError::DuplicateTaskMaterial
-        | ProcedureBindingError::UndeclaredMaterial { .. }
-        | ProcedureBindingError::UnexpectedThermalMaterials { .. } => {
-            AdapterInvocationValidationError::ProcedureMaterialBindings { task: task.clone() }
-        }
-        ProcedureBindingError::BindingScopeMismatch { .. }
-        | ProcedureBindingError::DuplicateRequirement { .. }
-        | ProcedureBindingError::RequirementCount { .. }
-        | ProcedureBindingError::MissingRequirement { .. }
-        | ProcedureBindingError::RequirementKindMismatch { .. }
-        | ProcedureBindingError::RequirementConstraintsMismatch { .. }
-        | ProcedureBindingError::RequirementPolicyMismatch { .. } => {
-            AdapterInvocationValidationError::ProcedureCapabilityBindings { task: task.clone() }
-        }
-    }
-}
-
-fn validate_allocated_method_graph(
-    method: &AllocatedMethod,
-    known_methods: &BTreeMap<LocalId, &AllocatedMethod>,
-) -> Result<(), AdapterInvocationValidationError> {
-    let invalid = |message: String| AdapterInvocationValidationError::InvalidMethodGraph {
-        choice: method.choice.clone(),
-        message,
-    };
-    let mut dependencies = BTreeSet::new();
-    for dependency in &method.after {
-        if dependency == &method.choice
-            || !known_methods.contains_key(dependency)
-            || !dependencies.insert(dependency)
-        {
-            return Err(invalid(format!(
-                "completion dependency '{dependency}' is unknown, repeated, or self-referential"
-            )));
-        }
-    }
-
-    let mut inputs = BTreeMap::new();
-    for input in &method.inputs {
-        if inputs.insert(input.name.clone(), input).is_some() {
-            return Err(invalid(format!("input '{}' is repeated", input.name)));
-        }
-        if let Some(source) = &input.source {
-            let PlanningValueSource::ChoiceOutput { choice, output } = source else {
-                return Err(invalid(format!(
-                    "input '{}' has a non-choice output source",
-                    input.name
-                )));
-            };
-            let Some(producer) = known_methods.get(choice) else {
-                return Err(invalid(format!(
-                    "input '{}' references unknown choice '{choice}'",
-                    input.name
-                )));
-            };
-            if choice == &method.choice
-                || !producer.outputs.iter().any(|candidate| {
-                    &candidate.name == output && candidate.port_type == input.port_type
-                })
-            {
-                return Err(invalid(format!(
-                    "input '{}' references a missing or type-incompatible output '{choice}::{output}'",
-                    input.name
-                )));
-            }
-        }
-    }
-    let mut outputs = BTreeMap::new();
-    for output in &method.outputs {
-        if output.source.is_some() || outputs.insert(output.name.clone(), output).is_some() {
-            return Err(invalid(format!(
-                "output '{}' is repeated or carries an input-only source",
-                output.name
-            )));
-        }
-    }
-
-    let mut available = inputs
-        .values()
-        .map(|input| {
-            (
-                PlanningValueSource::ChoiceInput {
-                    input: input.name.clone(),
-                },
-                input.port_type.clone(),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-    let mut task_ids = BTreeSet::new();
-    let mut material_uses = BTreeMap::<PlanningValueSource, usize>::new();
-    for task in &method.tasks {
-        if !task_ids.insert(task.id.clone()) {
-            return Err(invalid(format!("task '{}' is repeated", task.id)));
-        }
-        for task_input in &task.inputs {
-            match &task_input.source {
-                PlanningValueSource::ChoiceInput { .. }
-                | PlanningValueSource::TaskOutput { .. } => {}
-                PlanningValueSource::ChoiceOutput { choice, output } => {
-                    return Err(invalid(format!(
-                        "task '{}' directly references choice output '{choice}::{output}' instead of a Method input",
-                        task.id
-                    )));
-                }
-            }
-            if available.get(&task_input.source) != Some(&task_input.port_type) {
-                return Err(invalid(format!(
-                    "task '{}' references a value that is unavailable, forward-defined, or type-incompatible",
-                    task.id
-                )));
-            }
-            record_material_use(
-                &mut material_uses,
-                &task_input.source,
-                &task_input.port_type,
-            );
-        }
-        let mut output_names = BTreeSet::new();
-        for output in &task.outputs {
-            if !output_names.insert(output.name.clone()) {
-                return Err(invalid(format!(
-                    "task '{}' repeats output '{}'",
-                    task.id, output.name
-                )));
-            }
-            available.insert(
-                PlanningValueSource::TaskOutput {
-                    task: task.id.clone(),
-                    output: output.name.clone(),
-                },
-                output.port_type.clone(),
-            );
-        }
-    }
-
-    let mut yields = BTreeSet::new();
-    for method_yield in &method.yields {
-        if !outputs.contains_key(&method_yield.output)
-            || !yields.insert(method_yield.output.clone())
-        {
-            return Err(invalid(format!(
-                "yield '{}' is unknown or repeated",
-                method_yield.output
-            )));
-        }
-        match &method_yield.source {
-            PlanningValueSource::ChoiceInput { .. } | PlanningValueSource::TaskOutput { .. } => {}
-            PlanningValueSource::ChoiceOutput { choice, output } => {
-                return Err(invalid(format!(
-                    "yield '{}' directly references choice output '{choice}::{output}' instead of a Method input",
-                    method_yield.output
-                )));
-            }
-        }
-        let output_type = &outputs[&method_yield.output].port_type;
-        if available.get(&method_yield.source) != Some(output_type) {
-            return Err(invalid(format!(
-                "yield '{}' references an unavailable or type-incompatible local value",
-                method_yield.output
-            )));
-        }
-        record_material_use(&mut material_uses, &method_yield.source, output_type);
-    }
-    if yields != outputs.into_keys().collect() {
-        return Err(invalid(
-            "selected Method yields do not cover every output exactly once".to_owned(),
-        ));
-    }
-    if let Some((source, uses)) = material_uses.into_iter().find(|(_, uses)| *uses > 1) {
-        return Err(invalid(format!(
-            "physical material value {source:?} has {uses} consumers; use an explicit split or sample operation"
-        )));
-    }
-    Ok(())
-}
-
-fn record_material_use(
-    uses: &mut BTreeMap<PlanningValueSource, usize>,
-    source: &PlanningValueSource,
-    port_type: &lab_lair::method::PortType,
-) {
-    if matches!(port_type, lab_lair::method::PortType::Material { .. }) {
-        *uses.entry(source.clone()).or_default() += 1;
-    }
-}
-
-fn validate_allocated_method_dependencies(
-    methods: &[AllocatedMethod],
-) -> Result<(), AdapterInvocationValidationError> {
-    let mut dependencies = methods
-        .iter()
-        .map(|method| {
-            let mut dependencies = method.after.iter().collect::<BTreeSet<_>>();
-            dependencies.extend(
-                method
-                    .inputs
-                    .iter()
-                    .filter_map(|input| match &input.source {
-                        Some(PlanningValueSource::ChoiceOutput { choice, .. }) => Some(choice),
-                        _ => None,
-                    }),
-            );
-            dependencies.extend(method.yields.iter().filter_map(|method_yield| {
-                match &method_yield.source {
-                    PlanningValueSource::ChoiceOutput { choice, .. } => Some(choice),
-                    _ => None,
-                }
-            }));
-            dependencies.extend(method.tasks.iter().flat_map(|task| {
-                task.materials
-                    .iter()
-                    .filter_map(|material| match &material.source {
-                        SelectedMaterialSource::ChoiceOutput { choice } => Some(choice),
-                        SelectedMaterialSource::MaterialLot { .. } => None,
-                    })
-            }));
-            (method.choice.as_str(), dependencies)
-        })
-        .collect::<BTreeMap<_, _>>();
-    let mut dependents = BTreeMap::<&str, Vec<&str>>::new();
-    let mut indegree = BTreeMap::new();
-    for (choice, choices) in &dependencies {
-        indegree.insert(*choice, choices.len());
-        for dependency in choices {
-            dependents
-                .entry(dependency.as_str())
-                .or_default()
-                .push(choice);
-        }
-    }
-    let mut ready = indegree
-        .iter()
-        .filter_map(|(choice, degree)| (*degree == 0).then_some(*choice))
-        .collect::<Vec<_>>();
-    let mut visited = 0;
-    while let Some(choice) = ready.pop() {
-        visited += 1;
-        for dependent in dependents.get(choice).into_iter().flatten() {
-            let degree = indegree
-                .get_mut(dependent)
-                .expect("allocated Method dependencies were validated before cycle checking");
-            *degree -= 1;
-            if *degree == 0 {
-                ready.push(dependent);
-            }
-        }
-    }
-    dependencies.clear();
-    if visited != methods.len() {
-        return Err(AdapterInvocationValidationError::MethodDependencyCycle);
-    }
-    Ok(())
-}
-
-fn validate_allocated_material_linearity(
-    methods: &[AllocatedMethod],
-) -> Result<(), AdapterInvocationValidationError> {
-    let mut uses = BTreeMap::<(LocalId, LocalId), usize>::new();
-    for method in methods {
-        for input in &method.inputs {
-            let Some(PlanningValueSource::ChoiceOutput { choice, output }) = &input.source else {
-                continue;
-            };
-            if matches!(input.port_type, lab_lair::method::PortType::Material { .. }) {
-                *uses.entry((choice.clone(), output.clone())).or_default() += 1;
-            }
-        }
-    }
-    if let Some(((choice, output), uses)) = uses.into_iter().find(|(_, uses)| *uses > 1) {
-        return Err(AdapterInvocationValidationError::MaterialLinearity {
-            value: format!("{choice}::{output}"),
-            uses,
-        });
-    }
-    Ok(())
-}
-
-fn validate_material_inventory(
-    plan: &AdapterInvocationPlan,
-) -> Result<(), AdapterInvocationValidationError> {
-    plan.material_inventory
-        .validate()
-        .map_err(AdapterInvocationValidationError::InvalidMaterialInventory)?;
-    if plan.material_inventory.source_sha256() != plan.inventory_sha256
-        || plan.material_inventory.facility() != plan.facility
-    {
-        return Err(AdapterInvocationValidationError::MaterialInventoryMismatch);
-    }
-    Ok(())
-}
-
-fn valid_material_binding(
-    binding: &SelectedMaterialBinding,
-    choices: &BTreeSet<LocalId>,
-    inventory: &MaterialLotInventory,
-) -> bool {
-    if binding.symbol.is_empty() {
-        return false;
-    }
-    let mut alternatives = BTreeSet::new();
-    if binding
-        .interchangeable_alternatives
-        .iter()
-        .any(|alternative| {
-            AbsoluteIri::new(alternative).is_err() || !alternatives.insert(alternative.as_str())
-        })
-    {
-        return false;
-    }
-    match &binding.source {
-        SelectedMaterialSource::MaterialLot {
-            component,
-            material_lot,
-        } => {
-            let Some(MaterialLotCandidates::Identified {
-                component: expected_component,
-                material_lots,
-            }) = inventory.candidates(&binding.symbol)
-            else {
-                return false;
-            };
-            let expected_alternatives = material_lots
-                .iter()
-                .filter_map(|candidate| (candidate != material_lot).then_some(candidate.as_str()))
-                .collect::<BTreeSet<_>>();
-            AbsoluteIri::new(component).is_ok()
-                && AbsoluteIri::new(material_lot).is_ok()
-                && component == expected_component
-                && material_lots.contains(material_lot)
-                && alternatives == expected_alternatives
-        }
-        SelectedMaterialSource::ChoiceOutput { choice } => {
-            choices.contains(choice) && alternatives.is_empty()
-        }
-    }
-}
-
 #[derive(Default)]
 struct InvocationMembers {
     tasks: BTreeSet<LocalId>,
@@ -848,17 +272,6 @@ fn is_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-fn is_relative_path(path: &Path) -> bool {
-    !path.as_os_str().is_empty()
-        && !path.is_absolute()
-        && !path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-}
-
 #[derive(Debug, Error)]
 pub enum AdapterInvocationError {
     #[error(transparent)]
@@ -875,68 +288,11 @@ pub enum AdapterInvocationValidationError {
     WrongSchema { found: String },
     #[error("adapter invocations contain an invalid {label} SHA-256 digest")]
     InvalidDigest { label: &'static str },
-    #[error("adapter invocations name a facility that is not an absolute IRI")]
-    InvalidFacility,
-    #[error("adapter invocation material inventory does not match its inventory hash and facility")]
-    MaterialInventoryMismatch,
-    #[error("adapter invocation contains invalid material inventory: {0}")]
-    InvalidMaterialInventory(#[source] MaterialLotInventoryValidationError),
-    #[error("adapter invocations contain no selected Methods")]
-    EmptyMethods,
-    #[error("adapter invocations repeat Method choice `{choice}`")]
-    DuplicateChoice { choice: LocalId },
-    #[error("selected Method choice `{choice}` contains no Procedure tasks")]
-    EmptyMethod { choice: LocalId },
-    #[error("selected Method choice `{choice}` has an invalid value graph: {message}")]
-    InvalidMethodGraph { choice: LocalId, message: String },
-    #[error("selected Method choices contain a cyclic value or completion dependency")]
-    MethodDependencyCycle,
-    #[error("physical material value `{value}` has {uses} semantic consumers")]
-    MaterialLinearity { value: String, uses: usize },
-    #[error("adapter invocations repeat Procedure task `{task}`")]
-    DuplicateTask { task: LocalId },
-    #[error("Procedure task `{task}` contains no capability requirements")]
-    EmptyTask { task: LocalId },
-    #[error("adapter invocations repeat Procedure parameter `{parameter}`")]
-    DuplicateProcedureParameter { parameter: LocalId },
     #[error(transparent)]
-    InvalidProcedureTaskProgram(#[from] ProcedureTaskProgramValidationError),
-    #[error("Procedure task `{task}` normalized program references an undeclared material input")]
-    ProcedureMaterialBindings { task: LocalId },
-    #[error("Procedure task `{task}` normalized program references an unavailable task input")]
-    ProcedureInputBindings { task: LocalId },
-    #[error("Procedure task `{task}` normalized program does not bind exactly its outputs")]
-    ProcedureOutputBindings { task: LocalId },
-    #[error(
-        "Procedure task `{task}` does not preserve its normalized capability formula and atomic bindings"
-    )]
-    ProcedureCapabilityBindings { task: LocalId },
-    #[error(
-        "Procedure task `{task}` requirement `{requirement}` has an inconsistent Procedure implementation binding"
-    )]
-    ProcedureImplementationBinding { task: LocalId, requirement: LocalId },
-    #[error("adapter invocations repeat Procedure material input `{input}`")]
-    DuplicateMaterialInput { input: LocalId },
-    #[error("Procedure material input `{input}` has an invalid physical source")]
-    InvalidMaterialBinding { input: LocalId },
-    #[error("adapter invocations repeat capability requirement `{requirement}`")]
-    DuplicateRequirement { requirement: LocalId },
-    #[error(
-        "capability requirement `{requirement}` has an empty or non-operational control policy"
-    )]
-    InvalidControlPolicy { requirement: LocalId },
-    #[error("capability requirement `{requirement}` has an invalid offering or Asset IRI")]
-    InvalidBinding { requirement: LocalId },
-    #[error(
-        "capability requirement `{requirement}` has an invalid selected offering parameter `{offering_parameter}`"
-    )]
-    InvalidParameterBinding {
-        requirement: LocalId,
-        offering_parameter: String,
-    },
+    InvalidAllocatedProgram(#[from] AllocatedProgramValidationError),
     #[error("adapter invocation ID `{invocation}` is empty or repeated")]
     DuplicateInvocation { invocation: String },
-    #[error("adapter invocation `{invocation}` has invalid Asset, driver, profile, or digest data")]
+    #[error("adapter invocation `{invocation}` does not match its Asset and adapter identity")]
     InvalidInvocation { invocation: String },
     #[error("adapter invocation `{invocation}` contains no tasks or requirements")]
     EmptyInvocation { invocation: String },
@@ -963,18 +319,16 @@ mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
-    use lab_capability::{
-        AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, ExactInteger, MethodId,
-        OperationId, PropertyKind, PropertyValue, QualificationLevel, ScalarValue,
-    };
+    use lab_capability::{CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel};
 
     use super::*;
-    use lab_lair::allocation::{AllocatedProgram, AllocatedRequirementBinding, InvocationAdapter};
-    use lab_lair::method::{IntentOperationId, PortType, ProcedureValue};
+    use lab_lair::allocation::{
+        AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding, InvocationAdapter,
+    };
+    use lab_lair::method::{IntentOperationId, PortType};
     use lab_lair::planning::{
-        PlanningMethodYield, PlanningPort, PlanningProcedureParameter, PlanningTaskInput,
-        PlanningTaskOutput, PlanningValueSource, SelectedCapabilityParameter,
-        SelectedMaterialBinding, SelectedMaterialSource,
+        PlanningMethodYield, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
+        PlanningValueSource,
     };
 
     fn id(value: &str) -> LocalId {
@@ -1075,257 +429,25 @@ mod tests {
     }
 
     #[test]
-    fn adapter_invocations_revalidate_registered_task_program_provenance() {
-        let mut plan = valid_plan();
-        plan.validate().unwrap();
-
-        plan.methods[0].tasks[0].operation =
-            OperationId::new(lab_lair::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
-        assert!(matches!(
-            plan.validate(),
-            Err(
-                AdapterInvocationValidationError::InvalidProcedureTaskProgram(
-                    ProcedureTaskProgramValidationError::CannotNormalize(_)
-                )
-            )
-        ));
-    }
-
-    fn selected_parameter(observed: i64) -> SelectedCapabilityParameter {
-        SelectedCapabilityParameter {
-            property_kind: PropertyKind::new("https://example.org/property/count").unwrap(),
-            relation: ConstraintRelation::AtLeast,
-            required: PropertyValue::unitless(ScalarValue::Integer(
-                ExactInteger::parse("2").unwrap(),
-            )),
-            offering_parameter: "https://example.org/offering-parameter/count".to_owned(),
-            observed: PropertyValue::unitless(ScalarValue::Integer(
-                ExactInteger::parse(observed.to_string()).unwrap(),
-            )),
-        }
-    }
-
-    #[test]
-    fn task_values_are_available_only_incrementally_and_never_directly_from_other_choices() {
-        let mut self_reference = valid_plan();
-        let task = self_reference.methods[0].tasks[0].id.clone();
-        let output = self_reference.methods[0].tasks[0].outputs[0].name.clone();
-        self_reference.methods[0].tasks[0].inputs[0].source =
-            PlanningValueSource::TaskOutput { task, output };
-        assert!(matches!(
-            self_reference.validate(),
-            Err(AdapterInvocationValidationError::InvalidMethodGraph { .. })
-        ));
-
-        let mut direct_choice = valid_plan();
-        direct_choice.methods[0].tasks[0].inputs[0].source = PlanningValueSource::ChoiceOutput {
-            choice: id("choice"),
-            output: id("output"),
-        };
-        assert!(matches!(
-            direct_choice.validate(),
-            Err(AdapterInvocationValidationError::InvalidMethodGraph { .. })
-        ));
-    }
-
-    #[test]
-    fn task_outputs_are_unique_and_method_yields_use_only_local_values() {
-        let mut duplicate_output = valid_plan();
-        let duplicate = duplicate_output.methods[0].tasks[0].outputs[0].clone();
-        duplicate_output.methods[0].tasks[0].outputs.push(duplicate);
-        assert!(matches!(
-            duplicate_output.validate(),
-            Err(AdapterInvocationValidationError::InvalidMethodGraph { .. })
-        ));
-
-        let mut direct_choice = valid_plan();
-        direct_choice.methods[0].yields[0].source = PlanningValueSource::ChoiceOutput {
-            choice: id("choice"),
-            output: id("output"),
-        };
-        assert!(matches!(
-            direct_choice.validate(),
-            Err(AdapterInvocationValidationError::InvalidMethodGraph { .. })
-        ));
-    }
-
-    #[test]
-    fn selected_capability_parameters_and_control_policies_are_revalidated() {
-        let mut policy = valid_plan();
-        policy.methods[0].tasks[0].requirements[0].accepted_control_modes =
-            BTreeSet::from([ControlMode::Unspecified]);
-        assert!(matches!(
-            policy.validate(),
-            Err(AdapterInvocationValidationError::InvalidControlPolicy { .. })
-        ));
-
-        let mut observation = valid_plan();
-        observation.methods[0].tasks[0].requirements[0].parameters = vec![selected_parameter(1)];
-        assert!(matches!(
-            observation.validate(),
-            Err(AdapterInvocationValidationError::InvalidParameterBinding { .. })
-        ));
-
-        let mut duplicate = valid_plan();
-        let parameter = selected_parameter(2);
-        duplicate.methods[0].tasks[0].requirements[0].parameters =
-            vec![parameter.clone(), parameter];
-        assert!(matches!(
-            duplicate.validate(),
-            Err(AdapterInvocationValidationError::InvalidParameterBinding { .. })
-        ));
-    }
-
-    #[test]
-    fn procedure_parameter_ids_are_global() {
-        let mut plan = valid_plan();
-        let parameter = PlanningProcedureParameter {
-            id: id("choice::parameter"),
-            property_kind: PropertyKind::new("https://example.org/property/count").unwrap(),
-            value: ProcedureValue::Scalar {
-                value: PropertyValue::unitless(ScalarValue::Integer(
-                    ExactInteger::parse("1").unwrap(),
-                )),
-            },
-        };
-        plan.methods[0].tasks[0].parameters = vec![parameter.clone(), parameter];
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::DuplicateProcedureParameter { .. })
-        ));
-    }
-
-    #[test]
-    fn material_alternatives_are_exact_inventory_lots() {
-        let mut plan = valid_plan();
-        let selected = "https://example.org/lot/a".to_owned();
-        let alternative = "https://example.org/lot/b".to_owned();
-        let mut materials = plan.material_inventory.materials().clone();
-        materials.insert(
-            "sample".to_owned(),
-            MaterialLotCandidates::Identified {
-                component: "https://example.org/component/sample".to_owned(),
-                material_lots: vec![selected.clone(), alternative.clone()],
-            },
-        );
-        plan.material_inventory = MaterialLotInventory::new(
-            plan.material_inventory.source_sha256(),
-            plan.material_inventory.facility(),
-            materials,
-            plan.material_inventory.artifacts().clone(),
-        );
-        plan.methods[0].tasks[0]
-            .materials
-            .push(SelectedMaterialBinding {
-                input: id("choice::material"),
-                symbol: "sample".to_owned(),
-                source: SelectedMaterialSource::MaterialLot {
-                    component: "https://example.org/component/sample".to_owned(),
-                    material_lot: selected.clone(),
-                },
-                interchangeable_alternatives: vec![alternative],
-            });
-        plan.validate().unwrap();
-
-        plan.methods[0].tasks[0].materials[0].interchangeable_alternatives = vec![selected];
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::InvalidMaterialBinding { .. })
-        ));
-    }
-
-    #[test]
     fn invocation_tasks_are_exactly_the_requirement_owners() {
         let mut plan = valid_plan();
         let extra = id("choice::manual-task");
-        plan.methods[0].tasks.push(AllocatedProcedureTask {
-            id: extra.clone(),
-            operation: OperationId::new("https://example.org/manual-operation").unwrap(),
-            program: None,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            parameters: Vec::new(),
-            materials: Vec::new(),
-            requirements: vec![requirement("choice::manual-requirement", None)],
-        });
+        plan.allocated.methods[0]
+            .tasks
+            .push(AllocatedProcedureTask {
+                id: extra.clone(),
+                operation: OperationId::new("https://example.org/manual-operation").unwrap(),
+                program: None,
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                parameters: Vec::new(),
+                materials: Vec::new(),
+                requirements: vec![requirement("choice::manual-requirement", None)],
+            });
         plan.invocations[0].tasks.push(extra);
         assert!(matches!(
             plan.validate(),
             Err(AdapterInvocationValidationError::InvocationTaskOwnershipMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn material_values_are_affine_in_the_semantic_graph() {
-        let mut plan = valid_plan();
-        let material = PortType::Material {
-            state: AbsoluteIri::new("https://example.org/material/sample").unwrap(),
-        };
-        plan.methods[0].inputs[0].port_type = material.clone();
-        plan.methods[0].tasks[0].inputs[0].port_type = material;
-        let duplicate = plan.methods[0].tasks[0].inputs[0].clone();
-        plan.methods[0].tasks[0].inputs.push(duplicate);
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::InvalidMethodGraph { .. })
-        ));
-    }
-
-    #[test]
-    fn material_method_outputs_have_at_most_one_downstream_consumer() {
-        let mut allocated = allocated_program();
-        let material = PortType::Material {
-            state: AbsoluteIri::new("https://example.org/material/sample").unwrap(),
-        };
-        allocated.methods[0].outputs[0].port_type = material.clone();
-        allocated.methods[0].tasks[0].outputs[0].port_type = material.clone();
-
-        for suffix in ["first", "second"] {
-            let choice = id(&format!("consumer-{suffix}"));
-            let task = id(&format!("consumer-{suffix}::task"));
-            let input = id("input");
-            allocated.methods.push(AllocatedMethod {
-                choice,
-                source_operation: IntentOperationId::new(format!("example.consume.{suffix}"))
-                    .unwrap(),
-                method: MethodId::new(format!("https://example.org/method/consume/{suffix}"))
-                    .unwrap(),
-                after: Vec::new(),
-                inputs: vec![PlanningPort {
-                    name: input.clone(),
-                    port_type: material.clone(),
-                    source: Some(PlanningValueSource::ChoiceOutput {
-                        choice: id("choice"),
-                        output: id("output"),
-                    }),
-                }],
-                outputs: Vec::new(),
-                yields: Vec::new(),
-                tasks: vec![AllocatedProcedureTask {
-                    id: task,
-                    operation: OperationId::new(format!(
-                        "https://example.org/operation/consume/{suffix}"
-                    ))
-                    .unwrap(),
-                    program: None,
-                    inputs: vec![PlanningTaskInput {
-                        source: PlanningValueSource::ChoiceInput { input },
-                        port_type: material.clone(),
-                    }],
-                    outputs: Vec::new(),
-                    parameters: Vec::new(),
-                    materials: Vec::new(),
-                    requirements: vec![requirement(
-                        &format!("consumer-{suffix}::requirement"),
-                        None,
-                    )],
-                }],
-            });
-        }
-
-        assert!(matches!(
-            AdapterInvocationPlan::from_allocated(allocated, "c".repeat(64), inventory()),
-            Err(AdapterInvocationValidationError::MaterialLinearity { uses: 2, .. })
         ));
     }
 
@@ -1361,20 +483,81 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
-    fn non_utf8_adapter_profile_paths_are_rejected_without_panicking() {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
+    fn flattened_allocation_preserves_the_v1_json_shape_and_hash_contract() {
+        let plan = valid_plan();
+        let encoded = serde_json::to_value(&plan).unwrap();
+        let object = encoded.as_object().unwrap();
+        assert!(!object.contains_key("allocated"));
+        assert_eq!(
+            object.keys().map(String::as_str).collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "allocated_lair_sha256",
+                "facility",
+                "inventory_sha256",
+                "invocations",
+                "material_inventory",
+                "methods",
+                "problem_sha256",
+                "schema_version",
+            ])
+        );
 
-        let mut plan = valid_plan();
-        plan.invocations[0].adapter.profile_path =
-            PathBuf::from(OsString::from_vec(b"profiles/\xff.toml".to_vec()));
-        plan.invocations[0].id =
-            adapter_invocation_id(&plan.invocations[0].asset, &plan.invocations[0].adapter);
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::InvalidInvocation { .. })
-        ));
+        let legacy = CanonicalAdapterInvocationPlan {
+            schema_version: &plan.schema_version,
+            problem_sha256: &plan.allocated.problem_sha256,
+            allocated_lair_sha256: &plan.allocated_lair_sha256,
+            inventory_sha256: &plan.allocated.inventory_sha256,
+            facility: &plan.allocated.facility,
+            material_inventory: &plan.material_inventory,
+            methods: &plan.allocated.methods,
+            invocations: &plan.invocations,
+        };
+        assert_eq!(encoded, serde_json::to_value(&legacy).unwrap());
+        assert_eq!(
+            plan.sha256(),
+            hex_sha256(&serde_json::to_vec(&legacy).unwrap())
+        );
+        assert_eq!(
+            serde_json::from_value::<AdapterInvocationPlan>(encoded).unwrap(),
+            plan
+        );
+
+        let schema = serde_json::to_value(schemars::schema_for!(AdapterInvocationPlan)).unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+        assert!(!properties.contains_key("allocated"));
+        for property in ["problem_sha256", "inventory_sha256", "facility", "methods"] {
+            assert!(
+                properties.contains_key(property),
+                "missing `{property}` schema"
+            );
+        }
+    }
+
+    #[test]
+    fn manual_only_plan_preserves_the_v1_omitted_invocations_hash_contract() {
+        let mut allocated = allocated_program();
+        allocated.methods[0].tasks[0].requirements[0].adapter = None;
+        let plan =
+            AdapterInvocationPlan::from_allocated(allocated, "c".repeat(64), inventory()).unwrap();
+        assert!(plan.invocations.is_empty());
+
+        let legacy = CanonicalAdapterInvocationPlan {
+            schema_version: &plan.schema_version,
+            problem_sha256: &plan.allocated.problem_sha256,
+            allocated_lair_sha256: &plan.allocated_lair_sha256,
+            inventory_sha256: &plan.allocated.inventory_sha256,
+            facility: &plan.allocated.facility,
+            material_inventory: &plan.material_inventory,
+            methods: &plan.allocated.methods,
+            invocations: &plan.invocations,
+        };
+        let legacy_bytes = serde_json::to_vec(&legacy).unwrap();
+        assert!(
+            !String::from_utf8(legacy_bytes.clone())
+                .unwrap()
+                .contains("\"invocations\"")
+        );
+        assert_eq!(plan.sha256(), hex_sha256(&legacy_bytes));
     }
 }

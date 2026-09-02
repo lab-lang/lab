@@ -148,7 +148,7 @@ pub(in crate::backend) fn lower_invocation(
         let run_path = format!("{directory}/automation_run.json");
         let plan = StarTaskPlan {
             schema_version: TASK_PLAN_SCHEMA.to_owned(),
-            facility: invocation_plan.facility.clone(),
+            facility: invocation_plan.allocated.facility.clone(),
             asset: invocation.asset.clone(),
             adapter: BACKEND.to_owned(),
             adapter_profile: profile.name.clone(),

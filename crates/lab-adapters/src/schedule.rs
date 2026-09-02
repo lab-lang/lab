@@ -121,6 +121,7 @@ impl AllocatedProcedureSchedule {
         }
 
         let task_records = plan
+            .allocated
             .methods
             .iter()
             .flat_map(|method| &method.tasks)
@@ -228,6 +229,7 @@ fn validate_locations(
 ) -> Result<(), AllocatedProcedureScheduleError> {
     let scheduled_tasks = invocation.tasks.iter().collect::<BTreeSet<_>>();
     let methods = plan
+        .allocated
         .methods
         .iter()
         .filter(|method| {
@@ -239,6 +241,7 @@ fn validate_locations(
         .map(|method| (method.choice.clone(), method))
         .collect::<BTreeMap<_, _>>();
     let lineage_methods = plan
+        .allocated
         .methods
         .iter()
         .map(|method| (method.choice.clone(), method))
@@ -552,7 +555,7 @@ mod tests {
     use super::*;
     use crate::{ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocationPlan, adapter_invocation_id};
     use lab_lair::allocation::{
-        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
+        AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
     };
     use lab_lair::planning::{
         MaterialLotCandidates, MaterialLotInventory, PlanningPort, PlanningTaskInput,
@@ -636,26 +639,28 @@ mod tests {
         };
         let plan = AdapterInvocationPlan {
             schema_version: ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
-            problem_sha256: "b".repeat(64),
+            allocated: AllocatedProgram {
+                problem_sha256: "b".repeat(64),
+                inventory_sha256: "d".repeat(64),
+                facility: "https://example.org/facility".to_owned(),
+                methods: vec![AllocatedMethod {
+                    choice: id("method"),
+                    source_operation: IntentOperationId::new("https://example.org/intent").unwrap(),
+                    method: MethodId::new("https://example.org/method").unwrap(),
+                    after: Vec::new(),
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    yields: Vec::new(),
+                    tasks: vec![first, second],
+                }],
+            },
             allocated_lair_sha256: "c".repeat(64),
-            inventory_sha256: "d".repeat(64),
-            facility: "https://example.org/facility".to_owned(),
             material_inventory: MaterialLotInventory::new(
                 "d".repeat(64),
                 "https://example.org/facility",
                 BTreeMap::new(),
                 BTreeMap::new(),
             ),
-            methods: vec![AllocatedMethod {
-                choice: id("method"),
-                source_operation: IntentOperationId::new("https://example.org/intent").unwrap(),
-                method: MethodId::new("https://example.org/method").unwrap(),
-                after: Vec::new(),
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                yields: Vec::new(),
-                tasks: vec![first, second],
-            }],
             invocations: vec![invocation.clone()],
         };
         plan.validate().unwrap();
@@ -740,7 +745,7 @@ mod tests {
     #[test]
     fn rejects_two_different_materials_in_one_position() {
         let (mut plan, invocation) = fixture();
-        for method in &mut plan.methods {
+        for method in &mut plan.allocated.methods {
             for task in &mut method.tasks {
                 if task.id == invocation.tasks[0] {
                     task.materials = vec![
@@ -789,7 +794,7 @@ mod tests {
         let (mut plan, invocation) = fixture();
         // Material input identities are unique per invocation, so two tasks drawing the same
         // reagent name it separately while pointing at one lot. That is one tube, not a conflict.
-        for method in &mut plan.methods {
+        for method in &mut plan.allocated.methods {
             for task in &mut method.tasks {
                 let input = if task.id == invocation.tasks[0] {
                     "buffer-a"
@@ -831,7 +836,7 @@ mod tests {
     #[test]
     fn rejects_two_different_choice_inputs_in_one_position() {
         let (mut plan, invocation) = fixture();
-        plan.methods[0].inputs = vec![
+        plan.allocated.methods[0].inputs = vec![
             PlanningPort {
                 name: id("cells-a"),
                 port_type: PortType::Material {
@@ -850,7 +855,7 @@ mod tests {
         plan.validate().unwrap();
         let collide = |input: &str| ScheduledPhysicalLocation {
             value: ScheduledValueRef::ChoiceInput {
-                choice: plan.methods[0].choice.clone(),
+                choice: plan.allocated.methods[0].choice.clone(),
                 input: id(input),
             },
             resource: "chilled-rack".to_owned(),

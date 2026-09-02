@@ -36,6 +36,7 @@ pub(crate) fn exact_invocation_tasks<'a>(
     let requirement_ids = invocation.requirements.iter().collect::<BTreeSet<_>>();
     let mut members = Vec::new();
     for task in plan
+        .allocated
         .methods
         .iter()
         .flat_map(|method| method.tasks.iter())

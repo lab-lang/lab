@@ -26,8 +26,8 @@ use super::ir::{
     YieldOp,
 };
 use super::{
-    AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
-    InvocationAdapter,
+    AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedProgramValidationError,
+    AllocatedRequirementBinding, InvocationAdapter,
 };
 use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::{IntentOperationId, LocalId, PortType};
@@ -111,6 +111,8 @@ pub enum AllocatedProgramExtractionError {
     ParameterMatchCoverage { requirement: LocalId },
     #[error("allocated Method `{choice}` contains unexpected operation `{operation}`")]
     UnexpectedMethodOperation { choice: LocalId, operation: String },
+    #[error("cannot extract an invalid semantic allocation: {0}")]
+    InvalidAllocatedProgram(#[from] AllocatedProgramValidationError),
 }
 
 #[derive(Clone)]
@@ -205,12 +207,14 @@ pub fn extract_allocated_program(
         allocated_methods.push(allocated);
     }
 
-    Ok(AllocatedProgram {
+    let allocated = AllocatedProgram {
         problem_sha256: allocation_context.problem_sha256,
         inventory_sha256: allocation_context.inventory_sha256,
         facility: allocation_context.facility,
         methods: allocated_methods,
-    })
+    };
+    allocated.validate()?;
+    Ok(allocated)
 }
 
 fn extract_context(

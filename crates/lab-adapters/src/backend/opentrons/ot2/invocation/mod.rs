@@ -309,7 +309,7 @@ pub(in crate::backend) fn lower_invocation(
         let directory = format!("tasks/{:03}-{slug}", ordinal + 1);
         let plan = Ot2TaskPlan {
             schema_version: TASK_PLAN_SCHEMA.to_owned(),
-            facility: invocation_plan.facility.clone(),
+            facility: invocation_plan.allocated.facility.clone(),
             asset: invocation.asset.clone(),
             adapter: BACKEND.to_owned(),
             adapter_profile: profile.name.clone(),
@@ -493,7 +493,7 @@ fn lower_batch_invocation(
 
     let map = BatchPlateMapDocument {
         schema_version: "lab.batch-plate-map.v1",
-        facility: &invocation_plan.facility,
+        facility: &invocation_plan.allocated.facility,
         asset: &invocation.asset,
         schedule_sha256: &schedule_sha256,
         tasks: &plating_tasks,
@@ -531,6 +531,7 @@ fn batch_run_plan(
         .iter()
         .map(|task_id| {
             invocation_plan
+                .allocated
                 .methods
                 .iter()
                 .flat_map(|method| &method.tasks)
@@ -550,6 +551,7 @@ fn batch_run_plan(
         .iter()
         .map(|requirement_id| {
             invocation_plan
+                .allocated
                 .methods
                 .iter()
                 .flat_map(|method| &method.tasks)
@@ -566,7 +568,7 @@ fn batch_run_plan(
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Ot2RunPlan {
         schema_version: RUN_PLAN_SCHEMA.to_owned(),
-        facility: invocation_plan.facility.clone(),
+        facility: invocation_plan.allocated.facility.clone(),
         asset: invocation.asset.clone(),
         adapter: BACKEND.to_owned(),
         adapter_profile: profile.name.clone(),

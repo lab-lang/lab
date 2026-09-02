@@ -4,6 +4,7 @@ mod application;
 mod extraction;
 pub(crate) mod ir;
 pub mod model;
+mod validation;
 
 pub use application::AllocationApplicationError;
 pub(crate) use application::apply_facility_solution;
@@ -12,3 +13,4 @@ pub use model::{
     AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
     InvocationAdapter,
 };
+pub use validation::AllocatedProgramValidationError;

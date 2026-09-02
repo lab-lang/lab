@@ -59,19 +59,20 @@ pub fn build_execution_plan_from_invocations(
     problem
         .validate()
         .map_err(|error| ExecutionPlanBuildError::InvalidProblem(error.to_string()))?;
-    if problem.sha256() != invocations.problem_sha256 {
+    if problem.sha256() != invocations.allocated.problem_sha256 {
         return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
     }
     let planning = options
         .planning
         .take()
         .ok_or(ExecutionPlanBuildError::MissingPlanningReference)?;
-    if planning.problem_sha256 != invocations.problem_sha256
+    if planning.problem_sha256 != invocations.allocated.problem_sha256
         || planning.allocated_lair_sha256 != invocations.allocated_lair_sha256
     {
         return Err(ExecutionPlanBuildError::PlanningReferenceMismatch);
     }
     let expected_methods = invocations
+        .allocated
         .methods
         .iter()
         .map(|method| {
@@ -105,6 +106,7 @@ pub fn build_execution_plan_from_invocations(
 
     options.materials.extend(
         invocations
+            .allocated
             .methods
             .iter()
             .flat_map(|method| &method.tasks)
@@ -133,7 +135,7 @@ pub fn build_execution_plan_from_invocations(
     let mut node_tasks = Vec::<BTreeSet<lab_lair::method::LocalId>>::new();
     let mut task_nodes = BTreeMap::<lab_lair::method::LocalId, Vec<String>>::new();
     let mut document_nodes = BTreeMap::<(String, String, String), usize>::new();
-    for method in &invocations.methods {
+    for method in &invocations.allocated.methods {
         for task in &method.tasks {
             let binding_scope =
                 task.program
@@ -388,8 +390,8 @@ pub fn build_execution_plan_from_invocations(
         format: EXECUTION_PLAN_FORMAT.to_owned(),
         inventory: ExecutionInventoryReference {
             document: options.inventory_document,
-            source_sha256: invocations.inventory_sha256.clone(),
-            facility: invocations.facility.clone(),
+            source_sha256: invocations.allocated.inventory_sha256.clone(),
+            facility: invocations.allocated.facility.clone(),
         },
         planning: Some(planning),
         requirements,
@@ -416,7 +418,7 @@ fn execution_task_dependencies(
         .map(|choice| (choice.id.clone(), choice))
         .collect::<BTreeMap<_, _>>();
     let mut selected = SelectedChoices::new();
-    for method in &invocations.methods {
+    for method in &invocations.allocated.methods {
         let Some(choice) = problem_choices.get(&method.choice).copied() else {
             return Err(ExecutionPlanBuildError::InvocationProblemMismatch);
         };
@@ -436,7 +438,7 @@ fn execution_task_dependencies(
     }
 
     let mut dependencies = BTreeMap::new();
-    for method in &invocations.methods {
+    for method in &invocations.allocated.methods {
         let (choice, candidate) = selected
             .get(&method.choice)
             .expect("every invocation Method was matched to its planning candidate");
