@@ -428,7 +428,7 @@ The difference is that one resolves and the other does not.
 The sharper finding is that this identity is already minted and already
 threaded, and nothing consumes it. `CheckedExpression::Reference` carries a
 `DefinitionId` beside its path; `ModuleExport` carries one for every export.
-Both are written by the checker. No pass in `lab-compiler`, `lab-ide`, or
+Both are written by the checker. No pass in `lab-lair`, `lab-ide`, or
 `lab-language-server` reads either, and the only references outside the checker
 are in tests. Every real consumer takes `path.first()` and works with the bare
 word instead.
@@ -951,29 +951,26 @@ Attempting more is what produced `marpaia/labop`'s omissions report.
 
 ## Where it lands in the compiler
 
-The workspace gains one crate. `lab-compiler/README.md` records the invariant
-that no production backend imports `lab-language`, and this respects it.
+The workspace keeps RDF and SBOL objects outside both `lab-language` and
+`lab-lair`. The current ownership split is:
 
-**`lab-language`** gains only Layer 0: the identity tail on `role`, a resolver
-from `Ty` to a set of term IRIs, and ontology-validity diagnostics. Its only new
-dependency is `sbol-ontology`, which is an embedded TSV with no RDF and no
-network. The crate stays I/O-free and stays light enough for `lab-ide-wasm`.
+**`lab-language`** owns the RDF-free identity, type, role-grounding, and
+ontology-validity semantics used by both native and embedded frontends. It has
+no RDF or network dependency and stays light enough for `lab-ide-wasm`.
 
-**`lab-sbol`** is new, sits beside `lab-language`, and owns the correspondence:
-identity minting, `CheckedModule` to `sbol3::Document`, `sbol3::Document` to Lab
-declarations for import, and `ValidationReport` to Lab diagnostics. Depends on
-`sbol = "1"`.
+**`lab-sbol`** sits beside `lab-language` and owns the SBOL correspondence. Its
+implemented direction resolves grounded kinds and imports SBOL designs or a
+checked module from an `sbol3::Document`. The inverse checked-module-to-SBOL
+emitter remains work for this crate rather than for LAIR or a device adapter.
 
-**`lab-compiler`** gains an SBOL emitter producing an `ArtifactBundle`, and the
-design stage gains an SBOL representation.
+**`lab-project`** owns filesystem and package orchestration. It parses and
+validates selected SBOL documents, calls `lab-sbol`, and passes the resulting
+checked modules into `lab-lair`. A bare `lab-language::compile_module` call and
+the textual `labc` inspection tool remain independent of the RDF stack.
 
-Placement note for the validation pass. It is a peer of
-`material_flow::verify_module` in kind, but putting it inside
-`compile_parsed_module` would pull `oxrdf` and its dependencies into the crate
-the wasm editor builds on. Running it from `lab-project::compile` and from
-`labc` instead keeps the frontend light, at the cost that a bare
-`compile_module` call does not run it. That is the right trade while the editor
-target exists.
+**`lab-adapters`** owns `ArtifactBundle` only for generated device and operator
+artifacts. That type is not the representation of an SBOL design document and
+does not move SBOL emission into the adapter layer.
 
 ### The IR change, shallow and deep
 

@@ -16,9 +16,9 @@ When facility allocation selects a Hamilton STAR CapabilityOffering and its exac
 
 Planning is deterministic to make that review meaningful. Deck coordinates come from a vendored, attributed catalog of Hamilton carriers and labware; liquid heights come from per-well volume tracking over measured volume-to-height models, with the safety margins stated as named constants; liquid-class corrected volumes come from the driver crate's water tables. Capacitive level detection is an adapter-configuration opt-in that adds a runtime check on top of the planned heights, never a substitute for them.
 
-`lab run` is the toolchain's first hardware-touching command, so its safety posture is part of this decision: a dry run that validates and prints every frame without hardware, an explicit confirmation before any motion, an operator confirmation at every manual step, and on any firmware error a Z-safety retract followed by an abort naming the failed step, with no automatic retry or resume.
+`lab run` is the toolchain's first hardware-touching command, so its safety posture is part of this decision: a dry run that validates and prints every frame without hardware, an explicit confirmation before any motion, an operator confirmation at every manual step, and on any firmware error a Z-safety retract followed by an abort naming the failed step, with no automatic retry. A durable plan-bound ledger permits only an explicit `--resume` after operator intervention and skips nodes already recorded complete.
 
-The implementation lives at `backend/hamilton/star`. SBOLInventory describes the physical Asset and its capability offerings; a local execution overlay binds that exact Asset IRI to the `hamilton.star` adapter. The adapter configuration cannot choose an Asset or adapter.
+Hamilton planning and document emission live at `crates/lab-adapters/src/backend/hamilton/star`, the versioned reviewed document is owned by `lab-runfmt`, and its live executor is owned by `lab-runtime`. SBOLInventory describes the physical Asset and its capability offerings; a local execution overlay binds that exact Asset IRI to the `hamilton.star` adapter. The adapter configuration cannot choose an Asset or adapter.
 
 ## Consequences
 
