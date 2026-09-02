@@ -853,6 +853,10 @@ workflow main() -> Material<Plasmid>:
         assert!(ir.contains("https://www.lab-compiler.org/ns/method#automated-golden-gate"));
         assert!(ir.contains("https://www.lab-compiler.org/ns/method#manual-artifact-realization"));
         assert!(ir.contains("procedure.parameter"));
+        assert!(
+            ir.contains("normalized_program: procedure.program <"),
+            "{ir}"
+        );
         assert!(ir.contains("capability.requirement"));
         assert!(ir.contains("capability.constraint"));
         assert!(ir.contains("http://qudt.org/vocab/unit/HR"));

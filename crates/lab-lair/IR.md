@@ -14,7 +14,7 @@ Pliron is the structural substrate of `lab-lair`: its operations, SSA values, re
 - `allocation` represents the selected Method and exact offering, Asset, adapter, and MaterialLot bindings; and
 - `meta` records the explicit stage contract on the module.
 
-Procedure operations and material states use open absolute IRIs while the structural Pliron vocabulary remains small and closed. Adding a portable Method or Capability therefore does not require adding another operation class to the compiler. Local task, requirement, port, parameter, and material identities remain stable across refinement, planning, allocation, adapter projection, and reviewed plans.
+Procedure operations and material states use open absolute IRIs while the structural Pliron vocabulary remains small and closed. Adding a portable Method or Capability therefore does not require adding another operation class to the compiler. A task's canonical interior is carried by the intrinsically verified `procedure.program` attribute, whose document remains the same portable, versioned Procedure contract used outside Pliron. Local task, requirement, port, parameter, and material identities remain stable across refinement, planning, allocation, adapter projection, and reviewed plans.
 
 ## Executable stages
 
