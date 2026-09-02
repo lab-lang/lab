@@ -11,7 +11,10 @@ use crate::method::LocalId;
 use crate::procedure::binding::{
     ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
 };
-use crate::procedure::{BindingScope, ValidatedProcedureProgram};
+use crate::procedure::{
+    BindingScope, ProcedureTaskProgramValidationError, ValidatedProcedureProgram,
+    validate_task_program,
+};
 use lab_capability::{AbsoluteIri, ControlMode, PropertyConstraint, QualificationLevel};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -178,13 +181,24 @@ impl AdapterInvocationPlan {
                         );
                     }
                 }
-                if let Some(program) = &task.program {
-                    let validated = program.validate().map_err(|error| {
-                        AdapterInvocationValidationError::InvalidProcedureProgram {
-                            task: task.id.clone(),
-                            message: error.to_string(),
-                        }
-                    })?;
+                let validated = validate_task_program(
+                    &task.id,
+                    &task.operation,
+                    task.inputs.len(),
+                    &task
+                        .outputs
+                        .iter()
+                        .map(|output| output.name.clone())
+                        .collect::<Vec<_>>(),
+                    task.parameters
+                        .iter()
+                        .map(|parameter| (&parameter.id, &parameter.value)),
+                    task.materials
+                        .iter()
+                        .map(|material| (&material.input, material.symbol.as_str())),
+                    task.program.as_ref(),
+                )?;
+                if let Some(validated) = validated {
                     validate_program_contract(task, &validated)?;
                 }
                 for material in &task.materials {
@@ -878,8 +892,8 @@ pub enum AdapterInvocationValidationError {
     EmptyTask { task: LocalId },
     #[error("adapter invocations repeat Procedure parameter `{parameter}`")]
     DuplicateProcedureParameter { parameter: LocalId },
-    #[error("Procedure task `{task}` has an invalid normalized program: {message}")]
-    InvalidProcedureProgram { task: LocalId, message: String },
+    #[error(transparent)]
+    InvalidProcedureTaskProgram(#[from] ProcedureTaskProgramValidationError),
     #[error("Procedure task `{task}` normalized program references an undeclared material input")]
     ProcedureMaterialBindings { task: LocalId },
     #[error("Procedure task `{task}` normalized program references an unavailable task input")]
@@ -1051,6 +1065,23 @@ mod tests {
     fn valid_plan() -> AdapterInvocationPlan {
         AdapterInvocationPlan::from_allocated(allocated_program(), "c".repeat(64), inventory())
             .unwrap()
+    }
+
+    #[test]
+    fn adapter_invocations_revalidate_registered_task_program_provenance() {
+        let mut plan = valid_plan();
+        plan.validate().unwrap();
+
+        plan.methods[0].tasks[0].operation =
+            OperationId::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
+        assert!(matches!(
+            plan.validate(),
+            Err(
+                AdapterInvocationValidationError::InvalidProcedureTaskProgram(
+                    ProcedureTaskProgramValidationError::CannotNormalize(_)
+                )
+            )
+        ));
     }
 
     fn selected_parameter(observed: i64) -> SelectedCapabilityParameter {

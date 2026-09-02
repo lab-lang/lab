@@ -882,6 +882,39 @@ mod tests {
     }
 
     #[test]
+    fn allocated_lair_revalidates_registered_task_program_provenance() {
+        let (context, module) = simple_allocated_module();
+        let module_block = module
+            .get_region(&context)
+            .deref(&context)
+            .get_head()
+            .unwrap();
+        let method = module_block
+            .deref(&context)
+            .iter(&context)
+            .find_map(|operation| Operation::get_op::<MethodOp>(operation, &context))
+            .unwrap();
+        let task = method
+            .entry_block(&context)
+            .deref(&context)
+            .iter(&context)
+            .find_map(|operation| Operation::get_op::<TaskOp>(operation, &context))
+            .unwrap();
+        task.set_attr_operation(
+            &context,
+            StringAttr::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE.to_owned()),
+        );
+        verify_operation(module.get_operation(), &context).unwrap();
+
+        let error = extract_allocated_program(&context, module).unwrap_err();
+        assert!(matches!(
+            error,
+            AllocatedProgramExtractionError::InvalidStage(message)
+                if message.contains("cannot be normalized")
+        ));
+    }
+
+    #[test]
     fn method_value_sources_do_not_depend_on_module_order() {
         let mut context = Context::new();
         let module = ModuleOp::new(

@@ -6,7 +6,10 @@ use crate::method::{IntentOperationId, LocalId, PortType, ProcedureValue};
 use crate::procedure::binding::{
     ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
 };
-use crate::procedure::{BindingScope, ProcedureProgram, ValidatedProcedureProgram};
+use crate::procedure::{
+    BindingScope, ProcedureProgram, ProcedureTaskProgramValidationError, ValidatedProcedureProgram,
+    validate_task_program,
+};
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint, PropertyKind,
     QualificationLevel,
@@ -449,13 +452,24 @@ fn validate_candidate(
                 });
             }
         }
-        if let Some(program) = &task.program {
-            let validated = program.validate().map_err(|error| {
-                PlanningProblemValidationError::InvalidProcedureProgram {
-                    task: task.id.clone(),
-                    message: error.to_string(),
-                }
-            })?;
+        let validated = validate_task_program(
+            &task.id,
+            &task.operation,
+            task.inputs.len(),
+            &task
+                .outputs
+                .iter()
+                .map(|output| output.name.clone())
+                .collect::<Vec<_>>(),
+            task.parameters
+                .iter()
+                .map(|parameter| (&parameter.id, &parameter.value)),
+            task.materials
+                .iter()
+                .map(|material| (&material.id, material.symbol.as_str())),
+            task.program.as_ref(),
+        )?;
+        if let Some(validated) = validated {
             validate_program_contract(task, &validated)?;
         } else if task.binding_scope != BindingScope::Independent {
             return Err(PlanningProblemValidationError::ProcedureCapabilityFormula {
@@ -643,8 +657,8 @@ pub enum PlanningProblemValidationError {
         material: LocalId,
         producer: LocalId,
     },
-    #[error("Procedure task `{task}` has an invalid normalized program: {message}")]
-    InvalidProcedureProgram { task: LocalId, message: String },
+    #[error(transparent)]
+    InvalidProcedureTaskProgram(#[from] ProcedureTaskProgramValidationError),
     #[error("Procedure task `{task}` normalized program references an undeclared material input")]
     ProcedureMaterialBindings { task: LocalId },
     #[error("Procedure task `{task}` normalized program references an unavailable task input")]
@@ -686,6 +700,42 @@ pub enum PlanningProblemValidationError {
 mod tests {
     use super::*;
 
+    fn external_problem() -> PlanningProblem {
+        PlanningProblem {
+            schema_version: PLANNING_PROBLEM_SCHEMA_VERSION.to_owned(),
+            choices: vec![PlanningMethodChoice {
+                id: LocalId::new("choice").unwrap(),
+                source_operation: IntentOperationId::new("example.operation").unwrap(),
+                after: Vec::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                candidates: vec![PlanningMethodCandidate {
+                    method: MethodId::new("https://example.org/method").unwrap(),
+                    tasks: vec![PlanningProcedureTask {
+                        id: LocalId::new("choice::task").unwrap(),
+                        operation: OperationId::new("https://example.org/procedure/external")
+                            .unwrap(),
+                        program: None,
+                        binding_scope: BindingScope::Independent,
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
+                        parameters: Vec::new(),
+                        materials: Vec::new(),
+                        requirements: vec![PlanningCapabilityRequirement {
+                            id: LocalId::new("choice::task::requirement").unwrap(),
+                            capability_kind: CapabilityKind::new("https://example.org/capability")
+                                .unwrap(),
+                            minimum_qualification: QualificationLevel::Plannable,
+                            accepted_control_modes: BTreeSet::from([ControlMode::Manual]),
+                            constraints: Vec::new(),
+                        }],
+                    }],
+                    yields: Vec::new(),
+                }],
+            }],
+        }
+    }
+
     #[test]
     fn a_deserialized_problem_is_revalidated_before_use() {
         let problem = PlanningProblem {
@@ -700,5 +750,20 @@ mod tests {
             PlanningProblemValidationError::EmptyProblem
         );
         assert_eq!(decoded.sha256().len(), 64);
+    }
+
+    #[test]
+    fn planning_revalidates_registered_task_program_provenance() {
+        let mut problem = external_problem();
+        problem.validate().unwrap();
+
+        problem.choices[0].candidates[0].tasks[0].operation =
+            OperationId::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
+        assert!(matches!(
+            problem.validate(),
+            Err(PlanningProblemValidationError::InvalidProcedureTaskProgram(
+                ProcedureTaskProgramValidationError::CannotNormalize(_)
+            ))
+        ));
     }
 }

@@ -1125,15 +1125,17 @@ mod tests {
     };
     use tempfile::TempDir;
 
+    use lab_lair::backend::validate_adapter_profile;
     use lab_lair::planning::{
         FacilityPlanningSolutionValidationError, MethodPin, PLANNING_PROBLEM_SCHEMA_VERSION,
         PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProcedureTask,
         PlanningTaskOutput, PlanningValueSource,
     };
-    use lab_lair::{backend::validate_adapter_profile, procedure::vocabulary::SETUP_GOLDEN_GATE};
 
     use super::*;
     use crate::AdapterBindingRequest;
+
+    const TEST_PIPETTING_OPERATION: &str = "https://example.org/procedure/handle-liquid";
 
     fn id(value: &str) -> LocalId {
         LocalId::new(value).unwrap()
@@ -1415,6 +1417,24 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         .unwrap()
     }
 
+    fn ot2_bindings_with_test_pipetting_operation(
+        inventory: &InventorySnapshot,
+    ) -> AdapterBindingSnapshot {
+        let mut bindings = ot2_bindings(inventory);
+        let implementation = bindings.bindings[0]
+            .procedure_implementations
+            .iter_mut()
+            .find(|implementation| {
+                implementation.contract.as_str()
+                    == lab_lair::procedure::vocabulary::PIPETTING_PROGRAM_V1
+            })
+            .expect("the OT-2 binding carries its pipetting implementation");
+        implementation
+            .operations
+            .insert(OperationId::new(TEST_PIPETTING_OPERATION).unwrap());
+        bindings
+    }
+
     fn normalize_test_task(task: &mut PlanningProcedureTask, operation: &str) {
         let program = pipetting_program();
         let formula = program.validate().unwrap().capability_formula();
@@ -1543,10 +1563,10 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         });
         normalize_test_task(
             &mut problem.choices[0].candidates[0].tasks[0],
-            SETUP_GOLDEN_GATE,
+            TEST_PIPETTING_OPERATION,
         );
         problem.validate().unwrap();
-        let adapters = ot2_bindings(&inventory);
+        let adapters = ot2_bindings_with_test_pipetting_operation(&inventory);
 
         let solution = solve_facility_planning(
             &problem,
@@ -1596,7 +1616,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         });
         normalize_test_task(
             &mut problem.choices[0].candidates[0].tasks[0],
-            "https://example.org/procedure/handle-liquid",
+            TEST_PIPETTING_OPERATION,
         );
         problem.validate().unwrap();
         let adapters = ot2_bindings(&inventory);
@@ -1641,10 +1661,10 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         });
         normalize_test_task(
             &mut problem.choices[0].candidates[0].tasks[0],
-            SETUP_GOLDEN_GATE,
+            TEST_PIPETTING_OPERATION,
         );
         problem.validate().unwrap();
-        let adapters = ot2_bindings(&inventory);
+        let adapters = ot2_bindings_with_test_pipetting_operation(&inventory);
         let mut solution = solve_facility_planning(
             &problem,
             &inventory,

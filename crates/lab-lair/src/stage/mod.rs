@@ -21,6 +21,7 @@ use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::procedure::binding::{ProcedureCapabilityRequirement, ProcedureTaskInterface};
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp};
+use crate::procedure::validate_task_program;
 use crate::stage::ir::StageOp;
 
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
@@ -265,7 +266,7 @@ fn verify_allocated_method(
             if !global_parameters.insert(id.clone()) {
                 return Err(format!("duplicate Procedure parameter identity '{id}'"));
             }
-            parameters.push((id, parameter.procedure_node(context)));
+            parameters.push(parameter);
             continue;
         }
         if let Some(material) = Operation::get_op::<MaterialInputOp>(operation, context) {
@@ -334,10 +335,12 @@ fn verify_allocated_method(
             "allocated Method '{choice}' must contain a Procedure task"
         ));
     }
-    for (parameter, node) in parameters {
+    for parameter in &parameters {
+        let id = parameter.parameter_id(context);
+        let node = parameter.procedure_node(context);
         if !tasks.contains(&node) {
             return Err(format!(
-                "Procedure parameter '{parameter}' references node '{node}' outside allocated Method '{choice}'"
+                "Procedure parameter '{id}' references node '{node}' outside allocated Method '{choice}'"
             ));
         }
     }
@@ -398,6 +401,7 @@ fn verify_allocated_method(
         context,
         &task_operations,
         &requirements,
+        &parameters,
         &materials,
         &constraints,
     )?;
@@ -687,6 +691,7 @@ fn verify_task_program_contracts(
     context: &Context,
     task_operations: &[pliron::context::Ptr<Operation>],
     requirements: &BTreeMap<String, RequirementOp>,
+    parameters: &[ParameterOp],
     materials: &BTreeMap<String, MaterialInputOp>,
     constraints: &[ConstraintOp],
 ) -> Result<(), String> {
@@ -725,31 +730,57 @@ fn verify_task_program_contracts(
         "stage verification rejects constraints that reference absent Requirements"
     );
 
-    let mut materials_by_node = BTreeMap::<String, Vec<crate::procedure::ProcedureLocalId>>::new();
+    let mut parameters_by_node =
+        BTreeMap::<String, Vec<(crate::method::LocalId, crate::method::ProcedureValue)>>::new();
+    for parameter in parameters {
+        let node = parameter.procedure_node(context);
+        let (id, _, value) = parameter.semantic_parameter(context);
+        parameters_by_node
+            .entry(node)
+            .or_default()
+            .push((id, value));
+    }
+
+    let mut materials_by_node = BTreeMap::<String, Vec<(crate::method::LocalId, String)>>::new();
     for (material_id, material) in materials {
         materials_by_node
             .entry(material.procedure_node(context))
             .or_default()
-            .push(
+            .push((
                 crate::procedure::ProcedureLocalId::new(material_id)
                     .expect("verified material input identities are stable"),
-            );
+                material.symbol(context),
+            ));
     }
 
     for operation in task_operations {
         let task = Operation::get_op::<TaskOp>(*operation, context)
             .expect("Procedure task list contains only procedure.task operations");
-        let Some(program) = task.semantic_program(context) else {
+        let node = task.semantic_node_id(context);
+        let operation_id = task.semantic_operation(context);
+        let outputs = task.output_names(context);
+        let task_parameters = parameters_by_node.remove(node.as_str()).unwrap_or_default();
+        let task_materials = materials_by_node.remove(node.as_str()).unwrap_or_default();
+        let program = task.semantic_program(context);
+        let Some(validated) = validate_task_program(
+            &node,
+            &operation_id,
+            operation.deref(context).operands().count(),
+            &outputs,
+            task_parameters.iter().map(|(id, value)| (id, value)),
+            task_materials
+                .iter()
+                .map(|(id, symbol)| (id, symbol.as_str())),
+            program.as_ref(),
+        )
+        .map_err(|error| error.to_string())?
+        else {
             continue;
         };
-        let node = task.semantic_node_id(context);
-        let validated = program.validate().map_err(|error| {
-            format!("Procedure node '{node}' has an invalid normalized program: {error}")
-        })?;
         let interface = ProcedureTaskInterface::new(
             operation.deref(context).operands().count(),
-            materials_by_node.remove(node.as_str()).unwrap_or_default(),
-            task.output_names(context),
+            task_materials.into_iter().map(|(id, _)| id),
+            outputs,
         );
         let declared_requirements = requirements_by_node
             .remove(node.as_str())
@@ -882,7 +913,7 @@ fn verify_candidate(
             if !global_parameter_ids.insert(id.clone()) {
                 return Err(format!("duplicate Procedure parameter identity '{id}'"));
             }
-            parameters.push((id, parameter.procedure_node(context)));
+            parameters.push(parameter);
             continue;
         }
         if let Some(material) = Operation::get_op::<MaterialInputOp>(operation, context) {
@@ -940,10 +971,12 @@ fn verify_candidate(
             ));
         }
     }
-    for (parameter, node) in parameters {
+    for parameter in &parameters {
+        let id = parameter.parameter_id(context);
+        let node = parameter.procedure_node(context);
         if !tasks.contains(&node) {
             return Err(format!(
-                "Procedure parameter '{parameter}' references Procedure node '{node}' outside its candidate"
+                "Procedure parameter '{id}' references Procedure node '{node}' outside its candidate"
             ));
         }
     }
@@ -959,6 +992,7 @@ fn verify_candidate(
         context,
         &task_operations,
         &requirements,
+        &parameters,
         &material_inputs,
         &constraints,
     )?;
@@ -1269,6 +1303,23 @@ mod tests {
             error.contains("does not carry the program-derived constraints"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn refined_alternatives_revalidate_registered_task_program_provenance() {
+        let (context, module, task) = refined_program_with_bound_task();
+        assert_eq!(
+            detect_stage(&context, module).unwrap(),
+            IrStage::RefinedAlternatives
+        );
+
+        task.set_attr_operation(
+            &context,
+            StringAttr::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE.to_owned()),
+        );
+        verify_operation(module.get_operation(), &context).unwrap();
+        let error = detect_stage(&context, module).unwrap_err();
+        assert!(error.contains("cannot be normalized"), "{error}");
     }
 
     fn refined_program_with_bound_task() -> (Context, ModuleOp, TaskOp) {
