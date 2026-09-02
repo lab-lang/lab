@@ -1,4 +1,4 @@
-//! Compiler-owned adapter discovery and profile validation.
+//! Adapter discovery and operational-profile validation.
 //!
 //! An adapter is a Lab implementation, never a facility Asset. The manifest binds an adapter ID
 //! to an exact SBOLInventory Asset IRI; this registry states which semantic capability offerings

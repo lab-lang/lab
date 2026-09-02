@@ -4,7 +4,7 @@
 //! material or data state are open absolute IRIs, so adding a method does not add a Rust operation
 //! class to the compiler.
 
-// Construction APIs are consumed by the forthcoming method-refinement pass.
+// Construction APIs are consumed by Method refinement.
 
 use std::collections::BTreeSet;
 

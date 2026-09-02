@@ -1,6 +1,6 @@
 //! Facility-independent method alternatives and candidate-region termination.
 
-// Construction APIs are consumed by the forthcoming method-refinement pass.
+// Construction APIs are consumed by Method refinement.
 
 use std::collections::BTreeSet;
 

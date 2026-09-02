@@ -1,6 +1,6 @@
 //! First-class semantic capability requirements inside method candidate regions.
 
-// Construction APIs are consumed by the forthcoming method-refinement pass.
+// Construction APIs are consumed by Method refinement.
 
 use std::cell::Ref;
 use std::collections::BTreeSet;
