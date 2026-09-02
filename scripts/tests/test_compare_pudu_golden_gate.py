@@ -169,6 +169,23 @@ Opening Thermocycler lid
             },
         )
 
+    def test_hardware_trace_records_both_module_generations(self) -> None:
+        trace = """\
+Aspirating 2.0 uL from A1 of Opentrons 24 Well Aluminum Block with NEST 1.5 mL Snapcap on Temperature Module GEN1 on slot 1 at 3.78 uL/sec
+Dispensing 2.0 uL into A1 of NEST 96 Well Plate 100 µL PCR Full Skirt on Thermocycler Module GEN1 on slot 7 at 7.56 uL/sec
+"""
+
+        self.assertEqual(
+            comparison.trace_hardware(trace),
+            {
+                "thermocycler_labware": [
+                    "NEST 96 Well Plate 100 µL PCR Full Skirt"
+                ],
+                "temperature_module_generations": [1],
+                "thermocycler_module_generations": [1],
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

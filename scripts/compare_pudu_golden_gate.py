@@ -727,6 +727,36 @@ print(json.dumps({
     }
 
 
+def pudu_transformation_instruments(
+    python: Path, generated_protocol: Path
+) -> dict[str, dict[str, str]]:
+    program = """
+import importlib.util
+import json
+import sys
+
+spec = importlib.util.spec_from_file_location("generated_pudu_transformation", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class CaptureHardware(module.HeatShockTransformation):
+    def run(self, protocol):
+        print(json.dumps({
+            "small": {"model": self.pipette_p20, "mount": self.pipette_p20_position},
+            "large": {"model": self.pipette_p300, "mount": self.pipette_p300_position},
+        }))
+module.HeatShockTransformation = CaptureHardware
+module.run(None)
+"""
+    output = run_command(
+        (python, "-c", program, generated_protocol), cwd=generated_protocol.parent
+    )
+    try:
+        raw = json.loads(output.stdout)
+    except json.JSONDecodeError as error:
+        raise ComparisonError("PUDU instrument configuration is not JSON") from error
+    return raw
+
+
 def lab_transformation_configuration(manifest_path: Path) -> dict[str, Any]:
     manifest = read_json(manifest_path)["execution"]
     preparation = manifest["preparations"][0]["execution"]
@@ -757,6 +787,7 @@ def lab_transformation_configuration(manifest_path: Path) -> dict[str, Any]:
 
 
 TEMPERATURE_MODULE_GENERATION = re.compile(r"on Temperature Module GEN([12]) on slot")
+THERMOCYCLER_MODULE_GENERATION = re.compile(r"on Thermocycler Module GEN([12]) on slot")
 
 
 def trace_hardware(trace: str) -> dict[str, Any]:
@@ -775,9 +806,36 @@ def trace_hardware(trace: str) -> dict[str, Any]:
     temperature_module_generations = sorted(
         {int(generation) for generation in TEMPERATURE_MODULE_GENERATION.findall(trace)}
     )
+    thermocycler_module_generations = sorted(
+        {int(generation) for generation in THERMOCYCLER_MODULE_GENERATION.findall(trace)}
+    )
     return {
         "thermocycler_labware": sorted(thermocycler_labware),
         "temperature_module_generations": temperature_module_generations,
+        "thermocycler_module_generations": thermocycler_module_generations,
+    }
+
+
+def workflow_hardware(
+    instruments: dict[str, Any], traces: dict[str, Path]
+) -> dict[str, Any]:
+    traced = [trace_hardware(path.read_text()) for path in traces.values()]
+    return {
+        "instruments": instruments,
+        "temperature_module_generations": sorted(
+            {
+                generation
+                for hardware in traced
+                for generation in hardware["temperature_module_generations"]
+            }
+        ),
+        "thermocycler_module_generations": sorted(
+            {
+                generation
+                for hardware in traced
+                for generation in hardware["thermocycler_module_generations"]
+            }
+        ),
     }
 
 
@@ -1066,7 +1124,7 @@ def observations(
                 "lab": lab_hardware["transformation"][
                     "temperature_module_generations"
                 ],
-                "explanation": "PUDU's simulated transformation stages competent cells in a passive tube rack; Lab uses the facility's GEN2 Temperature Module at the required 4 C setpoint.",
+                "explanation": "PUDU's simulated transformation stages competent cells in a passive tube rack; Lab uses the facility's GEN1 Temperature Module at the required 4 C setpoint.",
             }
         )
 
@@ -1227,6 +1285,24 @@ def compare(
 
     facets.extend(
         (
+            compare_facet(
+                "hardware.workflow",
+                workflow_hardware(
+                    pudu_transformation_instruments(
+                        pudu_python,
+                        pudu_output / "transformation_protocol.py",
+                    ),
+                    pudu_traces,
+                ),
+                workflow_hardware(
+                    read_json(lab_bundle / "transformation_manifest.json")["deck"][
+                        "instruments"
+                    ],
+                    lab_traces,
+                ),
+                basis="Resolved P20 and P300 models and mounts plus Temperature Module and Thermocycler Module generations across the simulated workflow.",
+                normalized_root=normalized,
+            ),
             compare_facet(
                 "thermal.assembly",
                 thermal_core(pudu_assembly_trace),

@@ -51,7 +51,7 @@ scripts/compare_pudu_golden_gate.py --pudu-repository ~/git/RudgeLab/PUDU
 
 The script creates a retained temporary directory unless `--out-dir` names a new directory. It verifies the PUDU revision and input checksums, generates and simulates PUDU's assembly, transformation, and plating protocols exactly as its workflow guide does, builds and simulates Lab's Golden Gate package with the same simulator, preserves both raw output trees, and writes `comparison.json` plus every normalized facet used in the decision.
 
-The comparison has ten required facets:
+The comparison has eleven required facets:
 
 1. checked assembly input identity and composition;
 2. checked transformation input identity and composition;
@@ -61,12 +61,13 @@ The comparison has ten required facets:
 6. assembly liquid actions and contamination boundaries;
 7. transformation liquid actions and contamination boundaries;
 8. plating liquid actions and contamination boundaries;
-9. assembly staging and thermocycler program; and
-10. transformation volume and thermal intent from the two generated outputs.
+9. resolved P20 and P300 models and mounts plus temperature-module and thermocycler generations;
+10. assembly staging and thermocycler program; and
+11. transformation volume and thermal intent from the two generated outputs.
 
 Liquid traces are reduced to leaf aspirate, dispense, blowout, and touch-tip operations. Tip pickup and drop operations define contamination boundaries between those actions: Lab must preserve every boundary PUDU uses, but may introduce an additional fresh tip without failing equivalence. Physical source wells are compared by the material the generated protocol placed in them, so a deliberate temperature-controlled cell position can be compared with PUDU's passive source-rack position without confusing competent cells with recovery medium. Tip-rack slots are facility configuration; deck locations that define product lineage, dilution layers, or agar destinations remain exact. The command exits nonzero and retains both normalized documents whenever any required facet differs.
 
-At the pinned revisions, all ten facets pass. The common trace contains 595 equal leaf liquid operations: 184 in assembly, 153 in transformation, and 258 in dilution/plating.
+At the pinned revisions, all eleven facets pass. The common trace contains 595 equal leaf liquid operations: 184 in assembly, 153 in transformation, and 258 in dilution/plating.
 
 ## Explicit output differences
 
@@ -74,8 +75,7 @@ The report records observed differences separately from the equivalence facets i
 
 - PUDU switches its generated transformation implementation to `water_testing=True` under the Opentrons simulator, so its simulation omits heat shock and recovery incubation. The comparison reads the resolved configuration from PUDU's generated protocol to verify thermal intent, while Lab simulates its real reviewed thermal path.
 - PUDU transforms in a NEST 100 µL thermocycler plate but its generated plating protocol loads a Bio-Rad 200 µL source plate. Lab preserves the NEST plate across the explicit handoff.
-- PUDU's generic assembly temperature-module request resolves to GEN1 in the pinned simulator. Lab's facility explicitly declares a GEN2 temperature module. Both outputs use the required Thermocycler Module GEN1.
-- PUDU's simulated transformation stages competent cells in a passive tube rack. Lab enforces the Method's 4 °C staging requirement on the facility's GEN2 temperature module.
+- PUDU's simulated transformation stages competent cells in a passive tube rack. Lab enforces the Method's 4 °C staging requirement on the shared GEN1 temperature module.
 - Lab takes a fresh large-volume tip for the second dilution-medium distribution chunk. PUDU reuses its first tip; the report records Lab's additional boundary and verifies that it removes no PUDU contamination boundary.
 - Lab opens the thermocycler after final assembly and transformation thermal work so the next reviewed plate handoff is physically possible. PUDU's simulated protocols leave it closed.
 
@@ -87,4 +87,4 @@ These differences are not silently normalized into equality. Each is emitted wit
 
 The hosted Rust and Python suites cover canonical normalization, allocation, generated manifests, template structure, and the differential normalizers. The live PUDU comparison additionally requires PUDU's pinned environment and Opentrons simulator, so it remains an explicit acceptance command rather than an ordinary hermetic unit test.
 
-Passing software equivalence is not hardware qualification. The next gate is an operator-reviewed water or inexpensive-surrogate run on the actual OT-2 with its Thermocycler Module GEN1, followed by a biological acceptance run whose evidence is recorded. Flex and STAR must independently implement and qualify the same portable Procedure semantics with their own calibrated profiles; copying OT-2 values would violate the device boundary.
+Passing software equivalence is not hardware qualification. The next gate is an operator-reviewed water or inexpensive-surrogate run on the actual OT-2 with its GEN2 P20 and P300 pipettes, Temperature Module GEN1, and Thermocycler Module GEN1, followed by a biological acceptance run whose evidence is recorded. Flex and STAR must independently implement and qualify the same portable Procedure semantics with their own calibrated profiles; copying OT-2 values would violate the device boundary.

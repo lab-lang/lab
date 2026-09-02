@@ -4,6 +4,12 @@
   "hardware": {
     "robot_type": "OT-2",
     "api_level": "2.21",
+    "p20_model": "p20_single_gen2",
+    "p20_mount": "left",
+    "p300_model": "p300_single_gen2",
+    "p300_mount": "right",
+    "temperature_module_generation": 1,
+    "temperature_module_load_name": "temperature module",
     "thermocycler_generation": 1,
     "thermocycler_load_name": "thermocycler module"
   },

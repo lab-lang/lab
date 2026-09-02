@@ -921,6 +921,27 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     assert_eq!(manifest["execution"]["kind"], "assembly");
     assert_eq!(manifest["execution"]["setups"].as_array().unwrap().len(), 2);
     assert_eq!(
+        manifest["deck"]["instruments"]["small"]["model"],
+        regression["hardware"]["p20_model"]
+    );
+    assert_eq!(
+        manifest["deck"]["instruments"]["small"]["mount"],
+        regression["hardware"]["p20_mount"]
+    );
+    assert_eq!(
+        manifest["deck"]["instruments"]["large"]["model"],
+        regression["hardware"]["p300_model"]
+    );
+    assert_eq!(
+        manifest["deck"]["instruments"]["large"]["mount"],
+        regression["hardware"]["p300_mount"]
+    );
+    assert_eq!(
+        manifest["deck"]["deck"]["temperature_module"]["model"],
+        regression["hardware"]["temperature_module_load_name"],
+        "the example matches PUDU's Temperature Module GEN1"
+    );
+    assert_eq!(
         manifest["deck"]["deck"]["thermocycler"]["model"], "thermocycler module",
         "the example's exact OT-2 Asset has a Thermocycler Module GEN1"
     );

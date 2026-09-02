@@ -31,7 +31,8 @@ model = "p300_single_gen2"
 mount = "right"
 
 [deck.temperature_module]
-model = "temperature module gen2"
+# PUDU uses Opentrons' generic load name, which resolves to Temperature Module GEN1.
+model = "temperature module"
 slot = "1"
 labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
 capacity = 24
