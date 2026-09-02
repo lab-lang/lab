@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use lab_lair::program::PortableLairProgram;
-use lab_lair::{compile_module, parse_module, render_checked_module};
+use lab_compiler::program::PortableLairProgram;
+use lab_compiler::{compile_module, parse_module, render_checked_module};
 
 #[derive(Debug, Parser)]
 #[command(

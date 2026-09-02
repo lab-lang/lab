@@ -15,22 +15,22 @@ use lab_adapters::{
 };
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
+use lab_compiler::method::{IntentOperationId, LocalId, MethodRegistry};
+use lab_compiler::planning::{
+    AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
+    FacilityPlanningSolution, MaterialLotInventory, MethodPin, MethodPinSelector,
+    PlanningProblemExtractionError,
+};
+use lab_compiler::program::{
+    AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
+    RefinedLairError,
+};
 use lab_facility::{
     AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, FacilityPlanningError,
     MaterialLotInventoryError, build_material_lot_inventory, explain_facility_planning_error,
     solve_facility_planning,
 };
 use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
-use lab_lair::method::{IntentOperationId, LocalId, MethodRegistry};
-use lab_lair::planning::{
-    AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
-    FacilityPlanningSolution, MaterialLotInventory, MethodPin, MethodPinSelector,
-    PlanningProblemExtractionError,
-};
-use lab_lair::program::{
-    AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
-    RefinedLairError,
-};
 use lab_package::{LabPackage, PlanningAdapterRequirement};
 use thiserror::Error;
 
@@ -47,14 +47,14 @@ pub struct FacilityPlanningResult {
     pub inventory: InventorySnapshot,
     pub adapter_bindings: Option<AdapterBindingSnapshot>,
     pub refined_lair: String,
-    pub problem: lab_lair::planning::PlanningProblem,
+    pub problem: lab_compiler::planning::PlanningProblem,
     pub solution: FacilityPlanningSolution,
     pub allocated: AllocatedLairProgram,
     pub adapter_invocations: AdapterInvocationPlan,
 }
 
 impl FacilityPlanningResult {
-    pub fn problem(&self) -> &lab_lair::planning::PlanningProblem {
+    pub fn problem(&self) -> &lab_compiler::planning::PlanningProblem {
         &self.problem
     }
 

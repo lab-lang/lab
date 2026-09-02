@@ -7,19 +7,19 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_instruments::{ThermalProfile, ThermalStage, ThermalStep};
-use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
-use lab_lair::procedure::{
+use lab_compiler::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_compiler::procedure::{
     FluidPathPolicy, Location, MixTechnique, PipettingProgramV1, PipettingStep, TransferTechnique,
     ValidatedPipettingProgramV1, ValidatedProcedureProgram, VesselRole, Volume,
 };
+use lab_instruments::{ThermalProfile, ThermalStage, ThermalStep};
 
 use crate::backend::invocation::{ProcedureTaskView, material_role};
-use lab_lair::planning::{PlanningValueSource, SelectedMaterialBinding};
+use lab_compiler::planning::{PlanningValueSource, SelectedMaterialBinding};
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 
-pub(crate) use lab_lair::procedure::vocabulary::{
+pub(crate) use lab_compiler::procedure::vocabulary::{
     ADD_RECOVERY_MEDIUM, CYCLE_GOLDEN_GATE, HEAT_SHOCK_TRANSFORMATION, INCUBATE_RECOVERY_CULTURE,
     PLATE_DILUTED_CULTURE, PREPARE_CHEMICAL_TRANSFORMATION, SERIAL_DILUTION, SETUP_GOLDEN_GATE,
 };
@@ -59,13 +59,13 @@ impl SourceDemand {
 fn source_demand(
     adapter: &str,
     task: &AllocatedProcedureTask,
-    ledger: &lab_lair::procedure::LiquidLedger,
-    vessel: &lab_lair::procedure::ProcedureLocalId,
+    ledger: &lab_compiler::procedure::LiquidLedger,
+    vessel: &lab_compiler::procedure::ProcedureLocalId,
     position: u32,
     label: &str,
     stated: Option<&Volume>,
 ) -> Result<SourceDemand, String> {
-    let at = lab_lair::procedure::Location {
+    let at = lab_compiler::procedure::Location {
         vessel: vessel.clone(),
         position,
     };
@@ -1049,7 +1049,7 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
         ));
     };
     let destinations = (0..destination_vessel.positions)
-        .map(|position| lab_lair::procedure::Location {
+        .map(|position| lab_compiler::procedure::Location {
             vessel: destination_vessel.id.clone(),
             position,
         })
@@ -1109,7 +1109,7 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
 fn source_demand_at(
     adapter: &str,
     task: &AllocatedProcedureTask,
-    ledger: &lab_lair::procedure::LiquidLedger,
+    ledger: &lab_compiler::procedure::LiquidLedger,
     program: &PipettingProgramV1,
     at: &Location,
     label: &str,
@@ -1134,7 +1134,7 @@ fn project_basic_golden_gate<'a>(
     adapter: &str,
     task: &'a AllocatedProcedureTask,
     program: &PipettingProgramV1,
-    ledger: &lab_lair::procedure::LiquidLedger,
+    ledger: &lab_compiler::procedure::LiquidLedger,
     destinations: &[Location],
 ) -> Result<(Vec<MaterialVolume<'a>>, u32, GoldenGateMix), String> {
     let mut additions = Vec::new();
@@ -1212,7 +1212,7 @@ fn project_temperature_staged_golden_gate<'a>(
     adapter: &str,
     task: &'a AllocatedProcedureTask,
     program: &PipettingProgramV1,
-    ledger: &lab_lair::procedure::LiquidLedger,
+    ledger: &lab_compiler::procedure::LiquidLedger,
     destinations: &[Location],
 ) -> Result<(Vec<MaterialVolume<'a>>, u32, GoldenGateMix), String> {
     let sources = program
@@ -1463,7 +1463,7 @@ fn exact_source_temperature(
     task: &AllocatedProcedureTask,
     program: &PipettingProgramV1,
 ) -> Result<Option<f64>, String> {
-    let Some(temperature) = lab_lair::procedure::staged_temperature_envelope(&program.vessels)
+    let Some(temperature) = lab_compiler::procedure::staged_temperature_envelope(&program.vessels)
     else {
         return Ok(None);
     };

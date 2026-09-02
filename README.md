@@ -55,6 +55,6 @@ The language, LAIR, facility model, adapters, and runtime are still evolving. Dr
 - [Golden Gate example](examples/golden-gate/README.md)
 - [Golden Gate in Python](examples/golden-gate-python/README.md) — the same checked program through the typed Python frontend
 - [Golden Gate, extended](examples/golden-gate-extended/README.md) — the same laboratory with most of the language in it
-- [LAIR internals](crates/lab-lair/README.md)
+- [LAIR internals](crates/lab-compiler/README.md)
 - [Facility planning internals](crates/lab-facility/README.md)
 - [Adapter implementation internals](crates/lab-adapters/README.md)

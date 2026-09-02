@@ -2,13 +2,13 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_lair::allocation::{
+use lab_compiler::allocation::{
     AllocatedMethod, AllocatedProgram, AllocatedProgramExtractionError,
     AllocatedProgramValidationError, InvocationAdapter,
 };
-use lab_lair::method::LocalId;
-use lab_lair::planning::MaterialLotInventory;
-use lab_lair::program::AllocatedLairProgram;
+use lab_compiler::method::LocalId;
+use lab_compiler::planning::MaterialLotInventory;
+use lab_compiler::program::AllocatedLairProgram;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -322,11 +322,11 @@ mod tests {
     use lab_capability::{CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel};
 
     use super::*;
-    use lab_lair::allocation::{
+    use lab_compiler::allocation::{
         AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding, InvocationAdapter,
     };
-    use lab_lair::method::{IntentOperationId, PortType};
-    use lab_lair::planning::{
+    use lab_compiler::method::{IntentOperationId, PortType};
+    use lab_compiler::planning::{
         PlanningMethodYield, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
         PlanningValueSource,
     };

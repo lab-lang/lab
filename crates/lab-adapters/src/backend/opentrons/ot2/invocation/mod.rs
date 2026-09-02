@@ -2,10 +2,10 @@
 
 use std::collections::BTreeSet;
 
+use lab_compiler::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_compiler::method::LocalId;
+use lab_compiler::procedure::{MixTechnique, TransferTechnique};
 use lab_instruments::ThermalProfile;
-use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
-use lab_lair::method::LocalId;
-use lab_lair::procedure::{MixTechnique, TransferTechnique};
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
 use serde::Serialize;
 
@@ -31,7 +31,7 @@ use crate::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedExecutionGroup, ArtifactBundle,
     GeneratedArtifact,
 };
-use lab_lair::planning::{
+use lab_compiler::planning::{
     PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };

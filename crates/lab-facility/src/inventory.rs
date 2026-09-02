@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use lab_language::{CheckedDeclaration, CheckedModule};
 use thiserror::Error;
 
-use lab_lair::planning::{
+use lab_compiler::planning::{
     MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
 };
 

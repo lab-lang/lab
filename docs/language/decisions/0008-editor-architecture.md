@@ -9,7 +9,7 @@ Rust packages live under `crates/`, named for the responsibility they own. Binar
 | Package | Responsibility | Binary or host surface |
 | --- | --- | --- |
 | `lab-cli` | project and real-world workflow UX | `lab` |
-| `lab-lair` | aggregate compiler IR, Method and Procedure semantics, passes, allocation contracts, compiler inspection | `labc`, `lab-opt` |
+| `lab-compiler` | aggregate compiler IR, Method and Procedure semantics, passes, allocation contracts, compiler inspection | `labc`, `lab-opt` |
 | `lab-facility` | inventory binding, global facility allocation, explanations, reviewed execution-plan construction | Rust API |
 | `lab-adapters` | adapter catalogs and profiles, immutable invocations and schedules, concrete device lowering | Rust API |
 | `lab-project` | package-aware compilation and composition of LAIR, facility planning, and adapters | Rust API used by the CLI and Python bindings |

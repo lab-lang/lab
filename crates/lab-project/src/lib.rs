@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lab_lair::method::{
+use lab_compiler::method::{
     MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
     MethodRegistryError,
 };
@@ -339,7 +339,7 @@ impl LabProject {
 
     fn method_registry_for(&self, root: &PathBuf) -> Result<MethodRegistry, ProjectError> {
         let roots = self.ordered_reachable_roots(root);
-        let mut definitions = lab_lair::method::standard_method_definitions();
+        let mut definitions = lab_compiler::method::standard_method_definitions();
         definitions.extend(self.load_method_definitions(&roots)?);
         MethodRegistry::new(definitions).map_err(|source| ProjectError::InvalidMethodRegistry {
             package: self.packages[root].package.manifest.package.name.clone(),
@@ -829,7 +829,7 @@ documents = ["methods/recovery.json"]
 "#,
             &[("values.lab", DONOR)],
         );
-        let mut custom = lab_lair::method::standard_method_definitions()
+        let mut custom = lab_compiler::method::standard_method_definitions()
             .into_iter()
             .find(|definition| definition.refines.as_str() == "std.lab.plasmid.recover")
             .unwrap();
@@ -857,7 +857,7 @@ shared = { path = "../shared" }
         assert_eq!(project.package_method_definitions().unwrap(), [custom]);
         let compiled = project.compile().unwrap();
         let recovery = compiled.methods.methods_for(
-            &lab_lair::method::IntentOperationId::new("std.lab.plasmid.recover").unwrap(),
+            &lab_compiler::method::IntentOperationId::new("std.lab.plasmid.recover").unwrap(),
         );
 
         assert_eq!(
@@ -1071,7 +1071,8 @@ workflow main() -> Material<Plasmid>:
             planned.solution().problem_sha256
         );
         let allocated_ir = planned.allocated.ir();
-        let reparsed = lab_lair::program::AllocatedLairProgram::parse_ir(&allocated_ir).unwrap();
+        let reparsed =
+            lab_compiler::program::AllocatedLairProgram::parse_ir(&allocated_ir).unwrap();
         assert_eq!(
             reparsed.allocated_program().unwrap(),
             planned.allocated.allocated_program().unwrap()
@@ -1096,7 +1097,7 @@ workflow main() -> Material<Plasmid>:
                 task.materials.iter().any(|material| {
                     matches!(
                         material.source,
-                        lab_lair::planning::SelectedMaterialSource::MaterialLot { .. }
+                        lab_compiler::planning::SelectedMaterialSource::MaterialLot { .. }
                     )
                 })
             })

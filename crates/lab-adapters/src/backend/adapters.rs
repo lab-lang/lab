@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use lab_capability::{
     CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
 };
-use lab_lair::procedure::ProgramFeature;
-use lab_lair::procedure::vocabulary::{
+use lab_compiler::procedure::ProgramFeature;
+use lab_compiler::procedure::vocabulary::{
     ADD_RECOVERY_MEDIUM, AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, CYCLE_GOLDEN_GATE,
     HEAT_SHOCK_TRANSFORMATION, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
     INCUBATE_RECOVERY_CULTURE, LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER,
@@ -33,7 +33,7 @@ use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
 use crate::{AdapterInvocation, AdapterInvocationPlan};
-use lab_lair::method::LocalId;
+use lab_compiler::method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
     STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
@@ -1367,12 +1367,12 @@ mod tests {
 
     use super::*;
     use lab_capability::{MethodId, OperationId, QualificationLevel};
-    use lab_lair::allocation::{
+    use lab_compiler::allocation::{
         AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
         InvocationAdapter,
     };
-    use lab_lair::method::IntentOperationId;
-    use lab_lair::planning::MaterialLotInventory;
+    use lab_compiler::method::IntentOperationId;
+    use lab_compiler::planning::MaterialLotInventory;
 
     #[test]
     fn registry_separates_semantic_capabilities_from_features() {

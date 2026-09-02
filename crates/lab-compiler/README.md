@@ -1,6 +1,6 @@
 # LAIR implementation notes
 
-`crates/lab-lair/` owns Lab's aggregate intermediate representation and builds the experimental `labc` compiler and `lab-opt` IR tool. These are compiler-development interfaces; the standard package, planning, and runtime workflow is exposed through the repository's `lab` binary.
+`crates/lab-compiler/` owns Lab's aggregate intermediate representation and builds the experimental `labc` compiler and `lab-opt` IR tool. These are compiler-development interfaces; the standard package, planning, and runtime workflow is exposed through the repository's `lab` binary.
 
 Lab is a multi-layer IR compiler. `CheckedModule` is the portable frontend boundary, verified LAIR is the mutable transformation boundary, and the facility planning problem is the global constraint boundary. LAIR owns the laboratory program and its progressively specialized semantic states; facility search and concrete device implementations are separate consumers of those states.
 
@@ -17,7 +17,7 @@ checked modules
     -> one facility-wide execution plan
 ```
 
-`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_lair::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `lab-facility` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `lab-adapters` projects immutable adapter invocations exclusively from that allocated program.
+`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_compiler::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `lab-facility` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `lab-adapters` projects immutable adapter invocations exclusively from that allocated program.
 
 Verifier-valid Allocated Procedure LAIR is the only input device lowering is projected from. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
 

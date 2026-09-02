@@ -2,9 +2,9 @@
 
 use std::path::Path;
 
-use lab_lair::method::{MethodDefinition, MethodRegistry, standard_method_definitions};
-use lab_lair::program::PortableLairProgram;
-use lab_lair::{
+use lab_compiler::method::{MethodDefinition, MethodRegistry, standard_method_definitions};
+use lab_compiler::program::PortableLairProgram;
+use lab_compiler::{
     CheckedModule, Diagnostic, ModuleId, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
 };
@@ -211,7 +211,7 @@ fn compile_named_modules(modules: &[(String, String)]) -> PyResult<Vec<CheckedMo
 struct RefinedProgram {
     schema_version: &'static str,
     refined_lair: String,
-    planning_problem: lab_lair::planning::PlanningProblem,
+    planning_problem: lab_compiler::planning::PlanningProblem,
 }
 
 /// Refine checked Python-emitted Lab modules through the shared Rust Method pipeline.
@@ -254,8 +254,8 @@ struct PythonFacilityPlan<'a> {
     inventory: PythonInventorySelection<'a>,
     adapter_bindings: Option<&'a lab_facility::AdapterBindingSnapshot>,
     refined_lair: &'a str,
-    planning_problem: &'a lab_lair::planning::PlanningProblem,
-    facility_solution: &'a lab_lair::planning::FacilityPlanningSolution,
+    planning_problem: &'a lab_compiler::planning::PlanningProblem,
+    facility_solution: &'a lab_compiler::planning::FacilityPlanningSolution,
     allocated_lair: String,
     adapter_invocations: &'a lab_adapters::AdapterInvocationPlan,
 }

@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-use lab_lair::planning::{PlanningCandidateRejectionReason, PlanningRejectedOffering};
+use lab_compiler::planning::{PlanningCandidateRejectionReason, PlanningRejectedOffering};
 
 use crate::{
     AlternativeMethod, FacilityPlanningError, PlanningAlternative, PlanningMaterialRejectionReason,

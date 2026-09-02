@@ -7,18 +7,18 @@ use lab_capability::{
     AbsoluteIri, ControlMode, MethodId, ProcedureImplementationId, PropertyConstraint,
     PropertyValue, QualificationLevel, ScalarValue, UnitIri,
 };
+use lab_compiler::method::LocalId;
+use lab_compiler::procedure::BindingScope;
 use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
     FacilityScalarValue, InventorySnapshot,
 };
-use lab_lair::method::LocalId;
-use lab_lair::procedure::BindingScope;
 use sbol_inventory::vocabulary::Qualification;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use lab_lair::planning::{
+use lab_compiler::planning::{
     AdapterRequirement, AssetPin, AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
     FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotCandidates, MaterialLotInventory,
     MaterialLotInventoryValidationError, MethodPinSelector, PlanningCandidateRejectionReason,
@@ -1118,15 +1118,15 @@ mod tests {
     use lab_capability::{
         CapabilityKind, ConstraintRelation, ExactInteger, OperationId, PropertyKind, ScalarValue,
     };
-    use lab_lair::method::{IntentOperationId, PortType};
-    use lab_lair::procedure::{
+    use lab_compiler::method::{IntentOperationId, PortType};
+    use lab_compiler::procedure::{
         FluidPathPolicy, Location, MaterialOutput, PipettingConstraints, PipettingProgramV1,
         PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole, Volume,
     };
     use tempfile::TempDir;
 
     use lab_adapters::validate_adapter_profile;
-    use lab_lair::planning::{
+    use lab_compiler::planning::{
         FacilityPlanningSolutionValidationError, MethodPin, PLANNING_PROBLEM_SCHEMA_VERSION,
         PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProcedureTask,
         PlanningTaskOutput, PlanningValueSource,
@@ -1173,7 +1173,7 @@ mod tests {
             operation: OperationId::new(format!("https://example.org/procedure/{operation}"))
                 .unwrap(),
             program: None,
-            binding_scope: lab_lair::procedure::BindingScope::Independent,
+            binding_scope: lab_compiler::procedure::BindingScope::Independent,
             inputs: Vec::new(),
             outputs: vec![PlanningTaskOutput {
                 name: id("result"),
@@ -1426,7 +1426,7 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             .iter_mut()
             .find(|implementation| {
                 implementation.contract.as_str()
-                    == lab_lair::procedure::vocabulary::PIPETTING_PROGRAM_V1
+                    == lab_compiler::procedure::vocabulary::PIPETTING_PROGRAM_V1
             })
             .expect("the OT-2 binding carries its pipetting implementation");
         implementation

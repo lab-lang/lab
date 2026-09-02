@@ -6,7 +6,7 @@ use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLower
 use crate::backend::invocation::exact_invocation_tasks;
 use crate::backend::procedure::{CYCLE_GOLDEN_GATE, normalized_thermal_program};
 use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
-use lab_lair::planning::PlanningValueSource;
+use lab_compiler::planning::PlanningValueSource;
 
 pub(in crate::backend) fn lower_invocation(
     invocation_plan: &AdapterInvocationPlan,

@@ -5,7 +5,7 @@ members = [
     "crates/lab-capability",
     "crates/lab-cli",
     "crates/lab-facility",
-    "crates/lab-lair",
+    "crates/lab-compiler",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
     "crates/lab-inventory",
@@ -76,7 +76,7 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 byonoy-hid = { version = "0.1.0", default-features = false }
 lab-adapters = { path = "crates/lab-adapters", version = "0.1.2" }
 lab-facility = { path = "crates/lab-facility", version = "0.1.2" }
-lab-lair = { path = "crates/lab-lair", version = "0.1.2" }
+lab-compiler = { path = "crates/lab-compiler", version = "0.1.2" }
 lab-capability = { path = "crates/lab-capability", version = "0.1.2" }
 # Default features stay off at the workspace level so the compiler's pure
 # protocol use never links libusb; the CLI runner re-enables `usb`.

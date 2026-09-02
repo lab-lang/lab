@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lab_adapters::AdapterInvocationPlan;
 use lab_capability::{ControlMode, ScalarValue};
-use lab_lair::method::ProcedureValue;
-use lab_lair::procedure::BindingScope;
+use lab_compiler::method::ProcedureValue;
+use lab_compiler::procedure::BindingScope;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,
@@ -15,7 +15,7 @@ use lab_runfmt::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use lab_lair::planning::{
+use lab_compiler::planning::{
     AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, PlanningMaterialSource,
     PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningValueSource,
     SelectedMaterialSource,
@@ -132,8 +132,8 @@ pub fn build_execution_plan_from_invocations(
 
     let mut requirements = Vec::new();
     let mut nodes = Vec::<ExecutionPlanNode>::new();
-    let mut node_tasks = Vec::<BTreeSet<lab_lair::method::LocalId>>::new();
-    let mut task_nodes = BTreeMap::<lab_lair::method::LocalId, Vec<String>>::new();
+    let mut node_tasks = Vec::<BTreeSet<lab_compiler::method::LocalId>>::new();
+    let mut task_nodes = BTreeMap::<lab_compiler::method::LocalId, Vec<String>>::new();
     let mut document_nodes = BTreeMap::<(String, String, String), usize>::new();
     for method in &invocations.allocated.methods {
         for task in &method.tasks {
@@ -404,14 +404,16 @@ pub fn build_execution_plan_from_invocations(
     Ok(plan)
 }
 
-type SelectedChoices<'a> =
-    BTreeMap<lab_lair::method::LocalId, (&'a PlanningMethodChoice, &'a PlanningMethodCandidate)>;
+type SelectedChoices<'a> = BTreeMap<
+    lab_compiler::method::LocalId,
+    (&'a PlanningMethodChoice, &'a PlanningMethodCandidate),
+>;
 
 fn execution_task_dependencies(
     invocations: &AdapterInvocationPlan,
     problem: &PlanningProblem,
-    task_nodes: &BTreeMap<lab_lair::method::LocalId, Vec<String>>,
-) -> Result<BTreeMap<lab_lair::method::LocalId, Vec<String>>, ExecutionPlanBuildError> {
+    task_nodes: &BTreeMap<lab_compiler::method::LocalId, Vec<String>>,
+) -> Result<BTreeMap<lab_compiler::method::LocalId, Vec<String>>, ExecutionPlanBuildError> {
     let problem_choices = problem
         .choices
         .iter()
@@ -570,11 +572,11 @@ fn allocated_material_matches(
 }
 
 fn source_execution_nodes(
-    owner: &lab_lair::method::LocalId,
+    owner: &lab_compiler::method::LocalId,
     source: &PlanningValueSource,
     selected: &SelectedChoices<'_>,
-    task_nodes: &BTreeMap<lab_lair::method::LocalId, Vec<String>>,
-    visiting_inputs: &mut BTreeSet<(lab_lair::method::LocalId, lab_lair::method::LocalId)>,
+    task_nodes: &BTreeMap<lab_compiler::method::LocalId, Vec<String>>,
+    visiting_inputs: &mut BTreeSet<(lab_compiler::method::LocalId, lab_compiler::method::LocalId)>,
 ) -> Result<Vec<String>, ExecutionPlanBuildError> {
     match source {
         PlanningValueSource::TaskOutput { task, .. } => {

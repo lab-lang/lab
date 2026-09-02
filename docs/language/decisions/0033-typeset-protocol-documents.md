@@ -67,7 +67,7 @@ without the Lab toolchain.
 
 - The Typst compiler crates are a dependency of `lab-cli` only.
   `lab-adapters` emits `.typ` sources without depending on the typesetting
-  engine, and `lab-lair` remains independent of generated documents.
+  engine, and `lab-compiler` remains independent of generated documents.
 - A typesetting failure fails the build. The sources are generated, so an
   engine error is an emitter bug, reported with file-and-line diagnostics into
   the `.typ` on disk.

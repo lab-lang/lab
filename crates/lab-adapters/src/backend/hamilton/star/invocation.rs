@@ -2,8 +2,8 @@
 
 use std::collections::BTreeSet;
 
-use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
-use lab_lair::method::LocalId;
+use lab_compiler::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_compiler::method::LocalId;
 use lab_runfmt::STAR_RUN_FORMAT;
 use serde::Serialize;
 
@@ -23,7 +23,7 @@ use crate::backend::procedure::{
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
 use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
-use lab_lair::planning::{
+use lab_compiler::planning::{
     PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };

@@ -7,15 +7,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_lair::allocation::{AllocatedMethod, AllocatedProcedureTask, InvocationAdapter};
-use lab_lair::method::LocalId;
-use lab_lair::planning::PlanningValueSource;
+use lab_compiler::allocation::{AllocatedMethod, AllocatedProcedureTask, InvocationAdapter};
+use lab_compiler::method::LocalId;
+use lab_compiler::planning::PlanningValueSource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{AdapterInvocation, AdapterInvocationPlan};
-use lab_lair::procedure::vocabulary::PROVISION_MATERIAL;
+use lab_compiler::procedure::vocabulary::PROVISION_MATERIAL;
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
 
@@ -550,14 +550,14 @@ mod tests {
     use lab_capability::{
         AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
     };
-    use lab_lair::method::{IntentOperationId, PortType};
+    use lab_compiler::method::{IntentOperationId, PortType};
 
     use super::*;
     use crate::{ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocationPlan, adapter_invocation_id};
-    use lab_lair::allocation::{
+    use lab_compiler::allocation::{
         AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
     };
-    use lab_lair::planning::{
+    use lab_compiler::planning::{
         MaterialLotCandidates, MaterialLotInventory, PlanningPort, PlanningTaskInput,
         PlanningTaskOutput, PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
     };

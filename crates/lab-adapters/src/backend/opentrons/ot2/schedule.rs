@@ -6,8 +6,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_lair::allocation::{AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding};
-use lab_lair::method::LocalId;
+use lab_compiler::allocation::{
+    AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
+};
+use lab_compiler::method::LocalId;
 use serde::Serialize;
 
 use super::BACKEND;
@@ -26,7 +28,7 @@ use crate::{
     AdapterInvocation, AdapterInvocationPlan, AllocatedExecutionGroup, AllocatedProcedureSchedule,
     ScheduledPhysicalLocation, ScheduledValueRef,
 };
-use lab_lair::planning::{PlanningValueSource, SelectedMaterialSource};
+use lab_compiler::planning::{PlanningValueSource, SelectedMaterialSource};
 
 #[derive(Clone, Serialize)]
 pub(super) struct Ot2ScheduledTask {
@@ -1560,7 +1562,7 @@ fn scheduled_task(task: &PlannedTask<'_>) -> Ot2ScheduledTask {
 fn add_output_locations(
     locations: &mut Vec<ScheduledPhysicalLocation>,
     task: &LocalId,
-    outputs: Vec<lab_lair::planning::PlanningTaskOutput>,
+    outputs: Vec<lab_compiler::planning::PlanningTaskOutput>,
     resource: &str,
     positions: &[String],
 ) {
@@ -1577,7 +1579,7 @@ fn add_output_locations(
 fn add_well_output_locations(
     locations: &mut Vec<ScheduledPhysicalLocation>,
     task: &LocalId,
-    outputs: Vec<lab_lair::planning::PlanningTaskOutput>,
+    outputs: Vec<lab_compiler::planning::PlanningTaskOutput>,
     resource: &str,
     positions: &[crate::backend::resources::Well],
 ) {

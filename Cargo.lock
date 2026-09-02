@@ -1667,8 +1667,8 @@ version = "0.1.2"
 dependencies = [
  "hamilton-star",
  "lab-capability",
+ "lab-compiler",
  "lab-instruments",
- "lab-lair",
  "lab-runfmt",
  "opentrons-protocol",
  "sbol-inventory",
@@ -1700,9 +1700,9 @@ dependencies = [
  "flate2",
  "lab-adapters",
  "lab-capability",
+ "lab-compiler",
  "lab-facility",
  "lab-inventory",
- "lab-lair",
  "lab-package",
  "lab-project",
  "lab-runfmt",
@@ -1723,13 +1723,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-compiler"
+version = "0.1.2"
+dependencies = [
+ "anyhow",
+ "cargo-husky",
+ "clap",
+ "lab-capability",
+ "lab-language",
+ "pliron",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "lab-facility"
 version = "0.1.2"
 dependencies = [
  "lab-adapters",
  "lab-capability",
+ "lab-compiler",
  "lab-inventory",
- "lab-lair",
  "lab-language",
  "lab-runfmt",
  "sbol-inventory",
@@ -1784,24 +1802,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lab-lair"
-version = "0.1.2"
-dependencies = [
- "anyhow",
- "cargo-husky",
- "clap",
- "lab-capability",
- "lab-language",
- "pliron",
- "schemars",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror",
-]
-
-[[package]]
 name = "lab-language"
 version = "0.1.2"
 dependencies = [
@@ -1839,9 +1839,9 @@ version = "0.1.2"
 dependencies = [
  "lab-adapters",
  "lab-capability",
+ "lab-compiler",
  "lab-facility",
  "lab-inventory",
- "lab-lair",
  "lab-language",
  "lab-package",
  "lab-sbol",
@@ -1858,8 +1858,8 @@ name = "lab-python"
 version = "0.1.2"
 dependencies = [
  "lab-adapters",
+ "lab-compiler",
  "lab-facility",
- "lab-lair",
  "lab-project",
  "pyo3",
  "serde",

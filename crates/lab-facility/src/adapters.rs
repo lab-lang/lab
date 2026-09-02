@@ -427,7 +427,7 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         assert_eq!(binding.procedure_implementations.len(), 1);
         assert_eq!(
             binding.procedure_implementations[0].contract.as_str(),
-            lab_lair::procedure::vocabulary::PIPETTING_PROGRAM_V1
+            lab_compiler::procedure::vocabulary::PIPETTING_PROGRAM_V1
         );
         assert_eq!(binding.offerings.len(), 1);
         let offering = &binding.offerings[0];
