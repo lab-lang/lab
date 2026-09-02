@@ -1,7 +1,7 @@
 //! Opentrons Flex lowering for exact facility-allocated Procedure invocations.
 
 mod invocation;
-mod profile;
+pub mod profile;
 
 /// Stable adapter identity used by explicit Asset bindings, device plans, and adapter diagnostics.
 pub(in crate::backend::opentrons::flex) const BACKEND: &str = "opentrons.flex";

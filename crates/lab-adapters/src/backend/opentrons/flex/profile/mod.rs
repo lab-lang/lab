@@ -15,12 +15,15 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use crate::backend::opentrons::flex::profile::error::FlexProfileError;
-// Only the field types other `flex` submodules reach into directly
-// are re-exported; the rest of the schema stays behind `FlexAdapterProfile`.
-use crate::backend::opentrons::flex::profile::schema::{
-    FlexDeck, FlexTechniqueCalibration, Instruments,
+// These types occur in public profile fields, so they remain nameable without exposing the
+// private source-module layout used to implement the schema.
+pub use crate::backend::opentrons::flex::profile::schema::{
+    AssemblyStage, FlexDeck, FlexTechniqueCalibration, Instruments, MediaRack, Pipette, Plates,
+    PlatingStage, Stages, TemperatureModule, Thermocycler, TipRacks, TransformationStage, Trash,
 };
-pub use crate::backend::opentrons::flex::profile::schema::{Pipette, Stages, TipRacks};
+pub use crate::backend::resources::{
+    PlateCapacity, UnknownPlateGeometry, supported_plate_capacities,
+};
 
 /// Slots the installed thermocycler occupies.
 const THERMOCYCLER_SLOTS: [FlexSlot; 2] = [FlexSlot::A1, FlexSlot::B1];

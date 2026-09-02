@@ -1,7 +1,7 @@
 //! Opentrons OT-2 lowering for exact facility-allocated Procedure invocations.
 
 mod invocation;
-mod profile;
+pub mod profile;
 mod schedule;
 
 /// Stable adapter identity used by explicit Asset bindings, device plans, and adapter diagnostics.

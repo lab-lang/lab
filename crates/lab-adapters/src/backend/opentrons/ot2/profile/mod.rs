@@ -14,10 +14,16 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub use error::Ot2ProfileError;
-// Only the field types other `ot2` submodules reach into directly
-// are re-exported; the rest of the schema stays behind `Ot2AdapterProfile`.
-use schema::{Instruments, ProtocolOptions, SharedDeck};
-pub use schema::{Stages, TechniqueCalibration};
+// These types occur in public profile fields, so they remain nameable without exposing the
+// private source-module layout used to implement the schema.
+pub use crate::backend::resources::{
+    PlateCapacity, UnknownPlateGeometry, supported_plate_capacities,
+};
+pub use schema::{
+    AssemblyStage, Instruments, MediaRack, Pipette, Plates, PlatingStage, ProtocolOptions,
+    SharedDeck, SourceRack, Stages, TechniqueCalibration, TemperatureModule, Thermocycler,
+    TipRacks, TransformationStage,
+};
 
 /// Deck slots an OT-2 can address. Slot 12 is the fixed trash.
 const ADDRESSABLE_SLOTS: [&str; 11] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
