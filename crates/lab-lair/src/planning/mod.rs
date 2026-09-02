@@ -2,7 +2,6 @@
 
 mod extraction;
 mod invocation;
-mod lowering;
 mod material_inventory;
 mod problem;
 mod schedule;
@@ -17,10 +16,6 @@ pub(crate) use invocation::hex_sha256;
 pub use invocation::{
     ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
     AdapterInvocationPlan, AdapterInvocationValidationError, adapter_invocation_id,
-};
-pub use lowering::{
-    FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
-    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
 };
 pub use material_inventory::{
     MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
