@@ -4,12 +4,16 @@ Status: accepted for the current milestone
 
 ## Decision
 
-All Rust packages live under `crates/`, named for the responsibility they own. Binary names remain independent from package names:
+Rust packages live under `crates/`, named for the responsibility they own. Binary names remain independent from package names. The principal compiler, application, runtime, and editor boundaries are:
 
 | Package | Responsibility | Binary or host surface |
 | --- | --- | --- |
 | `lab-cli` | project and real-world workflow UX | `lab` |
-| `lab-compiler` | lowering, backend IR, passes, compiler inspection | `labc`, `lab-opt` |
+| `lab-compiler` | aggregate compiler IR, Method and Procedure semantics, passes, allocation contracts, compiler inspection | `labc`, `lab-opt` |
+| `lab-facility` | inventory binding, global facility allocation, explanations, reviewed execution-plan construction | Rust API |
+| `lab-adapters` | adapter catalogs and profiles, immutable invocations and schedules, concrete device lowering | Rust API |
+| `lab-project` | package-aware compilation and composition of LAIR, facility planning, and adapters | Rust API used by the CLI and Python bindings |
+| `lab-runtime` | validation and execution of frozen reviewed plans | Rust API used by `lab` |
 | `lab-language` | syntax, AST, type checking, action contracts, material-flow checking, source diagnostics | Rust API |
 | `lab-package` | manifests, source discovery, module graph | Rust API |
 | `lab-ide` | document snapshots and editor intelligence | Rust API |

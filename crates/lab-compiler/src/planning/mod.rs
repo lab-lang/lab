@@ -1,62 +1,21 @@
-//! Target-neutral planning shared by compiler backends.
+//! Durable, target-neutral facility-planning contracts projected from LAIR.
 
-mod adapters;
-mod execution;
-mod explain;
-mod inventory;
-mod invocation;
-mod lowering;
-mod model;
+mod extraction;
 mod problem;
-mod resolution;
-mod schedule;
-mod solver;
+mod solution;
 
-pub use adapters::{
-    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingError, AdapterBindingRequest,
-    AdapterBindingSnapshot, BoundCapabilityOffering, BoundCapabilityParameter,
-    BoundCapabilityParameterValue, BoundProcedureImplementation, ResolvedAdapterBinding,
-};
-pub use execution::{
-    ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
-};
-pub use explain::explain_facility_planning_error;
-pub use inventory::BuildInventoryError;
-pub(crate) use invocation::hex_sha256;
-pub use invocation::{
-    ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterInvocationValidationError, AllocatedMethod,
-    AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter, adapter_invocation_id,
-};
-pub use lowering::{
-    FACILITY_LOWERING_SCHEMA_VERSION, FacilityLoweredArtifact, FacilityLoweredArtifactRole,
-    FacilityLoweredRequirement, FacilityLoweringManifest, FacilityLoweringRoute,
-};
-pub use model::{
-    ArtifactResolution, BuildAttempt, BuildGraph, BuildGraphNode, BuildInventory,
-    DependencyBuildManifest, DependencyBuildStatus, DependencyEdge, DependencyInventorySource,
-    DependencyNode, LegacyBuildInventory, MaterialLotBinding, MaterialLotBuildInventory,
-};
+pub use extraction::PlanningProblemExtractionError;
+pub(crate) use extraction::extract_planning_problem;
 pub use problem::{
     PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
     PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,
     PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
-pub use resolution::{DependencyGraphError, resolve_dependency_graph};
-pub use schedule::{
-    ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION, AllocatedExecutionGroup,
-    AllocatedProcedureSchedule, AllocatedProcedureScheduleError, ScheduledPhysicalLocation,
-    ScheduledValueRef,
-};
-pub use solver::{
-    AdapterRequirement, AlternativeMaterialBinding, AlternativeMethod,
-    AlternativeRequirementBinding, AssetPin, AssetPinSelector,
-    FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningError, FacilityPlanningPolicy,
-    FacilityPlanningSolution, FacilityPlanningSolutionValidationError, MethodPin,
-    MethodPinSelector, PlanningAlternative, PlanningCandidateRejectionReason,
-    PlanningMaterialRejectionReason, PlanningRejectedOffering, RejectedMethodCandidate,
-    RejectedPlanningMaterial, RejectedPlanningRequirement, SelectedAdapter,
-    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod,
-    SelectedProcedureTask, SelectedRequirementBinding,
+pub use solution::{
+    AdapterRequirement, AssetPin, AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
+    FacilityPlanningPolicy, FacilityPlanningSolution, FacilityPlanningSolutionValidationError,
+    MethodPin, MethodPinSelector, PlanningCandidateRejectionReason, PlanningRejectedOffering,
+    SelectedAdapter, SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    SelectedMethod, SelectedProcedureTask, SelectedRequirementBinding,
 };

@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{ArgAction, Parser};
-use lab_compiler::{CompilerSession, IrStage, PassPipeline, SessionOptions, registered_passes};
+use lab_compiler::pipeline::{PassPipeline, registered_passes};
+use lab_compiler::session::{CompilerSession, SessionOptions};
+use lab_compiler::stage::IrStage;
 
 #[derive(Debug, Parser)]
 #[command(

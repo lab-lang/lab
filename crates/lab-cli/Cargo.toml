@@ -15,10 +15,12 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 flate2 = "1.1.9"
+lab-adapters.workspace = true
+lab-facility.workspace = true
 lab-compiler.workspace = true
 lab-capability.workspace = true
 lab-inventory.workspace = true
-lab-method.workspace = true
+lab-language.workspace = true
 lab-runfmt.workspace = true
 # The runner needs the live USB transport the workspace dependency keeps
 # off by default.

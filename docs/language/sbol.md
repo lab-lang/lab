@@ -531,7 +531,7 @@ into LAIR needs an attribute type for it rather than reuse of `StringAttr`.
 
 Two payoffs beyond deleting code. The bespoke verifier is replaced by 109
 machine-checkable spec rules. And ADR 0022's unfinished half comes within reach:
-`source_lowering.rs` currently matches `"plasmid"` and `"strain"` by name and
+`program/lowering.rs` currently matches `"plasmid"` and `"strain"` by name and
 reads fields by name, but a Component carrying type and role terms is generic,
 so the special-casing has somewhere to go.
 
@@ -898,7 +898,7 @@ things, and guessing wrong produces a parse error that blames the document
 rather than the guess. An SBOL document names its serialization in its
 extension or it is not discovered.
 
-**Moving designs into SBOL does not change what an order names.** An imported Component carries its registry IRI as `sbol_identity`; a bought declaration separately carries `supplier_identity`, defaulting to its Lab symbol when no order identifier is stated. Inventory-backed planning follows only `sbol_identity -> sbol:built -> MaterialLot`, while device manifests may still use the supplier identifier. The symbolic `[inventory] materials` array remains a legacy migration form and no longer defines the semantic model.
+**Moving designs into SBOL does not change what an order names.** An imported Component carries its registry IRI as `sbol_identity`; a bought declaration separately carries `supplier_identity`, defaulting to its Lab symbol when no order identifier is stated. Inventory-backed planning follows only `sbol_identity -> sbol:built -> MaterialLot`, while device manifests may still use the supplier identifier.
 
 ### Widening the mapping found three real modelling gaps
 
@@ -930,7 +930,7 @@ real part. Each of those kinds now declares `sequence?: DNA`; none of them
 carried prelude fields before, so nothing was displaced.
 
 The third was a desync the widening caused rather than revealed.
-`source_lowering.rs` reads components with a hardcoded
+`program/lowering.rs` reads components with a hardcoded
 `&["Part", "Plasmid"]`, so a design with a promoter component would have checked
 and then failed to lower with a generic invalid-field error. The golden-gate
 examples use only bare parts, so no test would have caught it. The list is
@@ -951,29 +951,26 @@ Attempting more is what produced `marpaia/labop`'s omissions report.
 
 ## Where it lands in the compiler
 
-The workspace gains one crate. `lab-compiler/README.md` records the invariant
-that no production backend imports `lab-language`, and this respects it.
+The workspace keeps RDF and SBOL objects outside both `lab-language` and
+`lab-compiler`. The current ownership split is:
 
-**`lab-language`** gains only Layer 0: the identity tail on `role`, a resolver
-from `Ty` to a set of term IRIs, and ontology-validity diagnostics. Its only new
-dependency is `sbol-ontology`, which is an embedded TSV with no RDF and no
-network. The crate stays I/O-free and stays light enough for `lab-ide-wasm`.
+**`lab-language`** owns the RDF-free identity, type, role-grounding, and
+ontology-validity semantics used by both native and embedded frontends. It has
+no RDF or network dependency and stays light enough for `lab-ide-wasm`.
 
-**`lab-sbol`** is new, sits beside `lab-language`, and owns the correspondence:
-identity minting, `CheckedModule` to `sbol3::Document`, `sbol3::Document` to Lab
-declarations for import, and `ValidationReport` to Lab diagnostics. Depends on
-`sbol = "1"`.
+**`lab-sbol`** sits beside `lab-language` and owns the SBOL correspondence. Its
+implemented direction resolves grounded kinds and imports SBOL designs or a
+checked module from an `sbol3::Document`. The inverse checked-module-to-SBOL
+emitter remains work for this crate rather than for LAIR or a device adapter.
 
-**`lab-compiler`** gains an SBOL emitter producing an `ArtifactBundle`, and the
-design stage gains an SBOL representation.
+**`lab-project`** owns filesystem and package orchestration. It parses and
+validates selected SBOL documents, calls `lab-sbol`, and passes the resulting
+checked modules into `lab-compiler`. A bare `lab-language::compile_module` call and
+the textual `labc` inspection tool remain independent of the RDF stack.
 
-Placement note for the validation pass. It is a peer of
-`material_flow::verify_module` in kind, but putting it inside
-`compile_parsed_module` would pull `oxrdf` and its dependencies into the crate
-the wasm editor builds on. Running it from `lab-project::compile` and from
-`labc` instead keeps the frontend light, at the cost that a bare
-`compile_module` call does not run it. That is the right trade while the editor
-target exists.
+**`lab-adapters`** owns `ArtifactBundle` only for generated device and operator
+artifacts. That type is not the representation of an SBOL design document and
+does not move SBOL emission into the adapter layer.
 
 ### The IR change, shallow and deep
 
@@ -989,7 +986,7 @@ gains its encoding term. That is what lets a backend stop guessing
 
 **Deep.** Once terms are attributes rather than op identity, `design.plasmid` and `design.strain` stop being distinct ops, and the stage's representation is what should change rather than its attribute list. `IrStage::Design` becomes an `sbol3::Document` and the pliron design op degenerates to a reference carrying an IRI, as argued above. Workflow, Method, Procedure, Capability, and Allocation LAIR are untouched, because that is where pliron's SSA and linearity analysis earn their place.
 
-Both versions push on the same wall: `source_lowering.rs` matching `"plasmid"`
+Both versions push on the same wall: `program/lowering.rs` matching `"plasmid"`
 and `"strain"` by name and reading fields by name. That is the unfinished half
 of [0022](decisions/0022-fixed-grammar-open-vocabulary.md), "this removes
 biology from the frontend only", and a Component carrying roles is what it needs
@@ -1030,9 +1027,9 @@ with the realizing workflow's action site, and `Fused` expresses exactly that
 rather than forcing a choice between them.
 
 So the shape is: a `BTreeMap<DefinitionId, Span>` side-table on `CheckedModule`,
-threaded through `BuildArtifactIntent` in `source_lowering.rs`, which currently
+threaded through `BuildArtifactIntent` in `program/lowering.rs`, which currently
 carries only a name, and `set_loc` called at roughly fifteen construction sites
-in `lair/program.rs`. No new location machinery.
+in `program/mod.rs`. No new location machinery.
 
 That is worth doing for its own sake, and SBOL validation is what makes it pay
 for itself: it is the first pass that produces many precise, structured findings
@@ -1217,7 +1214,7 @@ and the RDF I/O stack are not obviously fine. This is why the validation pass
 runs from `lab-project` rather than from `compile_parsed_module`, and it needs
 measuring rather than assuming.
 
-**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. The dependency manifest independently moved to `lab.dependency-build.v1` when it began recording inventory source provenance and exact Component-to-MaterialLot bindings.
+**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. Facility planning now retains exact Component-to-MaterialLot candidates alongside the inventory digest and freezes the selected binding in allocated LAIR.
 
 The checker's tables are the bulk of the mechanical work: fifteen
 `HashMap<String, _>` and `BTreeSet<String>` fields on `SemanticContext`, plus

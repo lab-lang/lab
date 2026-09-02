@@ -37,15 +37,15 @@ Lab treats laboratory automation as a compilation and control problem:
 - two frontends, Python and Lab, lower to one checked module, which is the portable boundary nothing downstream reaches behind;
 - **LAIR**, the Lab Automation Intermediate Representation, preserves meaning as programs are progressively lowered from portable intent to method-selected procedures and facility-bound device operations;
 - the compiler checks types, action contracts, and material ownership while keeping specialization decisions inspectable;
-- a durable runtime will execute idempotent actions, recover around failures, react to observations, and preserve lineage from intent to outcome.
+- a reviewed runtime validates frozen facility plans, narrates them in dry-run, executes them in simulation or supported live modes, resumes from a plan-bound ledger, and writes resulting inventory provenance.
 
 Modeling these ideas in a type system, rather than in a library's conventions, lets the toolchain reason about concerns that ordinary APIs tend to hide: sample identity and custody, consumable materials, non-repeatable actions, probabilistic results, and evidence-backed acceptance. Writing in Python does not give any of that up, because the Python frontend is checked by the same compiler rather than layered over it.
 
 ## Status
 
-Lab is an early prototype. The current toolchain accepts both frontends, parses and checks representative biological designs and workflows, emits typed portable module IR, verifies action contracts and affine material flow, provides editor support, and includes experimental Opentrons OT-2 and Flex backends.
+Lab is an early prototype. The current toolchain accepts both frontends, parses and checks representative biological designs and workflows, emits typed portable module IR, verifies action contracts and affine material flow, refines scientific intent into canonical Procedures, selects Methods and exact facility resources together, and applies the result to verifier-valid Allocated LAIR. Concrete adapters project immutable invocations and schedules into reviewed device and operator documents, while the runtime validates and replays the frozen facility plan.
 
-The language and its intermediate representations are evolving, and the durable workflow runtime has not yet been built, so nothing replays today. Generated protocols are a compiler concept spike: a laboratory must verify and qualify them before anything is executed. The next major layers are resource-aware workflow lowering, scheduling and hardware specialization, and durable execution.
+The language, LAIR, facility model, adapters, and runtime are still evolving. Dry-run and simulation exercise reviewed plans without hardware, and live executors exist only for explicitly supported run formats. Generated instructions and live execution paths require facility-specific review, calibration, and qualification before physical or biological work; software equivalence is not hardware qualification. General reactive workflow execution and broader device coverage remain unfinished.
 
 ## Explore
 
@@ -55,4 +55,6 @@ The language and its intermediate representations are evolving, and the durable 
 - [Golden Gate example](examples/golden-gate/README.md)
 - [Golden Gate in Python](examples/golden-gate-python/README.md) — the same checked program through the typed Python frontend
 - [Golden Gate, extended](examples/golden-gate-extended/README.md) — the same laboratory with most of the language in it
-- [Compiler internals](crates/lab-compiler/README.md)
+- [LAIR internals](crates/lab-compiler/README.md)
+- [Facility planning internals](crates/lab-facility/README.md)
+- [Adapter implementation internals](crates/lab-adapters/README.md)

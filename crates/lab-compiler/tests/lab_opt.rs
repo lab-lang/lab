@@ -59,9 +59,9 @@ fn optimizer_reports_non_local_material_linearity_failures() {
     let ir = compiled_ir();
     let measure = ir
         .lines()
-        .find(|line| line.contains("node_id: builtin.string \"measure\""))
+        .find(|line| line.contains("selected_choice: builtin.string \"measure-choice\""))
         .unwrap();
-    let nonlinear = ir.replacen(measure, &measure.replace("(v3)", "(v2)"), 1);
+    let nonlinear = ir.replacen(measure, &measure.replace("(v5)", "(v2)"), 1);
 
     let output = run_with_stdin(
         &[

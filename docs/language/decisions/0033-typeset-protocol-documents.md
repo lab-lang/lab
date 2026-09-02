@@ -27,13 +27,12 @@ by textually demoting heading lines.
 
 ## Decision
 
-Backends describe documents in a small format-neutral model,
-`backend::document::Doc`, holding headings, paragraphs, notices, lists, and
-tables. Renderers own the syntax. A heading may carry a short label such as
-`Stage 1` or `Run 003`, which typography sets apart rather than punctuation,
-so emitters never invent a separator. Two renderers exist: `backend::typst`
-produces the `.typ` sources bundled with every build, and `backend::markdown`
-serves terminals (`labc --emit manual-protocol`) and readable test assertions.
+Adapters describe documents in a small format-neutral model,
+`lab-adapters`' internal `backend::document::Doc`, holding headings, paragraphs,
+notices, lists, and tables. Renderers own the syntax. A heading may carry a
+short label such as `Stage 1` or `Run 003`, which typography sets apart rather
+than punctuation, so emitters never invent a separator. The `backend::typst`
+renderer produces the `.typ` sources bundled with every build.
 
 Splicing a wave manual into the consolidated instructions is structural: the
 fragment's blocks are appended one heading level down. Each backend's manual
@@ -57,7 +56,7 @@ while a table of six or more columns shares the width equally so cells wrap
 instead of colliding.
 
 The look of every document lives in one style sheet,
-`crates/lab-compiler/src/backend/typst/templates/lab-style.typ`, maintained as
+`crates/lab-adapters/src/backend/typst/templates/lab-style.typ`, maintained as
 real Typst the way the OT-2 protocol modules are maintained as real Python.
 The style sheet is emitted into every output directory that holds a document,
 and generated documents import it by relative path, so each directory is a
@@ -66,9 +65,9 @@ without the Lab toolchain.
 
 ## Consequences
 
-- The typst crates are a dependency of `lab-cli` only. `lab-compiler` emits
-  `.typ` sources and stays lean for `lab-python`. `labc` writes bundles
-  without PDFs and prints markdown on stdout, where a terminal is the display.
+- The Typst compiler crates are a dependency of `lab-cli` only.
+  `lab-adapters` emits `.typ` sources without depending on the typesetting
+  engine, and `lab-compiler` remains independent of generated documents.
 - A typesetting failure fails the build. The sources are generated, so an
   engine error is an emitter bug, reported with file-and-line diagnostics into
   the `.typ` on disk.

@@ -1,0 +1,27 @@
+[package]
+name = "lab-facility"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Facility evidence, constraint solving, and reviewed execution planning for Lab."
+
+[dependencies]
+lab-adapters.workspace = true
+lab-capability.workspace = true
+lab-inventory.workspace = true
+lab-compiler.workspace = true
+lab-language.workspace = true
+lab-runfmt.workspace = true
+sbol-inventory.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

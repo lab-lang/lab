@@ -39,7 +39,7 @@ The rest of this file is the package's own documentation.
 
 ## How it works
 
-The Python package is a PyO3 binding over the `lab-compiler` crate and an object model for writing Lab programs in Python. It does not reimplement parsing or semantic checking: the object model emits Lab source and the language's own frontend decides whether it is well formed.
+The Python package binds the `lab-compiler`, `lab-facility`, and `lab-adapters` domain crates and provides an object model for writing Lab programs in Python. It does not reimplement parsing or semantic checking: the object model emits Lab source and the language's own frontend decides whether it is well formed.
 
 Checking source text directly returns the backend-neutral checked module as Python-native data:
 
@@ -108,7 +108,7 @@ refined = lab.refine(program, methods=(sequence_synthesis,), include_standard=Fa
 print(refined.planning_problem)
 ```
 
-The Python classes serialize the shared `lab-method` contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v1` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+The Python classes serialize the LAIR-owned Method contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v1` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
 
 The same typed authoring surface writes a persistent package catalog:
 
@@ -154,7 +154,7 @@ program = lab.check(designs.module, workflows.module)
 planned = lab.plan(program, project="path/to/facility-package")
 ```
 
-The returned `FacilityPlan` provides typed Method, Procedure task, canonical program, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. `lab.procedures` exposes immutable `PipettingProgramV1` and `ThermalProgramV1` bodies with exact `Decimal` quantities, typed vessel roles and liquid operations, portable aspiration and dispense strategies, air gaps, blowout and touch-tip requirements, and typed thermal stages and steps. Rust remains the authority that normalizes and validates these programs, constructs the exact liquid ledger, and derives their capability formulas; Python reads the frozen result. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
+The returned `FacilityPlan` provides typed Method, Procedure task, canonical program, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. Its top-level `material_inventory` retains the complete candidate MaterialLot evidence used for planning; `adapter_invocations` contains only selected material bindings and the source inventory digest. `lab.procedures` exposes immutable `PipettingProgramV1` and `ThermalProgramV1` bodies with exact `Decimal` quantities, typed vessel roles and liquid operations, portable aspiration and dispense strategies, air gaps, blowout and touch-tip requirements, and typed thermal stages and steps. Rust remains the authority that normalizes and validates these programs, constructs the exact liquid ledger, and derives their capability formulas; Python reads the frozen result. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
 
 ## Adapter discovery and profile validation
 

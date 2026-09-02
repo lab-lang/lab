@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn the_style_sheet_sample_compiles() {
         let templates = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../lab-compiler/src/backend/typst/templates");
+            .join("../lab-adapters/src/backend/typst/templates");
         let directory = tempfile::tempdir().unwrap();
         for name in ["lab-style.typ", "sample.typ"] {
             std::fs::copy(templates.join(name), directory.path().join(name)).unwrap();

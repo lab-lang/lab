@@ -9,21 +9,28 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use lab_adapters::{
+    AdapterInvocationError, AdapterInvocationPlan, AdapterProfileContractError,
+    validate_adapter_profile,
+};
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
-use lab_compiler::backend::{AdapterProfileContractError, validate_adapter_profile};
+use lab_compiler::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_compiler::planning::{
-    AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, BuildInventory,
-    BuildInventoryError, FacilityPlanningError, FacilityPlanningPolicy, FacilityPlanningSolution,
-    MaterialLotBuildInventory, MethodPin, MethodPinSelector, explain_facility_planning_error,
+    AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
+    FacilityPlanningSolution, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
 };
-use lab_compiler::{
-    AllocatedLairError, AllocatedLairProgram, PlanningProblemExtractionError, PortableLairError,
-    PortableLairProgram, RefinedLairError,
+use lab_compiler::program::{
+    AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
+    RefinedLairError,
+};
+use lab_facility::{
+    AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot,
+    AllocatedMaterialInventoryValidationError, FacilityPlanningError, MaterialLotInventory,
+    MaterialLotInventoryError, build_material_lot_inventory, explain_facility_planning_error,
+    solve_facility_planning, validate_allocated_material_inventory,
 };
 use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
-use lab_method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_package::{LabPackage, PlanningAdapterRequirement};
 use thiserror::Error;
 
@@ -38,19 +45,22 @@ pub struct FacilityPlanningResult {
     pub package: String,
     pub version: String,
     pub inventory: InventorySnapshot,
+    pub material_inventory: MaterialLotInventory,
     pub adapter_bindings: Option<AdapterBindingSnapshot>,
     pub refined_lair: String,
+    pub problem: lab_compiler::planning::PlanningProblem,
+    pub solution: FacilityPlanningSolution,
     pub allocated: AllocatedLairProgram,
     pub adapter_invocations: AdapterInvocationPlan,
 }
 
 impl FacilityPlanningResult {
     pub fn problem(&self) -> &lab_compiler::planning::PlanningProblem {
-        self.allocated.planning_problem()
+        &self.problem
     }
 
     pub fn solution(&self) -> &FacilityPlanningSolution {
-        self.allocated.solution()
+        &self.solution
     }
 }
 
@@ -109,7 +119,7 @@ pub enum FacilityProjectError {
     #[error("failed to index active SBOLInventory MaterialLots")]
     MaterialLots(#[source] MaterialLotCatalogError),
     #[error("failed to bind checked designs to SBOLInventory MaterialLots")]
-    MaterialInventory(#[source] BuildInventoryError),
+    MaterialInventory(#[source] MaterialLotInventoryError),
     #[error("failed to lower the checked program into Design and Intent LAIR")]
     PortableLair(#[source] PortableLairError),
     #[error("failed to refine workflow intent into Method alternatives")]
@@ -124,6 +134,8 @@ pub enum FacilityProjectError {
     Allocation(#[source] AllocatedLairError),
     #[error("failed to project allocated LAIR into adapter invocations")]
     AdapterInvocations(#[source] AdapterInvocationError),
+    #[error("allocated LAIR does not match the retained material inventory")]
+    AllocatedMaterialInventory(#[source] AllocatedMaterialInventoryValidationError),
 }
 
 impl LabProject {
@@ -197,7 +209,7 @@ fn plan_modules_with_inventory(
         .map_err(FacilityProjectError::PlanningProblem)?;
     let adapter_bindings = resolve_package_adapter_bindings(package, &inventory)?;
     let material_inventory = semantic_material_inventory(modules, &inventory)?;
-    let solution = FacilityPlanningSolution::solve(
+    let solution = solve_facility_planning(
         &problem,
         &inventory,
         &material_inventory,
@@ -206,18 +218,22 @@ fn plan_modules_with_inventory(
     )
     .map_err(FacilityProjectError::FacilityPlanning)?;
     let allocated = refined
-        .allocate(solution)
+        .allocate(&solution)
         .map_err(FacilityProjectError::Allocation)?;
-    let adapter_invocations = allocated
-        .adapter_invocations(material_inventory)
+    let adapter_invocations = AdapterInvocationPlan::from_allocated_lair(&allocated)
         .map_err(FacilityProjectError::AdapterInvocations)?;
+    validate_allocated_material_inventory(&adapter_invocations.allocated, &material_inventory)
+        .map_err(FacilityProjectError::AllocatedMaterialInventory)?;
 
     Ok(FacilityPlanningResult {
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         inventory,
+        material_inventory,
         adapter_bindings,
         refined_lair,
+        problem,
+        solution,
         allocated,
         adapter_invocations,
     })
@@ -307,7 +323,7 @@ pub fn resolve_package_adapter_bindings(
 fn semantic_material_inventory(
     modules: &[&lab_language::CheckedModule],
     snapshot: &InventorySnapshot,
-) -> Result<MaterialLotBuildInventory, FacilityProjectError> {
+) -> Result<MaterialLotInventory, FacilityProjectError> {
     let material_lots = snapshot
         .active_material_lots()
         .map_err(FacilityProjectError::MaterialLots)?;
@@ -320,17 +336,13 @@ fn semantic_material_inventory(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let inventory = BuildInventory::from_material_lots(
+    build_material_lot_inventory(
         modules,
         snapshot.source_sha256(),
         snapshot.facility().as_str(),
         &lots_by_component,
     )
-    .map_err(FacilityProjectError::MaterialInventory)?;
-    let BuildInventory::MaterialLots(inventory) = inventory else {
-        unreachable!("SBOLInventory material binding always creates semantic inventory")
-    };
-    Ok(inventory)
+    .map_err(FacilityProjectError::MaterialInventory)
 }
 
 fn facility_planning_policy(

@@ -2,12 +2,12 @@
 
 use std::path::Path;
 
-use lab_compiler::{
-    CheckedModule, Diagnostic, ModuleId, PortableLairProgram, SemanticEnvironment, SourceId,
+use lab_compiler::method::{MethodDefinition, MethodRegistry, standard_method_definitions};
+use lab_compiler::program::PortableLairProgram;
+use lab_language::{
+    CheckedModule, Diagnostic, ModuleId, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
-    standard_method_definitions,
 };
-use lab_method::{MethodDefinition, MethodRegistry};
 use lab_project::{FacilityPlanningResult, LabProject, plan_modules_for_package};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -108,7 +108,7 @@ fn lab_standard_library() -> PyResult<String> {
 /// Describe every adapter implementation and profile schema in this compiler build.
 #[pyfunction]
 fn lab_adapter_catalog() -> PyResult<String> {
-    let catalog = lab_compiler::backend::adapter_catalog()
+    let catalog = lab_adapters::adapter_catalog()
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&catalog).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -116,7 +116,7 @@ fn lab_adapter_catalog() -> PyResult<String> {
 /// Validate and canonicalize one operational adapter profile through its explicit driver.
 #[pyfunction]
 fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyResult<String> {
-    let profile = lab_compiler::backend::validate_adapter_profile(driver, name, contents)
+    let profile = lab_adapters::validate_adapter_profile(driver, name, contents)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -252,17 +252,18 @@ struct PythonFacilityPlan<'a> {
     package: &'a str,
     version: &'a str,
     inventory: PythonInventorySelection<'a>,
-    adapter_bindings: Option<&'a lab_compiler::planning::AdapterBindingSnapshot>,
+    adapter_bindings: Option<&'a lab_facility::AdapterBindingSnapshot>,
     refined_lair: &'a str,
     planning_problem: &'a lab_compiler::planning::PlanningProblem,
     facility_solution: &'a lab_compiler::planning::FacilityPlanningSolution,
     allocated_lair: String,
-    adapter_invocations: &'a lab_compiler::planning::AdapterInvocationPlan,
+    material_inventory: &'a lab_facility::MaterialLotInventory,
+    adapter_invocations: &'a lab_adapters::AdapterInvocationPlan,
 }
 
 fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String> {
     serde_json::to_string(&PythonFacilityPlan {
-        schema_version: "lab.python-facility-plan.v1",
+        schema_version: "lab.python-facility-plan.v2",
         package: &planned.package,
         version: &planned.version,
         inventory: PythonInventorySelection {
@@ -275,6 +276,7 @@ fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String>
         planning_problem: planned.problem(),
         facility_solution: planned.solution(),
         allocated_lair: planned.allocated.ir(),
+        material_inventory: &planned.material_inventory,
         adapter_invocations: &planned.adapter_invocations,
     })
     .map_err(|error| PyValueError::new_err(error.to_string()))

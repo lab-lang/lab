@@ -6,7 +6,7 @@ a Facility, Asset, CapabilityOffering, MaterialLot, adapter, or schedule. Those 
 belong to planning.
 
 The classes in this module only provide a typed Python authoring surface and exact JSON
-serialization. The Rust ``lab-method`` contract validates every catalog, and the Rust
+serialization. The Rust LAIR Method contract validates every catalog, and the Rust
 compiler performs refinement and planning-problem projection for both Lab source and
 Python-emitted programs.
 """

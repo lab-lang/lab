@@ -60,7 +60,7 @@ The facility phase selects 22 Method instances and binds 88 atomic requirements 
 | `.lab/build/compiler/planning-problem.json` | graph-wide Method and facility constraint problem |
 | `.lab/build/compiler/facility-solution.json` | exact selected Methods, MaterialLots, offerings, Assets, and adapters |
 | `.lab/build/compiler/allocated.lair` | verifier-valid selected Procedure graph with exact allocation bindings |
-| `.lab/build/compiler/adapter-invocations.json` | immutable exact tasks grouped by selected Asset and adapter |
+| `.lab/build/compiler/adapter-invocations.json` | immutable exact tasks and selected material bindings grouped by Asset and adapter |
 | `.lab/build/facility_lowering.json` | emitted artifacts, formats, Requirements, profiles, and digests by Asset route |
 | `.lab/build/plan.execution.json` | reviewed facility-wide dependency DAG and child documents |
 | `.lab/build/assets/opentrons_ot2/execution_schedule.json` | versioned execution groups, dependencies, and persistent physical locations |

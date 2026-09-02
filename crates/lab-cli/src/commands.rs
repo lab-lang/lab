@@ -2,12 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::planning::{ExecutionPlanOptions, build_execution_plan_from_invocations};
-use lab_compiler::{
-    CheckedDeclaration, DiagnosticSeverity, PortableLairProgram, SourceId, analyze_module,
+use lab_compiler::program::PortableLairProgram;
+use lab_facility::{ExecutionPlanOptions, build_execution_plan_from_invocations};
+use lab_inventory::InventorySnapshot;
+use lab_language::{
+    CheckedDeclaration, CheckedModule, DiagnosticSeverity, SourceId, analyze_module,
     render_diagnostic,
 };
-use lab_inventory::InventorySnapshot;
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{
     CompiledModule, CompiledProject, LOCK_FILE, LabProject, load_package_inventory,
@@ -418,6 +419,7 @@ fn write_facility_plan(
         allocated_lair: allocated_lair_reference,
         adapter_invocations: adapter_invocations_reference,
         methods: invocations
+            .allocated
             .methods
             .iter()
             .map(|method| ExecutionMethodSelection {
@@ -434,7 +436,6 @@ fn write_facility_plan(
     };
     let mut execution_plan = build_execution_plan_from_invocations(
         invocations,
-        problem,
         ExecutionPlanOptions {
             inventory_document: inventory_document.clone(),
             planning: Some(planning_reference),
@@ -469,9 +470,10 @@ fn write_facility_plan(
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         output: output_root.to_path_buf(),
-        facility: invocations.facility.clone(),
-        selected_methods: invocations.methods.len(),
+        facility: invocations.allocated.facility.clone(),
+        selected_methods: invocations.allocated.methods.len(),
         allocated_requirements: invocations
+            .allocated
             .methods
             .iter()
             .flat_map(|method| &method.tasks)
@@ -551,8 +553,8 @@ fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
 }
 
 fn write_unallocated_compiler_frontier(
-    modules: &[&lab_compiler::CheckedModule],
-    methods: &lab_method::MethodRegistry,
+    modules: &[&CheckedModule],
+    methods: &lab_compiler::method::MethodRegistry,
     output_root: &Path,
 ) -> Result<BuildCompilerIndex> {
     let compiler = output_root.join("compiler");

@@ -12,7 +12,7 @@ One high-level Procedure task may also require several capabilities that must be
 
 ## Decision
 
-Lab defines versioned, device-neutral operational contracts in the `lab-procedure` crate. Method refinement recognizes supported open Procedure operation IRIs and normalizes their exact parameters, material inputs, value inputs, and outputs into one canonical `ProcedureProgram` before facility planning. The program contains observable operations and scientific constraints, but no facility identity, deck coordinate, labware model, pipette model, firmware instruction, endpoint, or credential.
+Lab defines versioned, device-neutral operational contracts in `lab_compiler::procedure`. Method refinement recognizes supported open Procedure operation IRIs and normalizes their exact parameters, material inputs, value inputs, and outputs into one canonical `ProcedureProgram` before facility planning. The program contains observable operations and scientific constraints, but no facility identity, deck coordinate, labware model, pipette model, firmware instruction, endpoint, or credential.
 
 Each validated canonical program deterministically derives a `CapabilityFormula`. A formula contains stable clauses with exact capability-kind IRIs and typed property constraints plus an explicit binding scope. `AtomicAssetAssembly` requires every clause to bind to offerings on one Asset through one adapter and one exact Procedure implementation. Clause ordering is stable for evidence generation and never acts as allocation policy.
 

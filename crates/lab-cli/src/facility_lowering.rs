@@ -5,17 +5,69 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::ArtifactBundle;
-use lab_compiler::backend::{adapter_catalog, lower_adapter_invocation_with_adapter};
-use lab_compiler::planning::{
-    AdapterInvocation, AdapterInvocationPlan, FACILITY_LOWERING_SCHEMA_VERSION,
-    FacilityLoweredArtifact, FacilityLoweredArtifactRole, FacilityLoweredRequirement,
-    FacilityLoweringManifest, FacilityLoweringRoute,
+use lab_adapters::{
+    AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, adapter_catalog,
+    lower_adapter_invocation_with_adapter,
 };
+use lab_capability::ProcedureImplementationId;
 use lab_inventory::InventorySnapshot;
 use lab_package::LabPackage;
 use lab_runfmt::ReviewedRunDocument;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+const FACILITY_LOWERING_SCHEMA_VERSION: &str = "lab.facility-lowering.v2";
+
+/// Device artifacts emitted only after capability requirements have been allocated to a facility.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct FacilityLoweringManifest {
+    schema_version: String,
+    inventory_sha256: String,
+    facility: String,
+    pub(crate) routes: Vec<FacilityLoweringRoute>,
+}
+
+/// One exact Asset and adapter implementation selected by allocation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct FacilityLoweringRoute {
+    id: String,
+    asset: String,
+    driver: String,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    procedure_implementations: BTreeSet<ProcedureImplementationId>,
+    profile_path: PathBuf,
+    profile_sha256: String,
+    requirements: Vec<FacilityLoweredRequirement>,
+    pub(crate) output: PathBuf,
+    artifacts: Vec<FacilityLoweredArtifact>,
+}
+
+/// A semantic requirement whose allocated route caused this adapter lowering to exist.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct FacilityLoweredRequirement {
+    requirement_instance: String,
+    capability_kind: String,
+    offering: String,
+}
+
+/// One immutable artifact emitted by an allocated adapter.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct FacilityLoweredArtifact {
+    path: PathBuf,
+    media_type: String,
+    sha256: String,
+    role: FacilityLoweredArtifactRole,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    format: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FacilityLoweredArtifactRole {
+    AutomationProtocol,
+    OperatorDocument,
+    Support,
+}
 
 pub(crate) struct FacilityLoweringOutput {
     pub(crate) manifest: FacilityLoweringManifest,
@@ -26,7 +78,7 @@ pub(crate) struct FacilityLoweringOutput {
 
 struct LowerableInvocation {
     invocation: AdapterInvocation,
-    procedure_implementations: BTreeSet<lab_capability::ProcedureImplementationId>,
+    procedure_implementations: BTreeSet<ProcedureImplementationId>,
     requirements: Vec<FacilityLoweredRequirement>,
 }
 
@@ -51,8 +103,8 @@ pub(crate) fn lower_adapter_invocations(
     invocation_plan
         .validate()
         .context("allocated adapter invocations are invalid")?;
-    if invocation_plan.inventory_sha256 != inventory.source_sha256()
-        || invocation_plan.facility != inventory.facility().as_str()
+    if invocation_plan.allocated.inventory_sha256 != inventory.source_sha256()
+        || invocation_plan.allocated.facility != inventory.facility().as_str()
     {
         bail!("adapter invocations and the selected inventory snapshot do not match");
     }
@@ -63,6 +115,7 @@ pub(crate) fn lower_adapter_invocations(
         .map(|descriptor| (descriptor.id.as_str(), descriptor))
         .collect::<BTreeMap<_, _>>();
     let requirements = invocation_plan
+        .allocated
         .methods
         .iter()
         .flat_map(|method| &method.tasks)
@@ -225,8 +278,8 @@ pub(crate) fn lower_adapter_invocations(
     Ok(FacilityLoweringOutput {
         manifest: FacilityLoweringManifest {
             schema_version: FACILITY_LOWERING_SCHEMA_VERSION.to_owned(),
-            inventory_sha256: invocation_plan.inventory_sha256.clone(),
-            facility: invocation_plan.facility.clone(),
+            inventory_sha256: invocation_plan.allocated.inventory_sha256.clone(),
+            facility: invocation_plan.allocated.facility.clone(),
             routes,
         },
         protocols,

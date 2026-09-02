@@ -1,6 +1,6 @@
 //! WebAssembly host API for browser editors and embedded desktop surfaces.
 
-use lab_compiler::backend::{
+use lab_adapters::{
     adapter_catalog as compiler_adapter_catalog,
     default_adapter_profile as compiler_default_adapter_profile,
     validate_adapter_profile as compiler_validate_adapter_profile,

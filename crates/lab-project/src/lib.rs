@@ -9,14 +9,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use lab_compiler::method::{
+    MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
+    MethodRegistryError,
+};
 use lab_language::Grounding;
 use lab_language::{
     CheckedDeclaration, CheckedModule, ModuleId, SemanticEnvironment,
     compile_module_in_environment, parse_module,
-};
-use lab_method::{
-    MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
-    MethodRegistryError,
 };
 use lab_package::{
     DependencySpec, DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource,
@@ -339,7 +339,7 @@ impl LabProject {
 
     fn method_registry_for(&self, root: &PathBuf) -> Result<MethodRegistry, ProjectError> {
         let roots = self.ordered_reachable_roots(root);
-        let mut definitions = lab_compiler::standard_method_definitions();
+        let mut definitions = lab_compiler::method::standard_method_definitions();
         definitions.extend(self.load_method_definitions(&roots)?);
         MethodRegistry::new(definitions).map_err(|source| ProjectError::InvalidMethodRegistry {
             package: self.packages[root].package.manifest.package.name.clone(),
@@ -829,7 +829,7 @@ documents = ["methods/recovery.json"]
 "#,
             &[("values.lab", DONOR)],
         );
-        let mut custom = lab_compiler::standard_method_definitions()
+        let mut custom = lab_compiler::method::standard_method_definitions()
             .into_iter()
             .find(|definition| definition.refines.as_str() == "std.lab.plasmid.recover")
             .unwrap();
@@ -856,9 +856,9 @@ shared = { path = "../shared" }
         let project = LabProject::discover(root).unwrap();
         assert_eq!(project.package_method_definitions().unwrap(), [custom]);
         let compiled = project.compile().unwrap();
-        let recovery = compiled
-            .methods
-            .methods_for(&lab_method::IntentOperationId::new("std.lab.plasmid.recover").unwrap());
+        let recovery = compiled.methods.methods_for(
+            &lab_compiler::method::IntentOperationId::new("std.lab.plasmid.recover").unwrap(),
+        );
 
         assert_eq!(
             recovery
@@ -1069,6 +1069,29 @@ workflow main() -> Material<Plasmid>:
         assert_eq!(
             planned.problem().sha256(),
             planned.solution().problem_sha256
+        );
+        let allocated_ir = planned.allocated.ir();
+        let reparsed =
+            lab_compiler::program::AllocatedLairProgram::parse_ir(&allocated_ir).unwrap();
+        assert_eq!(
+            reparsed.allocated_program().unwrap(),
+            planned.allocated.allocated_program().unwrap()
+        );
+        let reprojected =
+            lab_adapters::AdapterInvocationPlan::from_allocated_lair(&reparsed).unwrap();
+        lab_facility::validate_allocated_material_inventory(
+            &reprojected.allocated,
+            &planned.material_inventory,
+        )
+        .unwrap();
+        assert_eq!(reprojected, planned.adapter_invocations);
+        assert_eq!(
+            planned.material_inventory.source_sha256(),
+            planned.inventory.source_sha256()
+        );
+        assert_eq!(
+            planned.material_inventory.facility(),
+            planned.inventory.facility().as_str()
         );
         assert!(
             planned

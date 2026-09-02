@@ -1,8 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lab-adapters",
     "crates/lab-capability",
     "crates/lab-cli",
+    "crates/lab-facility",
     "crates/lab-compiler",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
@@ -10,9 +12,7 @@ members = [
     "crates/lab-instruments",
     "crates/lab-language",
     "crates/lab-language-server",
-    "crates/lab-method",
     "crates/lab-package",
-    "crates/lab-procedure",
     "crates/lab-project",
     "crates/lab-sbol",
     "crates/lab-python",
@@ -74,6 +74,8 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 # Default features stay off at the workspace level so pure protocol use
 # never links the native HID library; a runner re-enables `hid`.
 byonoy-hid = { version = "0.1.0", default-features = false }
+lab-adapters = { path = "crates/lab-adapters", version = "0.1.2" }
+lab-facility = { path = "crates/lab-facility", version = "0.1.2" }
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.2" }
 lab-capability = { path = "crates/lab-capability", version = "0.1.2" }
 # Default features stay off at the workspace level so the compiler's pure
@@ -86,10 +88,8 @@ lab-inventory = { path = "crates/lab-inventory", version = "0.1.2" }
 lab-instruments = { path = "crates/lab-instruments", version = "0.1.2" }
 lab-language = { path = "crates/lab-language", version = "0.1.2" }
 lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }
-lab-method = { path = "crates/lab-method", version = "0.1.2" }
 opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.2" }
-lab-procedure = { path = "crates/lab-procedure", version = "0.1.2" }
 lab-project = { path = "crates/lab-project", version = "0.1.2" }
 lab-runfmt = { path = "crates/lab-runfmt", version = "0.1.2" }
 lab-sbol = { path = "crates/lab-sbol", version = "0.1.2" }

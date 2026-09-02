@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::backend::{adapter_catalog, hamilton::star::StarAdapterProfile};
+use lab_adapters::{adapter_catalog, hamilton::star::StarAdapterProfile};
 use lab_runfmt::{STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
 use lab_runtime::clock::WallClock;
 use lab_runtime::device_executors::{
