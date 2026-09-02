@@ -5,11 +5,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use lab_adapters::{
+    AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, adapter_catalog,
+    lower_adapter_invocation_with_adapter,
+};
 use lab_capability::ProcedureImplementationId;
 use lab_inventory::InventorySnapshot;
-use lab_lair::ArtifactBundle;
-use lab_lair::backend::{adapter_catalog, lower_adapter_invocation_with_adapter};
-use lab_lair::planning::{AdapterInvocation, AdapterInvocationPlan};
 use lab_package::LabPackage;
 use lab_runfmt::ReviewedRunDocument;
 use serde::{Deserialize, Serialize};

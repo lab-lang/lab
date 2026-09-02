@@ -7,16 +7,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::method::LocalId;
+use lab_lair::allocation::{AllocatedMethod, AllocatedProcedureTask, InvocationAdapter};
+use lab_lair::method::LocalId;
+use lab_lair::planning::PlanningValueSource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask,
-    InvocationAdapter, PlanningValueSource,
-};
-use crate::procedure::vocabulary::PROVISION_MATERIAL;
+use super::{AdapterInvocation, AdapterInvocationPlan};
+use lab_lair::procedure::vocabulary::PROVISION_MATERIAL;
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
 
@@ -68,7 +67,7 @@ impl AllocatedProcedureSchedule {
         let bytes = serde_json::to_vec(self).expect(
             "AllocatedProcedureSchedule contains only infallibly serializable semantic values",
         );
-        super::hex_sha256(&bytes)
+        crate::invocation::hex_sha256(&bytes)
     }
 
     pub fn new(
@@ -545,17 +544,19 @@ pub enum AllocatedProcedureScheduleError {
 mod tests {
     use std::path::PathBuf;
 
-    use crate::method::{IntentOperationId, PortType};
     use lab_capability::{
         AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
     };
+    use lab_lair::method::{IntentOperationId, PortType};
 
     use super::*;
-    use crate::planning::{
-        ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocationPlan, AllocatedMethod,
-        AllocatedProcedureTask, AllocatedRequirementBinding, MaterialLotCandidates,
-        MaterialLotInventory, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
-        PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
+    use crate::{ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocationPlan, adapter_invocation_id};
+    use lab_lair::allocation::{
+        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
+    };
+    use lab_lair::planning::{
+        MaterialLotCandidates, MaterialLotInventory, PlanningPort, PlanningTaskInput,
+        PlanningTaskOutput, PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
     };
 
     fn id(value: &str) -> LocalId {
@@ -627,10 +628,7 @@ mod tests {
             )],
         };
         let invocation = AdapterInvocation {
-            id: crate::planning::adapter_invocation_id(
-                "https://example.org/facility/ot2",
-                &adapter,
-            ),
+            id: adapter_invocation_id("https://example.org/facility/ot2", &adapter),
             asset: "https://example.org/facility/ot2".to_owned(),
             adapter,
             tasks: vec![first_task, second_task],

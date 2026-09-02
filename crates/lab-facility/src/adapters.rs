@@ -11,7 +11,7 @@ use sbol_inventory::vocabulary::Qualification;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use lab_lair::backend::{
+use lab_adapters::{
     AdapterDescriptor, AdapterServices, ProcedureImplementationDescriptor, ValidatedAdapterProfile,
     adapter_catalog,
 };
@@ -366,7 +366,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use lab_lair::backend::validate_adapter_profile;
+    use lab_adapters::validate_adapter_profile;
 
     use super::*;
 

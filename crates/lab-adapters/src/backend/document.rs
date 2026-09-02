@@ -1,7 +1,7 @@
-//! Format-neutral protocol documents. Backends describe what an operator
-//! document *says* — headings, paragraphs, tables, notices — and the
-//! `markdown` and `typst` renderers decide how it is written. Escaping is a
-//! renderer concern; emitters never see format syntax.
+//! Format-neutral protocol documents. Adapters describe what an operator
+//! document *says* — headings, paragraphs, tables, notices — and the Typst
+//! renderer decides how it is written. Escaping is a renderer concern;
+//! emitters never see format syntax.
 
 /// A complete operator document: identity plus content.
 #[derive(Clone, Debug)]

@@ -3,28 +3,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
-use crate::allocation::{
+use lab_capability::{AbsoluteIri, ControlMode, PropertyConstraint, QualificationLevel};
+use lab_lair::allocation::{
     AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedProgramExtractionError,
     InvocationAdapter,
 };
-use crate::method::LocalId;
-use crate::procedure::binding::{
+use lab_lair::method::LocalId;
+use lab_lair::planning::{
+    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
+    PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
+};
+use lab_lair::procedure::binding::{
     ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
 };
-use crate::procedure::{
+use lab_lair::procedure::{
     BindingScope, ProcedureTaskProgramValidationError, ValidatedProcedureProgram,
     validate_task_program,
 };
-use lab_capability::{AbsoluteIri, ControlMode, PropertyConstraint, QualificationLevel};
+use lab_lair::program::AllocatedLairProgram;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-
-use super::{
-    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
-    SelectedMaterialBinding, SelectedMaterialSource,
-};
 
 pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v1";
 
@@ -109,6 +109,17 @@ impl AdapterInvocationPlan {
         };
         plan.validate()?;
         Ok(plan)
+    }
+
+    /// Project adapter invocations from one exact verifier-valid Allocated LAIR artifact.
+    pub fn from_allocated_lair(
+        allocated_lair: &AllocatedLairProgram,
+        material_inventory: MaterialLotInventory,
+    ) -> Result<Self, AdapterInvocationError> {
+        let allocated_lair_sha256 = allocated_lair.sha256();
+        let allocated = allocated_lair.allocated_program()?;
+        Self::from_allocated(allocated, allocated_lair_sha256, material_inventory)
+            .map_err(Into::into)
     }
 
     /// Revalidate a deserialized invocation document before a backend consumes it.
@@ -494,7 +505,7 @@ fn validate_allocated_method_graph(
             return Err(invalid(format!("input '{}' is repeated", input.name)));
         }
         if let Some(source) = &input.source {
-            let super::PlanningValueSource::ChoiceOutput { choice, output } = source else {
+            let PlanningValueSource::ChoiceOutput { choice, output } = source else {
                 return Err(invalid(format!(
                     "input '{}' has a non-choice output source",
                     input.name
@@ -532,7 +543,7 @@ fn validate_allocated_method_graph(
         .values()
         .map(|input| {
             (
-                super::PlanningValueSource::ChoiceInput {
+                PlanningValueSource::ChoiceInput {
                     input: input.name.clone(),
                 },
                 input.port_type.clone(),
@@ -540,16 +551,16 @@ fn validate_allocated_method_graph(
         })
         .collect::<BTreeMap<_, _>>();
     let mut task_ids = BTreeSet::new();
-    let mut material_uses = BTreeMap::<super::PlanningValueSource, usize>::new();
+    let mut material_uses = BTreeMap::<PlanningValueSource, usize>::new();
     for task in &method.tasks {
         if !task_ids.insert(task.id.clone()) {
             return Err(invalid(format!("task '{}' is repeated", task.id)));
         }
         for task_input in &task.inputs {
             match &task_input.source {
-                super::PlanningValueSource::ChoiceInput { .. }
-                | super::PlanningValueSource::TaskOutput { .. } => {}
-                super::PlanningValueSource::ChoiceOutput { choice, output } => {
+                PlanningValueSource::ChoiceInput { .. }
+                | PlanningValueSource::TaskOutput { .. } => {}
+                PlanningValueSource::ChoiceOutput { choice, output } => {
                     return Err(invalid(format!(
                         "task '{}' directly references choice output '{choice}::{output}' instead of a Method input",
                         task.id
@@ -577,7 +588,7 @@ fn validate_allocated_method_graph(
                 )));
             }
             available.insert(
-                super::PlanningValueSource::TaskOutput {
+                PlanningValueSource::TaskOutput {
                     task: task.id.clone(),
                     output: output.name.clone(),
                 },
@@ -597,9 +608,8 @@ fn validate_allocated_method_graph(
             )));
         }
         match &method_yield.source {
-            super::PlanningValueSource::ChoiceInput { .. }
-            | super::PlanningValueSource::TaskOutput { .. } => {}
-            super::PlanningValueSource::ChoiceOutput { choice, output } => {
+            PlanningValueSource::ChoiceInput { .. } | PlanningValueSource::TaskOutput { .. } => {}
+            PlanningValueSource::ChoiceOutput { choice, output } => {
                 return Err(invalid(format!(
                     "yield '{}' directly references choice output '{choice}::{output}' instead of a Method input",
                     method_yield.output
@@ -629,11 +639,11 @@ fn validate_allocated_method_graph(
 }
 
 fn record_material_use(
-    uses: &mut BTreeMap<super::PlanningValueSource, usize>,
-    source: &super::PlanningValueSource,
-    port_type: &crate::method::PortType,
+    uses: &mut BTreeMap<PlanningValueSource, usize>,
+    source: &PlanningValueSource,
+    port_type: &lab_lair::method::PortType,
 ) {
-    if matches!(port_type, crate::method::PortType::Material { .. }) {
+    if matches!(port_type, lab_lair::method::PortType::Material { .. }) {
         *uses.entry(source.clone()).or_default() += 1;
     }
 }
@@ -650,15 +660,13 @@ fn validate_allocated_method_dependencies(
                     .inputs
                     .iter()
                     .filter_map(|input| match &input.source {
-                        Some(super::PlanningValueSource::ChoiceOutput { choice, .. }) => {
-                            Some(choice)
-                        }
+                        Some(PlanningValueSource::ChoiceOutput { choice, .. }) => Some(choice),
                         _ => None,
                     }),
             );
             dependencies.extend(method.yields.iter().filter_map(|method_yield| {
                 match &method_yield.source {
-                    super::PlanningValueSource::ChoiceOutput { choice, .. } => Some(choice),
+                    PlanningValueSource::ChoiceOutput { choice, .. } => Some(choice),
                     _ => None,
                 }
             }));
@@ -714,11 +722,10 @@ fn validate_allocated_material_linearity(
     let mut uses = BTreeMap::<(LocalId, LocalId), usize>::new();
     for method in methods {
         for input in &method.inputs {
-            let Some(super::PlanningValueSource::ChoiceOutput { choice, output }) = &input.source
-            else {
+            let Some(PlanningValueSource::ChoiceOutput { choice, output }) = &input.source else {
                 continue;
             };
-            if matches!(input.port_type, crate::method::PortType::Material { .. }) {
+            if matches!(input.port_type, lab_lair::method::PortType::Material { .. }) {
                 *uses.entry((choice.clone(), output.clone())).or_default() += 1;
             }
         }
@@ -962,9 +969,9 @@ mod tests {
     };
 
     use super::*;
-    use crate::allocation::{AllocatedProgram, AllocatedRequirementBinding, InvocationAdapter};
-    use crate::method::{IntentOperationId, PortType, ProcedureValue};
-    use crate::planning::{
+    use lab_lair::allocation::{AllocatedProgram, AllocatedRequirementBinding, InvocationAdapter};
+    use lab_lair::method::{IntentOperationId, PortType, ProcedureValue};
+    use lab_lair::planning::{
         PlanningMethodYield, PlanningPort, PlanningProcedureParameter, PlanningTaskInput,
         PlanningTaskOutput, PlanningValueSource, SelectedCapabilityParameter,
         SelectedMaterialBinding, SelectedMaterialSource,
@@ -1073,7 +1080,7 @@ mod tests {
         plan.validate().unwrap();
 
         plan.methods[0].tasks[0].operation =
-            OperationId::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
+            OperationId::new(lab_lair::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
         assert!(matches!(
             plan.validate(),
             Err(

@@ -108,7 +108,7 @@ fn lab_standard_library() -> PyResult<String> {
 /// Describe every adapter implementation and profile schema in this compiler build.
 #[pyfunction]
 fn lab_adapter_catalog() -> PyResult<String> {
-    let catalog = lab_lair::backend::adapter_catalog()
+    let catalog = lab_adapters::adapter_catalog()
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&catalog).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -116,7 +116,7 @@ fn lab_adapter_catalog() -> PyResult<String> {
 /// Validate and canonicalize one operational adapter profile through its explicit driver.
 #[pyfunction]
 fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyResult<String> {
-    let profile = lab_lair::backend::validate_adapter_profile(driver, name, contents)
+    let profile = lab_adapters::validate_adapter_profile(driver, name, contents)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -257,7 +257,7 @@ struct PythonFacilityPlan<'a> {
     planning_problem: &'a lab_lair::planning::PlanningProblem,
     facility_solution: &'a lab_lair::planning::FacilityPlanningSolution,
     allocated_lair: String,
-    adapter_invocations: &'a lab_lair::planning::AdapterInvocationPlan,
+    adapter_invocations: &'a lab_adapters::AdapterInvocationPlan,
 }
 
 fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String> {

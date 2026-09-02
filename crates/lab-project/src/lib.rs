@@ -1077,9 +1077,11 @@ workflow main() -> Material<Plasmid>:
             planned.allocated.allocated_program().unwrap()
         );
         assert_eq!(
-            reparsed
-                .adapter_invocations(planned.adapter_invocations.material_inventory.clone())
-                .unwrap(),
+            lab_adapters::AdapterInvocationPlan::from_allocated_lair(
+                &reparsed,
+                planned.adapter_invocations.material_inventory.clone(),
+            )
+            .unwrap(),
             planned.adapter_invocations
         );
         assert!(

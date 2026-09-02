@@ -2,8 +2,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::method::LocalId;
 use lab_instruments::ThermalProfile;
+use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_lair::method::LocalId;
 use lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT;
 use opentrons_protocol::schema::Metadata;
 use opentrons_protocol::v8::schema::{WellLocation, WellOrigin};
@@ -26,12 +27,11 @@ use crate::backend::resources::{
     PlateAllocator, PlateCapacity, Well, assign_source_wells, plate_wells,
 };
 use crate::backend::typst;
-use crate::planning::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,
+use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
+use lab_lair::planning::{
     PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };
-use crate::{ArtifactBundle, GeneratedArtifact};
 
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-flex-task.v1";
 

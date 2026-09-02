@@ -5,8 +5,8 @@ use lab_runfmt::{THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument};
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::invocation::exact_invocation_tasks;
 use crate::backend::procedure::{CYCLE_GOLDEN_GATE, normalized_thermal_program};
-use crate::planning::{AdapterInvocation, AdapterInvocationPlan, PlanningValueSource};
-use crate::{ArtifactBundle, GeneratedArtifact};
+use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
+use lab_lair::planning::PlanningValueSource;
 
 pub(in crate::backend) fn lower_invocation(
     invocation_plan: &AdapterInvocationPlan,

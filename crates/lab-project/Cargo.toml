@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Package-aware project loading and compilation for Lab."
 
 [dependencies]
+lab-adapters.workspace = true
 lab-capability.workspace = true
 lab-facility.workspace = true
 lab-lair.workspace = true

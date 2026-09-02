@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_lair::backend::{
+use lab_adapters::{
     AdapterCatalog, AdapterDescriptor, ValidatedAdapterProfile, adapter_catalog,
     default_adapter_profile, validate_adapter_profile,
 };

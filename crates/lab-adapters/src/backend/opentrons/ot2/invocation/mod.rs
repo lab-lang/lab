@@ -2,9 +2,10 @@
 
 use std::collections::BTreeSet;
 
-use crate::method::LocalId;
-use crate::procedure::{MixTechnique, TransferTechnique};
 use lab_instruments::ThermalProfile;
+use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_lair::method::LocalId;
+use lab_lair::procedure::{MixTechnique, TransferTechnique};
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
 use serde::Serialize;
 
@@ -26,13 +27,14 @@ use crate::backend::procedure::{
 use crate::backend::profile::Plates;
 use crate::backend::resources::{PlateCapacity, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
-use crate::planning::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedExecutionGroup, AllocatedProcedureTask,
-    AllocatedRequirementBinding, PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput,
-    PlanningValueSource, SelectedCapabilityParameter, SelectedMaterialBinding,
-    SelectedMaterialSource,
+use crate::{
+    AdapterInvocation, AdapterInvocationPlan, AllocatedExecutionGroup, ArtifactBundle,
+    GeneratedArtifact,
 };
-use crate::{ArtifactBundle, GeneratedArtifact};
+use lab_lair::planning::{
+    PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+};
 
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-ot2-task.v1";
 const RUN_PLAN_SCHEMA: &str = "lab.opentrons-ot2-run.v1";

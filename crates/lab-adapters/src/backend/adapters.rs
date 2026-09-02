@@ -7,8 +7,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::procedure::ProgramFeature;
-use crate::procedure::vocabulary::{
+use lab_capability::{
+    CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
+};
+use lab_lair::procedure::ProgramFeature;
+use lab_lair::procedure::vocabulary::{
     ADD_RECOVERY_MEDIUM, AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, CYCLE_GOLDEN_GATE,
     HEAT_SHOCK_TRANSFORMATION, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
     INCUBATE_RECOVERY_CULTURE, LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER,
@@ -16,9 +19,6 @@ use crate::procedure::vocabulary::{
     PREPARE_CHEMICAL_TRANSFORMATION, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, SERIAL_DILUTION,
     SETUP_GOLDEN_GATE, TEMPERATURE_CONTROLLED_STAGING, THERMAL_PROGRAM_V1, TOUCH_TIP,
     VESSEL_RELATIVE_LIQUID_ACCESS,
-};
-use lab_capability::{
-    CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
 };
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, INCUBATION, LIQUID_HANDLING, THERMAL_CYCLING,
@@ -32,8 +32,8 @@ use crate::ArtifactBundle;
 use crate::backend::hamilton::star::StarAdapterProfile;
 use crate::backend::opentrons::flex::FlexAdapterProfile;
 use crate::backend::opentrons::ot2::Ot2AdapterProfile;
-use crate::method::LocalId;
-use crate::planning::{AdapterInvocation, AdapterInvocationPlan};
+use crate::{AdapterInvocation, AdapterInvocationPlan};
+use lab_lair::method::LocalId;
 use lab_runfmt::{
     OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
     STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
@@ -1364,12 +1364,12 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::method::IntentOperationId;
-    use crate::planning::{
-        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
-        MaterialLotInventory,
-    };
     use lab_capability::{MethodId, OperationId, QualificationLevel};
+    use lab_lair::allocation::{
+        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+    };
+    use lab_lair::method::IntentOperationId;
+    use lab_lair::planning::MaterialLotInventory;
 
     #[test]
     fn registry_separates_semantic_capabilities_from_features() {
@@ -1592,14 +1592,13 @@ mod tests {
                 tasks: vec![task],
                 requirements: vec![requirement],
             };
-            invocation.id =
-                crate::planning::adapter_invocation_id(&invocation.asset, &invocation.adapter);
+            invocation.id = crate::adapter_invocation_id(&invocation.asset, &invocation.adapter);
             invocation
         };
         let first = make_invocation(first_asset, first_task, first_requirement.clone());
         let second = make_invocation(second_asset, second_task, second_requirement.clone());
         let plan = AdapterInvocationPlan {
-            schema_version: crate::planning::ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
+            schema_version: crate::ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
             problem_sha256: "a".repeat(64),
             allocated_lair_sha256: "c".repeat(64),
             inventory_sha256: "d".repeat(64),

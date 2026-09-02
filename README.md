@@ -57,3 +57,4 @@ The language and its intermediate representations are evolving, and the durable 
 - [Golden Gate, extended](examples/golden-gate-extended/README.md) — the same laboratory with most of the language in it
 - [LAIR internals](crates/lab-lair/README.md)
 - [Facility planning internals](crates/lab-facility/README.md)
+- [Adapter implementation internals](crates/lab-adapters/README.md)

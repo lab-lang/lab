@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use lab_adapters::AdapterInvocationPlan;
 use lab_capability::{ControlMode, ScalarValue};
 use lab_lair::method::ProcedureValue;
 use lab_lair::procedure::BindingScope;
@@ -15,9 +16,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use lab_lair::planning::{
-    AdapterInvocationPlan, AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
-    PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem,
-    PlanningValueSource, SelectedMaterialSource,
+    AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, PlanningMaterialSource,
+    PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningValueSource,
+    SelectedMaterialSource,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

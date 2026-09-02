@@ -1,7 +1,8 @@
 [package]
 # Named for its directory. The wheel this crate is built into is published to
 # PyPI as `lab-compiler`; the crate itself is never published to crates.io.
-# The Rust compiler and IR implementation these bindings wrap is `lab-lair`.
+# The Rust compiler, facility planner, and adapter contracts these bindings wrap
+# are owned by `lab-lair`, `lab-facility`, and `lab-adapters` respectively.
 name = "lab-python"
 version.workspace = true
 edition.workspace = true
@@ -16,6 +17,7 @@ name = "_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+lab-adapters.workspace = true
 lab-facility.workspace = true
 lab-lair.workspace = true
 lab-project.workspace = true

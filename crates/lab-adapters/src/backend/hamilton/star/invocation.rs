@@ -2,7 +2,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::method::LocalId;
+use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_lair::method::LocalId;
 use lab_runfmt::STAR_RUN_FORMAT;
 use serde::Serialize;
 
@@ -21,12 +22,11 @@ use crate::backend::procedure::{
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
 use crate::backend::typst;
-use crate::planning::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,
+use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
+use lab_lair::planning::{
     PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };
-use crate::{ArtifactBundle, GeneratedArtifact};
 
 const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v1";
 

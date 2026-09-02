@@ -17,6 +17,7 @@ use pliron::operation::{Operation, verify_operation};
 use pliron::parsable::parse_from_str;
 use pliron::pass::{Analysis, AnalysisManager};
 use pliron::printable::Printable;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use self::lowering::{BuildArtifactIntent, WorkflowActionIntent, lower_build_intent};
@@ -283,7 +284,7 @@ impl AllocatedLairProgram {
 
     /// Digest the exact verified textual artifact retained by this program.
     pub fn sha256(&self) -> String {
-        crate::planning::hex_sha256(self.source.as_bytes())
+        hex_sha256(self.source.as_bytes())
     }
 
     /// Reconstruct the complete facility-bound semantic aggregate from Allocated LAIR.
@@ -295,22 +296,13 @@ impl AllocatedLairProgram {
     > {
         crate::allocation::extract_allocated_program(&self.context, self.module)
     }
+}
 
-    /// Project the exact backend-facing ABI from this verifier-valid allocated program.
-    pub fn adapter_invocations(
-        &self,
-        material_inventory: crate::planning::MaterialLotInventory,
-    ) -> Result<crate::planning::AdapterInvocationPlan, crate::planning::AdapterInvocationError>
-    {
-        let allocated_lair_sha256 = self.sha256();
-        let allocated = self.allocated_program()?;
-        crate::planning::AdapterInvocationPlan::from_allocated(
-            allocated,
-            allocated_lair_sha256,
-            material_inventory,
-        )
-        .map_err(Into::into)
-    }
+fn hex_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn verify_allocated_program(context: &Context, module: ModuleOp) -> Result<(), AllocatedLairError> {

@@ -9,6 +9,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
+use lab_adapters::{
+    AdapterInvocationError, AdapterInvocationPlan, AdapterProfileContractError,
+    validate_adapter_profile,
+};
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
 use lab_facility::{
@@ -17,12 +21,11 @@ use lab_facility::{
     solve_facility_planning,
 };
 use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
-use lab_lair::backend::{AdapterProfileContractError, validate_adapter_profile};
 use lab_lair::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_lair::planning::{
-    AdapterInvocationError, AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector,
-    FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotInventory, MethodPin,
-    MethodPinSelector, PlanningProblemExtractionError,
+    AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
+    FacilityPlanningSolution, MaterialLotInventory, MethodPin, MethodPinSelector,
+    PlanningProblemExtractionError,
 };
 use lab_lair::program::{
     AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
@@ -214,9 +217,9 @@ fn plan_modules_with_inventory(
     let allocated = refined
         .allocate(&solution)
         .map_err(FacilityProjectError::Allocation)?;
-    let adapter_invocations = allocated
-        .adapter_invocations(material_inventory)
-        .map_err(FacilityProjectError::AdapterInvocations)?;
+    let adapter_invocations =
+        AdapterInvocationPlan::from_allocated_lair(&allocated, material_inventory)
+            .map_err(FacilityProjectError::AdapterInvocations)?;
 
     Ok(FacilityPlanningResult {
         package: package.manifest.package.name.clone(),

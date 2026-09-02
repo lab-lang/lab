@@ -1,11 +1,11 @@
 //! WebAssembly host API for browser editors and embedded desktop surfaces.
 
-use lab_ide::Workspace;
-use lab_lair::backend::{
+use lab_adapters::{
     adapter_catalog as compiler_adapter_catalog,
     default_adapter_profile as compiler_default_adapter_profile,
     validate_adapter_profile as compiler_validate_adapter_profile,
 };
+use lab_ide::Workspace;
 use lab_language::{ModuleId, SourceId};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;

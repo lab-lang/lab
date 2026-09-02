@@ -1125,7 +1125,7 @@ mod tests {
     };
     use tempfile::TempDir;
 
-    use lab_lair::backend::validate_adapter_profile;
+    use lab_adapters::validate_adapter_profile;
     use lab_lair::planning::{
         FacilityPlanningSolutionValidationError, MethodPin, PLANNING_PROBLEM_SCHEMA_VERSION,
         PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProcedureTask,

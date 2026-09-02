@@ -1,10 +1,8 @@
-//! Target-neutral planning shared by compiler backends.
+//! Durable, target-neutral facility-planning contracts projected from LAIR.
 
 mod extraction;
-mod invocation;
 mod material_inventory;
 mod problem;
-mod schedule;
 mod solution;
 
 pub use crate::allocation::{
@@ -12,11 +10,6 @@ pub use crate::allocation::{
 };
 pub use extraction::PlanningProblemExtractionError;
 pub(crate) use extraction::extract_planning_problem;
-pub(crate) use invocation::hex_sha256;
-pub use invocation::{
-    ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterInvocationValidationError, adapter_invocation_id,
-};
 pub use material_inventory::{
     MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
 };
@@ -25,11 +18,6 @@ pub use problem::{
     PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,
     PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
-};
-pub use schedule::{
-    ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION, AllocatedExecutionGroup,
-    AllocatedProcedureSchedule, AllocatedProcedureScheduleError, ScheduledPhysicalLocation,
-    ScheduledValueRef,
 };
 pub use solution::{
     AdapterRequirement, AssetPin, AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,

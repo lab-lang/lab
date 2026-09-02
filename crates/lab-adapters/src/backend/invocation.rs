@@ -8,13 +8,12 @@
 
 use std::collections::BTreeSet;
 
-use crate::method::ProcedureValue;
 use lab_capability::ScalarValue;
+use lab_lair::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
+use lab_lair::method::ProcedureValue;
 
-use crate::planning::{
-    AdapterInvocation, AdapterInvocationPlan, AllocatedProcedureTask, AllocatedRequirementBinding,
-    PlanningProcedureParameter, SelectedMaterialBinding,
-};
+use crate::{AdapterInvocation, AdapterInvocationPlan};
+use lab_lair::planning::{PlanningProcedureParameter, SelectedMaterialBinding};
 
 /// One Procedure task paired with every requirement this invocation implements atomically.
 ///

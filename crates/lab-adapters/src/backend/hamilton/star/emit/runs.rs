@@ -17,7 +17,7 @@ use crate::backend::hamilton::star::plan::{
 };
 use crate::backend::hamilton::star::profile::{LldPolicy, MachineVariant};
 
-pub use crate::runfmt::RunStep;
+pub use lab_runfmt::RunStep;
 
 /// The tip-type indices a run document defines: the small class is index 0
 /// and the large class index 1, re-defined at every run start because the
@@ -44,8 +44,8 @@ pub(in crate::backend::hamilton::star) fn render_run(
     plan: &StarExecutionPlan,
     run: &StarRunPlan,
 ) -> Result<String, StarEmissionError> {
-    let document = crate::runfmt::StarRunDocument {
-        format: crate::runfmt::STAR_RUN_FORMAT.to_string(),
+    let document = lab_runfmt::StarRunDocument {
+        format: lab_runfmt::STAR_RUN_FORMAT.to_string(),
         run: run.id.clone(),
         title: run.title.clone(),
         machine: plan.deck.machine.variant.name().to_string(),

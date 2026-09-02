@@ -184,7 +184,7 @@ pub struct ThermalRequirement {
     pub fallback_index: usize,
 }
 
-pub use crate::runfmt::ManualStep;
+pub use lab_runfmt::ManualStep;
 
 /// The two tip sizes a run draws on, mapped to concrete racks and driver
 /// tip types by the profile.
