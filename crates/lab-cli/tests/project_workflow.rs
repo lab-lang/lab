@@ -1428,25 +1428,28 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v1");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v2");
+    assert!(invocations.get("material_inventory").is_none());
+    let j23101_binding = invocations["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|method| method["tasks"].as_array().unwrap())
+        .flat_map(|task| {
+            task.get("materials")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .find(|binding| binding["symbol"] == "J23101")
+        .expect("the adapter plan retains the exact selected J23101 binding");
     assert_eq!(
-        invocations["material_inventory"]["facility"],
-        "https://example.org/golden-gate/facility"
-    );
-    assert_eq!(
-        invocations["material_inventory"]["source_sha256"],
-        invocations["inventory_sha256"]
-    );
-    assert_eq!(
-        invocations["material_inventory"]["materials"]["J23101"]["component"],
+        j23101_binding["source"]["component"],
         "https://sbolcanvas.org/J23101"
     );
     assert_eq!(
-        invocations["material_inventory"]["materials"]["J23101"]["material_lots"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
+        j23101_binding["source"]["material_lot"],
+        "https://example.org/golden-gate/lots/J23101_lot"
     );
     let normalized_setup = invocations["methods"]
         .as_array()
@@ -2133,14 +2136,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         invocations["facility"],
         "https://example.org/golden-gate/facility"
     );
-    assert_eq!(
-        invocations["material_inventory"]["materials"]["reference_gfp"]["component"],
-        "https://example.org/golden-gate/materials/reference_gfp"
-    );
-    assert_eq!(
-        invocations["material_inventory"]["materials"]["reference_gfp"]["material_lots"],
-        serde_json::json!(["https://example.org/golden-gate/lots/reference_gfp_lot"])
-    );
+    assert!(invocations.get("material_inventory").is_none());
     let reference_binding = invocations["methods"]
         .as_array()
         .unwrap()

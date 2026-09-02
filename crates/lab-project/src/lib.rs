@@ -1077,13 +1077,20 @@ workflow main() -> Material<Plasmid>:
             reparsed.allocated_program().unwrap(),
             planned.allocated.allocated_program().unwrap()
         );
+        let reprojected =
+            lab_adapters::AdapterInvocationPlan::from_allocated_lair(&reparsed).unwrap();
+        reprojected
+            .allocated
+            .validate_against_material_inventory(&planned.material_inventory)
+            .unwrap();
+        assert_eq!(reprojected, planned.adapter_invocations);
         assert_eq!(
-            lab_adapters::AdapterInvocationPlan::from_allocated_lair(
-                &reparsed,
-                planned.adapter_invocations.material_inventory.clone(),
-            )
-            .unwrap(),
-            planned.adapter_invocations
+            planned.material_inventory.source_sha256(),
+            planned.inventory.source_sha256()
+        );
+        assert_eq!(
+            planned.material_inventory.facility(),
+            planned.inventory.facility().as_str()
         );
         assert!(
             planned

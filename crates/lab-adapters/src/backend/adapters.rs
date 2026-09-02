@@ -1363,8 +1363,6 @@ mod feature_scope_tests {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use lab_capability::{MethodId, OperationId, QualificationLevel};
     use lab_compiler::allocation::{
@@ -1372,7 +1370,6 @@ mod tests {
         InvocationAdapter,
     };
     use lab_compiler::method::IntentOperationId;
-    use lab_compiler::planning::MaterialLotInventory;
 
     #[test]
     fn registry_separates_semantic_capabilities_from_features() {
@@ -1609,12 +1606,6 @@ mod tests {
                 methods: vec![first_method, second_method],
             },
             allocated_lair_sha256: "c".repeat(64),
-            material_inventory: MaterialLotInventory::new(
-                "d".repeat(64),
-                "https://example.org/facility",
-                BTreeMap::new(),
-                BTreeMap::new(),
-            ),
             invocations: vec![first.clone(), second.clone()],
         };
         plan.validate().unwrap();

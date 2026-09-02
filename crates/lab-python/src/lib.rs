@@ -257,12 +257,13 @@ struct PythonFacilityPlan<'a> {
     planning_problem: &'a lab_compiler::planning::PlanningProblem,
     facility_solution: &'a lab_compiler::planning::FacilityPlanningSolution,
     allocated_lair: String,
+    material_inventory: &'a lab_compiler::planning::MaterialLotInventory,
     adapter_invocations: &'a lab_adapters::AdapterInvocationPlan,
 }
 
 fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String> {
     serde_json::to_string(&PythonFacilityPlan {
-        schema_version: "lab.python-facility-plan.v1",
+        schema_version: "lab.python-facility-plan.v2",
         package: &planned.package,
         version: &planned.version,
         inventory: PythonInventorySelection {
@@ -275,6 +276,7 @@ fn serialize_facility_plan(planned: &FacilityPlanningResult) -> PyResult<String>
         planning_problem: planned.problem(),
         facility_solution: planned.solution(),
         allocated_lair: planned.allocated.ir(),
+        material_inventory: &planned.material_inventory,
         adapter_invocations: &planned.adapter_invocations,
     })
     .map_err(|error| PyValueError::new_err(error.to_string()))

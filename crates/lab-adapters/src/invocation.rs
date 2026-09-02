@@ -7,23 +7,24 @@ use lab_compiler::allocation::{
     AllocatedProgramValidationError, InvocationAdapter,
 };
 use lab_compiler::method::LocalId;
-use lab_compiler::planning::MaterialLotInventory;
 use lab_compiler::program::AllocatedLairProgram;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v1";
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v2";
 
 /// The complete, immutable backend-facing projection of an allocated Procedure program.
+///
+/// Exact selected material sources and the inventory digest remain in `allocated`; the normalized
+/// candidate inventory is upstream facility-planning evidence and is not copied into this record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AdapterInvocationPlan {
     pub schema_version: String,
     #[serde(flatten)]
     pub allocated: AllocatedProgram,
     pub allocated_lair_sha256: String,
-    pub material_inventory: MaterialLotInventory,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub invocations: Vec<AdapterInvocation>,
 }
@@ -46,7 +47,6 @@ struct CanonicalAdapterInvocationPlan<'a> {
     allocated_lair_sha256: &'a str,
     inventory_sha256: &'a str,
     facility: &'a str,
-    material_inventory: &'a MaterialLotInventory,
     methods: &'a [AllocatedMethod],
     #[serde(skip_serializing_if = "<[AdapterInvocation]>::is_empty")]
     invocations: &'a [AdapterInvocation],
@@ -55,14 +55,13 @@ struct CanonicalAdapterInvocationPlan<'a> {
 impl AdapterInvocationPlan {
     /// Digest the canonical serde representation consumed by execution scheduling and adapters.
     pub fn sha256(&self) -> String {
-        // Preserve the v1 canonical field order even though the owned allocation is serde-flattened.
+        // Preserve the v2 canonical field order even though the owned allocation is serde-flattened.
         let bytes = serde_json::to_vec(&CanonicalAdapterInvocationPlan {
             schema_version: &self.schema_version,
             problem_sha256: &self.allocated.problem_sha256,
             allocated_lair_sha256: &self.allocated_lair_sha256,
             inventory_sha256: &self.allocated.inventory_sha256,
             facility: &self.allocated.facility,
-            material_inventory: &self.material_inventory,
             methods: &self.allocated.methods,
             invocations: &self.invocations,
         })
@@ -74,7 +73,6 @@ impl AdapterInvocationPlan {
     fn from_allocated(
         allocated: AllocatedProgram,
         allocated_lair_sha256: String,
-        material_inventory: MaterialLotInventory,
     ) -> Result<Self, AdapterInvocationValidationError> {
         let mut groups = BTreeMap::<(String, InvocationAdapter), InvocationMembers>::new();
         for method in &allocated.methods {
@@ -104,7 +102,6 @@ impl AdapterInvocationPlan {
             schema_version: ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
             allocated,
             allocated_lair_sha256,
-            material_inventory,
             invocations,
         };
         plan.validate()?;
@@ -114,12 +111,10 @@ impl AdapterInvocationPlan {
     /// Project adapter invocations from one exact verifier-valid Allocated LAIR artifact.
     pub fn from_allocated_lair(
         allocated_lair: &AllocatedLairProgram,
-        material_inventory: MaterialLotInventory,
     ) -> Result<Self, AdapterInvocationError> {
         let allocated_lair_sha256 = allocated_lair.sha256();
         let allocated = allocated_lair.allocated_program()?;
-        Self::from_allocated(allocated, allocated_lair_sha256, material_inventory)
-            .map_err(Into::into)
+        Self::from_allocated(allocated, allocated_lair_sha256).map_err(Into::into)
     }
 
     /// Revalidate a deserialized invocation document before a backend consumes it.
@@ -134,8 +129,7 @@ impl AdapterInvocationPlan {
                 label: "allocated LAIR",
             });
         }
-        self.allocated
-            .validate_against_material_inventory(&self.material_inventory)?;
+        self.allocated.validate()?;
         let tasks = self
             .allocated
             .methods
@@ -316,7 +310,7 @@ pub enum AdapterInvocationValidationError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
 
     use lab_capability::{CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel};
@@ -414,18 +408,33 @@ mod tests {
         }
     }
 
-    fn inventory() -> MaterialLotInventory {
-        MaterialLotInventory::new(
-            "b".repeat(64),
-            "https://example.org/facility",
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
+    fn valid_plan() -> AdapterInvocationPlan {
+        AdapterInvocationPlan::from_allocated(allocated_program(), "c".repeat(64)).unwrap()
     }
 
-    fn valid_plan() -> AdapterInvocationPlan {
-        AdapterInvocationPlan::from_allocated(allocated_program(), "c".repeat(64), inventory())
-            .unwrap()
+    #[test]
+    fn invocation_validation_rechecks_the_allocated_program() {
+        let mut plan = valid_plan();
+        plan.allocated.inventory_sha256 = "not-a-digest".to_owned();
+
+        assert!(matches!(
+            plan.validate(),
+            Err(AdapterInvocationValidationError::InvalidAllocatedProgram(
+                AllocatedProgramValidationError::InvalidDigest { label: "inventory" }
+            ))
+        ));
+    }
+
+    #[test]
+    fn invocation_validation_rejects_v1_documents() {
+        let mut plan = valid_plan();
+        plan.schema_version = "lab.adapter-invocations.v1".to_owned();
+
+        assert!(matches!(
+            plan.validate(),
+            Err(AdapterInvocationValidationError::WrongSchema { found })
+                if found == "lab.adapter-invocations.v1"
+        ));
     }
 
     #[test]
@@ -484,7 +493,7 @@ mod tests {
     }
 
     #[test]
-    fn flattened_allocation_preserves_the_v1_json_shape_and_hash_contract() {
+    fn flattened_allocation_preserves_the_v2_json_shape_and_hash_contract() {
         let plan = valid_plan();
         let encoded = serde_json::to_value(&plan).unwrap();
         let object = encoded.as_object().unwrap();
@@ -496,27 +505,25 @@ mod tests {
                 "facility",
                 "inventory_sha256",
                 "invocations",
-                "material_inventory",
                 "methods",
                 "problem_sha256",
                 "schema_version",
             ])
         );
 
-        let legacy = CanonicalAdapterInvocationPlan {
+        let canonical = CanonicalAdapterInvocationPlan {
             schema_version: &plan.schema_version,
             problem_sha256: &plan.allocated.problem_sha256,
             allocated_lair_sha256: &plan.allocated_lair_sha256,
             inventory_sha256: &plan.allocated.inventory_sha256,
             facility: &plan.allocated.facility,
-            material_inventory: &plan.material_inventory,
             methods: &plan.allocated.methods,
             invocations: &plan.invocations,
         };
-        assert_eq!(encoded, serde_json::to_value(&legacy).unwrap());
+        assert_eq!(encoded, serde_json::to_value(&canonical).unwrap());
         assert_eq!(
             plan.sha256(),
-            hex_sha256(&serde_json::to_vec(&legacy).unwrap())
+            hex_sha256(&serde_json::to_vec(&canonical).unwrap())
         );
         assert_eq!(
             serde_json::from_value::<AdapterInvocationPlan>(encoded).unwrap(),
@@ -526,6 +533,7 @@ mod tests {
         let schema = serde_json::to_value(schemars::schema_for!(AdapterInvocationPlan)).unwrap();
         let properties = schema["properties"].as_object().unwrap();
         assert!(!properties.contains_key("allocated"));
+        assert!(!properties.contains_key("material_inventory"));
         for property in ["problem_sha256", "inventory_sha256", "facility", "methods"] {
             assert!(
                 properties.contains_key(property),
@@ -535,29 +543,27 @@ mod tests {
     }
 
     #[test]
-    fn manual_only_plan_preserves_the_v1_omitted_invocations_hash_contract() {
+    fn manual_only_plan_preserves_the_v2_omitted_invocations_hash_contract() {
         let mut allocated = allocated_program();
         allocated.methods[0].tasks[0].requirements[0].adapter = None;
-        let plan =
-            AdapterInvocationPlan::from_allocated(allocated, "c".repeat(64), inventory()).unwrap();
+        let plan = AdapterInvocationPlan::from_allocated(allocated, "c".repeat(64)).unwrap();
         assert!(plan.invocations.is_empty());
 
-        let legacy = CanonicalAdapterInvocationPlan {
+        let canonical = CanonicalAdapterInvocationPlan {
             schema_version: &plan.schema_version,
             problem_sha256: &plan.allocated.problem_sha256,
             allocated_lair_sha256: &plan.allocated_lair_sha256,
             inventory_sha256: &plan.allocated.inventory_sha256,
             facility: &plan.allocated.facility,
-            material_inventory: &plan.material_inventory,
             methods: &plan.allocated.methods,
             invocations: &plan.invocations,
         };
-        let legacy_bytes = serde_json::to_vec(&legacy).unwrap();
+        let canonical_bytes = serde_json::to_vec(&canonical).unwrap();
         assert!(
-            !String::from_utf8(legacy_bytes.clone())
+            !String::from_utf8(canonical_bytes.clone())
                 .unwrap()
                 .contains("\"invocations\"")
         );
-        assert_eq!(plan.sha256(), hex_sha256(&legacy_bytes));
+        assert_eq!(plan.sha256(), hex_sha256(&canonical_bytes));
     }
 }

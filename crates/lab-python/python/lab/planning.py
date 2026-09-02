@@ -80,7 +80,7 @@ class MaterialCandidates:
 
 @dataclass(frozen=True, slots=True)
 class MaterialInventory:
-    """The immutable inventory projection used by the solver and every adapter invocation."""
+    """The immutable MaterialLot evidence retained with one facility plan."""
 
     source_sha256: str
     facility: str
@@ -263,7 +263,6 @@ class AdapterInvocationPlan:
     allocated_lair_sha256: str
     inventory_sha256: str
     facility: str
-    material_inventory: MaterialInventory
     methods: tuple[AllocatedMethod, ...]
     invocations: tuple[AdapterInvocation, ...]
 
@@ -312,6 +311,7 @@ class FacilityPlan:
     solution: FacilitySolution
     allocated_lair: str
     adapter_bindings: dict[str, Any] | None
+    material_inventory: MaterialInventory
     adapter_invocations: AdapterInvocationPlan
     raw_invocation_plan: dict[str, Any]
 
@@ -328,10 +328,6 @@ class FacilityPlan:
     @property
     def methods(self) -> tuple[AllocatedMethod, ...]:
         return self.adapter_invocations.methods
-
-    @property
-    def material_inventory(self) -> MaterialInventory:
-        return self.adapter_invocations.material_inventory
 
     def task(self, task_id: str) -> AllocatedProcedureTask:
         return self.adapter_invocations.task(task_id)
@@ -606,7 +602,6 @@ def _adapter_invocation_plan(raw: dict[str, Any]) -> AdapterInvocationPlan:
         allocated_lair_sha256=cast(str, raw["allocated_lair_sha256"]),
         inventory_sha256=cast(str, raw["inventory_sha256"]),
         facility=cast(str, raw["facility"]),
-        material_inventory=_material_inventory(cast(dict[str, Any], raw["material_inventory"])),
         methods=tuple(
             AllocatedMethod(
                 choice=cast(str, method["choice"]),
@@ -644,6 +639,7 @@ def _facility_plan(serialized: str) -> FacilityPlan:
         solution=_solution(cast(dict[str, Any], raw["facility_solution"])),
         allocated_lair=cast(str, raw["allocated_lair"]),
         adapter_bindings=cast(dict[str, Any], bindings) if bindings is not None else None,
+        material_inventory=_material_inventory(cast(dict[str, Any], raw["material_inventory"])),
         adapter_invocations=_adapter_invocation_plan(invocation_plan),
         raw_invocation_plan=invocation_plan,
     )

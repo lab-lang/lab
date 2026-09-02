@@ -78,10 +78,11 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     planned = lab.plan_project(GOLDEN_GATE)
 
     assert isinstance(planned, planning.FacilityPlan)
-    assert planned.schema_version == "lab.python-facility-plan.v1"
+    assert planned.schema_version == "lab.python-facility-plan.v2"
     assert planned.inventory.facility == "https://example.org/golden-gate/facility"
     assert planned.solution.problem_sha256 == planned.invocation_plan["problem_sha256"]
-    assert planned.adapter_invocations.schema_version == "lab.adapter-invocations.v1"
+    assert planned.adapter_invocations.schema_version == "lab.adapter-invocations.v2"
+    assert "material_inventory" not in planned.invocation_plan
     assert any(invocation.asset == OT2 for invocation in planned.invocations)
     assert any(
         isinstance(material.source, planning.MaterialLotSource)
@@ -92,6 +93,7 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     )
     assert "allocated-procedure" in planned.allocated_lair
     assert planned.material_inventory.facility == planned.inventory.facility
+    assert planned.material_inventory.source_sha256 == planned.invocation_plan["inventory_sha256"]
     assert planned.material_inventory.materials["BsaI"].identified
     assert planned.material_inventory.materials["BsaI"].material_lots == (
         "https://example.org/golden-gate/lots/BsaI_lot",

@@ -14,7 +14,7 @@ This behavior cannot live only in a Python template. A template-local fusion wou
 
 The compiler defines a versioned `AllocatedProcedureSchedule` between immutable facility allocation and device document emission. A schedule belongs to one exact `AdapterInvocation`, is bound to the SHA-256 of its complete `AdapterInvocationPlan`, and may not select another Method, capability offering, Asset, adapter, MaterialLot, or Procedure implementation.
 
-`lab.adapter-invocations.v1` retains each selected Method's explicit completion dependencies, input and output ports, and Procedure yields in addition to its tasks. A scheduler therefore follows exact selected value edges instead of correlating samples by display names or operation order.
+`lab.adapter-invocations.v2` retains each selected Method's explicit completion dependencies, input and output ports, and Procedure yields in addition to its tasks. It carries selected material bindings and the source inventory digest, while the full candidate MaterialLot inventory remains on the facility-planning result. A scheduler therefore follows exact selected value edges instead of correlating samples by display names or operation order.
 
 Each `AllocatedExecutionGroup` names one or more complete Procedure tasks, every requirement owned by those tasks, and dependencies on other groups. Validation requires that every task and requirement in the invocation appears exactly once, that no task's atomic requirement formula is split between groups, and that the group graph is acyclic.
 

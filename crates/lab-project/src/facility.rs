@@ -15,6 +15,7 @@ use lab_adapters::{
 };
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
+use lab_compiler::allocation::AllocatedProgramValidationError;
 use lab_compiler::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_compiler::planning::{
     AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
@@ -45,6 +46,7 @@ pub struct FacilityPlanningResult {
     pub package: String,
     pub version: String,
     pub inventory: InventorySnapshot,
+    pub material_inventory: MaterialLotInventory,
     pub adapter_bindings: Option<AdapterBindingSnapshot>,
     pub refined_lair: String,
     pub problem: lab_compiler::planning::PlanningProblem,
@@ -133,6 +135,8 @@ pub enum FacilityProjectError {
     Allocation(#[source] AllocatedLairError),
     #[error("failed to project allocated LAIR into adapter invocations")]
     AdapterInvocations(#[source] AdapterInvocationError),
+    #[error("allocated LAIR does not match the retained material inventory")]
+    AllocatedMaterialInventory(#[source] AllocatedProgramValidationError),
 }
 
 impl LabProject {
@@ -217,14 +221,18 @@ fn plan_modules_with_inventory(
     let allocated = refined
         .allocate(&solution)
         .map_err(FacilityProjectError::Allocation)?;
-    let adapter_invocations =
-        AdapterInvocationPlan::from_allocated_lair(&allocated, material_inventory)
-            .map_err(FacilityProjectError::AdapterInvocations)?;
+    let adapter_invocations = AdapterInvocationPlan::from_allocated_lair(&allocated)
+        .map_err(FacilityProjectError::AdapterInvocations)?;
+    adapter_invocations
+        .allocated
+        .validate_against_material_inventory(&material_inventory)
+        .map_err(FacilityProjectError::AllocatedMaterialInventory)?;
 
     Ok(FacilityPlanningResult {
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         inventory,
+        material_inventory,
         adapter_bindings,
         refined_lair,
         problem,

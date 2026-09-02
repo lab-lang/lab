@@ -558,8 +558,8 @@ mod tests {
         AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
     };
     use lab_compiler::planning::{
-        MaterialLotCandidates, MaterialLotInventory, PlanningPort, PlanningTaskInput,
-        PlanningTaskOutput, PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
+        PlanningPort, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
+        SelectedMaterialBinding, SelectedMaterialSource,
     };
 
     fn id(value: &str) -> LocalId {
@@ -655,12 +655,6 @@ mod tests {
                 }],
             },
             allocated_lair_sha256: "c".repeat(64),
-            material_inventory: MaterialLotInventory::new(
-                "d".repeat(64),
-                "https://example.org/facility",
-                BTreeMap::new(),
-                BTreeMap::new(),
-            ),
             invocations: vec![invocation.clone()],
         };
         plan.validate().unwrap();
@@ -722,26 +716,6 @@ mod tests {
         }
     }
 
-    /// Registers a lot so the plan's own material validation accepts the binding.
-    fn with_material_inventory(plan: &mut AdapterInvocationPlan, inputs: &[(&str, &str)]) {
-        let mut materials = plan.material_inventory.materials().clone();
-        for (input, lot) in inputs {
-            materials.insert(
-                (*input).to_owned(),
-                MaterialLotCandidates::Identified {
-                    component: format!("https://example.org/component/{input}"),
-                    material_lots: vec![(*lot).to_owned()],
-                },
-            );
-        }
-        plan.material_inventory = MaterialLotInventory::new(
-            plan.material_inventory.source_sha256(),
-            plan.material_inventory.facility(),
-            materials,
-            plan.material_inventory.artifacts().clone(),
-        );
-    }
-
     #[test]
     fn rejects_two_different_materials_in_one_position() {
         let (mut plan, invocation) = fixture();
@@ -755,13 +729,6 @@ mod tests {
                 }
             }
         }
-        with_material_inventory(
-            &mut plan,
-            &[
-                ("buffer", "https://example.org/lots/buffer"),
-                ("enzyme", "https://example.org/lots/enzyme"),
-            ],
-        );
         // One tube cannot hold two different reagents, however the adapter arrived at the layout.
         let collide = |input: &str| ScheduledPhysicalLocation {
             value: ScheduledValueRef::MaterialInput {
@@ -812,7 +779,6 @@ mod tests {
                 }];
             }
         }
-        with_material_inventory(&mut plan, &[("buffer", "https://example.org/lots/buffer")]);
         let shared = |task: usize, input: &str| ScheduledPhysicalLocation {
             value: ScheduledValueRef::MaterialInput {
                 task: invocation.tasks[task].clone(),
