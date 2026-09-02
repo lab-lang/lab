@@ -8,10 +8,7 @@ use thiserror::Error;
 
 use super::{AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, InvocationAdapter};
 use crate::method::{LocalId, PortType};
-use crate::planning::{
-    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
-    PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource,
-};
+use crate::planning::{PlanningValueSource, SelectedMaterialBinding, SelectedMaterialSource};
 use crate::procedure::binding::{
     ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
 };
@@ -200,35 +197,6 @@ impl AllocatedProgram {
         }
         validate_allocated_method_dependencies(&self.methods)?;
         validate_allocated_material_linearity(&self.methods)?;
-        Ok(())
-    }
-
-    /// Validate this allocation against the exact material-lot evidence used by facility planning.
-    pub fn validate_against_material_inventory(
-        &self,
-        material_inventory: &MaterialLotInventory,
-    ) -> Result<(), AllocatedProgramValidationError> {
-        material_inventory
-            .validate()
-            .map_err(AllocatedProgramValidationError::InvalidMaterialInventory)?;
-        if material_inventory.source_sha256() != self.inventory_sha256
-            || material_inventory.facility() != self.facility
-        {
-            return Err(AllocatedProgramValidationError::MaterialInventoryMismatch);
-        }
-        self.validate()?;
-        for material in self
-            .methods
-            .iter()
-            .flat_map(|method| &method.tasks)
-            .flat_map(|task| &task.materials)
-        {
-            if !material_binding_matches_inventory(material, material_inventory) {
-                return Err(AllocatedProgramValidationError::InvalidMaterialBinding {
-                    input: material.input.clone(),
-                });
-            }
-        }
         Ok(())
     }
 }
@@ -608,38 +576,6 @@ fn valid_material_binding(binding: &SelectedMaterialBinding, choices: &BTreeSet<
     }
 }
 
-fn material_binding_matches_inventory(
-    binding: &SelectedMaterialBinding,
-    inventory: &MaterialLotInventory,
-) -> bool {
-    let SelectedMaterialSource::MaterialLot {
-        component,
-        material_lot,
-    } = &binding.source
-    else {
-        return true;
-    };
-    let Some(MaterialLotCandidates::Identified {
-        component: expected_component,
-        material_lots,
-    }) = inventory.candidates(&binding.symbol)
-    else {
-        return false;
-    };
-    let expected_alternatives = material_lots
-        .iter()
-        .filter_map(|candidate| (candidate != material_lot).then_some(candidate.as_str()))
-        .collect::<BTreeSet<_>>();
-    component == expected_component
-        && material_lots.contains(material_lot)
-        && binding
-            .interchangeable_alternatives
-            .iter()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>()
-            == expected_alternatives
-}
-
 fn valid_invocation_adapter(adapter: &InvocationAdapter) -> bool {
     !adapter.driver.is_empty()
         && is_relative_path(&adapter.profile_path)
@@ -678,10 +614,6 @@ pub enum AllocatedProgramValidationError {
     InvalidDigest { label: &'static str },
     #[error("allocated program names a facility that is not an absolute IRI")]
     InvalidFacility,
-    #[error("allocated program contains invalid material inventory: {0}")]
-    InvalidMaterialInventory(#[source] MaterialLotInventoryValidationError),
-    #[error("allocated program material inventory does not match its inventory hash and facility")]
-    MaterialInventoryMismatch,
     #[error("allocated program contains no selected Methods")]
     EmptyMethods,
     #[error("allocated program repeats Method choice `{choice}`")]
@@ -741,7 +673,7 @@ pub enum AllocatedProgramValidationError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
 
     use lab_capability::{
@@ -838,15 +770,6 @@ mod tests {
                 }],
             }],
         }
-    }
-
-    fn inventory() -> MaterialLotInventory {
-        MaterialLotInventory::new(
-            "b".repeat(64),
-            "https://example.org/facility",
-            BTreeMap::new(),
-            BTreeMap::new(),
-        )
     }
 
     fn selected_parameter(observed: i64) -> SelectedCapabilityParameter {
@@ -971,22 +894,9 @@ mod tests {
     }
 
     #[test]
-    fn material_alternatives_are_exact_inventory_lots() {
+    fn material_binding_alternatives_exclude_the_selected_lot() {
         let mut allocated = allocated_program();
         let selected = "https://example.org/lot/a".to_owned();
-        let alternative = "https://example.org/lot/b".to_owned();
-        let inventory = MaterialLotInventory::new(
-            "b".repeat(64),
-            "https://example.org/facility",
-            BTreeMap::from([(
-                "sample".to_owned(),
-                MaterialLotCandidates::Identified {
-                    component: "https://example.org/component/sample".to_owned(),
-                    material_lots: vec![selected.clone(), alternative.clone()],
-                },
-            )]),
-            BTreeMap::new(),
-        );
         allocated.methods[0].tasks[0]
             .materials
             .push(SelectedMaterialBinding {
@@ -996,39 +906,13 @@ mod tests {
                     component: "https://example.org/component/sample".to_owned(),
                     material_lot: selected.clone(),
                 },
-                interchangeable_alternatives: vec![alternative],
+                interchangeable_alternatives: vec![selected],
             });
-        allocated
-            .validate_against_material_inventory(&inventory)
-            .unwrap();
 
-        allocated.methods[0].tasks[0].materials[0].interchangeable_alternatives = vec![selected];
         assert!(matches!(
             allocated.validate(),
             Err(AllocatedProgramValidationError::InvalidMaterialBinding { .. })
         ));
-        assert!(matches!(
-            allocated.validate_against_material_inventory(&inventory),
-            Err(AllocatedProgramValidationError::InvalidMaterialBinding { .. })
-        ));
-    }
-
-    #[test]
-    fn inventory_evidence_must_match_the_allocated_source_and_facility() {
-        let allocated = allocated_program();
-        let wrong_inventory = MaterialLotInventory::new(
-            "c".repeat(64),
-            "https://example.org/facility",
-            BTreeMap::new(),
-            BTreeMap::new(),
-        );
-        assert!(matches!(
-            allocated.validate_against_material_inventory(&wrong_inventory),
-            Err(AllocatedProgramValidationError::MaterialInventoryMismatch)
-        ));
-        allocated
-            .validate_against_material_inventory(&inventory())
-            .unwrap();
     }
 
     #[test]

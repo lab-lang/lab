@@ -1079,10 +1079,11 @@ workflow main() -> Material<Plasmid>:
         );
         let reprojected =
             lab_adapters::AdapterInvocationPlan::from_allocated_lair(&reparsed).unwrap();
-        reprojected
-            .allocated
-            .validate_against_material_inventory(&planned.material_inventory)
-            .unwrap();
+        lab_facility::validate_allocated_material_inventory(
+            &reprojected.allocated,
+            &planned.material_inventory,
+        )
+        .unwrap();
         assert_eq!(reprojected, planned.adapter_invocations);
         assert_eq!(
             planned.material_inventory.source_sha256(),

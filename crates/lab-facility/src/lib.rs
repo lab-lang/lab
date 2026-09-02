@@ -19,7 +19,11 @@ pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
 };
 pub use explain::explain_facility_planning_error;
-pub use inventory::{MaterialLotInventoryError, build_material_lot_inventory};
+pub use inventory::{
+    AllocatedMaterialInventoryValidationError, MaterialLotCandidates, MaterialLotInventory,
+    MaterialLotInventoryError, MaterialLotInventoryValidationError, build_material_lot_inventory,
+    validate_allocated_material_inventory,
+};
 pub use solver::{
     AlternativeMaterialBinding, AlternativeMethod, AlternativeRequirementBinding,
     FacilityPlanningError, PlanningAlternative, PlanningMaterialRejectionReason,

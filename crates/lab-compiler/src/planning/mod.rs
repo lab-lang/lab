@@ -1,15 +1,11 @@
 //! Durable, target-neutral facility-planning contracts projected from LAIR.
 
 mod extraction;
-mod material_inventory;
 mod problem;
 mod solution;
 
 pub use extraction::PlanningProblemExtractionError;
 pub(crate) use extraction::extract_planning_problem;
-pub use material_inventory::{
-    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
-};
 pub use problem::{
     PLANNING_PROBLEM_SCHEMA_VERSION, PlanningCapabilityRequirement, PlanningMaterialInput,
     PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningMethodYield,

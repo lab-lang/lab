@@ -257,7 +257,7 @@ struct PythonFacilityPlan<'a> {
     planning_problem: &'a lab_compiler::planning::PlanningProblem,
     facility_solution: &'a lab_compiler::planning::FacilityPlanningSolution,
     allocated_lair: String,
-    material_inventory: &'a lab_compiler::planning::MaterialLotInventory,
+    material_inventory: &'a lab_facility::MaterialLotInventory,
     adapter_invocations: &'a lab_adapters::AdapterInvocationPlan,
 }
 

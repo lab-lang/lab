@@ -15,21 +15,20 @@ use lab_adapters::{
 };
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
-use lab_compiler::allocation::AllocatedProgramValidationError;
 use lab_compiler::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_compiler::planning::{
     AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
-    FacilityPlanningSolution, MaterialLotInventory, MethodPin, MethodPinSelector,
-    PlanningProblemExtractionError,
+    FacilityPlanningSolution, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
 };
 use lab_compiler::program::{
     AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
     RefinedLairError,
 };
 use lab_facility::{
-    AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, FacilityPlanningError,
+    AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot,
+    AllocatedMaterialInventoryValidationError, FacilityPlanningError, MaterialLotInventory,
     MaterialLotInventoryError, build_material_lot_inventory, explain_facility_planning_error,
-    solve_facility_planning,
+    solve_facility_planning, validate_allocated_material_inventory,
 };
 use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
 use lab_package::{LabPackage, PlanningAdapterRequirement};
@@ -136,7 +135,7 @@ pub enum FacilityProjectError {
     #[error("failed to project allocated LAIR into adapter invocations")]
     AdapterInvocations(#[source] AdapterInvocationError),
     #[error("allocated LAIR does not match the retained material inventory")]
-    AllocatedMaterialInventory(#[source] AllocatedProgramValidationError),
+    AllocatedMaterialInventory(#[source] AllocatedMaterialInventoryValidationError),
 }
 
 impl LabProject {
@@ -223,9 +222,7 @@ fn plan_modules_with_inventory(
         .map_err(FacilityProjectError::Allocation)?;
     let adapter_invocations = AdapterInvocationPlan::from_allocated_lair(&allocated)
         .map_err(FacilityProjectError::AdapterInvocations)?;
-    adapter_invocations
-        .allocated
-        .validate_against_material_inventory(&material_inventory)
+    validate_allocated_material_inventory(&adapter_invocations.allocated, &material_inventory)
         .map_err(FacilityProjectError::AllocatedMaterialInventory)?;
 
     Ok(FacilityPlanningResult {

@@ -34,8 +34,8 @@ The source tree follows semantic ownership and dependency direction:
 - `src/ir/` owns the small set of Pliron attribute helpers shared across domain operations;
 - `src/program/` owns stage-typed program wrappers and checked-source lowering into coupled Design and Workflow IR;
 - `src/pipeline.rs` and `src/session.rs` own textual pass orchestration and a reusable Pliron compiler session;
-- `src/planning/` owns planning-problem extraction, the RDF-independent constraint and solution contracts, and exact MaterialLot evidence;
-- `lab-facility` owns adapter-to-inventory binding, MaterialLot evidence construction, graph-wide solving and explanations, and reviewed execution-plan construction;
+- `src/planning/` owns planning-problem extraction and the RDF-independent constraint and solution contracts;
+- `lab-facility` owns exact MaterialLot evidence, its construction and allocation cross-validation, adapter-to-inventory binding, graph-wide solving and explanations, and reviewed execution-plan construction;
 - `lab-adapters` owns adapter discovery, operational-profile validation, immutable invocation and scheduling contracts, shared typed views over exact allocated Procedure tasks, concrete device implementations, and generated files independently of persistence;
 - `lab-runfmt` owns the versioned reviewed documents interpreted by the runtime; and
 - `src/bin/labc/` and `src/bin/lab-opt/` own developer-facing command orchestration.

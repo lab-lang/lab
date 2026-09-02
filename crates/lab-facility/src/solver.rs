@@ -20,17 +20,17 @@ use thiserror::Error;
 
 use lab_compiler::planning::{
     AdapterRequirement, AssetPin, AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
-    FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotCandidates, MaterialLotInventory,
-    MaterialLotInventoryValidationError, MethodPinSelector, PlanningCandidateRejectionReason,
-    PlanningCapabilityRequirement, PlanningMaterialInput, PlanningMaterialSource,
-    PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningProblemValidationError,
-    PlanningProcedureTask, PlanningRejectedOffering, SelectedAdapter, SelectedCapabilityParameter,
-    SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod, SelectedProcedureTask,
-    SelectedRequirementBinding,
+    FacilityPlanningPolicy, FacilityPlanningSolution, MethodPinSelector,
+    PlanningCandidateRejectionReason, PlanningCapabilityRequirement, PlanningMaterialInput,
+    PlanningMaterialSource, PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem,
+    PlanningProblemValidationError, PlanningProcedureTask, PlanningRejectedOffering,
+    SelectedAdapter, SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    SelectedMethod, SelectedProcedureTask, SelectedRequirementBinding,
 };
 
 use crate::{
     ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, BoundProcedureImplementation,
+    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
     ResolvedAdapterBinding,
 };
 
