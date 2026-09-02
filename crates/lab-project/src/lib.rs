@@ -1070,6 +1070,18 @@ workflow main() -> Material<Plasmid>:
             planned.problem().sha256(),
             planned.solution().problem_sha256
         );
+        let allocated_ir = planned.allocated.ir();
+        let reparsed = lab_lair::program::AllocatedLairProgram::parse_ir(&allocated_ir).unwrap();
+        assert_eq!(
+            reparsed.allocated_program().unwrap(),
+            planned.allocated.allocated_program().unwrap()
+        );
+        assert_eq!(
+            reparsed
+                .adapter_invocations(planned.adapter_invocations.material_inventory.clone())
+                .unwrap(),
+            planned.adapter_invocations
+        );
         assert!(
             planned
                 .adapter_invocations

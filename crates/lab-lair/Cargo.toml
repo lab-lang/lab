@@ -28,7 +28,6 @@ clap.workspace = true
 hamilton-star.workspace = true
 lab-capability.workspace = true
 lab-instruments.workspace = true
-lab-inventory.workspace = true
 lab-runfmt.workspace = true
 lab-language.workspace = true
 sbol-inventory.workspace = true

@@ -3,8 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
-#[cfg(test)]
-use crate::allocation::AllocatedRequirementBinding;
 use crate::allocation::{
     AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedProgramExtractionError,
     InvocationAdapter,
@@ -20,8 +18,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-#[cfg(test)]
-use super::{FacilityPlanningSolution, FacilityPlanningSolutionValidationError, PlanningProblem};
 use super::{
     MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
     SelectedMaterialBinding, SelectedMaterialSource,
@@ -60,114 +56,6 @@ impl AdapterInvocationPlan {
         let bytes = serde_json::to_vec(self)
             .expect("AdapterInvocationPlan contains only infallibly serializable semantic values");
         hex_sha256(&bytes)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn project(
-        problem: &PlanningProblem,
-        solution: &FacilityPlanningSolution,
-        allocated_lair_sha256: String,
-        material_inventory: MaterialLotInventory,
-    ) -> Result<Self, AdapterInvocationError> {
-        solution.validate_against(problem)?;
-        let selections = solution
-            .selections
-            .iter()
-            .map(|selection| (selection.choice.clone(), selection))
-            .collect::<BTreeMap<_, _>>();
-        let mut methods = Vec::new();
-
-        for choice in &problem.choices {
-            let selection = selections
-                .get(&choice.id)
-                .expect("solution validation proves every choice has a selection");
-            let candidate = choice
-                .candidates
-                .iter()
-                .find(|candidate| candidate.method == selection.method)
-                .expect("solution validation proves the selected Method exists");
-            let selected_tasks = selection
-                .tasks
-                .iter()
-                .map(|task| (task.task.clone(), task))
-                .collect::<BTreeMap<_, _>>();
-            let mut tasks = Vec::new();
-            for task in &candidate.tasks {
-                let selected = selected_tasks
-                    .get(&task.id)
-                    .expect("solution validation proves every selected task exists");
-                let selected_requirements = selected
-                    .requirements
-                    .iter()
-                    .map(|requirement| (requirement.requirement.clone(), requirement))
-                    .collect::<BTreeMap<_, _>>();
-                let requirements = task
-                    .requirements
-                    .iter()
-                    .map(|requirement| {
-                        let selected = selected_requirements
-                            .get(&requirement.id)
-                            .expect("solution validation proves every selected Requirement exists");
-                        let adapter = selected.adapter.as_ref().map(|adapter| InvocationAdapter {
-                            driver: adapter.driver.clone(),
-                            profile_path: adapter.profile_path.clone(),
-                            profile_sha256: adapter.profile_sha256.clone(),
-                            features: adapter.features.clone(),
-                            accepted_run_formats: adapter.accepted_run_formats.clone(),
-                            emitted_run_formats: adapter.emitted_run_formats.clone(),
-                        });
-                        AllocatedRequirementBinding {
-                            id: requirement.id.clone(),
-                            capability_kind: selected.capability_kind.clone(),
-                            minimum_qualification: selected.minimum_qualification,
-                            accepted_control_modes: selected.accepted_control_modes.clone(),
-                            offering: selected.offering.clone(),
-                            asset: selected.asset.clone(),
-                            observed_qualification: selected.observed_qualification.clone(),
-                            control_mode: selected.control_mode.clone(),
-                            parameters: selected.parameters.clone(),
-                            procedure_implementation: selected
-                                .adapter
-                                .as_ref()
-                                .and_then(|adapter| adapter.procedure_implementation.clone()),
-                            adapter,
-                        }
-                    })
-                    .collect();
-                tasks.push(AllocatedProcedureTask {
-                    id: task.id.clone(),
-                    operation: task.operation.clone(),
-                    program: task.program.clone(),
-                    inputs: task.inputs.clone(),
-                    outputs: task.outputs.clone(),
-                    parameters: task.parameters.clone(),
-                    materials: selected.materials.clone(),
-                    requirements,
-                });
-            }
-            methods.push(AllocatedMethod {
-                choice: choice.id.clone(),
-                source_operation: choice.source_operation.clone(),
-                method: selection.method.clone(),
-                after: choice.after.clone(),
-                inputs: choice.inputs.clone(),
-                outputs: choice.outputs.clone(),
-                yields: candidate.yields.clone(),
-                tasks,
-            });
-        }
-
-        Self::from_allocated(
-            AllocatedProgram {
-                problem_sha256: solution.problem_sha256.clone(),
-                inventory_sha256: solution.inventory_sha256.clone(),
-                facility: solution.facility.clone(),
-                methods,
-            },
-            allocated_lair_sha256,
-            material_inventory,
-        )
-        .map_err(AdapterInvocationError::from)
     }
 
     /// Project backend invocations from an exact semantic allocation.
@@ -954,9 +842,6 @@ fn is_relative_path(path: &Path) -> bool {
 pub enum AdapterInvocationError {
     #[error(transparent)]
     InvalidAllocatedProgram(#[from] AllocatedProgramExtractionError),
-    #[cfg(test)]
-    #[error(transparent)]
-    InvalidSolution(#[from] FacilityPlanningSolutionValidationError),
     #[error(transparent)]
     InvalidProjection(#[from] AdapterInvocationValidationError),
 }

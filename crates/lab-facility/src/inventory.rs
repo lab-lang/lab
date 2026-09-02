@@ -3,7 +3,9 @@ use std::collections::BTreeMap;
 use lab_language::{CheckedDeclaration, CheckedModule};
 use thiserror::Error;
 
-use super::{MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError};
+use lab_lair::planning::{
+    MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
+};
 
 #[derive(Debug, Error)]
 pub enum MaterialLotInventoryError {

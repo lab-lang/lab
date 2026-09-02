@@ -1679,6 +1679,7 @@ dependencies = [
  "clap",
  "flate2",
  "lab-capability",
+ "lab-facility",
  "lab-inventory",
  "lab-lair",
  "lab-package",
@@ -1698,6 +1699,23 @@ dependencies = [
  "typst-layout",
  "typst-pdf",
  "ureq",
+]
+
+[[package]]
+name = "lab-facility"
+version = "0.1.2"
+dependencies = [
+ "lab-capability",
+ "lab-inventory",
+ "lab-lair",
+ "lab-language",
+ "lab-runfmt",
+ "sbol-inventory",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]
@@ -1753,7 +1771,6 @@ dependencies = [
  "hamilton-star",
  "lab-capability",
  "lab-instruments",
- "lab-inventory",
  "lab-language",
  "lab-runfmt",
  "opentrons-protocol",
@@ -1805,6 +1822,7 @@ name = "lab-project"
 version = "0.1.2"
 dependencies = [
  "lab-capability",
+ "lab-facility",
  "lab-inventory",
  "lab-lair",
  "lab-language",
@@ -1822,6 +1840,7 @@ dependencies = [
 name = "lab-python"
 version = "0.1.2"
 dependencies = [
+ "lab-facility",
  "lab-lair",
  "lab-project",
  "pyo3",

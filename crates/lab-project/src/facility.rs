@@ -11,15 +11,18 @@ use std::path::PathBuf;
 
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
+use lab_facility::{
+    AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, FacilityPlanningError,
+    MaterialLotInventoryError, build_material_lot_inventory, explain_facility_planning_error,
+    solve_facility_planning,
+};
 use lab_inventory::{InventoryLoadError, InventorySnapshot, MaterialLotCatalogError};
 use lab_lair::backend::{AdapterProfileContractError, validate_adapter_profile};
 use lab_lair::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_lair::planning::{
-    AdapterBindingError, AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationError,
-    AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningError,
-    FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotInventory,
-    MaterialLotInventoryError, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
-    build_material_lot_inventory, explain_facility_planning_error, solve_facility_planning,
+    AdapterInvocationError, AdapterInvocationPlan, AdapterRequirement, AssetPin, AssetPinSelector,
+    FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotInventory, MethodPin,
+    MethodPinSelector, PlanningProblemExtractionError,
 };
 use lab_lair::program::{
     AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,

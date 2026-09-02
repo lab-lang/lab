@@ -3,8 +3,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use crate::method::LocalId;
-use crate::procedure::BindingScope;
 use lab_capability::{
     AbsoluteIri, ControlMode, MethodId, ProcedureImplementationId, PropertyConstraint,
     PropertyValue, QualificationLevel, ScalarValue, UnitIri,
@@ -13,21 +11,27 @@ use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
     FacilityScalarValue, InventorySnapshot,
 };
+use lab_lair::method::LocalId;
+use lab_lair::procedure::BindingScope;
 use sbol_inventory::vocabulary::Qualification;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{
-    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, AdapterRequirement, AssetPin,
-    AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningPolicy,
-    FacilityPlanningSolution, MaterialLotCandidates, MaterialLotInventory,
+use lab_lair::planning::{
+    AdapterRequirement, AssetPin, AssetPinSelector, FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION,
+    FacilityPlanningPolicy, FacilityPlanningSolution, MaterialLotCandidates, MaterialLotInventory,
     MaterialLotInventoryValidationError, MethodPinSelector, PlanningCandidateRejectionReason,
     PlanningCapabilityRequirement, PlanningMaterialInput, PlanningMaterialSource,
-    PlanningMethodCandidate, PlanningProblem, PlanningProblemValidationError,
-    PlanningProcedureTask, PlanningRejectedOffering, ResolvedAdapterBinding, SelectedAdapter,
-    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod,
-    SelectedProcedureTask, SelectedRequirementBinding,
+    PlanningMethodCandidate, PlanningMethodChoice, PlanningProblem, PlanningProblemValidationError,
+    PlanningProcedureTask, PlanningRejectedOffering, SelectedAdapter, SelectedCapabilityParameter,
+    SelectedMaterialBinding, SelectedMaterialSource, SelectedMethod, SelectedProcedureTask,
+    SelectedRequirementBinding,
+};
+
+use crate::{
+    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, BoundProcedureImplementation,
+    ResolvedAdapterBinding,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -861,7 +865,7 @@ fn selected_adapters(
 
 fn selected_adapter(
     binding: &ResolvedAdapterBinding,
-    implementation: Option<&super::BoundProcedureImplementation>,
+    implementation: Option<&BoundProcedureImplementation>,
 ) -> SelectedAdapter {
     SelectedAdapter {
         driver: binding.driver.clone(),
@@ -982,7 +986,7 @@ fn resolve_method_pins(
     Ok(pins)
 }
 
-fn selector_matches(selector: &MethodPinSelector, choice: &super::PlanningMethodChoice) -> bool {
+fn selector_matches(selector: &MethodPinSelector, choice: &PlanningMethodChoice) -> bool {
     match selector {
         MethodPinSelector::Choice { choice: selected } => selected == &choice.id,
         MethodPinSelector::SourceOperation { source_operation } => {
@@ -1111,24 +1115,25 @@ fn summarize_alternative(selection: &[SelectedMethod]) -> PlanningAlternative {
 mod tests {
     use std::fs;
 
-    use crate::method::{IntentOperationId, PortType};
-    use crate::procedure::{
-        FluidPathPolicy, Location, MaterialOutput, PipettingConstraints, PipettingProgramV1,
-        PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole, Volume,
-    };
     use lab_capability::{
         CapabilityKind, ConstraintRelation, ExactInteger, OperationId, PropertyKind, ScalarValue,
     };
+    use lab_lair::method::{IntentOperationId, PortType};
+    use lab_lair::procedure::{
+        FluidPathPolicy, Location, MaterialOutput, PipettingConstraints, PipettingProgramV1,
+        PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole, Volume,
+    };
     use tempfile::TempDir;
 
-    use crate::planning::{
-        AdapterBindingRequest, FacilityPlanningSolutionValidationError, MethodPin,
-        PLANNING_PROBLEM_SCHEMA_VERSION, PlanningMethodChoice, PlanningMethodYield, PlanningPort,
-        PlanningProcedureTask, PlanningTaskOutput, PlanningValueSource,
+    use lab_lair::planning::{
+        FacilityPlanningSolutionValidationError, MethodPin, PLANNING_PROBLEM_SCHEMA_VERSION,
+        PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProcedureTask,
+        PlanningTaskOutput, PlanningValueSource,
     };
-    use crate::{backend::validate_adapter_profile, procedure::vocabulary::SETUP_GOLDEN_GATE};
+    use lab_lair::{backend::validate_adapter_profile, procedure::vocabulary::SETUP_GOLDEN_GATE};
 
     use super::*;
+    use crate::AdapterBindingRequest;
 
     fn id(value: &str) -> LocalId {
         LocalId::new(value).unwrap()
@@ -1166,7 +1171,7 @@ mod tests {
             operation: OperationId::new(format!("https://example.org/procedure/{operation}"))
                 .unwrap(),
             program: None,
-            binding_scope: crate::procedure::BindingScope::Independent,
+            binding_scope: lab_lair::procedure::BindingScope::Independent,
             inputs: Vec::new(),
             outputs: vec![PlanningTaskOutput {
                 name: id("result"),

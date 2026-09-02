@@ -587,26 +587,20 @@ fn workflow_value(
 
 #[cfg(test)]
 mod tests {
-    use crate::method::{IntentOperationId, ProcedureValue, ScalarType};
+    use crate::method::{ProcedureValue, ScalarType};
     use crate::procedure::{
         AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
     };
     use lab_capability::ScalarValue;
-    use lab_inventory::InventorySnapshot;
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
 
-    use crate::backend::default_adapter_profile;
-    use crate::planning::{
-        AdapterBindingRequest, AdapterBindingSnapshot, AdapterInvocationPlan, AdapterRequirement,
-        FacilityPlanningPolicy, MethodPin, MethodPinSelector, PlanningProblem, PlanningValueSource,
-        build_material_lot_inventory, solve_facility_planning,
-    };
+    use crate::planning::{PlanningProblem, PlanningValueSource};
     use crate::session::CompilerSession;
     use crate::stage::IrStage;
 
-    use super::{AllocatedLairProgram, PortableLairProgram};
+    use super::PortableLairProgram;
 
     const DESIGNS: &str = r#"use std.bio.designs
 use std.bio.golden_gate
@@ -1352,193 +1346,5 @@ workflow main() -> Material<Plasmid>:
         let decoded: PlanningProblem = serde_json::from_str(&json).expect("problem deserializes");
         decoded.validate().expect("decoded problem revalidates");
         assert_eq!(decoded, problem);
-    }
-
-    #[test]
-    fn a_complete_solution_produces_verifier_valid_allocated_procedure_lair() {
-        let source = format!("{DESIGNS}{WORKFLOWS}")
-            .replace("use demo.designs\n", "")
-            .replace("use std.bio.designs\nuse std.bio.golden_gate\n", "")
-            .replacen(
-                "use std.bio.build",
-                "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.build",
-                1,
-            );
-        let checked = compile_module(&source).expect("program checks");
-        let refined = PortableLairProgram::lower(&checked)
-            .expect("portable LAIR lowers")
-            .refine_standard_methods()
-            .expect("standard methods refine");
-        let problem = refined.planning_problem().expect("problem projects");
-        let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../..")
-            .canonicalize()
-            .unwrap();
-        let inventory = InventorySnapshot::load(
-            workspace.join("examples/golden-gate"),
-            "inventory/facility.ttl",
-            None,
-        )
-        .expect("Golden Gate inventory validates");
-        let policy = FacilityPlanningPolicy {
-            method_pins: [
-                (
-                    "std.bio.build.realize",
-                    "https://www.lab-compiler.org/ns/method#automated-golden-gate",
-                ),
-                (
-                    "std.lab.plasmid.transform",
-                    "https://www.lab-compiler.org/ns/method#automated-chemical-transformation",
-                ),
-                (
-                    "std.lab.plasmid.recover",
-                    "https://www.lab-compiler.org/ns/method#automated-recovery",
-                ),
-                (
-                    "std.lab.plasmid.plate",
-                    "https://www.lab-compiler.org/ns/method#automated-antibiotic-selection",
-                ),
-            ]
-            .into_iter()
-            .map(|(operation, method)| MethodPin {
-                selector: MethodPinSelector::SourceOperation {
-                    source_operation: IntentOperationId::new(operation).unwrap(),
-                },
-                method: lab_capability::MethodId::new(method).unwrap(),
-            })
-            .collect(),
-            asset_pins: Vec::new(),
-            adapter_requirement: AdapterRequirement::Optional,
-        };
-        let adapters = AdapterBindingSnapshot::resolve(
-            &inventory,
-            vec![AdapterBindingRequest {
-                asset: "https://example.org/golden-gate/opentrons_ot2".to_owned(),
-                driver: "opentrons.ot2".to_owned(),
-                profile_path: std::path::PathBuf::from("adapters/opentrons-ot2.toml"),
-                profile: default_adapter_profile("opentrons.ot2", "opentrons-ot2").unwrap(),
-            }],
-        )
-        .unwrap();
-        let active_lots = inventory.active_material_lots().unwrap();
-        let lots_by_component = active_lots
-            .components()
-            .map(|(component, lots)| {
-                (
-                    component.as_str().to_owned(),
-                    lots.iter().map(|lot| lot.as_str().to_owned()).collect(),
-                )
-            })
-            .collect();
-        let material_inventory = build_material_lot_inventory(
-            &[&checked],
-            inventory.source_sha256(),
-            inventory.facility().as_str(),
-            &lots_by_component,
-        )
-        .unwrap();
-        let solution = solve_facility_planning(
-            &problem,
-            &inventory,
-            &material_inventory,
-            Some(&adapters),
-            policy,
-        )
-        .unwrap();
-        let allocated = refined.allocate(&solution).expect("solution applies");
-        let ir = allocated.ir();
-
-        assert!(ir.contains("allocated-procedure"), "{ir}");
-        assert!(ir.contains("allocation.context"), "{ir}");
-        assert!(ir.contains("allocation.method"), "{ir}");
-        assert!(ir.contains("allocation.yield"), "{ir}");
-        assert!(ir.contains("selected_input_names"), "{ir}");
-        assert!(ir.contains("selected_output_names"), "{ir}");
-        assert!(ir.contains("allocation.binding"), "{ir}");
-        assert!(
-            ir.contains("https://example.org/golden-gate/opentrons_ot2"),
-            "{ir}"
-        );
-        assert!(ir.contains("#automated-recovery"), "{ir}");
-        assert!(!ir.contains("method.choice"), "{ir}");
-        assert!(!ir.contains("method.yield"), "{ir}");
-
-        let allocated_lair_sha256 = crate::planning::hex_sha256(ir.as_bytes());
-        let sidecar_projection = AdapterInvocationPlan::project(
-            &problem,
-            &solution,
-            allocated_lair_sha256,
-            material_inventory.clone(),
-        )
-        .unwrap();
-        let reparsed = AllocatedLairProgram::parse_ir(&ir).unwrap();
-        let invocations = reparsed.adapter_invocations(material_inventory).unwrap();
-        assert_eq!(invocations, sidecar_projection);
-        assert_eq!(invocations.invocations.len(), 1);
-        assert_eq!(
-            invocations.invocations[0].asset,
-            "https://example.org/golden-gate/opentrons_ot2"
-        );
-        assert_eq!(invocations.invocations[0].adapter.driver, "opentrons.ot2");
-        assert!(
-            invocations.invocations[0]
-                .requirements
-                .iter()
-                .any(|requirement| requirement.as_str().ends_with("::transfer"))
-        );
-        assert!(
-            invocations.invocations[0]
-                .requirements
-                .iter()
-                .any(|requirement| requirement.as_str().ends_with("::mix"))
-        );
-        assert!(
-            invocations.invocations[0]
-                .requirements
-                .iter()
-                .all(|requirement| !requirement.as_str().ends_with("::liquid-handling"))
-        );
-        assert!(
-            invocations
-                .methods
-                .iter()
-                .any(|method| { method.method.as_str().ends_with("#automated-golden-gate") })
-        );
-        assert!(invocations.methods.iter().any(|method| {
-            method.method.as_str().ends_with("#automated-recovery")
-                && method.tasks.iter().all(|task| {
-                    task.requirements
-                        .iter()
-                        .all(|binding| binding.adapter.is_some())
-                })
-        }));
-        let json = serde_json::to_string_pretty(&invocations).unwrap();
-        let decoded: AdapterInvocationPlan = serde_json::from_str(&json).unwrap();
-        decoded.validate().unwrap();
-        assert_eq!(decoded, invocations);
-        let mut mismatched_inventory = decoded.clone();
-        mismatched_inventory.material_inventory = crate::planning::MaterialLotInventory::new(
-            "0".repeat(64),
-            mismatched_inventory.material_inventory.facility(),
-            mismatched_inventory.material_inventory.materials().clone(),
-            mismatched_inventory.material_inventory.artifacts().clone(),
-        );
-        assert!(matches!(
-            mismatched_inventory.validate(),
-            Err(crate::planning::AdapterInvocationValidationError::MaterialInventoryMismatch)
-        ));
-
-        let mut tampered = decoded;
-        tampered.invocations[0]
-            .tasks
-            .push(crate::method::LocalId::new("task-that-was-never-allocated").unwrap());
-        assert!(matches!(
-            tampered.validate(),
-            Err(crate::planning::AdapterInvocationValidationError::UnknownTask { .. })
-        ));
-
-        let mut session = CompilerSession::default();
-        session.parse_ir(&ir).unwrap();
-        session.verify_stage(IrStage::AllocatedProcedure).unwrap();
     }
 }

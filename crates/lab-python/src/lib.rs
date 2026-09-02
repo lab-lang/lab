@@ -252,7 +252,7 @@ struct PythonFacilityPlan<'a> {
     package: &'a str,
     version: &'a str,
     inventory: PythonInventorySelection<'a>,
-    adapter_bindings: Option<&'a lab_lair::planning::AdapterBindingSnapshot>,
+    adapter_bindings: Option<&'a lab_facility::AdapterBindingSnapshot>,
     refined_lair: &'a str,
     planning_problem: &'a lab_lair::planning::PlanningProblem,
     facility_solution: &'a lab_lair::planning::FacilityPlanningSolution,

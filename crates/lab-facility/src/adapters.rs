@@ -11,7 +11,7 @@ use sbol_inventory::vocabulary::Qualification;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::backend::{
+use lab_lair::backend::{
     AdapterDescriptor, AdapterServices, ProcedureImplementationDescriptor, ValidatedAdapterProfile,
     adapter_catalog,
 };
@@ -366,7 +366,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::backend::validate_adapter_profile;
+    use lab_lair::backend::validate_adapter_profile;
 
     use super::*;
 
@@ -427,7 +427,7 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         assert_eq!(binding.procedure_implementations.len(), 1);
         assert_eq!(
             binding.procedure_implementations[0].contract.as_str(),
-            crate::procedure::vocabulary::PIPETTING_PROGRAM_V1
+            lab_lair::procedure::vocabulary::PIPETTING_PROGRAM_V1
         );
         assert_eq!(binding.offerings.len(), 1);
         let offering = &binding.offerings[0];

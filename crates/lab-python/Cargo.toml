@@ -16,6 +16,7 @@ name = "_native"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+lab-facility.workspace = true
 lab-lair.workspace = true
 lab-project.workspace = true
 pyo3.workspace = true

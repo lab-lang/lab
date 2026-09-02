@@ -10,14 +10,14 @@ The canonical facility-aware pipeline is:
 checked modules
     -> Design and Intent LAIR
     -> Method alternatives containing Procedure tasks and Capability requirements
-    -> one graph-wide Method, MaterialLot, offering, Asset, and adapter solution
+    -> one graph-wide Method, MaterialLot, offering, Asset, and adapter solution (`lab-facility`)
     -> Allocated Procedure LAIR
     -> immutable adapter invocations
     -> independently reviewed device and operator documents
     -> one facility-wide execution plan
 ```
 
-`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_lair::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `solve_facility_planning` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `AllocatedLairProgram::adapter_invocations` is the only production backend projection.
+`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_lair::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `lab-facility` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `AllocatedLairProgram::adapter_invocations` is the only production backend projection.
 
 Verifier-valid Allocated Procedure LAIR is the only input device lowering is projected from. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
 
@@ -34,13 +34,14 @@ The source tree follows semantic ownership and dependency direction:
 - `src/ir/` owns the small set of Pliron attribute helpers shared across domain operations;
 - `src/program/` owns stage-typed program wrappers and checked-source lowering into coupled Design and Workflow IR;
 - `src/pipeline.rs` and `src/session.rs` own textual pass orchestration and a reusable Pliron compiler session;
-- `src/planning/` owns planning-problem extraction, the RDF-independent constraint problem, exact MaterialLot evidence, adapter-binding snapshots, graph-wide solving, immutable adapter-invocation projection, and reviewed execution-plan construction;
+- `src/planning/` owns planning-problem extraction, the RDF-independent constraint and solution contracts, exact MaterialLot evidence, immutable adapter-invocation projection, and scheduling contracts;
+- `lab-facility` owns adapter-to-inventory binding, MaterialLot evidence construction, graph-wide solving and explanations, and reviewed execution-plan construction;
 - `src/backend/` owns adapter discovery, operational-profile validation, shared typed views over exact allocated Procedure tasks, and concrete implementations grouped by vendor family;
 - `src/artifact/` owns generated files independently of filesystem persistence;
 - `lab-runfmt` owns the versioned reviewed documents interpreted by the runtime; and
 - `src/bin/labc/` and `src/bin/lab-opt/` own developer-facing command orchestration.
 
-The dependency direction is language model -> LAIR and planning -> adapter invocation -> backend artifacts, with application crates owning filesystems, SBOLInventory loading, and output writes. LAIR and global planning never depend on a concrete robot.
+The dependency direction is language model -> LAIR -> facility planning -> adapter invocation -> backend artifacts, with application crates owning filesystems, SBOLInventory loading, and output writes. LAIR verification remains device-neutral; facility planning currently consumes the adapter catalog through LAIR until the adapter package is extracted.
 
 `lab.adapter-catalog.v2` is the machine-readable implementation contract. Each stable adapter ID declares implementation features and private configuration schema. Its versioned Procedure implementations separately declare a stable implementation IRI, exact Procedure contract and operation set, required capability kinds, accepted control modes, run-document formats, and truthful planning, lowering, simulation, and runtime services. Broad adapter capability declarations are a compatibility surface for operations that have not yet been normalized and are not authority for a normalized Procedure program. A driver is selected only by an explicit manifest binding to an exact Asset IRI, never by manufacturer or model inference.
 

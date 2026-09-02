@@ -81,11 +81,12 @@ Decision records preserve the reasoning and status behind the language rather th
 
 - [LAIR overview](../crates/lab-lair/IR.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
 - [LAIR internals](../crates/lab-lair/README.md) describes the current compiler pipeline and developer commands.
+- [Facility planning internals](../crates/lab-facility/README.md) describe inventory binding, global allocation, and reviewed-plan construction over LAIR contracts.
 - [Language frontend](../crates/lab-language/README.md) describes the source-preserving and checked frontend boundaries.
 - [Portable method definitions](language/capabilities.md) describe the facility-independent Method, Procedure, and Capability documents owned by LAIR and shared with Python extensions.
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
-- The [`lab-lair`](../crates/lab-lair/README.md) crate is the Rust compiler and IR embedding API; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
+- The [`lab-lair`](../crates/lab-lair/README.md) crate is the Rust compiler and IR embedding API, while [`lab-facility`](../crates/lab-facility/README.md) owns facility-aware allocation services; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
 - [PUDU workflow equivalence](integrations/pudu-workflow-equivalence.md) defines and executes the output comparison between the Golden Gate example and PUDU's documented OT-2 workflow.
 

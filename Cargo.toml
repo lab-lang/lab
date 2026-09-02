@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/lab-capability",
     "crates/lab-cli",
+    "crates/lab-facility",
     "crates/lab-lair",
     "crates/lab-ide",
     "crates/lab-ide-wasm",
@@ -72,6 +73,7 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 # Default features stay off at the workspace level so pure protocol use
 # never links the native HID library; a runner re-enables `hid`.
 byonoy-hid = { version = "0.1.0", default-features = false }
+lab-facility = { path = "crates/lab-facility", version = "0.1.2" }
 lab-lair = { path = "crates/lab-lair", version = "0.1.2" }
 lab-capability = { path = "crates/lab-capability", version = "0.1.2" }
 # Default features stay off at the workspace level so the compiler's pure
