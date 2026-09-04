@@ -407,7 +407,7 @@ impl StandardLibrary {
         modules: impl IntoIterator<Item = StandardModule>,
     ) -> Result<Self, CatalogError> {
         let mut indexed = BTreeMap::new();
-        let mut operations = BTreeMap::<&str, &str>::new();
+        let mut operations = BTreeMap::<String, &str>::new();
         for module in modules {
             module.validate()?;
             if indexed.contains_key(module.path) {
@@ -423,11 +423,17 @@ impl StandardLibrary {
                         .iter()
                         .map(|constructor| constructor.operation),
                 )
-                .chain(module.actions.iter().map(|action| action.operation))
+                .chain(
+                    module
+                        .actions
+                        .iter()
+                        .map(|action| action.operation.as_str()),
+                )
+                .map(str::to_owned)
             {
-                if let Some(previous) = operations.insert(operation, module.path) {
+                if let Some(previous) = operations.insert(operation.clone(), module.path) {
                     return Err(CatalogError::DuplicateOperation {
-                        operation: operation.to_owned(),
+                        operation,
                         first_module: previous.to_owned(),
                         second_module: module.path.to_owned(),
                     });
@@ -709,13 +715,13 @@ mod tests {
     #[test]
     fn rejects_malformed_action_contracts_during_registration() {
         let malformed = ActionContractSpec {
-            operation: "std.test.broken",
-            phrase: vec![PhrasePart::Operand {
-                name: "input",
-                r#type: ContractType::Concrete(Ty::String),
-                mode: crate::OwnershipMode::Copy,
-            }],
-            inert: &[],
+            operation: "std.test.broken".to_owned(),
+            phrase: vec![PhrasePart::operand(
+                "input",
+                ContractType::Concrete(Ty::String),
+                crate::OwnershipMode::Copy,
+            )],
+            inert: Vec::new(),
             results: Vec::new(),
         };
         let result = StandardLibrary::from_modules([

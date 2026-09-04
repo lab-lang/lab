@@ -107,7 +107,7 @@ type LineageTable = BTreeMap<String, ActionLineage>;
 pub(crate) struct ActionLineage {
     results: Vec<Lineage>,
     /// Operands whose lineage no result carries on.
-    inert: &'static [&'static str],
+    inert: Vec<String>,
 }
 
 /// What every workflow in a module knows about where its materials came from,
@@ -139,7 +139,7 @@ pub(crate) fn lineage_table(library: &StandardLibrary) -> LineageTable {
                 action.operation.to_owned(),
                 ActionLineage {
                     results,
-                    inert: action.inert,
+                    inert: action.inert.clone(),
                 },
             )
         })
@@ -233,7 +233,8 @@ impl Analyzer<'_> {
                 continue;
             }
             // What an organism sits on is not part of the organism.
-            if declared.is_some_and(|action| action.inert.contains(&argument.name.as_str())) {
+            if declared.is_some_and(|action| action.inert.iter().any(|name| name == &argument.name))
+            {
                 continue;
             }
             match self.map.of(&argument.value) {

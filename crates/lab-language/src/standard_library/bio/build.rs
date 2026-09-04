@@ -12,35 +12,31 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
     let material = Ty::material;
     let concrete = ContractType::Concrete;
     let action = ActionContractSpec {
-        operation: "std.bio.build.realize",
+        operation: "std.bio.build.realize".to_owned(),
         phrase: vec![
-            PhrasePart::Word("realize"),
+            PhrasePart::word("realize"),
             // Realizing is making the thing a declaration describes, whatever
             // kind of thing that is. The declaration carries the recipe, so a
             // plasmid realizes by assembly and a medium by weighing out, and
             // which is a Method's business rather than this contract's.
-            PhrasePart::Operand {
-                name: "design",
-                r#type: ContractType::AnyValue,
-                mode: OwnershipMode::Copy,
-            },
+            PhrasePart::operand("design", ContractType::AnyValue, OwnershipMode::Copy),
             // A realization with no artifact inputs writes nothing, so leaving
             // the clause out says the same thing as passing an empty list.
             PhrasePart::Optional(vec![
-                PhrasePart::Word("from"),
-                PhrasePart::Operand {
-                    name: "dependencies",
-                    r#type: concrete(Ty::List(Box::new(material(named("Plasmid"))))),
-                    mode: OwnershipMode::Take,
-                },
+                PhrasePart::word("from"),
+                PhrasePart::operand(
+                    "dependencies",
+                    concrete(Ty::List(Box::new(material(named("Plasmid"))))),
+                    OwnershipMode::Take,
+                ),
             ]),
         ],
         // Realizing a design assembles DNA rather than establishing an
         // organism, so the product carries the lineage of what went into it.
-        inert: &[],
+        inert: Vec::new(),
         results: vec![ResultSpec {
-            name: "product",
-            r#type: ContractType::MaterialOf("design"),
+            name: "product".to_owned(),
+            r#type: ContractType::MaterialOf("design".to_owned()),
             lineage: Lineage::Continues,
         }],
     };
