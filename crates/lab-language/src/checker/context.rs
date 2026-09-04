@@ -7,13 +7,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::Path;
-use crate::checked::CheckedType;
+use crate::checked::{CheckedActionOperand, CheckedActionResult, CheckedPhraseToken, CheckedType};
 use crate::semantic_error::SemanticError;
-use crate::semantics::{DefinitionId, ExportKind, ModuleId, ModuleInterface, SemanticEnvironment};
+use crate::semantics::{
+    ActionSurface, DefinitionId, ExportKind, ModuleId, ModuleInterface, SemanticEnvironment,
+};
 use crate::source::Span;
 use crate::standard_library::{
-    ActionContractSpec, ConstructorSpec, PureFunctionSpec, StandardLibrary, StandardModule,
-    TypeSpec,
+    ActionContractSpec, ConstructorSpec, ContractType, Lineage, PhrasePart, PureFunctionSpec,
+    ResultSpec, StandardLibrary, StandardModule, TypeSpec,
 };
 use crate::type_system::{Ty, from_checked_type};
 
@@ -65,6 +67,62 @@ pub(super) struct ArtifactKindSignature {
     pub declares: Option<crate::checked::CheckedPresence>,
 }
 
+/// Rebuild the contract a workflow checks against from an imported action's
+/// surface.
+///
+/// A hole becomes a quantity slot for a measurement, an integer slot for a
+/// whole number, and an operand otherwise, exactly as the declaring module
+/// decided; the surface carries enough to make the same choice.
+fn action_contract_from_surface(surface: &ActionSurface) -> ActionContractSpec {
+    let operand = |name: &str| {
+        surface
+            .operands
+            .iter()
+            .find(|operand| operand.name == name)
+            .expect("an action surface names every operand its phrase holds")
+    };
+    let phrase = surface
+        .phrase
+        .iter()
+        .map(|token| match token {
+            CheckedPhraseToken::Word(word) => PhrasePart::word(word),
+            CheckedPhraseToken::Hole(name) => {
+                let operand = operand(name);
+                match from_checked_type(&operand.r#type) {
+                    Ty::Quantity(unit) => PhrasePart::quantity(name, false, &[unit.as_str()]),
+                    Ty::Integer => PhrasePart::integer(name, false),
+                    ty => PhrasePart::operand(name, ContractType::Concrete(ty), operand.mode),
+                }
+            }
+        })
+        .collect();
+    let results = surface
+        .results
+        .iter()
+        .map(|result| ResultSpec {
+            name: result.name.clone(),
+            r#type: ContractType::Concrete(from_checked_type(&result.r#type)),
+            lineage: Lineage::Continues,
+        })
+        .collect();
+    ActionContractSpec {
+        operation: surface.operation.clone(),
+        phrase,
+        results,
+        inert: Vec::new(),
+    }
+}
+
+/// The full contract of an action declared in source.
+#[derive(Clone)]
+pub(super) struct CheckedActionContract {
+    pub operation: String,
+    pub phrase: Vec<CheckedPhraseToken>,
+    pub operands: Vec<CheckedActionOperand>,
+    pub results: Vec<CheckedActionResult>,
+    pub capability: String,
+}
+
 /// A facet in scope: the type it classifies, its states, and the state changes
 /// it admits.
 #[derive(Clone)]
@@ -110,6 +168,13 @@ pub(super) struct SemanticContext {
     pub pure_functions: HashMap<String, PureFunctionSpec>,
     pub constructors: HashMap<String, ConstructorSpec>,
     pub actions: HashMap<String, ActionContractSpec>,
+    /// The full contract of each action declared in source, by verb.
+    ///
+    /// The action map above is what a workflow checks against, shared with the
+    /// standard library. This carries the extra a source declaration states and
+    /// exports: the phrase, the operands and results with their types, and the
+    /// capability, so the compiler can derive a method to run the verb.
+    pub action_contracts: HashMap<String, CheckedActionContract>,
     pub circuits: HashMap<String, CircuitSignature>,
     pub data: HashMap<String, DataSignature>,
     pub cases: HashMap<String, String>,
@@ -165,6 +230,7 @@ impl SemanticContext {
             pure_functions: HashMap::new(),
             constructors: HashMap::new(),
             actions: HashMap::new(),
+            action_contracts: HashMap::new(),
             circuits: HashMap::new(),
             data: HashMap::new(),
             cases: HashMap::new(),
@@ -478,7 +544,14 @@ impl SemanticContext {
                         );
                     }
                 }
-                ExportKind::Workflow | ExportKind::Action => {
+                ExportKind::Action => {
+                    self.insert_imported_name(interface.module.as_str(), name, span)?;
+                    if let Some(surface) = &export.action {
+                        self.actions
+                            .insert(name.clone(), action_contract_from_surface(surface));
+                    }
+                }
+                ExportKind::Workflow => {
                     self.insert_imported_name(interface.module.as_str(), name, span)?;
                     if let Some(signature) = &export.callable {
                         self.workflows.insert(

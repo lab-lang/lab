@@ -115,6 +115,21 @@ impl Checker {
                             .collect(),
                     });
                 }
+                Item::Action(declaration) => {
+                    let contract = self
+                        .action_contracts
+                        .get(&declaration.name.value)
+                        .expect("the action was collected");
+                    declarations.push(CheckedDeclaration::Action {
+                        doc: declaration.doc.clone(),
+                        name: declaration.name.value.clone(),
+                        operation: contract.operation.clone(),
+                        phrase: contract.phrase.clone(),
+                        operands: contract.operands.clone(),
+                        results: contract.results.clone(),
+                        capability: contract.capability.clone(),
+                    });
+                }
                 Item::ArtifactKind(declaration) => {
                     let signature = self
                         .artifact_kinds
@@ -2008,7 +2023,7 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         let CheckedStatement::Effect { action, .. } = &body[0] else {
             panic!("expected effect")
         };
-        assert_eq!(module.schema_version, "lab.portable-module.v10");
+        assert_eq!(module.schema_version, "lab.portable-module.v11");
         assert_eq!(action.operation, "std.lab.plasmid.store");
         assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
         assert_eq!(action.results[0].name, "material");
@@ -2722,6 +2737,137 @@ plasmid sample:
 "#,
         )
         .expect("a rule reads the produced type's field");
+    }
+
+    /// A package declares a durable verb with `action`, and a workflow checks
+    /// against it the way it checks a bundled one. A new verb is a declaration.
+    mod actions {
+        use super::*;
+
+        const CENTRIFUGE: &str = r#"use std.bio.designs
+use std.lab.plasmid
+
+action centrifuge <culture> at <force> for <duration> -> pellet:
+  culture: take Material<Strain is recovered>
+  force: Quantity<rcf>
+  duration: Quantity<min>
+  pellet: Material<Strain is recovered>
+  requires Centrifugation
+
+buy chassis DH5alpha:
+  competence = competent
+  efficiency = 1e9 cfu/ug
+
+buy plasmid p:
+  sbol_identity = "https://example.org/p"
+  sequence = dna("ACGT")
+
+build strain s:
+  chassis = DH5alpha
+  plasmids = [p]
+
+workflow spin(dna: List<Material<Plasmid>>) -> Material<Strain is recovered>:
+  cells <- provision DH5alpha
+  strain, culture <- transform s from dna into cells
+  culture <- recover culture for 1 h
+  pellet <- centrifuge culture at 4000 rcf for 10 min
+  <- dispose strain
+  return pellet
+"#;
+
+        #[test]
+        fn a_declared_verb_checks_in_a_workflow() {
+            let module = compile_module(CENTRIFUGE).expect("a declared verb is usable");
+            let action = module
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    CheckedDeclaration::Action {
+                        name,
+                        operation,
+                        capability,
+                        ..
+                    } => Some((name.clone(), operation.clone(), capability.clone())),
+                    _ => None,
+                });
+            let (name, operation, capability) = action.expect("the action was checked");
+            assert_eq!(name, "centrifuge");
+            assert_eq!(operation, "standalone.centrifuge");
+            assert_eq!(capability, "Centrifugation");
+        }
+
+        /// The phrase is checked as written: a wrong word or a missing operand
+        /// is a diagnostic against the declared shape.
+        #[test]
+        fn refuses_a_call_that_does_not_match_the_phrase() {
+            let wrong = CENTRIFUGE.replace(
+                "centrifuge culture at 4000 rcf for 10 min",
+                "centrifuge culture at 4000 rcf",
+            );
+            let error = compile_module(&wrong).unwrap_err().to_string();
+            assert!(
+                error.contains("centrifuge"),
+                "the phrase is checked against the declaration: {error}"
+            );
+        }
+
+        /// A measurement operand pins its unit, so calling with another is the
+        /// same thousandfold refusal a field gets.
+        #[test]
+        fn a_measurement_operand_checks_its_unit() {
+            let wrong = CENTRIFUGE.replace("at 4000 rcf", "at 4000 g");
+            let error = compile_module(&wrong).unwrap_err().to_string();
+            assert!(
+                error.contains("rcf"),
+                "the operand's unit is what it accepts: {error}"
+            );
+        }
+
+        /// A verb an importing module uses is checked against the same contract
+        /// the declaring module wrote.
+        #[test]
+        fn a_verb_crosses_a_module_boundary() {
+            let verbs = "use std.bio.designs
+
+action chill <culture> for <duration> -> chilled:
+  culture: take Material<Strain is recovered>
+  duration: Quantity<min>
+  chilled: Material<Strain is recovered>
+  requires StaticIncubation
+";
+            let designs =
+                compile_module_with_id(ModuleId::new("pkg.verbs"), verbs).expect("verbs compile");
+            let mut environment = SemanticEnvironment::default();
+            environment.insert("pkg.verbs", designs.interface.clone());
+            compile_module_in_environment(
+                ModuleId::new("pkg.work"),
+                "use std.bio.designs
+use std.lab.plasmid
+use pkg.verbs
+
+workflow w(c: Material<Strain is recovered>) -> Material<Strain is recovered>:
+  c <- chill c for 20 min
+  return c
+",
+                &environment,
+            )
+            .expect("an imported verb checks a workflow");
+        }
+
+        #[test]
+        fn an_action_states_the_capability_it_needs() {
+            let error = compile_module(
+                "action spin <c> -> c:
+  c: take Material<Plasmid>
+",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("capability"),
+                "a verb without a capability cannot be allocated: {error}"
+            );
+        }
     }
 
     #[test]

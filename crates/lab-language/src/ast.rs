@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::checked::OwnershipMode;
 use crate::source::{Identifier, Span};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,6 +48,7 @@ pub enum Item {
     Use(UseDecl),
     Role(RoleDecl),
     Facet(FacetDecl),
+    Action(ActionDecl),
     ArtifactKind(ArtifactKindDecl),
     Circuit(CircuitDecl),
     Artifact(ArtifactDecl),
@@ -61,6 +63,7 @@ impl Item {
             Self::Use(item) => item.span,
             Self::Role(item) => item.span,
             Self::Facet(item) => item.span,
+            Self::Action(item) => item.span,
             Self::ArtifactKind(item) => item.span,
             Self::Circuit(item) => item.span,
             Self::Artifact(item) => item.span,
@@ -94,6 +97,50 @@ pub struct RoleDecl {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UseDecl {
     pub path: Path,
+    pub span: Span,
+}
+
+/// A durable laboratory verb a package declares.
+///
+/// The header is the phrase a workflow writes, with each operand in `<>` and
+/// each result named after `->`. The body types every operand and result, gives
+/// an operand its ownership mode, and names the capability the verb needs. What
+/// the compiler bundles as `centrifuge`, `chill`, and the rest is the same
+/// shape a package supplies, so a new verb is a declaration rather than a
+/// compiler change.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// The verb, which is the phrase's first word.
+    pub name: Identifier,
+    /// The phrase in order: literal words and `<operand>` holes.
+    pub phrase: Vec<PhraseToken>,
+    /// The names a result binds, in order, listed after `->`.
+    pub results: Vec<Identifier>,
+    /// A type, and for an operand an ownership mode, for each named operand and
+    /// result.
+    pub bindings: Vec<ActionBinding>,
+    /// The capability a facility must offer to run this verb.
+    pub capability: Identifier,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "token", rename_all = "snake_case")]
+pub enum PhraseToken {
+    Word(Identifier),
+    Hole(Identifier),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionBinding {
+    pub name: Identifier,
+    /// The ownership mode, where this names an operand. A result is never owned
+    /// by the action, so it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<OwnershipMode>,
+    pub ty: TypeExpr,
     pub span: Span,
 }
 

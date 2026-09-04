@@ -14,7 +14,7 @@ mod prelude;
 pub(crate) use catalog::{
     ConstructorSpec, PureFunctionSpec, StandardLibrary, StandardModule, TypeSpec,
 };
-pub(crate) use contract::{ActionContractSpec, ContractType, Lineage, PhrasePart};
+pub(crate) use contract::{ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec};
 
 pub(crate) fn manifest() -> manifest::Library {
     manifest::library()

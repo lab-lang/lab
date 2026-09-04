@@ -334,6 +334,30 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                     .collect(),
             })
         }
-        ExportKind::Action => None,
+        ExportKind::Action => {
+            let surface = export.action.as_ref()?;
+            Some(Export::Action {
+                name: name.to_owned(),
+                documentation,
+                phrase: surface
+                    .phrase
+                    .iter()
+                    .map(|token| match token {
+                        crate::checked::CheckedPhraseToken::Word(word) => word.clone(),
+                        crate::checked::CheckedPhraseToken::Hole(operand) => operand.clone(),
+                    })
+                    .collect(),
+                optional: Vec::new(),
+                results: surface
+                    .results
+                    .iter()
+                    .map(|result| Field {
+                        name: result.name.clone(),
+                        r#type: result.r#type.display_name(),
+                        optional: false,
+                    })
+                    .collect(),
+            })
+        }
     }
 }

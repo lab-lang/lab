@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checked::OwnershipMode;
 use crate::error::{ParseError, syntax_span};
 use crate::lexer::lex;
 use crate::source::{Identifier, Span, Spanned};
@@ -65,6 +66,10 @@ impl<'a> Parser<'a> {
                 let mut declaration = self.parse_facet()?;
                 declaration.doc = doc;
                 Item::Facet(declaration)
+            } else if self.check_word("action") {
+                let mut declaration = self.parse_action()?;
+                declaration.doc = doc;
+                Item::Action(declaration)
             } else if self.check_word("circuit") {
                 let mut declaration = self.parse_circuit()?;
                 declaration.doc = doc;
@@ -221,6 +226,87 @@ impl<'a> Parser<'a> {
             subject,
             states,
             transitions,
+            span: start.join(end),
+        })
+    }
+
+    /// `action centrifuge <culture> at <force> for <duration> -> pellet:`
+    ///
+    /// The header is the phrase a workflow writes: words as they are, operands
+    /// in `<>`, results after `->`. The block types every operand and result,
+    /// and states the capability the verb needs.
+    fn parse_action(&mut self) -> Result<ActionDecl, ParseError> {
+        let start = self.expect_word("action")?.span;
+        let name = self.take_identifier("an action name")?;
+        let mut phrase = vec![PhraseToken::Word(name.clone())];
+        while !self.check(&TokenKind::RightArrow) && !self.check(&TokenKind::Colon) {
+            if self.consume(&TokenKind::Less).is_some() {
+                let operand = self.take_identifier("an operand name")?;
+                self.expect(TokenKind::Greater)?;
+                phrase.push(PhraseToken::Hole(operand));
+            } else {
+                phrase.push(PhraseToken::Word(self.take_identifier("a phrase word")?));
+            }
+        }
+        let mut results = Vec::new();
+        if self.consume(&TokenKind::RightArrow).is_some() {
+            results.push(self.take_identifier("a result name")?);
+            while self.consume(&TokenKind::Comma).is_some() {
+                results.push(self.take_identifier("a result name")?);
+            }
+        }
+        self.open_block()?;
+        let mut bindings = Vec::new();
+        let mut capability = None;
+        while !self.check(&TokenKind::Dedent) {
+            if self.check_word("requires") {
+                let keyword = self.next().expect("checked");
+                if capability.is_some() {
+                    return Err(syntax_span(
+                        keyword.span,
+                        "an action states the one capability it needs once",
+                    ));
+                }
+                capability = Some(self.take_identifier("a capability")?);
+                self.expect_line_end()?;
+                continue;
+            }
+            let binding = self.take_identifier("an operand or result name")?;
+            self.expect(TokenKind::Colon)?;
+            // An ownership mode is a word before the type, and only an operand
+            // has one. A result is never owned by the action that yields it.
+            let mode = match () {
+                _ if self.check_word("take") => Some(OwnershipMode::Take),
+                _ if self.check_word("borrow") => Some(OwnershipMode::Borrow),
+                _ if self.check_word("copy") => Some(OwnershipMode::Copy),
+                _ => None,
+            };
+            if mode.is_some() {
+                self.next();
+            }
+            let ty = self.parse_type()?;
+            let end = self.expect_line_end()?;
+            bindings.push(ActionBinding {
+                span: binding.span.join(end),
+                name: binding,
+                mode,
+                ty,
+            });
+        }
+        let end = self.expect(TokenKind::Dedent)?.span;
+        let capability = capability.ok_or_else(|| {
+            syntax_span(
+                start,
+                "an action states the capability a facility must offer to run it, written 'requires <Capability>'",
+            )
+        })?;
+        Ok(ActionDecl {
+            doc: None,
+            name,
+            phrase,
+            results,
+            bindings,
+            capability,
             span: start.join(end),
         })
     }

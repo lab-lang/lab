@@ -5,9 +5,10 @@ use lab_language::{Span, ast};
 use crate::{DocumentSymbol, SemanticToken, SemanticTokenKind, SymbolKind};
 
 pub(crate) const KEYWORDS: &[&str] = &[
-    "use", "role", "facet", "on", "build", "buy", "is", "any", "circuit", "artifact", "record",
-    "workflow", "state", "require", "accept", "across", "declares", "if", "else", "for", "in",
-    "match", "case", "return", "when", "every", "after", "emit", "and", "or", "not",
+    "use", "role", "facet", "action", "requires", "on", "build", "buy", "is", "any", "circuit",
+    "artifact", "record", "workflow", "state", "require", "accept", "across", "declares", "if",
+    "else", "for", "in", "match", "case", "return", "when", "every", "after", "emit", "and", "or",
+    "not",
 ];
 
 pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> {
@@ -15,6 +16,7 @@ pub(crate) fn declaration(item: &ast::Item) -> Option<(&str, SymbolKind, Span)> 
         ast::Item::Use(_) => None,
         ast::Item::Role(item) => Some((&item.name.value, SymbolKind::Role, item.name.span)),
         ast::Item::Facet(item) => Some((&item.name.value, SymbolKind::Facet, item.name.span)),
+        ast::Item::Action(item) => Some((&item.name.value, SymbolKind::Action, item.name.span)),
         ast::Item::ArtifactKind(item) => Some((&item.name.value, SymbolKind::Data, item.name.span)),
         ast::Item::Circuit(item) => Some((&item.name.value, SymbolKind::Circuit, item.name.span)),
         ast::Item::Artifact(item) => Some((&item.name.value, SymbolKind::Artifact, item.name.span)),
@@ -32,6 +34,7 @@ pub(crate) fn documentation(item: &ast::Item) -> Option<&str> {
         ast::Item::Use(_) => None,
         ast::Item::Role(item) => item.doc.as_deref(),
         ast::Item::Facet(item) => item.doc.as_deref(),
+        ast::Item::Action(item) => item.doc.as_deref(),
         ast::Item::ArtifactKind(item) => item.doc.as_deref(),
         ast::Item::Circuit(item) => item.doc.as_deref(),
         ast::Item::Artifact(item) => item.doc.as_deref(),
@@ -219,6 +222,11 @@ fn semantic_names(module: Option<&ast::Module>) -> SemanticNames {
             // a role it only ever appears where a type is written.
             ast::Item::Facet(declaration) => {
                 names.types.insert(declaration.name.value.clone());
+            }
+            // A verb reads like the library operations it joins, so it colors
+            // as a function.
+            ast::Item::Action(declaration) => {
+                names.functions.insert(declaration.name.value.clone());
             }
             // A kind's word introduces declarations, so an editor colors it
             // like the keyword it behaves as.

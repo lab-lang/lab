@@ -21,13 +21,14 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// Intent operation identities, typed values, ownership, and exact workflow
 /// callees, while Method definitions separately own capability refinement. A
 /// facet is a declaration of its own, carrying the states a kind's materials
-/// may be in and the changes between them, and a type argument may be narrowed
-/// to one of those states.
+/// may be in and the changes between them, a type argument may be narrowed to one
+/// of those states, and an action declares a durable verb with its phrase,
+/// operands, results, and capability.
 ///
 /// Grounding, design identities, and Intent operation identities are semantic
 /// contracts, so each incompatible change raises the version rather than
 /// riding along as an optional field.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v10";
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v11";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -78,6 +79,25 @@ pub enum CheckedDeclaration {
         /// The state changes this facet admits, as `(from, to)` pairs.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         transitions: Vec<CheckedFacetTransition>,
+    },
+    /// A durable laboratory verb a package declares.
+    ///
+    /// The phrase a workflow writes, its operands and results and their types,
+    /// and the capability it needs travel together, so an importer checks a
+    /// workflow against it and the compiler derives a manual method to run it.
+    Action {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        doc: Option<String>,
+        /// The verb, which is the phrase's first word.
+        name: String,
+        /// The Intent operation this verb refines, namespaced by its module.
+        operation: String,
+        /// The phrase a workflow writes, its words and operand holes in order.
+        phrase: Vec<CheckedPhraseToken>,
+        operands: Vec<CheckedActionOperand>,
+        results: Vec<CheckedActionResult>,
+        /// The capability a facility must offer to run this verb.
+        capability: String,
     },
     /// A name a supplier lists, and the Lab type it stands for.
     ///
@@ -320,6 +340,29 @@ pub struct CheckedSchemaField {
     pub r#type: CheckedType,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+}
+
+/// One token of an action's phrase: a literal word or an operand hole.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "token", rename_all = "snake_case")]
+pub enum CheckedPhraseToken {
+    Word(String),
+    Hole(String),
+}
+
+/// One operand an action takes: its name, its type, and how the action owns it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedActionOperand {
+    pub name: String,
+    pub r#type: CheckedType,
+    pub mode: OwnershipMode,
+}
+
+/// One result an action yields: its name and the type it arrives as.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedActionResult {
+    pub name: String,
+    pub r#type: CheckedType,
 }
 
 /// One state a facet admits, together with what a material in it carries.

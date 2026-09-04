@@ -7,6 +7,7 @@ pub enum SymbolKind {
     Module,
     Role,
     Facet,
+    Action,
     Circuit,
     Artifact,
     Data,

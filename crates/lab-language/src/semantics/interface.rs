@@ -49,6 +49,10 @@ pub struct ModuleExport {
     /// one, so the states are as much of the surface as a schema is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet: Option<FacetSurface>,
+    /// For an action export, the phrase, operands, results, and capability an
+    /// importer checks a workflow against and a compiler derives a method from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action: Option<ActionSurface>,
     /// Type parameters and their bounds, for a type or a callable alike.
     ///
     /// Without these an importer cannot tell a parameter apart from a nominal
@@ -66,6 +70,16 @@ pub struct ArtifactSchema {
     pub fields: Vec<CheckedSchemaField>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declares: Option<crate::checked::CheckedPresence>,
+}
+
+/// What a package's action verb means to a module that imports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionSurface {
+    pub operation: String,
+    pub phrase: Vec<crate::checked::CheckedPhraseToken>,
+    pub operands: Vec<crate::checked::CheckedActionOperand>,
+    pub results: Vec<crate::checked::CheckedActionResult>,
+    pub capability: String,
 }
 
 /// What a package's facet means to a module that imports it.

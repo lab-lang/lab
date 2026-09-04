@@ -5,22 +5,27 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::{
-    ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FacetDecl, FieldDecl, Item, Module,
-    Path, Provenance, TypeArgument, TypeExpr, Unit, WorkflowOutputs, instance_word,
+    ActionDecl, ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FacetDecl, FieldDecl,
+    Item, Module, Path, PhraseToken, Provenance, TypeArgument, TypeExpr, Unit, WorkflowOutputs,
+    instance_word,
 };
 use crate::checked::{
-    CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
-    CheckedSection,
+    CheckedAcceptance, CheckedActionOperand, CheckedActionResult, CheckedCase, CheckedDeclaration,
+    CheckedPhraseToken, CheckedPresence, CheckedProperty, CheckedSection, OwnershipMode,
 };
 use crate::is_absolute_iri;
 use crate::semantic_error::SemanticError;
 use crate::source::{Identifier, Span};
+use crate::standard_library::{
+    ActionContractSpec, ContractType, Lineage as ContractLineage, PhrasePart as ContractPhrasePart,
+    ResultSpec as ContractResultSpec,
+};
 use crate::type_system::{Ty, to_checked_type};
 
 use super::Checker;
 use super::context::{
-    ArtifactKindSignature, CircuitSignature, DataSignature, FacetSignature, FacetState, Generics,
-    SchemaField, WorkflowSignature,
+    ArtifactKindSignature, CheckedActionContract, CircuitSignature, DataSignature, FacetSignature,
+    FacetState, Generics, SchemaField, WorkflowSignature,
 };
 
 /// Where a type parameter's name appears in a signature, in source order.
@@ -254,6 +259,7 @@ impl Checker {
                 Item::Use(_) => continue,
                 Item::Role(value) => (&value.name.value, value.name.span),
                 Item::Facet(value) => (&value.name.value, value.name.span),
+                Item::Action(value) => (&value.name.value, value.name.span),
                 Item::ArtifactKind(value) => (&value.name.value, value.name.span),
                 Item::Circuit(value) => (&value.name.value, value.name.span),
                 Item::Artifact(value) => (&value.name.value, value.name.span),
@@ -322,6 +328,15 @@ impl Checker {
             }
         }
 
+        // Actions register after facets, because an operand may be narrowed to a
+        // facet state and the states must be known by then. A verb the workflow
+        // pass then reads is checked against the contract collected here.
+        for item in &module.items {
+            if let Item::Action(declaration) = item {
+                self.collect_action(declaration)?;
+            }
+        }
+
         for item in &module.items {
             match item {
                 Item::Circuit(declaration) => {
@@ -348,8 +363,8 @@ impl Checker {
                         },
                     );
                 }
-                // Both are collected in passes of their own.
-                Item::Role(_) | Item::Facet(_) => {}
+                // Each is collected in a pass of its own.
+                Item::Role(_) | Item::Facet(_) | Item::Action(_) => {}
                 Item::ArtifactKind(declaration) => {
                     let produces = self.lower_kind_type(&declaration.produces)?;
                     // A kind's roles classify the type it produces, because
@@ -689,6 +704,138 @@ impl Checker {
         } else {
             error.help(format!("states of '{subject_name}': {}", known.join(", ")))
         })
+    }
+
+    /// Validate one action and register its contract so workflows check
+    /// against it.
+    ///
+    /// The phrase's holes are typed by the body, and each hole's type decides
+    /// the part it becomes: a measurement is a quantity slot, a whole number an
+    /// integer slot, and anything else a material or value operand.
+    fn collect_action(&mut self, declaration: &ActionDecl) -> Result<(), SemanticError> {
+        let mut binding_types = BTreeMap::new();
+        let mut binding_modes = BTreeMap::new();
+        for binding in &declaration.bindings {
+            let ty = self.lower_type(&binding.ty, &BTreeSet::new())?;
+            if binding_types
+                .insert(binding.name.value.clone(), ty)
+                .is_some()
+            {
+                return Err(SemanticError::new(
+                    binding.name.span,
+                    format!("'{}' is typed more than once", binding.name.value),
+                ));
+            }
+            binding_modes.insert(binding.name.value.clone(), binding.mode);
+        }
+
+        let hole = |name: &Identifier| -> Result<Ty, SemanticError> {
+            binding_types.get(&name.value).cloned().ok_or_else(|| {
+                SemanticError::new(
+                    name.span,
+                    format!(
+                        "operand '{}' is named in the phrase but never typed",
+                        name.value
+                    ),
+                )
+            })
+        };
+
+        let mut phrase = Vec::new();
+        let mut phrase_tokens = Vec::new();
+        for token in &declaration.phrase {
+            match token {
+                PhraseToken::Word(word) => {
+                    phrase.push(ContractPhrasePart::word(&word.value));
+                    phrase_tokens.push(CheckedPhraseToken::Word(word.value.clone()));
+                }
+                PhraseToken::Hole(name) => {
+                    let ty = hole(name)?;
+                    phrase.push(self.action_operand_part(name, &ty, binding_modes[&name.value])?);
+                    phrase_tokens.push(CheckedPhraseToken::Hole(name.value.clone()));
+                }
+            }
+        }
+
+        let mut operands = Vec::new();
+        for token in &declaration.phrase {
+            if let PhraseToken::Hole(name) = token {
+                let ty = hole(name)?;
+                operands.push(CheckedActionOperand {
+                    name: name.value.clone(),
+                    r#type: to_checked_type(&ty),
+                    mode: binding_modes[&name.value].unwrap_or(OwnershipMode::Take),
+                });
+            }
+        }
+
+        let mut results = Vec::new();
+        let mut result_specs = Vec::new();
+        for name in &declaration.results {
+            let ty = hole(name)?;
+            results.push(CheckedActionResult {
+                name: name.value.clone(),
+                r#type: to_checked_type(&ty),
+            });
+            result_specs.push(ContractResultSpec {
+                name: name.value.clone(),
+                r#type: ContractType::Concrete(ty),
+                lineage: ContractLineage::Continues,
+            });
+        }
+
+        let operation = format!("{}.{}", self.module_id.as_str(), declaration.name.value);
+        let contract = ActionContractSpec {
+            operation: operation.clone(),
+            phrase,
+            results: result_specs,
+            inert: Vec::new(),
+        };
+        contract.validate().map_err(|message| {
+            SemanticError::new(
+                declaration.name.span,
+                format!("malformed action: {message}"),
+            )
+        })?;
+        self.actions
+            .insert(declaration.name.value.clone(), contract);
+        self.action_contracts.insert(
+            declaration.name.value.clone(),
+            CheckedActionContract {
+                operation,
+                phrase: phrase_tokens,
+                operands,
+                results,
+                capability: declaration.capability.value.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    /// The phrase part one operand hole becomes, chosen by its type.
+    fn action_operand_part(
+        &self,
+        name: &Identifier,
+        ty: &Ty,
+        mode: Option<OwnershipMode>,
+    ) -> Result<ContractPhrasePart, SemanticError> {
+        match ty {
+            Ty::Quantity(unit) => Ok(ContractPhrasePart::quantity(&name.value, false, &[unit])),
+            Ty::Integer => Ok(ContractPhrasePart::integer(&name.value, false)),
+            Ty::Measuring(_) => Err(SemanticError::new(
+                name.span,
+                format!(
+                    "operand '{}' must state one unit, not a dimension",
+                    name.value
+                ),
+            )
+            .help("an action operand pins its unit; a field may name a dimension")),
+            _ => Ok(ContractPhrasePart::operand(
+                &name.value,
+                ContractType::Concrete(ty.clone()),
+                mode.unwrap_or(OwnershipMode::Take),
+            )),
+        }
     }
 
     /// Validate one facet and register it against the type it classifies.

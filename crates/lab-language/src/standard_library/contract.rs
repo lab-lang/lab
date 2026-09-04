@@ -137,7 +137,7 @@ impl ActionContractSpec {
         }
     }
 
-    pub(in crate::standard_library) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         let action = self
             .source_name()
             .ok_or_else(|| "action phrase must begin with its source name".to_owned())?;
