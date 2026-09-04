@@ -1,0 +1,11 @@
+use std.bio.designs
+use std.bio.build
+
+build medium LB_broth:
+  components = [
+    Ingredient { substance: "tryptone", concentration: 10 g/L },
+  ]
+
+workflow main() -> Material<Medium>:
+  product <- realize LB_broth
+  return product

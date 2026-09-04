@@ -460,6 +460,11 @@ fn write_facility_plan(
         None
     };
 
+    let mut documents = lowered.documents;
+    if let Some(run_sheet) = write_manual_run_sheet(package, invocations, output_root)? {
+        documents.push(run_sheet);
+    }
+
     let bundles = lowered
         .manifest
         .routes
@@ -490,8 +495,49 @@ fn write_facility_plan(
         execution_plan: execution_plan_path,
         bundles,
         protocols: lowered.protocols,
-        documents: lowered.documents,
+        documents,
     })
+}
+
+/// Typeset the operator run sheet for the plan's manual steps.
+///
+/// An instrument's steps arrive with their own operator manual from the
+/// adapter that lowered them; the manual steps have no adapter, so the run
+/// sheet is where a person reads them. A plan with no manual step writes
+/// nothing.
+fn write_manual_run_sheet(
+    package: &lab_package::LabPackage,
+    invocations: &lab_adapters::AdapterInvocationPlan,
+    output_root: &Path,
+) -> Result<Option<PathBuf>> {
+    let steps = lab_facility::manual_run_steps(invocations);
+    if steps.is_empty() {
+        return Ok(None);
+    }
+    let source = lab_adapters::run_sheet::render_run_sheet(&lab_adapters::run_sheet::RunSheet {
+        package: package.manifest.package.name.clone(),
+        version: package.manifest.package.version.clone(),
+        facility: invocations.allocated.facility.clone(),
+        steps,
+    });
+    let directory = output_root.join("documents");
+    fs::create_dir_all(&directory)
+        .with_context(|| format!("failed to create {}", directory.display()))?;
+    fs::write(
+        directory.join(lab_adapters::run_sheet::RUN_SHEET_STYLE_PATH),
+        lab_adapters::run_sheet::RUN_SHEET_STYLE,
+    )
+    .context("failed to write the run-sheet style sheet")?;
+    let source_path = directory.join("manual_protocol.typ");
+    fs::write(&source_path, &source)
+        .with_context(|| format!("failed to write {}", source_path.display()))?;
+    let pdf = crate::typeset::Typesetter::new()
+        .compile_pdf(&directory, "manual_protocol.typ")
+        .context("failed to typeset the manual run sheet")?;
+    let pdf_path = directory.join("manual_protocol.pdf");
+    fs::write(&pdf_path, &pdf)
+        .with_context(|| format!("failed to write {}", pdf_path.display()))?;
+    Ok(Some(pdf_path))
 }
 
 fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {

@@ -13,6 +13,7 @@ pub mod opentrons;
 mod procedure;
 mod profile;
 mod resources;
+pub mod run_sheet;
 mod typst;
 
 pub use adapters::{

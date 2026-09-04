@@ -1418,7 +1418,9 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     );
     assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
     assert_eq!(facility["protocols"].as_array().unwrap().len(), 3);
-    assert_eq!(facility["documents"].as_array().unwrap().len(), 4);
+    // Four adapter operator documents plus the run sheet for the plan's
+    // manual-control steps.
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 5);
     for path in facility["protocols"]
         .as_array()
         .unwrap()

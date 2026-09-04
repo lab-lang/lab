@@ -18,7 +18,7 @@ pub use backend::{
     ValidatedAdapterProfile, adapter_catalog, default_adapter_profile,
     lower_adapter_invocation_with_adapter, validate_adapter_profile,
 };
-pub use backend::{hamilton, inheco, opentrons};
+pub use backend::{hamilton, inheco, opentrons, run_sheet};
 pub use invocation::{
     ADAPTER_INVOCATIONS_SCHEMA_VERSION, AdapterInvocation, AdapterInvocationError,
     AdapterInvocationPlan, AdapterInvocationValidationError, adapter_invocation_id,
