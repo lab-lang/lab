@@ -1668,6 +1668,7 @@ Temperature, and Count",
                 }
                 Ok(match name.as_str() {
                     "Integer" => Ty::Integer,
+                    "Decimal" => Ty::Decimal,
                     "String" => Ty::String,
                     "Bool" => Ty::Bool,
                     "None" => Ty::None,

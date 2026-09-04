@@ -91,10 +91,6 @@ fn quoted_fields(fields: &[&str]) -> String {
 pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
     EmptyBuild,
-    #[error(
-        "portable LAIR lowering does not support artifact kind '{kind}' declared by '{artifact}'"
-    )]
-    UnsupportedArtifactKind { artifact: String, kind: String },
     #[error("artifact '{artifact}' is missing workflow input '{field}'")]
     MissingField {
         artifact: String,
@@ -160,6 +156,13 @@ incomplete; add {missing} to assemble it, or remove {present} to build it by ano
 pub(crate) enum BuildArtifactIntent {
     Plasmid(PlasmidArtifactIntent),
     Strain(StrainArtifactIntent),
+    /// An artifact of a kind with no lowering contract of its own.
+    ///
+    /// A plasmid carries an assembly recipe and a strain carries transformation
+    /// chemistry, and each has a lowering that reads those facts. Everything
+    /// else a laboratory makes is realized from its declaration: the design
+    /// says what it is, and a Method says how making it runs.
+    Made(MadeArtifactIntent),
 }
 
 impl BuildArtifactIntent {
@@ -167,6 +170,7 @@ impl BuildArtifactIntent {
         match self {
             Self::Plasmid(intent) => &intent.name,
             Self::Strain(intent) => &intent.name,
+            Self::Made(intent) => &intent.name,
         }
     }
 
@@ -174,6 +178,7 @@ impl BuildArtifactIntent {
         match self {
             Self::Plasmid(intent) => &intent.dependencies,
             Self::Strain(intent) => &intent.dependencies,
+            Self::Made(intent) => &intent.dependencies,
         }
     }
 
@@ -181,8 +186,22 @@ impl BuildArtifactIntent {
         match self {
             Self::Plasmid(intent) => &intent.actions,
             Self::Strain(intent) => &intent.actions,
+            Self::Made(intent) => &intent.actions,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MadeArtifactIntent {
+    pub name: String,
+    /// The word the package declared this kind with.
+    pub kind: String,
+    /// The state the realized product arrives in, named for the type the kind
+    /// produces: a realized medium is a `MediumProduct` the way a realized
+    /// plasmid is a `PlasmidProduct`.
+    pub state: String,
+    pub dependencies: Vec<String>,
+    pub actions: Vec<WorkflowActionIntent>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -312,6 +331,7 @@ pub(crate) fn lower_build_intent(
             let CheckedDeclaration::Artifact {
                 artifact,
                 name,
+                produces,
                 properties,
                 ..
             } = declaration
@@ -322,6 +342,7 @@ pub(crate) fn lower_build_intent(
                 module.module.as_str(),
                 artifact.as_str(),
                 name,
+                produces,
                 properties,
                 &context,
             )?);
@@ -343,6 +364,7 @@ fn lower_artifact(
     module: &str,
     kind: &str,
     name: &str,
+    produces: &lab_language::CheckedType,
     properties: &[lab_language::CheckedProperty],
     context: &BuildLoweringContext<'_>,
 ) -> Result<BuildArtifactIntent, SourceLoweringError> {
@@ -501,12 +523,13 @@ fn lower_artifact(
             },
             actions: flow.actions.clone(),
         })),
-        // The initial portable lowering supports plasmid and strain intents. A
-        // package may declare other kinds, which require their own lowering contract.
-        other => Err(SourceLoweringError::UnsupportedArtifactKind {
-            artifact: name.to_owned(),
+        other => Ok(BuildArtifactIntent::Made(MadeArtifactIntent {
+            name: name.to_owned(),
             kind: other.to_owned(),
-        }),
+            state: format!("{}Product", produces.subject().display_name()),
+            dependencies: flow.dependencies.clone(),
+            actions: flow.actions.clone(),
+        })),
     }
 }
 

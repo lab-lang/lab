@@ -85,17 +85,22 @@ pub struct RealizeOp;
 
 impl RealizeOp {
     /// Construct an artifact-realization Intent without assuming a laboratory method.
+    ///
+    /// The product's state is named for what is being realized. A plasmid
+    /// arrives as `PlasmidProduct` and a medium as `MediumProduct`, and the
+    /// caller says which because the caller read the declaration.
     pub fn new(
         ctx: &mut Context,
         design: Value,
         artifact_name: impl Into<String>,
         dependencies: Vec<String>,
+        state: &str,
     ) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::state(ctx, "PlasmidProduct")],
+                vec![MaterialType::state(ctx, state)],
                 vec![design],
                 vec![],
                 0,
@@ -119,7 +124,7 @@ impl RealizeOp {
         assembly_replicates: u8,
         chemistry: DictAttr,
     ) -> Self {
-        let result = Self::new(ctx, design, artifact_name, dependencies);
+        let result = Self::new(ctx, design, artifact_name, dependencies, "PlasmidProduct");
         result.set_attr_realize_backbone(ctx, StringAttr::new(backbone.into()));
         result.set_attr_realize_components(ctx, string_vec(components));
         result.set_attr_realize_restriction_enzyme(ctx, StringAttr::new(restriction_enzyme.into()));
@@ -184,9 +189,20 @@ impl Verify for RealizeOp {
                 self.loc(ctx),
             )?;
         }
-        require_material(
+        // Which state the product arrives in is named for what is realized, so
+        // the verifier checks that it is a material rather than which one. A
+        // Golden Gate recipe still implies a plasmid, and says so.
+        if present == recipe_attributes.len() {
+            return require_material(
+                self.get_result_product(ctx),
+                "PlasmidProduct",
+                self.loc(ctx),
+                ctx,
+            );
+        }
+        require_any_material(
             self.get_result_product(ctx),
-            "PlasmidProduct",
+            "workflow.realize product",
             self.loc(ctx),
             ctx,
         )

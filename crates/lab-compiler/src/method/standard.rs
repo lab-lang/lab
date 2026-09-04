@@ -65,7 +65,7 @@ fn artifact_realization_service() -> MethodDefinition {
             "realize",
             "RealizeArtifact",
             vec![input_ref("design")],
-            vec![output("product", material("PlasmidProduct"))],
+            vec![output("product", PortType::MaterialAsRequested)],
             select_parameters(&parameters, &["artifact", "dependencies"]),
             vec![material_parameter("dependencies", "dependencies")],
             vec![requirement(
@@ -216,7 +216,7 @@ fn golden_gate_method(method_id: &str, setup: GoldenGateSetupMethod) -> MethodDe
                 "cycle-reaction",
                 "ThermalCycleGoldenGateReaction",
                 vec![task_ref("setup-reaction", "reaction")],
-                vec![output("product", material("PlasmidProduct"))],
+                vec![output("product", PortType::MaterialAsRequested)],
                 cycling_task_parameters,
                 vec![],
                 vec![requirement(

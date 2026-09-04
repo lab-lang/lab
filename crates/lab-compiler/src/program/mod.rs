@@ -21,7 +21,9 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use self::lowering::{BuildArtifactIntent, WorkflowActionIntent, lower_build_intent};
-use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
+use crate::design::ir::{
+    DesignDnaSequenceOp, DesignMadeArtifactOp, DesignPlasmidOp, DesignStrainOp,
+};
 use crate::ir::attributes::quantity_dict;
 use crate::stage::{IrStage, detect_stage, initialize_stage, set_stage};
 use crate::workflow::ir::{DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp};
@@ -141,6 +143,16 @@ impl PortableLairProgram {
                         intent.chassis.clone(),
                         intent.plasmids.clone(),
                         intent.selection.clone(),
+                    );
+                    let design = operation.get_result_design(&context);
+                    root.append_operation(&mut context, operation.get_operation(), 0);
+                    design
+                }
+                BuildArtifactIntent::Made(intent) => {
+                    let operation = DesignMadeArtifactOp::new(
+                        &mut context,
+                        intent.name.clone(),
+                        intent.kind.clone(),
                     );
                     let design = operation.get_result_design(&context);
                     root.append_operation(&mut context, operation.get_operation(), 0);
@@ -337,23 +349,37 @@ fn append_workflow(
     for action in artifact.actions() {
         match action {
             WorkflowActionIntent::Realize { product } => {
-                let BuildArtifactIntent::Plasmid(intent) = &artifact else {
-                    return Err(unsupported_realization(&name, "realize", "plasmid"));
-                };
-                let operation = if let Some(recipe) = &intent.recipe {
-                    RealizeOp::golden_gate(
+                let operation = match &artifact {
+                    BuildArtifactIntent::Plasmid(intent) => match &intent.recipe {
+                        Some(recipe) => RealizeOp::golden_gate(
+                            context,
+                            design,
+                            name.clone(),
+                            recipe.backbone.clone(),
+                            recipe.components.clone(),
+                            dependencies.clone(),
+                            recipe.restriction_enzyme.clone(),
+                            recipe.assembly_replicates,
+                            assembly_chemistry(&recipe.chemistry, context),
+                        ),
+                        None => RealizeOp::new(
+                            context,
+                            design,
+                            name.clone(),
+                            dependencies.clone(),
+                            "PlasmidProduct",
+                        ),
+                    },
+                    BuildArtifactIntent::Made(intent) => RealizeOp::new(
                         context,
                         design,
                         name.clone(),
-                        recipe.backbone.clone(),
-                        recipe.components.clone(),
                         dependencies.clone(),
-                        recipe.restriction_enzyme.clone(),
-                        recipe.assembly_replicates,
-                        assembly_chemistry(&recipe.chemistry, context),
-                    )
-                } else {
-                    RealizeOp::new(context, design, name.clone(), dependencies.clone())
+                        &intent.state,
+                    ),
+                    BuildArtifactIntent::Strain(_) => {
+                        return Err(unsupported_realization(&name, "realize", "plasmid"));
+                    }
                 };
                 values.insert(product.clone(), operation.get_result_product(context));
                 root.append_operation(context, operation.get_operation(), 0);
@@ -726,6 +752,56 @@ workflow build_second() -> Material<Plasmid>:
     /// arrived in LAIR as a value the IR believed was a tube of cells and no
     /// later check disagreed. One provisioning signature still serves every
     /// kind, because the state is the one the Intent asked for.
+    /// The reason the whole state machinery exists: making LB media.
+    ///
+    /// A medium is realized from its declaration exactly as a plasmid is, and
+    /// arrives as a `MediumProduct` rather than being refused for not being a
+    /// plasmid. The Golden Gate methods do not apply, because the Intent
+    /// carries no assembly recipe, so the one candidate is manual realization.
+    #[test]
+    fn a_medium_realizes_without_being_a_plasmid() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+
+build medium LB_broth:
+  sbol_identity = "https://example.org/media/LB_broth"
+  ph = 7.0
+  components = [
+    Ingredient { substance: "tryptone", concentration: 10 g/L },
+    Ingredient { substance: "yeast extract", concentration: 5 g/L },
+    Ingredient { substance: "sodium chloride", concentration: 10 g/L },
+  ]
+
+workflow make_LB() -> Material<Medium>:
+  product <- realize LB_broth
+  return product
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("module checks");
+        let program = PortableLairProgram::lower(&module).expect("program lowers");
+        let intent = program.ir();
+        assert!(
+            intent.contains("design.made_artifact"),
+            "a medium has a design of its own: {intent}"
+        );
+        assert!(
+            intent.contains("material-state#MediumProduct"),
+            "a realized medium is a MediumProduct: {intent}"
+        );
+
+        let refined = program
+            .refine_methods(crate::method::standard_method_registry())
+            .expect("the manual realization method refines it")
+            .ir();
+        assert!(
+            refined.contains("method#manual-artifact-realization"),
+            "manual realization applies: {refined}"
+        );
+        assert!(
+            !refined.contains("golden-gate"),
+            "an Intent with no assembly recipe is not a Golden Gate candidate: {refined}"
+        );
+    }
+
     #[test]
     fn provisioning_yields_the_state_of_the_thing_fetched() {
         const SOURCE: &str = r#"use std.bio.designs

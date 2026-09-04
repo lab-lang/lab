@@ -15,9 +15,13 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
         operation: "std.bio.build.realize",
         phrase: vec![
             PhrasePart::Word("realize"),
+            // Realizing is making the thing a declaration describes, whatever
+            // kind of thing that is. The declaration carries the recipe, so a
+            // plasmid realizes by assembly and a medium by weighing out, and
+            // which is a Method's business rather than this contract's.
             PhrasePart::Operand {
                 name: "design",
-                r#type: concrete(named("Plasmid")),
+                r#type: ContractType::AnyValue,
                 mode: OwnershipMode::Copy,
             },
             // A realization with no artifact inputs writes nothing, so leaving
@@ -36,7 +40,7 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
         inert: &[],
         results: vec![ResultSpec {
             name: "product",
-            r#type: concrete(material(named("Plasmid"))),
+            r#type: ContractType::MaterialOf("design"),
             lineage: Lineage::Continues,
         }],
     };
