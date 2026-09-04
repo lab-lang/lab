@@ -31,7 +31,8 @@ pub use pipetting::{
 };
 pub use program::{ProcedureProgram, ProcedureProgramValidationError, ValidatedProcedureProgram};
 pub use quantity::{
-    Duration, Length, QuantityError, Temperature, TemperatureRampRate, TemperatureRange, Volume,
+    Duration, Length, Mass, MassConcentration, QuantityError, Temperature, TemperatureRampRate,
+    TemperatureRange, Volume,
 };
 pub use thermal::{
     ThermalLoad, ThermalProgramV1, ThermalProgramValidationError, ThermalStage, ThermalStep,

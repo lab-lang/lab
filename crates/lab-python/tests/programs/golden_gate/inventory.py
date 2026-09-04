@@ -7,7 +7,16 @@ resolution and a runtime evidence question.
 
 import lab
 from lab import dna
-from lab.bio.designs import CDS, Antibiotic, Backbone, Chassis, Part, Promoter, RestrictionEnzyme
+from lab.bio.designs import (
+    Antibiotic,
+    Backbone,
+    CDS,
+    Chassis,
+    Part,
+    Promoter,
+    RestrictionEnzyme,
+    competent,
+)
 from lab.units import C, minutes
 
 module = lab.Module("golden_gate.designs.inventory", doc=__doc__)
@@ -119,6 +128,7 @@ recovery_medium = Reagent.buy(
 # Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
 # Both are transformed the way competent cells are: chilled, shocked, recovered.
 DH5alpha = Chassis.buy(
+    competence=competent,
     sbol_identity="https://sbolcanvas.org/DH5alpha",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
@@ -127,6 +137,7 @@ DH5alpha = Chassis.buy(
 )
 
 BL21 = Chassis.buy(
+    competence=competent,
     sbol_identity="https://sbolcanvas.org/BL21",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,

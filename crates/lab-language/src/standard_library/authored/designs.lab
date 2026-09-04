@@ -86,6 +86,26 @@ artifact Chassis is FunctionalEntity:
   recovery_temperature?: Quantity<C>
   recovery_duration?: Quantity<min>
 
+/**
+ * Whether a chassis will take up DNA.
+ *
+ * Cells are made competent or bought that way, and the difference matters to
+ * the one operation that needs it: transformation takes cells that are, and
+ * says so, rather than trusting that whatever was fetched will do.
+ *
+ * How competent they are is the batch's own number. A preparation is accepted
+ * on a control transformation, so the efficiency belongs to the cells rather
+ * than to the strain they came from or the plasmid they will carry.
+ */
+facet Competence on Chassis:
+  /** Cells as they grow, which take up nothing. */
+  naive
+  /** Cells a transformation may be attempted in. */
+  competent:
+    efficiency: Quantity<cfu/ug>
+
+  naive -> competent
+
 /** A selection agent a transformed culture is plated on. */
 artifact Antibiotic is SimpleChemical
 

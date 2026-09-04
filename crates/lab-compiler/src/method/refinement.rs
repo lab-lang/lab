@@ -80,11 +80,8 @@ impl DialectConversion for MethodRefinement<'_> {
     }
 
     fn convert_type(&mut self, context: &mut Context, ty: TypeHandle) -> Result<TypeHandle> {
-        let material = {
-            let ty = ty.deref(context);
-            ty.downcast_ref::<WorkflowMaterialType>().copied()
-        };
-        Ok(material.map_or(ty, |material| workflow_material_type(context, material)))
+        let state = workflow_material_state(context, ty);
+        Ok(state.map_or(ty, |state| procedure_material_type(context, &state)))
     }
 
     fn rewrite(
@@ -131,10 +128,14 @@ impl DialectConversion for MethodRefinement<'_> {
             .iter()
             .map(|candidate| candidate.id.clone())
             .collect::<Vec<_>>();
+        // A port whose state the Intent decides reads it from the result it
+        // corresponds to, so the Intent's own result types are resolved first.
+        let requested = requested_types(context, operation);
         let result_types = signature
             .outputs
             .iter()
-            .map(|output| port_type(context, &output.port_type))
+            .zip(requested.iter().copied())
+            .map(|(output, requested)| port_type(context, &output.port_type, requested))
             .collect::<Vec<_>>();
         let choice_artifact = text_parameter(&instance.parameters, "artifact");
         let choice_dependencies = text_list_parameter(&instance.parameters, "dependencies");
@@ -468,6 +469,26 @@ fn append_candidate(
         .deref(context)
         .arguments()
         .collect::<Vec<_>>();
+    // A task output whose state the Intent decides reads it from the choice
+    // result the Method exports it as. Ports that name their own state ignore
+    // this map entirely.
+    let choice_results = choice
+        .get_operation()
+        .deref(context)
+        .results()
+        .map(|value| value.get_type(context))
+        .collect::<Vec<_>>();
+    let requested_by_task_output = method
+        .outputs
+        .iter()
+        .zip(choice_results)
+        .filter_map(|(output, ty)| match &output.source {
+            ValueReference::TaskOutput { task, output } => {
+                Some(((task.clone(), output.clone()), ty))
+            }
+            ValueReference::Input { .. } => None,
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut values = method
         .inputs
         .iter()
@@ -490,7 +511,12 @@ fn append_candidate(
         let task_results = task
             .outputs
             .iter()
-            .map(|output| port_type(context, &output.port_type))
+            .map(|output| {
+                let requested = requested_by_task_output
+                    .get(&(task.id.clone(), output.name.clone()))
+                    .copied();
+                port_type(context, &output.port_type, requested)
+            })
             .collect();
         let node_id = qualified_id(choice_id, &method.id, &task.id);
         let output_names = task
@@ -808,7 +834,7 @@ fn verify_inputs(
         );
     }
     for (expected, actual) in expected.iter().zip(operands) {
-        if port_type_readonly(context, &expected.port_type) != actual.get_type(context) {
+        if port_type_readonly(context, &expected.port_type, None) != actual.get_type(context) {
             return input_err!(
                 operation.deref(context).loc(),
                 "Intent input '{}' does not match its method signature",
@@ -846,7 +872,7 @@ fn verify_results(
     }
     for (expected, actual) in expected.iter().zip(actual) {
         let actual_type = converted_type_readonly(context, actual.get_type(context));
-        if port_type_readonly(context, &expected.port_type) != actual_type {
+        if port_type_readonly(context, &expected.port_type, Some(actual_type)) != actual_type {
             return input_err!(
                 operation.deref(context).loc(),
                 "Intent result '{}' does not match its method signature",
@@ -858,74 +884,73 @@ fn verify_results(
 }
 
 fn converted_type_readonly(context: &Context, ty: TypeHandle) -> TypeHandle {
-    let material = {
-        let ty = ty.deref(context);
-        ty.downcast_ref::<WorkflowMaterialType>().copied()
-    };
-    material.map_or(ty, |material| {
-        workflow_material_type_readonly(context, material)
+    let state = workflow_material_state(context, ty);
+    state.map_or(ty, |state| {
+        ProcedureMaterialType::get(context, StringAttr::new(state)).into()
     })
 }
 
-fn workflow_material_type(context: &mut Context, material: WorkflowMaterialType) -> TypeHandle {
-    procedure_material_type(context, workflow_state(material))
+/// The state a Workflow material names, if the type is one.
+///
+/// Refinement carries the state across the dialect boundary unchanged. Both
+/// sides name a state by the same IRI, so there is nothing to translate and no
+/// table that could fall out of step with the states a package declares.
+fn workflow_material_state(context: &Context, ty: TypeHandle) -> Option<String> {
+    ty.deref(context)
+        .downcast_ref::<WorkflowMaterialType>()
+        .map(|material| material.iri().to_owned())
 }
 
-fn workflow_material_type_readonly(
-    context: &Context,
-    material: WorkflowMaterialType,
+/// The concrete type of one port.
+///
+/// `requested` is the type the Intent operation's corresponding result carries,
+/// which is what a port whose state the Intent decides resolves to. Every other
+/// port names its own type and ignores it.
+fn port_type(
+    context: &mut Context,
+    port_type: &PortType,
+    requested: Option<TypeHandle>,
 ) -> TypeHandle {
-    ProcedureMaterialType::get(
-        context,
-        StringAttr::new(workflow_state(material).to_owned()),
-    )
-    .into()
-}
-
-fn workflow_state(material: WorkflowMaterialType) -> &'static str {
-    match material {
-        WorkflowMaterialType::PlasmidProduct => {
-            "https://www.lab-compiler.org/ns/material-state#PlasmidProduct"
-        }
-        WorkflowMaterialType::StrainProduct => {
-            "https://www.lab-compiler.org/ns/material-state#StrainProduct"
-        }
-        WorkflowMaterialType::CompetentCells => {
-            "https://www.lab-compiler.org/ns/material-state#CompetentCells"
-        }
-        WorkflowMaterialType::TransformedCulture => {
-            "https://www.lab-compiler.org/ns/material-state#TransformedCulture"
-        }
-        WorkflowMaterialType::RecoveredCulture => {
-            "https://www.lab-compiler.org/ns/material-state#RecoveredCulture"
-        }
-        WorkflowMaterialType::DilutedCulture => {
-            "https://www.lab-compiler.org/ns/material-state#DilutedCulture"
-        }
-        WorkflowMaterialType::Plate => "https://www.lab-compiler.org/ns/material-state#Plate",
-    }
-}
-
-fn port_type(context: &mut Context, port_type: &PortType) -> TypeHandle {
     match port_type {
         PortType::Design => DesignType::get(context).into(),
         PortType::Material { state } => procedure_material_type(context, state.as_str()),
+        PortType::MaterialAsRequested => requested
+            .expect("a requested port is resolved against the Intent result it corresponds to"),
         PortType::Data { data_kind } => {
             ProcedureDataType::get(context, StringAttr::new(data_kind.to_string())).into()
         }
     }
 }
 
-fn port_type_readonly(context: &Context, port_type: &PortType) -> TypeHandle {
+fn port_type_readonly(
+    context: &Context,
+    port_type: &PortType,
+    requested: Option<TypeHandle>,
+) -> TypeHandle {
     match port_type {
         PortType::Design => DesignType::get(context).into(),
         PortType::Material { state } => {
             ProcedureMaterialType::get(context, StringAttr::new(state.to_string())).into()
         }
+        PortType::MaterialAsRequested => requested
+            .expect("a requested port is resolved against the Intent result it corresponds to"),
         PortType::Data { data_kind } => {
             ProcedureDataType::get(context, StringAttr::new(data_kind.to_string())).into()
         }
     }
+}
+
+/// The type each of an Intent operation's results carries, in Procedure terms.
+///
+/// This is what a port whose state the Intent decides resolves to. The results
+/// were checked against the Method signature before this runs, so a port that
+/// names its own state has already been agreed with the one here.
+fn requested_types(context: &Context, operation: Ptr<Operation>) -> Vec<Option<TypeHandle>> {
+    operation
+        .deref(context)
+        .results()
+        .map(|value| Some(converted_type_readonly(context, value.get_type(context))))
+        .collect()
 }
 
 fn procedure_material_type(context: &mut Context, state: &str) -> TypeHandle {

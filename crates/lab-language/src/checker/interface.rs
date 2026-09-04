@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use crate::checked::{CheckedDeclaration, CheckedType};
 use crate::semantics::{
-    CallableSignature, DefinitionId, ExportKind, ModuleExport, ModuleId, ModuleInterface,
-    TypeParameters,
+    CallableSignature, DefinitionId, ExportKind, FacetSurface, ModuleExport, ModuleId,
+    ModuleInterface, TypeParameters,
 };
 
 pub(super) fn build_interface(
@@ -33,6 +33,7 @@ pub(super) fn build_interface(
                 roles: Vec::new(),
                 term: None,
                 schema: None,
+                facet: None,
                 parameters: TypeParameters::default(),
                 documentation: documentation.clone().unwrap_or_default(),
             },
@@ -74,6 +75,32 @@ pub(super) fn build_interface(
                 BTreeMap::new(),
                 doc,
             ),
+            CheckedDeclaration::Facet {
+                doc,
+                name,
+                subject,
+                states,
+                transitions,
+            } => {
+                insert(
+                    &mut interface,
+                    name,
+                    ExportKind::Facet,
+                    None,
+                    None,
+                    BTreeMap::new(),
+                    doc,
+                );
+                interface
+                    .exports
+                    .get_mut(name)
+                    .expect("the facet export was just inserted")
+                    .facet = Some(FacetSurface {
+                    subject: subject.clone(),
+                    states: states.clone(),
+                    transitions: transitions.clone(),
+                });
+            }
             CheckedDeclaration::Role { doc, name, term } => {
                 insert(
                     &mut interface,

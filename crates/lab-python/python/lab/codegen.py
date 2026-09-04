@@ -213,7 +213,9 @@ def _runtime_imports(path: str, exports: list[dict[str, Any]], constructors: fro
         types.add("LabType")
     if "function" in kinds:
         names.add("Function")
-    if kinds & {"value", "constructor"}:
+    # A facet generates its own name and one per state it admits, and every
+    # one of them is a bare word Lab reads back.
+    if kinds & {"value", "constructor", "facet"}:
         names.add("Symbol")
     if "type" in kinds:
         types.add("LabType")
@@ -273,6 +275,8 @@ def _export(
         return _action(export, uses)
     if export["kind"] in ("type", "role"):
         return _lab_type(export, uses, constructors)
+    if export["kind"] == "facet":
+        return _facet(export, uses)
     factory = "Function" if export["kind"] == "function" else "Symbol"
     name = export["name"]
     assignment = f'{name} = {factory}(name="{name}", uses={_tuple(uses)})'
@@ -281,6 +285,28 @@ def _export(
             [f"{name} = {factory}(", f'    name="{name}",', f"    uses={_tuple(uses)},", ")"]
         )
     return _documented(assignment, export)
+
+
+def _facet(export: dict[str, Any], uses: tuple[str, ...]) -> str:
+    """A facet, generated as its name and one name per state it admits.
+
+    The name is what a declaration states and each state is what it states as
+    the value, so `competence = competent` needs both to be importable. A state
+    is a bare word in Lab, which is what a `Symbol` renders as.
+    """
+
+    blocks = [_documented(_symbol(export["name"], uses), export)]
+    blocks.extend(_symbol(state, uses) for state in export.get("states") or ())
+    return "\n\n\n".join(blocks)
+
+
+def _symbol(name: str, uses: tuple[str, ...]) -> str:
+    assignment = f'{name} = Symbol(name="{name}", uses={_tuple(uses)})'
+    if len(assignment) > _LIMIT:
+        assignment = "\n".join(
+            [f"{name} = Symbol(", f'    name="{name}",', f"    uses={_tuple(uses)},", ")"]
+        )
+    return assignment
 
 
 def _lab_type(

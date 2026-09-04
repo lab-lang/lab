@@ -46,6 +46,7 @@ pub fn instance_word(type_name: &str) -> String {
 pub enum Item {
     Use(UseDecl),
     Role(RoleDecl),
+    Facet(FacetDecl),
     ArtifactKind(ArtifactKindDecl),
     Circuit(CircuitDecl),
     Artifact(ArtifactDecl),
@@ -59,6 +60,7 @@ impl Item {
         match self {
             Self::Use(item) => item.span,
             Self::Role(item) => item.span,
+            Self::Facet(item) => item.span,
             Self::ArtifactKind(item) => item.span,
             Self::Circuit(item) => item.span,
             Self::Artifact(item) => item.span,
@@ -92,6 +94,57 @@ pub struct RoleDecl {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UseDecl {
     pub path: Path,
+    pub span: Span,
+}
+
+/// `facet Competence on Chassis` — how a kind's materials are classified by the
+/// state they are in.
+///
+/// A state is not a kind of thing, so it travels on the material rather than
+/// becoming a second type. `Culture` and `Plate` were types for want of this,
+/// which is why neither could name the design underneath it.
+///
+/// Several facets may classify one kind, and they are independent. A culture
+/// that is both diluted and grown under selection is two facets; flattening
+/// them into one state naming both does not survive a third axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacetDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: Identifier,
+    /// The type whose materials this facet classifies, written after `on`.
+    pub subject: TypeExpr,
+    /// The states in declaration order. The first is the state a newly
+    /// established material is in unless its declaration says otherwise.
+    pub states: Vec<FacetStateDecl>,
+    pub transitions: Vec<FacetTransitionDecl>,
+    pub span: Span,
+}
+
+/// One state a material may be in, together with what that state carries.
+///
+/// A state's fields are required. Knowing a batch of cells is competent without
+/// knowing how competent is not a state worth distinguishing, so a field that
+/// may be unstated belongs on the kind rather than on the state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacetStateDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: Identifier,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldDecl>,
+    pub span: Span,
+}
+
+/// `naive -> competent` — a state change an action may establish.
+///
+/// Transitions are written rather than inferred from the actions a package
+/// happens to declare, so the reachable states are a claim the kind makes and a
+/// reviewer can read.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacetTransitionDecl {
+    pub from: Identifier,
+    pub to: Identifier,
     pub span: Span,
 }
 
@@ -493,13 +546,26 @@ pub enum TypeArgument {
         role: Path,
         span: Span,
     },
+    /// `Chassis is competent` — the subject, narrowed to one facet state.
+    ///
+    /// The state constrains the argument rather than wrapping `Material`, so
+    /// `Material<Chassis is competent>` is still a material to every pass that
+    /// asks. Wrapping the material instead would take it out of ownership and
+    /// linearity analysis, which detect one by its outermost name.
+    InState {
+        subject: Box<TypeExpr>,
+        state: Identifier,
+        span: Span,
+    },
 }
 
 impl TypeArgument {
     pub fn span(&self) -> Span {
         match self {
             Self::Type(ty) => ty.span(),
-            Self::Binding { span, .. } | Self::Any { span, .. } => *span,
+            Self::Binding { span, .. } | Self::Any { span, .. } | Self::InState { span, .. } => {
+                *span
+            }
         }
     }
 }

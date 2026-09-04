@@ -246,7 +246,10 @@ fn material_provisioning() -> MethodDefinition {
             "provision",
             "ProvisionMaterial",
             vec![],
-            vec![output("material", material("CompetentCells"))],
+            // What comes off a shelf is whatever was asked for: competent
+            // cells, a plasmid prep, a bottle of medium. One signature serves
+            // all of them because the Intent names the state.
+            vec![output("material", PortType::MaterialAsRequested)],
             select_parameters(&parameters, &["item"]),
             vec![material_parameter("item", "item")],
             vec![requirement(

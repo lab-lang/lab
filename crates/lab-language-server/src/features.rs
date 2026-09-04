@@ -302,6 +302,9 @@ fn symbol_kind(kind: SymbolKind) -> lsp::SymbolKind {
         // A role classifies types without describing values, which is what an
         // editor calls an interface.
         SymbolKind::Role => lsp::SymbolKind::INTERFACE,
+        // A facet is a closed set of named states, which is what an editor
+        // calls an enum.
+        SymbolKind::Facet => lsp::SymbolKind::ENUM,
         SymbolKind::Circuit | SymbolKind::Workflow => lsp::SymbolKind::FUNCTION,
         SymbolKind::Artifact | SymbolKind::Data => lsp::SymbolKind::STRUCT,
         SymbolKind::Variable => lsp::SymbolKind::VARIABLE,

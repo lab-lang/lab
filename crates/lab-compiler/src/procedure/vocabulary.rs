@@ -57,6 +57,8 @@ pub const MAXIMUM_RAMP_RATE: &str = "https://sbol.io/ns/capability#MaximumRampRa
 pub const MAXIMUM_AIR_GAP_VOLUME: &str = "https://sbol.io/ns/capability#MaximumAirGapVolume";
 
 pub const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
+pub const GRAM: &str = "http://qudt.org/vocab/unit/GM";
+pub const GRAM_PER_LITRE: &str = "http://qudt.org/vocab/unit/GM-PER-L";
 pub const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
 pub const SECOND: &str = "http://qudt.org/vocab/unit/SEC";
 pub const DEGREE_CELSIUS_PER_SECOND: &str = "http://qudt.org/vocab/unit/DEG_C-PER-SEC";

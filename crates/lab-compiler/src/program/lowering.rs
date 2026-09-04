@@ -16,6 +16,12 @@ pub(crate) enum WorkflowActionIntent {
     Provision {
         cells: String,
         item: String,
+        /// The state the fetched material is in, named for what was fetched.
+        ///
+        /// Provisioning claimed competent cells whatever it was asked for, so
+        /// fetching an antibiotic produced a value the IR believed was a tube of
+        /// cells and nothing downstream disagreed.
+        state: String,
     },
     Transform {
         strain: String,
@@ -50,6 +56,19 @@ struct BuildLoweringContext<'a> {
     supplier_identities: &'a BTreeMap<String, String>,
     stated: &'a BTreeMap<String, Vec<lab_language::CheckedProperty>>,
     bindings: &'a BTreeMap<(String, String), TypedExpression>,
+}
+
+/// The state a catalogued item is in when it is fetched off a shelf.
+///
+/// A chassis is bought competent, which is why transformation takes competent
+/// cells rather than a chassis. Anything else arrives as stock of its own kind,
+/// so a reagent is a reagent rather than a tube of cells.
+fn provisioned_state(item_type: Option<&String>) -> String {
+    match item_type.map(String::as_str) {
+        Some("Chassis") => "CompetentCells".to_owned(),
+        Some(kind) => format!("{kind}Stock"),
+        None => "Stock".to_owned(),
+    }
 }
 
 /// The three properties a Golden Gate assembly recipe cannot be planned without.
@@ -278,7 +297,8 @@ pub(crate) fn lower_build_intent(
     let supplier_identities = supplier_identities(modules);
     let stated = inventory_properties(modules);
     let bindings = binding_values(modules);
-    let flows = realization_flows(modules, &supplier_identities)?;
+    let catalog_types = catalog_types(modules);
+    let flows = realization_flows(modules, &supplier_identities, &catalog_types)?;
     let context = BuildLoweringContext {
         flows: &flows,
         supplier_identities: &supplier_identities,
@@ -528,6 +548,23 @@ fn inventory_properties(
         .collect()
 }
 
+/// The Lab type each catalogued symbol stands for, with any state narrowing
+/// removed.
+///
+/// A provisioned material's state is named for the kind that was fetched, so
+/// lowering has to know that `DH5alpha` is a `Chassis` and `chloramphenicol` is
+/// not.
+fn catalog_types(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
+    declarations(modules)
+        .filter_map(|declaration| match declaration {
+            CheckedDeclaration::Catalog { name, r#type, .. } => {
+                Some((name.clone(), r#type.subject().display_name()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// What each catalogued symbol calls the item a supplier lists.
 ///
 /// This deliberately ignores the separate SBOL Component IRI. Existing device
@@ -549,6 +586,7 @@ fn supplier_identities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
 fn realization_flows(
     modules: &[&CheckedModule],
     identities: &BTreeMap<String, String>,
+    catalog_types: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
     let mut result = BTreeMap::new();
     for declaration in declarations(modules) {
@@ -603,10 +641,12 @@ fn realization_flows(
                     let [cells] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
                     };
+                    let declared = required_reference(action, "item", &design)?;
                     let item = resolved_reference(action, "item", identities, &design)?;
                     actions.push(WorkflowActionIntent::Provision {
                         cells: cells.clone(),
                         item,
+                        state: provisioned_state(catalog_types.get(&declared)),
                     });
                 }
                 "std.lab.plasmid.transform" => {
@@ -809,7 +849,9 @@ fn checked_symbol(
     identities: &BTreeMap<String, String>,
     accepted: &[&str],
 ) -> Result<String, SourceLoweringError> {
-    let lab_language::CheckedType::Named { name, arguments } = &expression.r#type else {
+    // What a symbol refers to is its kind; which state that thing is in does not
+    // change which catalogued item the name stands for.
+    let lab_language::CheckedType::Named { name, arguments } = expression.r#type.subject() else {
         return Err(invalid_field(artifact, field));
     };
     if !arguments.is_empty() || !accepted.contains(&name.as_str()) {

@@ -2,7 +2,7 @@
 
 import lab
 from lab import Material, Plate
-from lab.bio.designs import Antibiotic, Chassis, Strain
+from lab.bio.designs import Antibiotic, Chassis, Strain, competent
 from lab.units import C, h, minutes
 
 from .plasmid import reporter
@@ -10,6 +10,7 @@ from .plasmid import reporter
 module = lab.Module("reporter.workflow", doc=__doc__)
 
 DH5alpha = Chassis.buy(
+    competence=competent,
     identity="ATCC-53868",
     heat_shock_temperature=42 * C,
     recovery_duration=60 * minutes,

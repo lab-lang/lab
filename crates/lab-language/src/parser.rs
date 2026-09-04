@@ -61,6 +61,10 @@ impl<'a> Parser<'a> {
                 let mut declaration = self.parse_role()?;
                 declaration.doc = doc;
                 Item::Role(declaration)
+            } else if self.check_word("facet") {
+                let mut declaration = self.parse_facet()?;
+                declaration.doc = doc;
+                Item::Facet(declaration)
             } else if self.check_word("circuit") {
                 let mut declaration = self.parse_circuit()?;
                 declaration.doc = doc;
@@ -143,6 +147,80 @@ impl<'a> Parser<'a> {
             doc: None,
             name,
             term,
+            span: start.join(end),
+        })
+    }
+
+    /// `facet Competence on Chassis:` — the states a kind's materials may be in.
+    ///
+    /// A line inside the block is a state, or a transition when an arrow follows
+    /// the first name. Both begin with a state name, so the arrow is what tells
+    /// them apart and neither needs a keyword of its own.
+    fn parse_facet(&mut self) -> Result<FacetDecl, ParseError> {
+        let start = self.expect_word("facet")?.span;
+        let name = self.take_identifier("a facet name")?;
+        if !self.check_word("on") {
+            return Err(syntax_span(
+                self.current_span(),
+                "a facet states the kind it classifies, written 'on <Kind>'",
+            ));
+        }
+        self.next();
+        let subject = self.parse_type()?;
+        self.open_block()?;
+        let mut states = Vec::new();
+        let mut transitions = Vec::new();
+        while !self.check(&TokenKind::Dedent) {
+            let doc = self.take_doc()?;
+            let first = self.take_identifier("a state name")?;
+            if self.consume(&TokenKind::RightArrow).is_some() {
+                if doc.is_some() {
+                    return Err(syntax_span(
+                        first.span,
+                        "documentation describes a state; a transition is documented by the states it joins",
+                    ));
+                }
+                let to = self.take_identifier("the state a transition reaches")?;
+                let end = self.expect_line_end()?;
+                transitions.push(FacetTransitionDecl {
+                    span: first.span.join(end),
+                    from: first,
+                    to,
+                });
+                continue;
+            }
+            // A state carrying nothing needs no block, the way a kind whose
+            // instances state nothing beyond their name needs none.
+            if !self.check(&TokenKind::Colon) {
+                let end = self.expect_line_end()?;
+                states.push(FacetStateDecl {
+                    doc,
+                    span: first.span.join(end),
+                    name: first,
+                    fields: Vec::new(),
+                });
+                continue;
+            }
+            self.open_block()?;
+            let mut fields = Vec::new();
+            while !self.check(&TokenKind::Dedent) {
+                fields.push(self.parse_field_line(false)?);
+            }
+            let end = self.expect(TokenKind::Dedent)?.span;
+            states.push(FacetStateDecl {
+                doc,
+                span: first.span.join(end),
+                name: first,
+                fields,
+            });
+        }
+        let end = self.expect(TokenKind::Dedent)?.span;
+        Ok(FacetDecl {
+            doc: None,
+            name,
+            subject,
+            states,
+            transitions,
             span: start.join(end),
         })
     }
@@ -930,7 +1008,13 @@ impl<'a> Parser<'a> {
     /// `100 ng/uL` and `Quantity<ng/uL>`, so the two can never drift apart.
     fn parse_unit(&mut self) -> Result<String, ParseError> {
         let mut unit = self.take_identifier("a unit")?.value;
-        if self.consume(&TokenKind::Slash).is_some() {
+        // A denominator is a unit, so a slash followed by anything else is
+        // division. Without this, `20 uL / 2` reads the `2` as a denominator and
+        // a quantity cannot be divided at all.
+        if self.check(&TokenKind::Slash)
+            && matches!(self.peek_kind(1), Some(TokenKind::Identifier(_)))
+        {
+            self.next();
             unit.push('/');
             unit.push_str(&self.take_identifier("a unit denominator")?.value);
         }
@@ -1002,7 +1086,20 @@ impl<'a> Parser<'a> {
             let span = name.span.join(role.span);
             return Ok(TypeArgument::Binding { name, role, span });
         }
-        Ok(TypeArgument::Type(self.parse_type()?))
+        let subject = self.parse_type()?;
+        // `is` after an argument narrows it to one facet state. It reads as the
+        // same word that says a type plays a role, because it says the same
+        // kind of thing: this material is one of the things its kind may be.
+        if self.check_word("is") {
+            self.next();
+            let state = self.take_identifier("a facet state")?;
+            return Ok(TypeArgument::InState {
+                span: subject.span().join(state.span),
+                subject: Box::new(subject),
+                state,
+            });
+        }
+        Ok(TypeArgument::Type(subject))
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {

@@ -16,7 +16,8 @@ buy:
   part B0015
   backbone pSB1C3
   restriction_enzyme BsaI
-  chassis DH5alpha
+  chassis DH5alpha:
+    competence = competent
   antibiotic chloramphenicol
 
 reporter_sequence: DNA = dna("ACGTACGT")

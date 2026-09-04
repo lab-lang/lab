@@ -15,7 +15,7 @@ is a small molecule without being told separately.
 from typing import Generic, TypeVar
 
 from .._types import LabType
-from .._vocabulary import ArtifactKind
+from .._vocabulary import ArtifactKind, Symbol
 
 _T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
@@ -33,6 +33,25 @@ class Both(LabType, Generic[_T1, _T2]):
     """
 
     __lab_uses__ = ("std.bio.designs",)
+
+
+Competence = Symbol(name="Competence", uses=("std.bio.designs",))
+"""Whether a chassis will take up DNA.
+
+Cells are made competent or bought that way, and the difference matters to
+the one operation that needs it: transformation takes cells that are, and
+says so, rather than trusting that whatever was fetched will do.
+
+How competent they are is the batch's own number. A preparation is accepted
+on a control transformation, so the efficiency belongs to the cells rather
+than to the strain they came from or the plasmid they will carry.
+"""
+
+
+naive = Symbol(name="naive", uses=("std.bio.designs",))
+
+
+competent = Symbol(name="competent", uses=("std.bio.designs",))
 
 
 class Operon(LabType, Generic[_T1, _T2]):

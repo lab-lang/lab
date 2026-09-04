@@ -2,7 +2,7 @@
 
 import lab
 from lab import sbol
-from lab.bio.designs import (
+from lab.bio.designs import (, competent
     CDS,
     Antibiotic,
     Backbone,
@@ -85,6 +85,7 @@ BsaI = RestrictionEnzyme.buy(
     digest_duration=2 * minutes,
 )
 DH5alpha = Chassis.buy(
+        competence=competent,
     sbol_identity="https://sbolcanvas.org/DH5alpha",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
@@ -92,6 +93,7 @@ DH5alpha = Chassis.buy(
     recovery_duration=60 * minutes,
 )
 BL21 = Chassis.buy(
+        competence=competent,
     sbol_identity="https://sbolcanvas.org/BL21",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,

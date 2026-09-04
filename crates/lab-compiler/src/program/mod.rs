@@ -358,8 +358,8 @@ fn append_workflow(
                 values.insert(product.clone(), operation.get_result_product(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
-            WorkflowActionIntent::Provision { cells, item } => {
-                let operation = ProvisionOp::competent_cells(context, item.clone());
+            WorkflowActionIntent::Provision { cells, item, state } => {
+                let operation = ProvisionOp::new(context, item.clone(), state);
                 values.insert(cells.clone(), operation.get_result_material(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
@@ -620,6 +620,7 @@ buy restriction_enzyme BsaI:
   sbol_identity = "https://SBOL2Build.org/BsaI"
 buy chassis DH5alpha:
   sbol_identity = "https://sbolcanvas.org/DH5alpha"
+  competence = competent
 buy antibiotic chloramphenicol:
   sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"
 buy part T4_DNA_ligase:
@@ -713,6 +714,57 @@ workflow build_second() -> Material<Plasmid>:
   return product
 "#;
 
+    /// Fetching something off a shelf yields what was asked for.
+    ///
+    /// Provisioning minted competent cells for every item, so an antibiotic
+    /// arrived in LAIR as a value the IR believed was a tube of cells and no
+    /// later check disagreed. One provisioning signature still serves every
+    /// kind, because the state is the one the Intent asked for.
+    #[test]
+    fn provisioning_yields_the_state_of_the_thing_fetched() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+use std.lab.plasmid
+
+buy chassis DH5alpha:
+  competence = competent
+buy antibiotic chloramphenicol:
+  sbol_identity = "https://example.org/cam"
+
+build plasmid p:
+  sequence = dna("ACGTACGT")
+
+workflow w() -> (
+  product: Material<Plasmid>,
+  cells: Material<Chassis is competent>,
+  drug: Material<Antibiotic>,
+):
+  dependencies = []
+  product <- realize p from dependencies
+  cells <- provision DH5alpha
+  drug <- provision chloramphenicol
+  return product, cells, drug
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("module checks");
+        let ir = PortableLairProgram::lower(&module)
+            .expect("program lowers")
+            .ir();
+
+        assert!(
+            ir.contains("material-state#CompetentCells"),
+            "a chassis is bought competent: {ir}"
+        );
+        assert!(
+            ir.contains("material-state#AntibioticStock"),
+            "an antibiotic is an antibiotic, not a tube of cells: {ir}"
+        );
+        assert_eq!(
+            ir.matches("material-state#CompetentCells").count(),
+            1,
+            "only the chassis is competent cells: {ir}"
+        );
+    }
+
     #[test]
     fn lowers_an_artifact_and_its_workflow_from_separate_modules() {
         let designs = compile_module_in_environment(
@@ -730,6 +782,18 @@ workflow build_second() -> Material<Plasmid>:
         let program =
             PortableLairProgram::lower_program(&[&designs, &workflows]).expect("program lowers");
         let split = program.ir();
+
+        // What comes off a shelf is what was asked for. Fetching the chassis
+        // yields competent cells; fetching the antibiotic used to yield them
+        // too, which was the IR believing an antibiotic was a tube of cells.
+        assert!(
+            split.contains("workflow.material <\"https://www.lab-compiler.org/ns/material-state#CompetentCells\">"),
+            "a provisioned chassis is competent cells: {split}"
+        );
+        assert!(
+            !split.contains("#AntibioticStock"),
+            "this program provisions no antibiotic, so no such state appears"
+        );
 
         assert_eq!(split.matches(" = design.dna_sequence ").count(), 1);
         assert!(split.contains("sequence_name: builtin.string \"gfp_sequence\""));

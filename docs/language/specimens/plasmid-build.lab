@@ -4,7 +4,8 @@ use std.bio.golden_gate
 use std.lab.plasmid
 
 buy:
-  chassis competent_ecoli
+  chassis competent_ecoli:
+    competence = competent
   antibiotic kanamycin
   restriction_enzyme BsaI
   backbone p15A_kan

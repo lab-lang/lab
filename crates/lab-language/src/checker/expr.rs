@@ -209,7 +209,15 @@ impl Checker {
                             ))
                         }
                     }
-                    BinaryOp::Equal | BinaryOp::NotEqual => Ok(Ty::Bool),
+                    // Equality is otherwise permissive, but two measurements in
+                    // different units are never equal and never unequal: the
+                    // question cannot be asked until one is converted.
+                    BinaryOp::Equal | BinaryOp::NotEqual => {
+                        match mismatched_units(&left, &right, *span) {
+                            Some(error) => Err(error),
+                            None => Ok(Ty::Bool),
+                        }
+                    }
                     BinaryOp::Less
                     | BinaryOp::LessEqual
                     | BinaryOp::Greater
@@ -217,10 +225,12 @@ impl Checker {
                         if self.comparable(&left, &right) {
                             Ok(Ty::Bool)
                         } else {
-                            Err(SemanticError::new(
-                                *span,
-                                format!("cannot compare {left} with {right}"),
-                            ))
+                            Err(mismatched_units(&left, &right, *span).unwrap_or_else(|| {
+                                SemanticError::new(
+                                    *span,
+                                    format!("cannot compare {left} with {right}"),
+                                )
+                            }))
                         }
                     }
                     BinaryOp::Add => match (&left, &right) {
@@ -230,19 +240,57 @@ impl Checker {
                         (Ty::List(left), Ty::EmptyList) => Ok(Ty::List(left.clone())),
                         (Ty::EmptyList, Ty::List(right)) => Ok(Ty::List(right.clone())),
                         _ if self.comparable(&left, &right) => Ok(left),
-                        _ => Err(SemanticError::new(
-                            *span,
-                            format!("cannot add {left} and {right}"),
-                        )),
+                        _ => Err(mismatched_units(&left, &right, *span).unwrap_or_else(|| {
+                            SemanticError::new(*span, format!("cannot add {left} and {right}"))
+                        })),
                     },
-                    BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide => {
+                    BinaryOp::Subtract => {
                         if self.comparable(&left, &right) {
                             Ok(left)
                         } else {
-                            Err(SemanticError::new(
+                            Err(mismatched_units(&left, &right, *span).unwrap_or_else(|| {
+                                SemanticError::new(
+                                    *span,
+                                    format!("cannot subtract {right} from {left}"),
+                                )
+                            }))
+                        }
+                    }
+                    // Scaling a measurement by a count keeps its unit, which is
+                    // how a recipe states a batch. Multiplying two measurements
+                    // is a different operation: it yields a quantity in neither
+                    // operand's unit, and until dimensions are computed the
+                    // honest answer is that it cannot be written.
+                    BinaryOp::Multiply | BinaryOp::Divide => {
+                        match (&left, &right) {
+                            (Ty::Quantity(_), other) if crate::type_system::dimensionless(other) => {
+                                Ok(left)
+                            }
+                            (other, Ty::Quantity(_))
+                                if crate::type_system::dimensionless(other)
+                                    && matches!(op, BinaryOp::Multiply) =>
+                            {
+                                Ok(right)
+                            }
+                            (Ty::Quantity(left_unit), Ty::Quantity(right_unit)) => {
+                                Err(SemanticError::new(
+                                    *span,
+                                    format!(
+                                        "cannot multiply or divide {left} by {right}"
+                                    ),
+                                )
+                                .help(format!(
+                                    "the result is measured in neither '{left_unit}' nor '{right_unit}', and a quantity's dimension is not yet computed"
+                                ))
+                                .help(
+                                    "scale a measurement by a plain number instead, such as '20 uL * 3'",
+                                ))
+                            }
+                            _ if self.comparable(&left, &right) => Ok(left),
+                            _ => Err(SemanticError::new(
                                 *span,
-                                "incompatible arithmetic operands",
-                            ))
+                                format!("cannot combine {left} with {right} arithmetically"),
+                            )),
                         }
                     }
                     BinaryOp::Range => Ok(Ty::List(Box::new(left))),
@@ -690,6 +738,25 @@ pub(super) fn numeric_text(expression: &Expr) -> Result<String, SemanticError> {
             "quantity magnitude must be numeric",
         )),
     }
+}
+
+/// The diagnostic for two measurements that meet in a unit neither shares.
+///
+/// This is the same mistake as writing `20 mL` where microlitres are required,
+/// so it reads the same way: name both units and say that conversion is written
+/// rather than assumed. Returns `None` when the operands are not both
+/// quantities, so the caller keeps its own wording.
+fn mismatched_units(left: &Ty, right: &Ty, span: Span) -> Option<SemanticError> {
+    let (Ty::Quantity(left_unit), Ty::Quantity(right_unit)) = (left, right) else {
+        return None;
+    };
+    Some(
+        SemanticError::new(span, format!("'{left_unit}' and '{right_unit}' are different units"))
+            .help(format!(
+                "a measurement in '{left_unit}' and one in '{right_unit}' are not interchangeable, so neither converts on its own"
+            ))
+            .help("write both operands in the same unit"),
+    )
 }
 
 pub(super) fn binary_operator_name(operator: BinaryOp) -> &'static str {

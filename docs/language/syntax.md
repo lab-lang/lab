@@ -51,13 +51,30 @@ The kernel keeps orchestration mechanics distinct from domain operations:
 | Role | Words or forms |
 | --- | --- |
 | Modules | `use` |
-| Declaration shapes | `record`, `circuit`, `artifact`, `workflow`, `state` |
-| Classification | `role`, `is`, `any` |
+| Declaration shapes | `record`, `circuit`, `artifact`, `facet`, `workflow`, `state` |
+| Classification | `role`, `is`, `any`, `on` |
 | Provenance | `build`, `buy` |
 | Schemas and contracts | `declares`, `require`, `accept`, `across` |
 | Control | `if`, `else`, `for`, `in`, `match`, `case`, `return` |
 | Reactive control | `when`, `every`, `after`, `emit` |
 | Boolean operators | `and`, `or`, `not` |
+
+A `facet` classifies a kind's materials by the state they are in, which is what keeps a state off the type. Its states and the transitions between them are the vocabulary; `facet` and `on` are the mechanics, and the states a package names are no more in the parser than its artifact words are. See [0052](decisions/0052-material-states-are-declared-facets.md).
+
+A type argument narrows to a state with the same `is` that says a type plays a role:
+
+```lab
+facet Competence on Chassis:
+  naive
+  competent:
+    efficiency: Quantity<cfu/ug>
+
+  naive -> competent
+
+workflow transform_into(cells: Material<Chassis is competent>) -> Material<Strain>:
+```
+
+Narrowing runs one way. `Material<Chassis is competent>` may be used where `Material<Chassis>` is expected, because knowing which state a material is in is never a problem. The reverse is refused, which is how transforming into cells nobody made competent is caught. The state constrains the argument rather than wrapping the material, so a narrowed material is owned, consumed, and tracked exactly like any other.
 
 These are the mechanics. The *vocabulary* — `plasmid`, `strain`, and any domain word a package declares with `artifact` — is not in this table and is not in the parser, which is the point of [0022](decisions/0022-fixed-grammar-open-vocabulary.md). Circuits and workflows both declare a callable signature in their header. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
 
@@ -470,6 +487,8 @@ plasmid p_gfp:
 ```
 
 Units are checked rather than assumed: `20 mL` where microlitres are expected is a diagnostic, not a thousandfold error on the bench. Water makes each reaction up to its stated volume, and reagents that over-subscribe that volume are rejected before facility allocation or adapter lowering.
+
+The same standard holds wherever two measurements meet. `20 uL + 5 mL` and `volume > 5 mL` where volume is in microlitres are diagnostics, because neither unit converts on its own. A measurement scales by a plain number, so `20 uL * 3` is a volume and states a batch. Two measurements multiplied give a quantity in neither operand's unit, which is refused until a quantity's dimension is computed.
 
 ## Evidence a claim is believed on
 

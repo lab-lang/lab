@@ -76,6 +76,9 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0049: Pipetting techniques cross device boundaries](language/decisions/0049-pipetting-techniques-cross-device.md) | portable liquid-access constraints remain distinct from calibrated adapter realizations |
 | [0050: Allocated Procedure schedules make device batching explicit](language/decisions/0050-allocated-procedure-schedules.md) | fusing complete tasks into one device run is a checked artifact that preserves every identity |
 | [0051: Interchangeable physical resources resolve without a pin](language/decisions/0051-interchangeable-resources-resolve-without-a-pin.md) | equally usable MaterialLots bind deterministically and reviewably; Assets stay an explicit choice |
+| [0052: Material states are declared facets, not separate kinds](language/decisions/0052-material-states-are-declared-facets.md) | a state travels on the material as an orthogonal declared facet, keeping provenance and kind distinct |
+| [0053: Quantities carry dimensions and compose](language/decisions/0053-quantities-carry-dimensions-and-compose.md) | a field may ask for a dimension, conversion is written, and products and quotients are computed |
+| [0054: Every material carries a quantity](language/decisions/0054-every-material-carries-a-quantity.md) | a divisible material is drawn from as one take and two introductions, needing no exception to affine flow |
 
 ## Implementation and embedding
 

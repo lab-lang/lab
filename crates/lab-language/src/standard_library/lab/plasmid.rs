@@ -86,7 +86,17 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     take,
                 ),
                 PhrasePart::Word("into"),
-                operand("cells", concrete(material(named("Chassis"))), take),
+                // Cells that were never made competent take up nothing, so the
+                // state is required rather than assumed. A chassis fetched off
+                // the shelf carries it because its declaration states it.
+                operand(
+                    "cells",
+                    concrete(material(Ty::InState(
+                        Box::new(named("Chassis")),
+                        "competent".to_owned(),
+                    ))),
+                    take,
+                ),
             ],
             results: vec![
                 begins("strain", concrete(material(named("Strain")))),

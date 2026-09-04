@@ -11,6 +11,6 @@ mod interface;
 pub use grounding::Grounding;
 pub use ids::{DefinitionId, ModuleId};
 pub use interface::{
-    ArtifactSchema, CallableSignature, ExportKind, ModuleExport, ModuleInterface,
+    ArtifactSchema, CallableSignature, ExportKind, FacetSurface, ModuleExport, ModuleInterface,
     SemanticEnvironment, TypeParameters,
 };

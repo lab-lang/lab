@@ -65,6 +65,31 @@ pub(super) struct ArtifactKindSignature {
     pub declares: Option<crate::checked::CheckedPresence>,
 }
 
+/// A facet in scope: the type it classifies, its states, and the state changes
+/// it admits.
+#[derive(Clone)]
+pub(super) struct FacetSignature {
+    pub subject: Ty,
+    /// The states in declaration order, so the first stays identifiable as the
+    /// state a newly established material is in.
+    pub states: Vec<FacetState>,
+    pub transitions: Vec<(String, String)>,
+}
+
+impl FacetSignature {
+    /// The state this facet admits under that name, if it admits one.
+    pub fn state(&self, name: &str) -> Option<&FacetState> {
+        self.states.iter().find(|state| state.name == name)
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct FacetState {
+    pub doc: Option<String>,
+    pub name: String,
+    pub fields: BTreeMap<String, SchemaField>,
+}
+
 #[derive(Clone)]
 pub(super) struct WorkflowSignature {
     pub generics: Generics,
@@ -104,6 +129,14 @@ pub(super) struct SemanticContext {
     /// SBOL document states about it. A role with no term classifies types and
     /// says nothing about any ontology.
     pub role_terms: HashMap<String, String>,
+    /// Every facet in scope, by facet name.
+    pub facets: HashMap<String, FacetSignature>,
+    /// The facets classifying each subject type, by the type's name.
+    ///
+    /// A material type constrains a state without naming the facet it belongs
+    /// to, so resolving `Material<Chassis is competent>` starts from the
+    /// subject and asks which of its facets admits that state.
+    pub type_facets: HashMap<String, BTreeSet<String>>,
 }
 
 impl SemanticContext {
@@ -141,6 +174,8 @@ impl SemanticContext {
             roles: BTreeSet::new(),
             type_roles: HashMap::new(),
             role_terms: HashMap::new(),
+            facets: HashMap::new(),
+            type_facets: HashMap::new(),
         }
     }
 
@@ -314,6 +349,53 @@ impl SemanticContext {
                 // Types and roles are registered above, before anything that
                 // could refer to them.
                 ExportKind::Type | ExportKind::Role => {}
+                // A facet means nothing without its states, so the two travel
+                // together the way a kind travels with its schema.
+                ExportKind::Facet => {
+                    if let Some(surface) = &export.facet {
+                        let subject = from_checked_type(&surface.subject);
+                        if let Ty::Named(subject_name, _) = &subject {
+                            self.type_facets
+                                .entry(subject_name.clone())
+                                .or_default()
+                                .insert(name.clone());
+                        }
+                        self.facets.insert(
+                            name.clone(),
+                            FacetSignature {
+                                subject,
+                                states: surface
+                                    .states
+                                    .iter()
+                                    .map(|state| FacetState {
+                                        doc: state.doc.clone(),
+                                        name: state.name.clone(),
+                                        fields: state
+                                            .fields
+                                            .iter()
+                                            .map(|field| {
+                                                (
+                                                    field.name.clone(),
+                                                    SchemaField {
+                                                        ty: from_checked_type(&field.r#type),
+                                                        optional: field.optional,
+                                                    },
+                                                )
+                                            })
+                                            .collect(),
+                                    })
+                                    .collect(),
+                                transitions: surface
+                                    .transitions
+                                    .iter()
+                                    .map(|transition| {
+                                        (transition.from.clone(), transition.to.clone())
+                                    })
+                                    .collect(),
+                            },
+                        );
+                    }
+                }
                 // A word a package supplies means nothing without its schema,
                 // so the two travel together.
                 ExportKind::ArtifactKind => {

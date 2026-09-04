@@ -4,6 +4,7 @@
 //! and build policy. They deliberately describe neither a concrete laboratory
 //! procedure nor robot resources; protocol selection owns that transition.
 
+use lab_capability::AbsoluteIri;
 use pliron::builtin::attributes::{DictAttr, IntegerAttr, StringAttr, VecAttr};
 use pliron::common_traits::Verify;
 use pliron::context::Context;
@@ -12,9 +13,9 @@ use pliron::location::Location;
 use pliron::op::Op;
 use pliron::operation::Operation;
 use pliron::result::Result;
-use pliron::r#type::{Type, TypeHandle, Typed};
+use pliron::r#type::{TypeHandle, Typed};
 use pliron::value::Value;
-use pliron::verify_err;
+use pliron::{verify_err, verify_err_noloc};
 
 use crate::design::ir::DesignType;
 use crate::ir::attributes::{
@@ -23,22 +24,44 @@ use crate::ir::attributes::{
 };
 use crate::workflow::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 
-/// Abstract material states visible in a source-level build workflow.
-#[pliron_type(name = "workflow.material", format, verifier = "succ")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum MaterialType {
-    PlasmidProduct,
-    StrainProduct,
-    CompetentCells,
-    TransformedCulture,
-    RecoveredCulture,
-    DilutedCulture,
-    Plate,
+/// The namespace the states this compiler mints are named in.
+pub const STATE_NS: &str = "https://www.lab-compiler.org/ns/material-state#";
+
+/// One abstract material state visible in a source-level build workflow.
+///
+/// The state is an absolute IRI rather than one of a fixed set, because the set
+/// was never fixed: `method::standard` already names `AssemblyReaction`,
+/// `TransformationMixture`, and `RecoveryMixture`, none of which a closed
+/// enumeration here admitted. A package that declares a facet names states this
+/// dialect has not heard of, and that is the point.
+#[pliron_type(
+    name = "workflow.material",
+    generate_get = true,
+    format = "`<` $state `>`"
+)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MaterialType {
+    state: StringAttr,
 }
 
 impl MaterialType {
-    pub fn get(self, ctx: &Context) -> TypeHandle {
-        Self::instantiate(self, ctx).into()
+    /// The handle for a state this compiler mints, given its bare name.
+    pub fn state(ctx: &Context, name: &str) -> TypeHandle {
+        Self::get(ctx, StringAttr::new(format!("{STATE_NS}{name}"))).into()
+    }
+
+    /// The absolute IRI this state is named by.
+    pub fn iri(&self) -> &str {
+        self.state.as_str()
+    }
+}
+
+impl Verify for MaterialType {
+    fn verify(&self, _context: &Context) -> Result<()> {
+        if AbsoluteIri::new(self.state.as_str()).is_err() {
+            return verify_err_noloc!("workflow.material state must be an absolute IRI");
+        }
+        Ok(())
     }
 }
 
@@ -72,7 +95,7 @@ impl RealizeOp {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::PlasmidProduct.get(ctx)],
+                vec![MaterialType::state(ctx, "PlasmidProduct")],
                 vec![design],
                 vec![],
                 0,
@@ -163,7 +186,7 @@ impl Verify for RealizeOp {
         }
         require_material(
             self.get_result_product(ctx),
-            MaterialType::PlasmidProduct,
+            "PlasmidProduct",
             self.loc(ctx),
             ctx,
         )
@@ -176,16 +199,22 @@ impl Verify for RealizeOp {
     attributes = (provision_item: StringAttr),
     results = (material: MaterialType)
 )]
-/// Request an inventory item as abstract competent-cell material.
+/// Request an inventory item as the material its kind arrives in.
 pub struct ProvisionOp;
 
 impl ProvisionOp {
-    pub fn competent_cells(ctx: &mut Context, item: impl Into<String>) -> Self {
+    /// Fetch an item off the shelf in the state its kind arrives in.
+    ///
+    /// The state is stated by the caller rather than assumed here, so fetching
+    /// an antibiotic yields an antibiotic. The provisioning Method reads it back
+    /// from this result, which is how one signature serves every kind of thing a
+    /// shelf holds.
+    pub fn new(ctx: &mut Context, item: impl Into<String>, state: &str) -> Self {
         let result = Self {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::CompetentCells.get(ctx)],
+                vec![MaterialType::state(ctx, state)],
                 vec![],
                 vec![],
                 0,
@@ -203,9 +232,11 @@ impl Verify for ProvisionOp {
             "provision_item",
             self.loc(ctx),
         )?;
-        require_material(
+        // Which state a fetched item is in depends on what was fetched, so the
+        // verifier checks that it is a material rather than which one.
+        require_any_material(
             self.get_result_material(ctx),
-            MaterialType::CompetentCells,
+            "workflow.provision result",
             self.loc(ctx),
             ctx,
         )
@@ -250,8 +281,8 @@ impl TransformOp {
                 ctx,
                 Self::get_concrete_op_info(),
                 vec![
-                    MaterialType::StrainProduct.get(ctx),
-                    MaterialType::TransformedCulture.get(ctx),
+                    MaterialType::state(ctx, "StrainProduct"),
+                    MaterialType::state(ctx, "TransformedCulture"),
                 ],
                 vec![design, cells],
                 vec![],
@@ -304,19 +335,19 @@ impl Verify for TransformOp {
         )?;
         require_material(
             self.get_operand_cells(ctx),
-            MaterialType::CompetentCells,
+            "CompetentCells",
             self.loc(ctx),
             ctx,
         )?;
         require_material(
             self.get_result_strain(ctx),
-            MaterialType::StrainProduct,
+            "StrainProduct",
             self.loc(ctx),
             ctx,
         )?;
         require_material(
             self.get_result_culture(ctx),
-            MaterialType::TransformedCulture,
+            "TransformedCulture",
             self.loc(ctx),
             ctx,
         )
@@ -360,7 +391,7 @@ impl RecoverOp {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::RecoveredCulture.get(ctx)],
+                vec![MaterialType::state(ctx, "RecoveredCulture")],
                 vec![culture],
                 vec![],
                 0,
@@ -421,13 +452,13 @@ impl Verify for RecoverOp {
         }
         require_material(
             self.get_operand_culture(ctx),
-            MaterialType::TransformedCulture,
+            "TransformedCulture",
             self.loc(ctx),
             ctx,
         )?;
         require_material(
             self.get_result_recovered(ctx),
-            MaterialType::RecoveredCulture,
+            "RecoveredCulture",
             self.loc(ctx),
             ctx,
         )
@@ -467,7 +498,7 @@ impl DiluteOp {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::DilutedCulture.get(ctx)],
+                vec![MaterialType::state(ctx, "DilutedCulture")],
                 vec![culture],
                 vec![],
                 0,
@@ -522,13 +553,13 @@ impl Verify for DiluteOp {
         )?;
         require_material(
             self.get_operand_culture(ctx),
-            MaterialType::RecoveredCulture,
+            "RecoveredCulture",
             self.loc(ctx),
             ctx,
         )?;
         require_material(
             self.get_result_diluted(ctx),
-            MaterialType::DilutedCulture,
+            "DilutedCulture",
             self.loc(ctx),
             ctx,
         )
@@ -572,7 +603,7 @@ impl PlateOp {
             op: Operation::new(
                 ctx,
                 Self::get_concrete_op_info(),
-                vec![MaterialType::Plate.get(ctx)],
+                vec![MaterialType::state(ctx, "Plate")],
                 vec![culture],
                 vec![],
                 0,
@@ -634,16 +665,11 @@ impl Verify for PlateOp {
         }
         require_material(
             self.get_operand_culture(ctx),
-            MaterialType::DilutedCulture,
+            "DilutedCulture",
             self.loc(ctx),
             ctx,
         )?;
-        require_material(
-            self.get_result_plate(ctx),
-            MaterialType::Plate,
-            self.loc(ctx),
-            ctx,
-        )
+        require_material(self.get_result_plate(ctx), "Plate", self.loc(ctx), ctx)
     }
 }
 
@@ -663,21 +689,33 @@ fn require_count(
     Ok(())
 }
 
-fn require_material(
-    value: Value,
-    expected: MaterialType,
-    location: Location,
-    ctx: &Context,
-) -> Result<()> {
+/// Verify that a value is a material, whatever state it is in.
+fn require_any_material(value: Value, what: &str, location: Location, ctx: &Context) -> Result<()> {
+    let handle = value.get_type(ctx);
+    let ty = handle.deref(ctx);
+    if ty.downcast_ref::<MaterialType>().is_none() {
+        return verify_err!(location, "{what} must be a Workflow material");
+    }
+    Ok(())
+}
+
+/// Verify that a value is a material in the named state.
+///
+/// The state is written as a bare name and compared as the IRI it stands for,
+/// so a verifier reads as the state a person would say out loud while the
+/// comparison stays exact.
+fn require_material(value: Value, expected: &str, location: Location, ctx: &Context) -> Result<()> {
     let handle = value.get_type(ctx);
     let ty = handle.deref(ctx);
     let Some(actual) = ty.downcast_ref::<MaterialType>() else {
-        return verify_err!(location, "expected Workflow material type {expected:?}");
+        return verify_err!(location, "expected Workflow material state '{expected}'");
     };
-    if *actual != expected {
+    let expected_iri = format!("{STATE_NS}{expected}");
+    if actual.iri() != expected_iri {
         return verify_err!(
             location,
-            "expected Workflow material type {expected:?}, found {actual:?}"
+            "expected Workflow material state '{expected_iri}', found '{}'",
+            actual.iri()
         );
     }
     Ok(())

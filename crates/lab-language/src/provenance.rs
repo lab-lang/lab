@@ -314,7 +314,8 @@ mod tests {
     const SETUP: &str = r#"use std.lab.plasmid
 use std.bio.designs
 
-buy chassis DH5alpha
+buy chassis DH5alpha:
+  competence = competent
 buy antibiotic chloramphenicol
 
 strain host:

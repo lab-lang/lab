@@ -5,8 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::{
-    ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FieldDecl, Item, Module, Path,
-    Provenance, TypeArgument, TypeExpr, WorkflowOutputs,
+    ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FacetDecl, FieldDecl, Item, Module,
+    Path, Provenance, TypeArgument, TypeExpr, WorkflowOutputs, instance_word,
 };
 use crate::checked::{
     CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
@@ -19,8 +19,8 @@ use crate::type_system::{Ty, to_checked_type};
 
 use super::Checker;
 use super::context::{
-    ArtifactKindSignature, CircuitSignature, DataSignature, Generics, SchemaField,
-    WorkflowSignature,
+    ArtifactKindSignature, CircuitSignature, DataSignature, FacetSignature, FacetState, Generics,
+    SchemaField, WorkflowSignature,
 };
 
 /// Where a type parameter's name appears in a signature, in source order.
@@ -65,6 +65,9 @@ fn collect_mentions<'a>(ty: &'a TypeExpr, out: &mut Vec<Mention<'a>>) {
                     // A forgotten argument introduces no name and refers to
                     // none, so it takes no part in signature scoping.
                     TypeArgument::Any { .. } => {}
+                    // A narrowing introduces no name either, but the subject it
+                    // narrows is an ordinary argument and may mention one.
+                    TypeArgument::InState { subject, .. } => collect_mentions(subject, out),
                     TypeArgument::Type(ty) => collect_mentions(ty, out),
                 }
             }
@@ -155,6 +158,49 @@ fn conjunction(names: &[&str]) -> String {
     }
 }
 
+/// The kind a facet classifies, which is a bare name and never a built type.
+///
+/// A facet says which states a kind's materials may be in. A list or a
+/// measurement has no states, and a generic subject would make the states depend
+/// on an argument, so the subject is one name.
+fn facet_subject(declaration: &FacetDecl) -> Result<&Identifier, SemanticError> {
+    match &declaration.subject {
+        TypeExpr::Path {
+            path, arguments, ..
+        } if arguments.is_empty()
+            && let [segment] = path.segments.as_slice() =>
+        {
+            Ok(segment)
+        }
+        other => Err(
+            SemanticError::new(other.span(), "a facet classifies a named kind")
+                .help("write 'on' followed by the kind whose materials this facet classifies"),
+        ),
+    }
+}
+
+/// The facet a property name states, if it names one.
+///
+/// A facet is stated by its own name in snake_case, the way an artifact kind's
+/// instances are written with the type's name in snake_case. One convention
+/// serves both, so neither has to be learned separately.
+fn stated_facet(checker: &Checker, produces: &Ty, name: &str) -> Option<String> {
+    let Ty::Named(subject, _) = produces else {
+        return None;
+    };
+    checker
+        .type_facets
+        .get(subject)?
+        .iter()
+        .find(|facet| instance_word(facet) == name)
+        .cloned()
+}
+
+fn facet_state_expected(facet: &str, span: Span) -> SemanticError {
+    SemanticError::new(span, format!("'{facet}' is not a state"))
+        .help("a facet is stated as one of its states, written as a bare name")
+}
+
 fn quoted_conjunction(names: &[&str]) -> String {
     let quoted = names
         .iter()
@@ -206,6 +252,7 @@ impl Checker {
             let (name, span) = match item {
                 Item::Use(_) => continue,
                 Item::Role(value) => (&value.name.value, value.name.span),
+                Item::Facet(value) => (&value.name.value, value.name.span),
                 Item::ArtifactKind(value) => (&value.name.value, value.name.span),
                 Item::Circuit(value) => (&value.name.value, value.name.span),
                 Item::Artifact(value) => (&value.name.value, value.name.span),
@@ -263,6 +310,17 @@ impl Checker {
             }
         }
 
+        // Facets resolve before any signature, because a signature may narrow a
+        // material to a state and the states have to be known by then. They ask
+        // only for the subject's name, so a kind declared further down the file
+        // is not yet needed; that the name is a real kind is checked once every
+        // declaration has been seen.
+        for item in &module.items {
+            if let Item::Facet(declaration) = item {
+                self.collect_facet(declaration)?;
+            }
+        }
+
         for item in &module.items {
             match item {
                 Item::Circuit(declaration) => {
@@ -289,7 +347,8 @@ impl Checker {
                         },
                     );
                 }
-                Item::Role(_) => {}
+                // Both are collected in passes of their own.
+                Item::Role(_) | Item::Facet(_) => {}
                 Item::ArtifactKind(declaration) => {
                     let produces = self.lower_kind_type(&declaration.produces)?;
                     // A kind's roles classify the type it produces, because
@@ -467,11 +526,233 @@ impl Checker {
                         }
                         None => ty,
                     };
+                    // A stated facet narrows the thing itself, so every use of
+                    // the name carries the state. Provisioning a chassis
+                    // declared competent then yields competent cells without
+                    // the action contract knowing that facets exist.
+                    let ty = self.narrowed_by_stated_facets(&ty, declaration)?;
                     self.values.insert(declaration.name.value.clone(), ty);
                 }
                 Item::Use(_) | Item::Binding(_) => {}
             }
         }
+
+        for item in &module.items {
+            if let Item::Facet(declaration) = item {
+                let subject = facet_subject(declaration)?;
+                if !self.known_types.contains(&subject.value)
+                    && !self.artifact_kinds.values().any(|kind| {
+                        matches!(&kind.produces, Ty::Named(name, _) if name == &subject.value)
+                    })
+                    && !self.standard_types.contains_key(&subject.value)
+                {
+                    return Err(SemanticError::new(
+                        subject.span,
+                        format!("'{}' is not a kind in scope", subject.value),
+                    )
+                    .help("a facet classifies the materials of a declared kind"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Narrow an instance's type by the facet states its declaration states.
+    ///
+    /// A property whose name is a facet on this kind says which state this thing
+    /// is in. It is not a schema field: the kind declares what a thing *may*
+    /// state, and a facet declares what it may *be*, so the two namespaces are
+    /// checked separately and a facet name is never a missing property.
+    fn narrowed_by_stated_facets(
+        &self,
+        ty: &Ty,
+        declaration: &ArtifactDecl,
+    ) -> Result<Ty, SemanticError> {
+        let Ty::Named(subject, _) = ty else {
+            return Ok(ty.clone());
+        };
+        let Some(facets) = self.type_facets.get(subject) else {
+            return Ok(ty.clone());
+        };
+        let mut narrowed = ty.clone();
+        for member in &declaration.members {
+            let ArtifactMember::Property(property) = member else {
+                continue;
+            };
+            let Some(facet) = facets
+                .iter()
+                .find(|facet| instance_word(facet) == property.name.value)
+            else {
+                continue;
+            };
+            let signature = self
+                .facets
+                .get(facet)
+                .expect("a facet on this type was collected");
+            let state = match &property.value {
+                Expr::Path(path) => match path.segments.as_slice() {
+                    [segment] => segment,
+                    _ => return Err(facet_state_expected(&property.name.value, path.span)),
+                },
+                other => return Err(facet_state_expected(&property.name.value, other.span())),
+            };
+            if signature.state(&state.value).is_none() {
+                let states = signature
+                    .states
+                    .iter()
+                    .map(|state| state.name.as_str())
+                    .collect::<Vec<_>>();
+                return Err(SemanticError::new(
+                    state.span,
+                    format!("facet '{facet}' has no state '{}'", state.value),
+                )
+                .help(format!("states of '{facet}': {}", states.join(", "))));
+            }
+            narrowed = Ty::InState(Box::new(narrowed), state.value.clone());
+        }
+        Ok(narrowed)
+    }
+
+    /// Check that some facet of `subject` admits `state`.
+    ///
+    /// A material is narrowed by naming a state rather than the facet it belongs
+    /// to, because at the point of use the state is what a person knows: cells
+    /// are competent, a culture is diluted. Which facet said so is the
+    /// declaration's business.
+    fn check_facet_state(&self, subject: &Ty, state: &Identifier) -> Result<(), SemanticError> {
+        let Ty::Named(subject_name, _) = subject else {
+            return Err(SemanticError::new(
+                state.span,
+                format!("'{subject}' has no states, so it cannot be narrowed to one"),
+            )
+            .help("only a named kind carries facets"));
+        };
+        let facets = self.type_facets.get(subject_name);
+        let admits = facets.is_some_and(|names| {
+            names.iter().any(|facet| {
+                self.facets
+                    .get(facet)
+                    .is_some_and(|signature| signature.state(&state.value).is_some())
+            })
+        });
+        if admits {
+            return Ok(());
+        }
+        let known = facets
+            .map(|names| {
+                let mut states = names
+                    .iter()
+                    .filter_map(|facet| self.facets.get(facet))
+                    .flat_map(|signature| signature.states.iter().map(|state| state.name.as_str()))
+                    .collect::<Vec<_>>();
+                states.sort_unstable();
+                states
+            })
+            .unwrap_or_default();
+        let error = SemanticError::new(
+            state.span,
+            format!("'{subject_name}' has no state '{}'", state.value),
+        );
+        Err(if known.is_empty() {
+            error.help(format!(
+                "no facet classifies '{subject_name}'; declare one with 'facet <Name> on {subject_name}:'"
+            ))
+        } else {
+            error.help(format!("states of '{subject_name}': {}", known.join(", ")))
+        })
+    }
+
+    /// Validate one facet and register it against the type it classifies.
+    fn collect_facet(&mut self, declaration: &FacetDecl) -> Result<(), SemanticError> {
+        let subject_name = facet_subject(declaration)?.value.clone();
+        let subject = Ty::named(subject_name.clone());
+
+        let mut states: Vec<FacetState> = Vec::new();
+        for state in &declaration.states {
+            if states.iter().any(|seen| seen.name == state.name.value) {
+                return Err(SemanticError::new(
+                    state.name.span,
+                    format!("duplicate state '{}'", state.name.value),
+                )
+                .help("each state a facet admits is listed once"));
+            }
+            let mut fields = BTreeMap::new();
+            for field in &state.fields {
+                let ty = self.lower_type(&field.ty, &BTreeSet::new())?;
+                fields.insert(
+                    field.name.value.clone(),
+                    SchemaField {
+                        ty,
+                        optional: field.optional,
+                    },
+                );
+            }
+            states.push(FacetState {
+                doc: state.doc.clone(),
+                name: state.name.value.clone(),
+                fields,
+            });
+        }
+
+        let known = |name: &Identifier| states.iter().any(|state| state.name == name.value);
+        let mut transitions = Vec::new();
+        for transition in &declaration.transitions {
+            for endpoint in [&transition.from, &transition.to] {
+                if !known(endpoint) {
+                    return Err(SemanticError::new(
+                        endpoint.span,
+                        format!(
+                            "facet '{}' has no state '{}'",
+                            declaration.name.value, endpoint.value
+                        ),
+                    )
+                    .help(format!(
+                        "states in this facet: {}",
+                        states
+                            .iter()
+                            .map(|state| state.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )));
+                }
+            }
+            transitions.push((transition.from.value.clone(), transition.to.value.clone()));
+        }
+
+        // The first state is where a material starts, so it needs no transition
+        // into it. Any other state nothing reaches cannot be established, and a
+        // state no action can establish is a claim the kind cannot honor.
+        for state in states.iter().skip(1) {
+            if !transitions.iter().any(|(_, to)| to == &state.name) {
+                let span = declaration
+                    .states
+                    .iter()
+                    .find(|declared| declared.name.value == state.name)
+                    .map(|declared| declared.name.span)
+                    .unwrap_or(declaration.name.span);
+                return Err(SemanticError::new(
+                    span,
+                    format!("no transition reaches state '{}'", state.name),
+                )
+                .help(format!(
+                    "a material starts in '{}'; write a transition into '{}' or remove it",
+                    states[0].name, state.name
+                )));
+            }
+        }
+
+        self.type_facets
+            .entry(subject_name.clone())
+            .or_default()
+            .insert(declaration.name.value.clone());
+        self.facets.insert(
+            declaration.name.value.clone(),
+            FacetSignature {
+                subject,
+                states,
+                transitions,
+            },
+        );
         Ok(())
     }
 
@@ -994,6 +1275,13 @@ impl Checker {
                     // not declare is a mistake rather than an extension. SBOL
                     // and supplier identities were consumed above because
                     // they describe the instance, not one artifact kind.
+                    // A facet name says which state this thing is in. It narrowed
+                    // the value's type when the declaration was collected, and
+                    // it is not a schema field, so it is neither checked against
+                    // one nor reported as missing from one.
+                    if stated_facet(self, &produces, &property.name.value).is_some() {
+                        continue;
+                    }
                     if !signature.fields.contains_key(&property.name.value) {
                         let mut error = SemanticError::new(
                             property.name.span,
@@ -1107,7 +1395,15 @@ impl Checker {
             return Ok(CheckedDeclaration::Catalog {
                 doc: declaration.doc.clone(),
                 name: declaration.name.value.clone(),
-                r#type: to_checked_type(&produces),
+                // The stated state travels with the exported type, so a module
+                // that imports this name sees the same narrowing the declaring
+                // module did. Collection already computed it, so reading it back
+                // keeps one answer rather than two that could disagree.
+                r#type: to_checked_type(
+                    self.values
+                        .get(&declaration.name.value)
+                        .unwrap_or(&produces),
+                ),
                 sbol_identity,
                 supplier_identity: supplier_identity
                     .unwrap_or_else(|| declaration.name.value.clone()),
@@ -1216,6 +1512,13 @@ impl Checker {
                                 return Err(self.not_a_role(&role_name, *span));
                             }
                             Ok(Ty::Any(role_name))
+                        }
+                        TypeArgument::InState {
+                            subject, state, ..
+                        } => {
+                            let subject = self.lower_type(subject, generics)?;
+                            self.check_facet_state(&subject, state)?;
+                            Ok(Ty::InState(Box::new(subject), state.value.clone()))
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;

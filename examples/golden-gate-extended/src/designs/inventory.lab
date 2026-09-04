@@ -42,6 +42,7 @@ buy:
   // Both are transformed the way competent cells are: chilled, shocked, recovered.
   chassis DH5alpha:
     sbol_identity = "https://example.org/golden-gate/materials/DH5alpha"
+    competence = competent
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C
@@ -49,6 +50,7 @@ buy:
 
   chassis BL21:
     sbol_identity = "https://example.org/golden-gate/materials/BL21"
+    competence = competent
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C

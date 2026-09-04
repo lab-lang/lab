@@ -18,7 +18,8 @@ buy:
   backbone region_receiver
   restriction_enzyme BsaI
   restriction_enzyme BsmBI
-  chassis DH5alpha
+  chassis DH5alpha:
+    competence = competent
   antibiotic chloramphenicol
 
 build plasmid promoter_carrier:

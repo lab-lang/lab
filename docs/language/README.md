@@ -95,3 +95,6 @@ The latest accepted design records are:
 - [`0049`](decisions/0049-pipetting-techniques-cross-device.md): pipetting technique is a portable constraint whose numeric realization belongs to the adapter profile.
 - [`0050`](decisions/0050-allocated-procedure-schedules.md): fusing complete allocated tasks into one device run is a checked schedule that preserves task, requirement, and material identity.
 - [`0051`](decisions/0051-interchangeable-resources-resolve-without-a-pin.md): interchangeable MaterialLots resolve deterministically and reviewably, while choosing between Assets stays explicit.
+- [`0052`](decisions/0052-material-states-are-declared-facets.md): a material's state is a declared orthogonal facet of its design kind, not a separate type.
+- [`0053`](decisions/0053-quantities-carry-dimensions-and-compose.md): quantities carry dimensions, convert only where written, and compose under multiplication and division.
+- [`0054`](decisions/0054-every-material-carries-a-quantity.md): every material carries a quantity, and a divisible one is drawn from within ordinary affine ownership.

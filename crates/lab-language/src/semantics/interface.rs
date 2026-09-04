@@ -10,6 +10,7 @@ use crate::checked::{CheckedField, CheckedSchemaField, CheckedType};
 pub enum ExportKind {
     Type,
     Role,
+    Facet,
     ArtifactKind,
     Value,
     Function,
@@ -43,6 +44,11 @@ pub struct ModuleExport {
     /// against. A word means nothing to an importer without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<ArtifactSchema>,
+    /// For a facet export, the states it admits and the changes between them.
+    /// An importer that cannot see the states cannot constrain a material to
+    /// one, so the states are as much of the surface as a schema is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub facet: Option<FacetSurface>,
     /// Type parameters and their bounds, for a type or a callable alike.
     ///
     /// Without these an importer cannot tell a parameter apart from a nominal
@@ -60,6 +66,17 @@ pub struct ArtifactSchema {
     pub fields: Vec<CheckedSchemaField>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub declares: Option<crate::checked::CheckedPresence>,
+}
+
+/// What a package's facet means to a module that imports it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FacetSurface {
+    pub subject: CheckedType,
+    /// The states in declaration order, so the first stays identifiable as the
+    /// state a newly established material is in.
+    pub states: Vec<crate::checked::CheckedFacetState>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<crate::checked::CheckedFacetTransition>,
 }
 
 /// The type parameters a declaration takes, in declaration order, with whatever
