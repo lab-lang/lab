@@ -26,7 +26,9 @@ use crate::design::ir::{
 };
 use crate::ir::attributes::quantity_dict;
 use crate::stage::{IrStage, detect_stage, initialize_stage, set_stage};
-use crate::workflow::ir::{DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp};
+use crate::workflow::ir::{
+    DiluteOp, PerformOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp,
+};
 
 pub use self::lowering::SourceLoweringError;
 use crate::planning::PlanningProblemExtractionError;
@@ -477,6 +479,35 @@ fn append_workflow(
                 values.insert(plate.clone(), operation.get_result_plate(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
+            WorkflowActionIntent::Perform {
+                operation,
+                capability,
+                results,
+                operands,
+                parameters,
+            } => {
+                let operand_values = operands
+                    .iter()
+                    .map(|operand| workflow_value(&values, operand, &name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let states = results
+                    .iter()
+                    .map(|(_, state)| state.clone())
+                    .collect::<Vec<_>>();
+                let performed = PerformOp::new(
+                    context,
+                    operation.clone(),
+                    name.clone(),
+                    capability.clone(),
+                    parameters.clone(),
+                    operand_values,
+                    &states,
+                );
+                for ((binding, _), result) in results.iter().zip(performed.results(context)) {
+                    values.insert(binding.clone(), result);
+                }
+                root.append_operation(context, performed.get_operation(), 0);
+            }
         }
     }
     Ok(())
@@ -799,6 +830,55 @@ workflow make_LB() -> Material<Medium>:
         assert!(
             !refined.contains("golden-gate"),
             "an Intent with no assembly recipe is not a Golden Gate candidate: {refined}"
+        );
+    }
+
+    /// A package can declare a verb the compiler has never seen, and a workflow
+    /// that performs it refines to a manual bench method derived from the
+    /// declaration alone: the operand it consumes, the parameter it carries, and
+    /// the state its result arrives in.
+    #[test]
+    fn a_declared_verb_refines_to_a_derived_manual_method() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+
+build medium LB_broth:
+  components = [
+    Ingredient { substance: "tryptone", concentration: 10 g/L },
+  ]
+
+action degas <medium> for <duration> -> degassed:
+  medium: take Material<Medium>
+  duration: Quantity<min>
+  degassed: Material<Medium>
+  requires StaticIncubation
+
+workflow make_LB() -> Material<Medium>:
+  broth <- realize LB_broth
+  clear <- degas broth for 5 min
+  return clear
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("module checks");
+        let portable = PortableLairProgram::lower(&module).expect("program lowers");
+        let intent = portable.ir();
+        assert!(
+            intent.contains("workflow.perform"),
+            "the declared verb lowers to a perform Intent: {intent}"
+        );
+
+        let refined = portable
+            .refine_standard_methods()
+            .expect("the derived manual method refines the declared verb");
+        let problem = refined.planning_problem().expect("problem projects");
+        let choice = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "standalone.degas")
+            .expect("the declared verb becomes a planning choice");
+        assert_eq!(choice.candidates.len(), 1);
+        assert_eq!(
+            choice.candidates[0].method.as_str(),
+            "https://www.lab-compiler.org/ns/method#derived-standalone-degas"
         );
     }
 

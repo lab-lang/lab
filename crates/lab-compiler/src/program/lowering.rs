@@ -43,6 +43,24 @@ pub(crate) enum WorkflowActionIntent {
         culture: String,
         selection: String,
     },
+    /// A verb a package declared, lowered generically.
+    ///
+    /// The six bespoke actions predate the `action` declaration form; everything
+    /// a package declares afterward arrives here. The operation, the operand
+    /// materials it takes, the scalar parameters it carries, and the state each
+    /// result arrives in are all read from the checked call and its contract.
+    Perform {
+        operation: String,
+        /// The capability a facility must offer to run the verb.
+        capability: String,
+        /// Result binding names paired with the state each arrives in.
+        results: Vec<(String, String)>,
+        /// The workflow bindings this action takes as material operands.
+        operands: Vec<String>,
+        /// Scalar and measurement parameters, each as the text it was written
+        /// as.
+        parameters: Vec<(String, String)>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -652,6 +670,7 @@ fn realization_flows(
     catalog_types: &BTreeMap<String, String>,
     selections: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
+    let capabilities = action_capabilities(modules);
     let mut result = BTreeMap::new();
     for declaration in declarations(modules) {
         let CheckedDeclaration::Workflow { body, .. } = declaration else {
@@ -777,11 +796,11 @@ fn realization_flows(
                         },
                     });
                 }
-                operation => {
-                    return Err(SourceLoweringError::UnsupportedWorkflowAction {
-                        artifact: design,
-                        operation: operation.to_owned(),
-                    });
+                // A verb the frontend accepted that is not one of the six with a
+                // bespoke lowering is one a package declared. Its operands,
+                // parameters, and result states come from the checked call.
+                _ => {
+                    actions.push(perform_intent(action, &capabilities)?);
                 }
             }
         }
@@ -848,6 +867,92 @@ fn dependency_names(
                 .ok_or_else(|| SourceLoweringError::InvalidDependencyFlow(design.to_owned()))
         })
         .collect()
+}
+
+/// Lower a declared verb generically from its checked call.
+///
+/// A material argument is an operand the value it names flows into; a scalar or
+/// measurement argument is a parameter; and each result arrives in the state its
+/// type narrows to, or the product state of its kind where it narrows to none.
+fn perform_intent(
+    action: &ResolvedAction,
+    capabilities: &BTreeMap<String, String>,
+) -> Result<WorkflowActionIntent, SourceLoweringError> {
+    let invalid = || SourceLoweringError::InvalidActionResults {
+        artifact: String::new(),
+        operation: action.operation.clone(),
+    };
+    let capability = capabilities
+        .get(&action.operation)
+        .cloned()
+        .ok_or_else(invalid)?;
+    let mut operands = Vec::new();
+    let mut parameters = Vec::new();
+    for argument in &action.arguments {
+        match &argument.value.value {
+            CheckedExpression::Reference { path, .. } if path.len() == 1 => {
+                operands.push(path[0].clone());
+            }
+            CheckedExpression::Quantity { magnitude, unit } => {
+                parameters.push((argument.name.clone(), format!("{magnitude} {unit}")));
+            }
+            CheckedExpression::Integer { value } => {
+                parameters.push((argument.name.clone(), value.to_string()));
+            }
+            _ => return Err(invalid()),
+        }
+    }
+    let results = action
+        .results
+        .iter()
+        .map(|result| {
+            Ok((
+                result.name.clone(),
+                lair_state(&result.r#type).ok_or_else(invalid)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, SourceLoweringError>>()?;
+    Ok(WorkflowActionIntent::Perform {
+        operation: action.operation.clone(),
+        capability,
+        results,
+        operands,
+        parameters,
+    })
+}
+
+/// The capability each declared verb needs, keyed by the operation it refines.
+fn action_capabilities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
+    declarations(modules)
+        .filter_map(|declaration| match declaration {
+            CheckedDeclaration::Action {
+                operation,
+                capability,
+                ..
+            } => Some((operation.clone(), capability.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The workflow material state a result type stands for.
+///
+/// A material narrowed to a state arrives in that state; an unnarrowed one
+/// arrives in its kind's product state, the way a realized plasmid is a
+/// `PlasmidProduct`.
+fn lair_state(ty: &lab_language::CheckedType) -> Option<String> {
+    use lab_language::CheckedType;
+    let CheckedType::Named { name, arguments } = ty else {
+        return None;
+    };
+    if name != "Material" {
+        return None;
+    }
+    match arguments.first()? {
+        CheckedType::InState { state, .. } => Some(state.clone()),
+        CheckedType::Named { name, .. } => Some(format!("{name}Product")),
+        _ => None,
+    }
 }
 
 fn action_argument<'a>(action: &'a ResolvedAction, name: &str) -> Option<&'a TypedExpression> {

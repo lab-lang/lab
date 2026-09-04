@@ -6,6 +6,7 @@
 
 use lab_capability::AbsoluteIri;
 use pliron::builtin::attributes::{DictAttr, IntegerAttr, StringAttr, VecAttr};
+use pliron::builtin::op_interfaces::{AtLeastNOpdsInterface, AtLeastNResultsInterface};
 use pliron::common_traits::Verify;
 use pliron::context::Context;
 use pliron::derive::{pliron_op, pliron_type};
@@ -687,6 +688,165 @@ impl Verify for PlateOp {
         )?;
         require_material(self.get_result_plate(ctx), "Plate", self.loc(ctx), ctx)
     }
+}
+
+/// A durable laboratory action whose shape a declaration supplies.
+///
+/// The six operations with a bespoke op each predate the open `MaterialType`
+/// and the `action` declaration form. A verb a package declares lowers here:
+/// the operation it refines, the artifact it belongs to, and its scalar
+/// parameters travel as data, and its material operands and results are the
+/// values and states the contract named.
+#[pliron_op(
+    name = "workflow.perform",
+    format,
+    attributes = (
+        perform_operation: StringAttr,
+        perform_artifact: StringAttr,
+        perform_capability: StringAttr,
+        perform_parameter_names: VecAttr,
+        perform_parameters: DictAttr
+    ),
+    interfaces = [AtLeastNOpdsInterface<0>, AtLeastNResultsInterface<0>]
+)]
+pub struct PerformOp;
+
+impl PerformOp {
+    /// One performed action: the operation it refines, the artifact it is part
+    /// of, the capability that runs it, its scalar parameters, its material
+    /// operands, and the state each of its results arrives in.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        ctx: &mut Context,
+        operation: impl Into<String>,
+        artifact: impl Into<String>,
+        capability: impl Into<String>,
+        parameters: Vec<(String, String)>,
+        operands: Vec<Value>,
+        result_states: &[String],
+    ) -> Self {
+        let results = result_states
+            .iter()
+            .map(|state| MaterialType::state(ctx, state))
+            .collect::<Vec<_>>();
+        let result = Self {
+            op: Operation::new(
+                ctx,
+                Self::get_concrete_op_info(),
+                results,
+                operands,
+                vec![],
+                0,
+            ),
+        };
+        let names = parameters
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        result.set_attr_perform_operation(ctx, StringAttr::new(operation.into()));
+        result.set_attr_perform_artifact(ctx, StringAttr::new(artifact.into()));
+        result.set_attr_perform_capability(ctx, StringAttr::new(capability.into()));
+        result.set_attr_perform_parameter_names(ctx, string_vec(names));
+        result.set_attr_perform_parameters(ctx, parameter_dict(parameters));
+        result
+    }
+
+    /// The capability a facility must offer to run this action.
+    pub fn capability(&self, ctx: &Context) -> String {
+        self.get_attr_perform_capability(ctx)
+            .expect("a verified workflow.perform carries its capability")
+            .as_str()
+            .to_owned()
+    }
+
+    /// The Intent operation this action refines.
+    pub fn operation(&self, ctx: &Context) -> String {
+        self.get_attr_perform_operation(ctx)
+            .expect("a verified workflow.perform carries its operation")
+            .as_str()
+            .to_owned()
+    }
+
+    /// This action's result materials, in the order they were declared.
+    pub fn results(&self, ctx: &Context) -> Vec<Value> {
+        self.get_operation().deref(ctx).results().collect()
+    }
+
+    /// This action's scalar parameters, each the text its value was written as.
+    pub fn parameters(&self, ctx: &Context) -> Vec<(String, String)> {
+        use pliron::identifier::Identifier;
+        let (Some(names), Some(dict)) = (
+            self.get_attr_perform_parameter_names(ctx),
+            self.get_attr_perform_parameters(ctx),
+        ) else {
+            return Vec::new();
+        };
+        names
+            .0
+            .iter()
+            .filter_map(|name| {
+                let name = name.downcast_ref::<StringAttr>()?.as_str();
+                let key = Identifier::try_from(name).ok()?;
+                let value = dict.lookup(&key)?.downcast_ref::<StringAttr>()?.as_str();
+                Some((name.to_owned(), value.to_owned()))
+            })
+            .collect()
+    }
+}
+
+impl Verify for PerformOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        require_string(
+            self.get_attr_perform_operation(ctx).as_deref(),
+            "perform_operation",
+            self.loc(ctx),
+        )?;
+        require_string(
+            self.get_attr_perform_artifact(ctx).as_deref(),
+            "perform_artifact",
+            self.loc(ctx),
+        )?;
+        require_string(
+            self.get_attr_perform_capability(ctx).as_deref(),
+            "perform_capability",
+            self.loc(ctx),
+        )?;
+        if self.get_attr_perform_parameters(ctx).is_none() {
+            return verify_err!(
+                self.loc(ctx),
+                "workflow.perform requires perform_parameters"
+            );
+        }
+        let operation = self.get_operation();
+        let results = operation.deref(ctx).results().collect::<Vec<_>>();
+        for (index, result) in results.into_iter().enumerate() {
+            require_any_material(
+                result,
+                &format!("workflow.perform result {index}"),
+                self.loc(ctx),
+                ctx,
+            )?;
+        }
+        Ok(())
+    }
+}
+
+/// A parameter dictionary keyed by name, each value the text a magnitude and
+/// unit are written as. A scalar rides the same way, as its own text.
+fn parameter_dict(parameters: Vec<(String, String)>) -> DictAttr {
+    use pliron::identifier::Identifier;
+    DictAttr::new(
+        parameters
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    Identifier::try_from(name.as_str())
+                        .expect("a parameter name is a checked identifier"),
+                    StringAttr::new(value).into(),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn require_count(

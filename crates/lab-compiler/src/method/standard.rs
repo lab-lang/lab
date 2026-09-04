@@ -661,6 +661,76 @@ fn manual_antibiotic_selection() -> MethodDefinition {
     }
 }
 
+/// The manual bench method the compiler derives for a declared verb.
+///
+/// A package's `action` declaration names the operation, the capability that
+/// runs it, the materials it consumes and produces, and its scalar parameters.
+/// That is already a complete method: one manual task takes the operands,
+/// carries the parameters, requires the capability, and yields each result in
+/// the state the Intent asked for. Every declared verb refines this way, so a
+/// package adds vocabulary without adding a method to the registry.
+pub(crate) fn derived_manual_method(
+    operation: &str,
+    capability: &str,
+    operand_states: &[String],
+    parameter_names: &[String],
+    result_count: usize,
+) -> MethodDefinition {
+    let inputs = operand_states
+        .iter()
+        .enumerate()
+        .map(|(index, state)| input(&format!("operand{index}"), material_iri(state)))
+        .collect::<Vec<_>>();
+    let parameters = parameter_names
+        .iter()
+        .map(|name| parameter(name, ScalarType::Text))
+        .collect::<Vec<_>>();
+    let task_inputs = (0..operand_states.len())
+        .map(|index| input_ref(&format!("operand{index}")))
+        .collect::<Vec<_>>();
+    let task_outputs = (0..result_count)
+        .map(|index| output(&format!("result{index}"), PortType::MaterialAsRequested))
+        .collect::<Vec<_>>();
+    let task_parameters = parameters
+        .iter()
+        .map(|parameter| procedure_parameter(&parameter.name, parameter, None))
+        .collect::<Vec<_>>();
+    let outputs = (0..result_count)
+        .map(|index| {
+            let name = format!("result{index}");
+            method_output(&name, "perform", &name)
+        })
+        .collect::<Vec<_>>();
+    MethodDefinition {
+        id: method(&format!("derived-{}", operation.replace('.', "-"))),
+        refines: intent(operation),
+        inputs,
+        parameters,
+        tasks: vec![task(
+            "perform",
+            &upper_camel(operation.rsplit('.').next().unwrap_or(operation)),
+            task_inputs,
+            task_outputs,
+            task_parameters,
+            vec![],
+            vec![requirement(
+                "perform",
+                capability,
+                [ControlMode::Manual],
+                vec![],
+            )],
+        )],
+        outputs,
+    }
+}
+
+fn material_iri(state: &str) -> PortType {
+    PortType::Material {
+        state: AbsoluteIri::new(state.to_owned())
+            .expect("a workflow material state is an absolute IRI"),
+    }
+}
+
 fn realization_parameters() -> Vec<MethodParameter> {
     [
         parameter("artifact", ScalarType::Text),

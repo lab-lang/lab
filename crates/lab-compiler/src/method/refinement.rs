@@ -41,8 +41,8 @@ use crate::procedure::normalization::{
 };
 use crate::workflow::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 use crate::workflow::ir::{
-    DiluteOp, MaterialType as WorkflowMaterialType, PlateOp, ProvisionOp, RealizeOp, RecoverOp,
-    TransformOp,
+    DiluteOp, MaterialType as WorkflowMaterialType, PerformOp, PlateOp, ProvisionOp, RealizeOp,
+    RecoverOp, TransformOp,
 };
 
 pub(crate) fn refine_method_alternatives(
@@ -92,7 +92,17 @@ impl DialectConversion for MethodRefinement<'_> {
         _operands_info: &OperandsInfo,
     ) -> Result<()> {
         let instance = intent_instance(context, operation)?;
-        let declared_candidates = self.registry.methods_for(&instance.operation);
+        // A declared verb has no registered method: the compiler derives one
+        // manual bench method from the operands, parameters, and result states
+        // the Intent already carries, and refines against that.
+        let derived;
+        let declared_candidates: &[MethodDefinition] =
+            if Operation::get_op::<PerformOp>(operation, context).is_some() {
+                derived = vec![derived_method(context, operation)];
+                &derived
+            } else {
+                self.registry.methods_for(&instance.operation)
+            };
         if declared_candidates.is_empty() {
             return input_err!(
                 operation.deref(context).loc(),
@@ -215,7 +225,54 @@ struct IntentInstance {
     parameters: BTreeMap<LocalId, ProcedureValue>,
 }
 
+/// Build the manual bench method for one performed declared verb.
+///
+/// Everything the method needs is on the operation: the states its operands
+/// arrive in, the parameters it carries, how many results it yields, and the
+/// capability that runs it. The result states are read from the Intent when the
+/// candidate is built, so the method's outputs are requested rather than named.
+fn derived_method(context: &Context, operation: Ptr<Operation>) -> MethodDefinition {
+    let perform = Operation::get_op::<PerformOp>(operation, context)
+        .expect("derived_method is only called for a workflow.perform operation");
+    let operand_states = operation
+        .deref(context)
+        .operands()
+        .map(|value| {
+            material_state_iri(context, value.get_type(context))
+                .expect("a performed verb takes material operands")
+        })
+        .collect::<Vec<_>>();
+    let parameter_names = perform
+        .parameters(context)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
+    let result_count = operation.deref(context).results().count();
+    crate::method::derived_manual_method(
+        &perform.operation(context),
+        &perform.capability(context),
+        &operand_states,
+        &parameter_names,
+        result_count,
+    )
+}
+
+/// The absolute state IRI a material value carries, on either side of the
+/// Workflow-to-Procedure boundary.
+fn material_state_iri(context: &Context, ty: TypeHandle) -> Option<String> {
+    let handle = ty.deref(context);
+    if let Some(material) = handle.downcast_ref::<WorkflowMaterialType>() {
+        return Some(material.iri().to_owned());
+    }
+    handle
+        .downcast_ref::<ProcedureMaterialType>()
+        .map(|material| material.state().to_owned())
+}
+
 fn intent_operation(context: &Context, operation: Ptr<Operation>) -> Option<IntentOperationId> {
+    if let Some(perform) = Operation::get_op::<PerformOp>(operation, context) {
+        return IntentOperationId::new(perform.operation(context)).ok();
+    }
     let value = if Operation::get_op::<RealizeOp>(operation, context).is_some() {
         "std.bio.build.realize"
     } else if Operation::get_op::<ProvisionOp>(operation, context).is_some() {
@@ -446,6 +503,13 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
             "colony_volume_ul",
             u32_value(&plate.get_attr_plate_colony_volume_ul(context).unwrap()),
         );
+    } else if let Some(perform) = Operation::get_op::<PerformOp>(operation, context) {
+        // A declared verb carries its scalar parameters as the text they were
+        // written as. The derived method reads each one back verbatim, so a
+        // manual protocol shows "4000 rcf" the way the workflow said it.
+        for (name, value) in perform.parameters(context) {
+            insert_text(&mut parameters, &name, value);
+        }
     }
     Ok(IntentInstance {
         operation: semantic_operation,
