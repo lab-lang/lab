@@ -86,11 +86,11 @@ Binds culture.
 
 plate = Action(
     name="plate",
-    phrase=("plate", "<culture>", "on", "<antibiotic>"),
+    phrase=("plate", "<culture>", "on", "<medium>"),
     results=("plate",),
     uses=("std.lab.plasmid",),
 )
-"""Performed as `plate <culture> on <antibiotic>`.
+"""Performed as `plate <culture> on <medium>`.
 
 Binds plate.
 """

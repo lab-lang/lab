@@ -22,9 +22,38 @@ from ._declarations import (
 )
 from ._expressions import Expression
 from ._source import caller_origin
-from ._types import TypeApplication
+from ._types import InState, TypeApplication
 
 _ArtifactKindT = TypeVar("_ArtifactKindT", bound="ArtifactKind")
+
+
+class State(Expression):
+    """One state a facet admits, such as `competent` or `inoculated`.
+
+    A state is a value where a declaration states it and a narrowing where a
+    type is written: `inoculated[Medium]` is `Medium is inoculated`. Lab spells
+    the narrowing with `is`, which Python reads as identity, and an annotation
+    may not be a call, so subscripting is what is left and it reads the way the
+    words do.
+    """
+
+    __slots__ = ("name", "uses")
+
+    def __init__(self, *, name: str, uses: Sequence[str] = ()) -> None:
+        self.name = name
+        self.uses = tuple(uses)
+
+    def render(self) -> str:
+        return self.name
+
+    def lab_modules(self) -> Iterator[str]:
+        yield from self.uses
+
+    def __getitem__(self, subject: object) -> InState:
+        return InState(subject, self.name)
+
+    def __repr__(self) -> str:
+        return f"<lab state {self.name}>"
 
 
 class Symbol(Expression):

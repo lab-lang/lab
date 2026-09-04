@@ -749,6 +749,10 @@ fn select_parameters(
 fn parameter_unit(name: &str) -> Option<UnitIri> {
     if name.ends_with("_ul") {
         Some(unit("MicroL"))
+    } else if name.ends_with("_g_per_l") {
+        Some(unit("GM-PER-L"))
+    } else if name.ends_with("_g") {
+        Some(unit("GM"))
     } else if name.ends_with("_mm") {
         Some(unit("MilliM"))
     } else if name.ends_with("_temperature_c") {
@@ -965,6 +969,48 @@ fn upper_camel(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A parameter carries the unit its name says it is in, so a method
+    /// weighing something out reaches the exact quantity that measures it.
+    #[test]
+    fn a_parameter_names_the_unit_it_is_measured_in() {
+        use crate::procedure::{Mass, MassConcentration};
+
+        let mass = parameter_unit("tryptone_g").expect("a mass parameter names grams");
+        assert_eq!(mass.as_str(), "http://qudt.org/vocab/unit/GM");
+        assert_eq!(
+            Mass::parse_grams("5")
+                .expect("five grams")
+                .as_property_value()
+                .unit
+                .as_ref()
+                .map(UnitIri::as_str),
+            Some(mass.as_str()),
+            "the parameter and the quantity that carries it agree on the unit"
+        );
+
+        let concentration =
+            parameter_unit("tryptone_g_per_l").expect("a concentration names grams per litre");
+        assert_eq!(
+            concentration.as_str(),
+            "http://qudt.org/vocab/unit/GM-PER-L"
+        );
+        assert_eq!(
+            MassConcentration::parse_grams_per_litre("10")
+                .expect("ten grams per litre")
+                .as_property_value()
+                .unit
+                .as_ref()
+                .map(UnitIri::as_str),
+            Some(concentration.as_str())
+        );
+
+        // A longer suffix wins, so a concentration is not read as a mass.
+        assert_ne!(
+            parameter_unit("tryptone_g_per_l"),
+            parameter_unit("tryptone_g")
+        );
+    }
 
     #[test]
     fn bundled_methods_validate_and_retain_real_alternatives() {

@@ -66,6 +66,32 @@ class LabRole(LabType):
     __lab_role__: str = ""
 
 
+class LabState:
+    """One state a facet admits, mirrored as a class so it may be written in an
+    annotation.
+
+    `inoculated[Medium]` is `Medium is inoculated`. Lab spells the narrowing
+    with `is`, which Python reads as identity, and a type checker will not
+    accept a call or a bare variable in an annotation. A generic class is what
+    is left, and it is what roles are already mirrored as.
+    """
+
+    #: The Lab name of the state, read back where a declaration states it.
+    __lab_state__: str = ""
+    #: The Lab modules a program naming this state has to import.
+    __lab_uses__: tuple[str, ...] = ()
+
+
+def state_name(annotation: object) -> str | None:
+    """The state a class names, if it names one."""
+
+    return (
+        annotation.__lab_state__
+        if isinstance(annotation, type) and issubclass(annotation, LabState)
+        else None
+    )
+
+
 class TypeApplication:
     """A parameterized type, such as `Material[Plate]`."""
 
@@ -83,6 +109,28 @@ class TypeApplication:
         return f"<lab type {self.render()}>"
 
 
+class InState:
+    """A type narrowed to one facet state, such as `inoculated(Medium)`.
+
+    Lab writes this `Medium is inoculated`, which is not something Python can
+    parse. Calling the state reads the same way round and is an ordinary
+    callable: the state is what you know, and the subject is what you know it
+    about.
+    """
+
+    __slots__ = ("state", "subject")
+
+    def __init__(self, subject: object, state: str) -> None:
+        self.subject = subject
+        self.state = state
+
+    def render(self) -> str:
+        return f"{lab_type(self.subject)} is {self.state}"
+
+    def __repr__(self) -> str:
+        return f"<lab type {self.render()}>"
+
+
 def lab_type(annotation: object) -> str:
     """The Lab type an annotation states."""
 
@@ -90,11 +138,13 @@ def lab_type(annotation: object) -> str:
         return "None"
     if isinstance(annotation, str):
         return _from_text(annotation)
-    if isinstance(annotation, TypeApplication):
+    if isinstance(annotation, (TypeApplication, InState)):
         return annotation.render()
     origin = typing.get_origin(annotation)
     if origin is not None:
         arguments = typing.get_args(annotation)
+        if (state := state_name(origin)) is not None:
+            return f"{lab_type(arguments[0])} is {state}"
         if origin in (types.UnionType, typing.Union):
             return " | ".join(lab_type(argument) for argument in arguments)
         rendered = ", ".join(lab_type(argument) for argument in arguments)
@@ -128,6 +178,9 @@ def _name_of(annotation: object) -> str | None:
 def type_modules(annotation: object) -> Iterator[str]:
     """The Lab modules the names in an annotation come from."""
 
+    if isinstance(annotation, InState):
+        yield from type_modules(annotation.subject)
+        return
     if isinstance(annotation, TypeApplication):
         yield from type_modules(annotation.constructor)
         for argument in annotation.arguments:
@@ -135,6 +188,8 @@ def type_modules(annotation: object) -> Iterator[str]:
         return
     origin = typing.get_origin(annotation)
     if origin is not None:
+        if state_name(origin) is not None:
+            yield from getattr(origin, "__lab_uses__", ())
         for argument in typing.get_args(annotation):
             yield from type_modules(argument)
         return

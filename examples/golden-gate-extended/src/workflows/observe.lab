@@ -7,6 +7,7 @@
  * point past which nothing more will grow.
  */
 
+use std.bio.designs
 use std.lab.plasmid
 
 /** One image, what was counted in it, and how long the plate had been growing. */
@@ -22,7 +23,7 @@ record PlateObservation is Evidential:
  * evidence about the transformation rather than an absence of information.
  */
 record ColonyGrowth:
-  plate: Material<Plate>
+  plate: Material<Medium is inoculated>
   observations: List<PlateObservation>
 
   case Ready:
@@ -36,7 +37,7 @@ record ColonyGrowth:
  * `state` is the memory this run owns: the observations accumulate across
  * firings of the timer, and both exits carry them out.
  */
-workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
+workflow await_colonies(plate: Material<Medium is inoculated>) -> ColonyGrowth:
 
   state observations: List<PlateObservation> = []
 

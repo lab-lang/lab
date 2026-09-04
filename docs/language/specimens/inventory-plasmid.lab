@@ -18,7 +18,11 @@ buy:
   restriction_enzyme BsaI
   chassis DH5alpha:
     competence = competent
+    efficiency = 1e9 cfu/ug
   antibiotic chloramphenicol
+  medium LB_chloramphenicol_agar:
+    pouring = poured
+    selection = chloramphenicol
 
 reporter_sequence: DNA = dna("ACGTACGT")
 
@@ -48,12 +52,14 @@ workflow build_reporter_host(
   reporter: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [reporter]
   cells <- provision DH5alpha
   strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+
+  plate <- plate culture on agar
   return strain, plate

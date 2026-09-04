@@ -192,6 +192,10 @@ pub enum CheckedType {
     Any {
         role: String,
     },
+    /// A measurement of a stated thing, in whatever unit it was written in.
+    Measuring {
+        dimension: String,
+    },
     /// A type argument narrowed to one facet state, written `Chassis is
     /// competent`. It appears only as an argument, so a narrowed material is
     /// still a `Material` to anything reading the outer type.
@@ -239,6 +243,7 @@ impl CheckedType {
             Self::List { element } => format!("List<{}>", element.display_name()),
             Self::Quantity { unit } => format!("Quantity<{unit}>"),
             Self::Any { role } => format!("any {role}"),
+            Self::Measuring { dimension } => format!("Quantity<any {dimension}>"),
             Self::InState { subject, state } => format!("{} is {state}", subject.display_name()),
             Self::Integer => "Integer".to_owned(),
             Self::Decimal => "Decimal".to_owned(),

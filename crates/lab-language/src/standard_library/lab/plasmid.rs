@@ -28,6 +28,13 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
     let concrete = ContractType::Concrete;
     let named = Ty::named;
     let material = Ty::material;
+    // A culture and a picked colony are one organism at different points in
+    // being grown, and a plate is a medium that has been poured. Each was a
+    // fieldless type of its own, which is why none could name what it was made
+    // of. Naming the state instead keeps the design underneath readable.
+    let in_state = |subject: Ty, state: &str| Ty::InState(Box::new(subject), state.to_owned());
+    let strain = |state: &str| material(in_state(named("Strain"), state));
+    let plate = |state: &str| material(in_state(named("Medium"), state));
 
     let actions = vec![
         ActionContractSpec {
@@ -36,8 +43,9 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("capture"),
                 PhrasePart::Word("image"),
                 PhrasePart::Word("of"),
-                operand("plate", concrete(material(named("Plate"))), borrow),
+                operand("plate", concrete(plate("inoculated")), borrow),
             ],
+            inert: &[],
             results: vec![result("image", concrete(named("Image")))],
         },
         ActionContractSpec {
@@ -46,6 +54,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("synthesize"),
                 operand("design", concrete(named("Plasmid")), copy),
             ],
+            inert: &[],
             results: vec![result(
                 "fragments",
                 concrete(Ty::List(Box::new(named("Fragment")))),
@@ -61,6 +70,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     take,
                 ),
             ],
+            inert: &[],
             results: vec![result("construct", concrete(material(named("Plasmid"))))],
         },
         ActionContractSpec {
@@ -72,6 +82,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
             // Whether this laboratory bought the thing or made it last month is
             // not provision's business: it says what to fetch, and whether one
             // is available is a question for the plan.
+            inert: &[],
             results: vec![result("material", ContractType::MaterialOf("item"))],
         },
         ActionContractSpec {
@@ -98,16 +109,17 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     take,
                 ),
             ],
+            inert: &[],
             results: vec![
                 begins("strain", concrete(material(named("Strain")))),
-                begins("culture", concrete(material(named("Culture")))),
+                begins("culture", concrete(strain("transformed"))),
             ],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.recover",
             phrase: vec![
                 PhrasePart::Word("recover"),
-                operand("culture", concrete(material(named("Culture"))), take),
+                operand("culture", concrete(strain("transformed")), take),
                 PhrasePart::Word("for"),
                 PhrasePart::Quantity {
                     name: "duration",
@@ -115,25 +127,38 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     units: &["min", "h"],
                 },
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            inert: &[],
+            results: vec![result("culture", concrete(strain("recovered")))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.dilute",
             phrase: vec![
                 PhrasePart::Word("dilute"),
-                operand("culture", concrete(material(named("Culture"))), take),
+                operand("culture", concrete(strain("recovered")), take),
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            inert: &[],
+            results: vec![result("culture", concrete(strain("diluted")))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.plate",
             phrase: vec![
                 PhrasePart::Word("plate"),
-                operand("culture", concrete(material(named("Culture"))), take),
+                // A culture is plated whether or not it was thinned first.
+                // Diluting matters for counting what grows, not for the act of
+                // spreading it, so both states are spreadable.
+                operand(
+                    "culture",
+                    concrete(Ty::Union(vec![strain("recovered"), strain("diluted")])),
+                    take,
+                ),
                 PhrasePart::Word("on"),
-                operand("antibiotic", concrete(named("Antibiotic")), copy),
+                // What a culture is spread on is a medium that has been poured,
+                // so plating on the wrong one is now something to see rather
+                // than a name nobody checked.
+                operand("medium", concrete(plate("poured")), take),
             ],
-            results: vec![result("plate", concrete(material(named("Plate"))))],
+            inert: &["medium"],
+            results: vec![result("plate", concrete(plate("inoculated")))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.pick",
@@ -146,11 +171,12 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("isolated"),
                 PhrasePart::Word("colonies"),
                 PhrasePart::Word("from"),
-                operand("plate", concrete(material(named("Plate"))), borrow),
+                operand("plate", concrete(plate("inoculated")), borrow),
             ],
+            inert: &[],
             results: vec![begins(
                 "candidates",
-                concrete(Ty::List(Box::new(material(named("Clone"))))),
+                concrete(Ty::List(Box::new(strain("isolated")))),
             )],
         },
         ActionContractSpec {
@@ -159,19 +185,20 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("screen"),
                 operand(
                     "candidates",
-                    concrete(Ty::List(Box::new(material(named("Clone"))))),
+                    concrete(Ty::List(Box::new(strain("isolated")))),
                     take,
                 ),
                 PhrasePart::Word("against"),
                 operand("design", concrete(named("Plasmid")), copy),
             ],
+            inert: &[],
             results: vec![result("screening", concrete(named("Screening")))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.grow",
             phrase: vec![
                 PhrasePart::Word("grow"),
-                operand("clone", concrete(material(named("Clone"))), take),
+                operand("clone", concrete(strain("isolated")), take),
                 PhrasePart::Word("at"),
                 PhrasePart::Quantity {
                     name: "temperature",
@@ -185,14 +212,16 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     units: &["h"],
                 },
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            inert: &[],
+            results: vec![result("culture", concrete(strain("grown")))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.purify",
             phrase: vec![
                 PhrasePart::Word("purify"),
-                operand("culture", concrete(material(named("Culture"))), take),
+                operand("culture", concrete(strain("grown")), take),
             ],
+            inert: &[],
             results: vec![result("plasmid", concrete(material(named("Plasmid"))))],
         },
         ActionContractSpec {
@@ -201,6 +230,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("split"),
                 operand("material", concrete(material(named("Plasmid"))), take),
             ],
+            inert: &[],
             results: vec![
                 result("retained", ContractType::SameAs("material")),
                 result("aliquot", ContractType::SameAs("material")),
@@ -212,6 +242,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("sequence"),
                 operand("aliquot", concrete(material(named("Plasmid"))), take),
             ],
+            inert: &[],
             results: vec![result("result", concrete(named("SequenceCheck")))],
         },
         ActionContractSpec {
@@ -220,6 +251,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("quantify"),
                 operand("material", concrete(material(named("Plasmid"))), borrow),
             ],
+            inert: &[],
             results: vec![result("evidence", concrete(named("Evidence")))],
         },
         ActionContractSpec {
@@ -234,6 +266,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     units: &["C"],
                 },
             ],
+            inert: &[],
             results: vec![result("material", ContractType::SameAs("material"))],
         },
         ActionContractSpec {
@@ -242,6 +275,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::Word("dispose"),
                 operand("material", ContractType::AnyMaterial, take),
             ],
+            inert: &[],
             results: Vec::new(),
         },
     ];

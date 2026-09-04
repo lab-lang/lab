@@ -14,12 +14,15 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("CDS").parameters(1),
         TypeSpec::nominal("Chassis").documented("A host organism that carries engineered DNA."),
         TypeSpec::nominal("Circuit").parameters(2),
-        TypeSpec::nominal("Clone"),
-        TypeSpec::nominal("CloneSet")
-            .with_fields([("highest_confidence", Ty::material(named("Clone")))]),
+        TypeSpec::nominal("CloneSet").with_fields([(
+            "highest_confidence",
+            Ty::material(Ty::InState(
+                Box::new(named("Strain")),
+                "isolated".to_owned(),
+            )),
+        )]),
         TypeSpec::nominal("Colonies").with_fields([("count", Ty::Integer)]),
         TypeSpec::nominal("ColonyMap").with_fields([("isolated", named("Colonies"))]),
-        TypeSpec::nominal("Culture"),
         TypeSpec::nominal("DNA"),
         TypeSpec::nominal("Duration"),
         TypeSpec::nominal("Evidence").implements(["Evidential"]),
@@ -30,8 +33,8 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("Image"),
         TypeSpec::nominal("List").parameters(1),
         TypeSpec::nominal("Material").parameters(1),
+        TypeSpec::nominal("Medium").documented("What an organism is grown in or on."),
         TypeSpec::nominal("Part"),
-        TypeSpec::nominal("Plate"),
         TypeSpec::nominal("Plasmid")
             .with_fields([
                 ("topology", named("Topology")),

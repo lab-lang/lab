@@ -1039,7 +1039,15 @@ impl<'a> Parser<'a> {
             && self.check(&TokenKind::Less)
         {
             self.next();
-            let unit = self.parse_unit()?;
+            // `Quantity<any Volume>` asks for a measurement of something
+            // without pinning which unit it is written in, the way `any Signal`
+            // asks for a type playing a role without naming which.
+            let unit = if self.check_word("any") {
+                self.next();
+                Unit::Dimension(self.take_identifier("a dimension")?.value)
+            } else {
+                Unit::Exact(self.parse_unit()?)
+            };
             let end = self.expect(TokenKind::Greater)?.span;
             return Ok(TypeExpr::Quantity {
                 unit,
@@ -1212,6 +1220,20 @@ impl<'a> Parser<'a> {
                 expression = Expr::Field {
                     subject: Box::new(expression),
                     field,
+                    span,
+                };
+            } else if self.check_word("in")
+                && matches!(self.peek_kind(1), Some(TokenKind::Identifier(_)))
+            {
+                // `500 mL in uL` converts. A loop header never reaches here,
+                // because `for` takes its binding as a name rather than as an
+                // expression and reads its own `in`.
+                self.next();
+                let unit = self.take_identifier("a unit to convert to")?;
+                let span = expression.span().join(unit.span);
+                expression = Expr::Convert {
+                    value: Box::new(expression),
+                    unit,
                     span,
                 };
             } else if is_numeric(&expression) && self.peek_identifier().is_some() {

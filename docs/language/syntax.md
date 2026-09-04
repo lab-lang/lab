@@ -76,6 +76,18 @@ workflow transform_into(cells: Material<Chassis is competent>) -> Material<Strai
 
 Narrowing runs one way. `Material<Chassis is competent>` may be used where `Material<Chassis>` is expected, because knowing which state a material is in is never a problem. The reverse is refused, which is how transforming into cells nobody made competent is caught. The state constrains the argument rather than wrapping the material, so a narrowed material is owned, consumed, and tracked exactly like any other.
 
+A state carrying fields requires them wherever it is stated, so `competence = competent` states an `efficiency` beside it. What is true of a material in a state is part of saying it is in that state.
+
+A measurement composes with another, and the result measures something neither operand measured:
+
+```lab
+tryptone = 10 g/L * 500 mL     // 5 g
+volume = 500 ng / 100 ng/uL    // a volume, in litres
+length = 12 kb in bp           // 12000 bp
+```
+
+The result lands in the canonical unit of what it measures, and `in` converts where a conversion is written. A field may ask for a dimension rather than a unit, so `Quantity<any Volume>` takes any volume and `Quantity<any Concentration>` takes any mass in a volume. Amount in a volume is a different thing, so a field asking for a concentration refuses millimolar: going between them needs a molar mass, which is a fact about the substance rather than about the recipe.
+
 These are the mechanics. The *vocabulary* — `plasmid`, `strain`, and any domain word a package declares with `artifact` — is not in this table and is not in the parser, which is the point of [0022](decisions/0022-fixed-grammar-open-vocabulary.md). Circuits and workflows both declare a callable signature in their header. Laboratory verbs such as `synthesize`, `assemble`, `sequence`, `store`, and `dispose` are library operations, not keywords.
 
 The core punctuation has one job each:

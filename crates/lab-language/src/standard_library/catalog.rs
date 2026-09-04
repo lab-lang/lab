@@ -715,6 +715,7 @@ mod tests {
                 r#type: ContractType::Concrete(Ty::String),
                 mode: crate::OwnershipMode::Copy,
             }],
+            inert: &[],
             results: Vec::new(),
         };
         let result = StandardLibrary::from_modules([

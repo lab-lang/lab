@@ -22,6 +22,13 @@ pub(crate) enum Ty {
     /// constrained to a role. `Circuit<any Signal, Fluorescence>` is a circuit
     /// driven by some signal nobody may name again.
     Any(String),
+    /// A measurement of a stated thing, in whatever unit it was written in.
+    ///
+    /// A field asks for this where it holds measurements an author chose the
+    /// units of: a recipe carries grams per litre and millimolar together, and
+    /// pinning one unit would refuse the other. Each value still names its own
+    /// unit, so nothing converts on its own.
+    Measuring(String),
     /// A type argument narrowed to one facet state.
     ///
     /// This only ever appears as an argument, the way `Any` does, so a material
@@ -72,6 +79,7 @@ impl fmt::Display for Ty {
             Self::List(element) => write!(formatter, "List<{element}>"),
             Self::Quantity(unit) => write!(formatter, "Quantity<{unit}>"),
             Self::Any(role) => write!(formatter, "any {role}"),
+            Self::Measuring(dimension) => write!(formatter, "Quantity<any {dimension}>"),
             Self::InState(subject, state) => write!(formatter, "{subject} is {state}"),
             Self::Integer => formatter.write_str("Integer"),
             Self::Decimal => formatter.write_str("Decimal"),
@@ -100,6 +108,9 @@ pub(crate) fn to_checked_type(ty: &Ty) -> CheckedType {
         Ty::Decimal => CheckedType::Decimal,
         Ty::String => CheckedType::String,
         Ty::Any(role) => CheckedType::Any { role: role.clone() },
+        Ty::Measuring(dimension) => CheckedType::Measuring {
+            dimension: dimension.clone(),
+        },
         Ty::InState(subject, state) => CheckedType::InState {
             subject: Box::new(to_checked_type(subject)),
             state: state.clone(),
@@ -127,6 +138,7 @@ pub(crate) fn from_checked_type(ty: &CheckedType) -> Ty {
         CheckedType::List { element } => Ty::List(Box::new(from_checked_type(element))),
         CheckedType::Quantity { unit } => Ty::Quantity(unit.clone()),
         CheckedType::Any { role } => Ty::Any(role.clone()),
+        CheckedType::Measuring { dimension } => Ty::Measuring(dimension.clone()),
         CheckedType::InState { subject, state } => {
             Ty::InState(Box::new(from_checked_type(subject)), state.clone())
         }
@@ -171,6 +183,14 @@ pub(crate) fn compatible(roles: &RoleTable, actual: &Ty, expected: &Ty) -> bool 
         // `Circuit<Tetracycline, R>` become `Circuit<any Signal, R>` without a
         // separate rule, and it never runs in the other direction.
         Ty::Any(role) => plays_role(roles, actual, role),
+        // A measurement fits a field asking for what it measures. This runs one
+        // way: a field naming a unit still refuses every other unit, so the
+        // thousandfold error 0025 refuses is refused here too.
+        Ty::Measuring(dimension) => matches!(
+            (actual, crate::units::Dimension::named(dimension)),
+            (Ty::Quantity(unit), Some(wanted))
+                if crate::units::measured(unit).is_some_and(|it| it.dimension == wanted)
+        ),
         Ty::Union(alternatives) => alternatives.iter().any(|ty| compatible(roles, actual, ty)),
         Ty::List(expected) => match actual {
             Ty::List(actual) => compatible(roles, actual, expected),

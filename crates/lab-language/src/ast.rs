@@ -508,7 +508,7 @@ pub enum TypeExpr {
     ///
     /// The argument is a unit rather than a type, so it is written the way a
     /// unit is written everywhere else: a name, optionally over a denominator.
-    Quantity { unit: String, span: Span },
+    Quantity { unit: Unit, span: Span },
 }
 
 impl TypeExpr {
@@ -570,6 +570,28 @@ impl TypeArgument {
     }
 }
 
+/// What a written quantity type is measured in.
+///
+/// A field usually names the unit, because a thousandfold error is worth
+/// refusing and the unit is what refuses it. A recipe holds measurements in
+/// units its author chose, so it names the dimension instead and lets each
+/// value keep its own unit.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Unit {
+    Exact(String),
+    Dimension(String),
+}
+
+impl Unit {
+    pub fn written(&self) -> String {
+        match self {
+            Self::Exact(unit) => unit.clone(),
+            Self::Dimension(dimension) => format!("any {dimension}"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Path {
     pub segments: Vec<Identifier>,
@@ -616,6 +638,15 @@ pub enum Expr {
         field: Identifier,
         span: Span,
     },
+    /// `500 mL in uL` — the same measurement written in another unit.
+    ///
+    /// Conversion is written rather than implied, so a unit still means what it
+    /// says everywhere else and a thousandfold error stays a diagnostic.
+    Convert {
+        value: Box<Expr>,
+        unit: Identifier,
+        span: Span,
+    },
     Unary {
         op: UnaryOp,
         operand: Box<Expr>,
@@ -641,6 +672,7 @@ impl Expr {
             | Self::Call { span, .. }
             | Self::Record { span, .. }
             | Self::Field { span, .. }
+            | Self::Convert { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. } => *span,
         }

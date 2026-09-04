@@ -298,7 +298,8 @@ pub(crate) fn lower_build_intent(
     let stated = inventory_properties(modules);
     let bindings = binding_values(modules);
     let catalog_types = catalog_types(modules);
-    let flows = realization_flows(modules, &supplier_identities, &catalog_types)?;
+    let selections = selections(modules, &supplier_identities);
+    let flows = realization_flows(modules, &supplier_identities, &catalog_types, &selections)?;
     let context = BuildLoweringContext {
         flows: &flows,
         supplier_identities: &supplier_identities,
@@ -548,6 +549,45 @@ fn inventory_properties(
         .collect()
 }
 
+/// What each declared medium is selective for.
+///
+/// A plate is a poured medium, and what it selects for is a property of that
+/// medium rather than a second thing named beside it. Plating reads it from
+/// there, so the antibiotic on the bench and the one in the plan are the same
+/// statement.
+fn selections(
+    modules: &[&CheckedModule],
+    identities: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    declarations(modules)
+        .filter_map(|declaration| {
+            let (name, properties) = match declaration {
+                CheckedDeclaration::Catalog {
+                    name, properties, ..
+                }
+                | CheckedDeclaration::Artifact {
+                    name, properties, ..
+                } => (name, properties),
+                _ => return None,
+            };
+            let selection = properties
+                .iter()
+                .find(|property| property.name == "selection")?;
+            let CheckedExpression::Reference { path, .. } = &selection.value.value else {
+                return None;
+            };
+            let referenced = path.first()?;
+            Some((
+                name.clone(),
+                identities
+                    .get(referenced)
+                    .cloned()
+                    .unwrap_or_else(|| referenced.clone()),
+            ))
+        })
+        .collect()
+}
+
 /// The Lab type each catalogued symbol stands for, with any state narrowing
 /// removed.
 ///
@@ -587,6 +627,7 @@ fn realization_flows(
     modules: &[&CheckedModule],
     identities: &BTreeMap<String, String>,
     catalog_types: &BTreeMap<String, String>,
+    selections: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
     let mut result = BTreeMap::new();
     for declaration in declarations(modules) {
@@ -610,6 +651,10 @@ fn realization_flows(
             .collect::<BTreeMap<_, _>>();
         let mut dependencies = None;
         let mut actions = Vec::new();
+        // Which declaration each fetched binding names. A plate is spread on a
+        // medium a workflow fetched, so what it selects for is read from the
+        // declaration that binding came from.
+        let mut provisioned: BTreeMap<String, String> = BTreeMap::new();
         for statement in body {
             let CheckedStatement::Effect { results, action } = statement else {
                 continue;
@@ -643,6 +688,7 @@ fn realization_flows(
                     };
                     let declared = required_reference(action, "item", &design)?;
                     let item = resolved_reference(action, "item", identities, &design)?;
+                    provisioned.insert(cells.clone(), declared.clone());
                     actions.push(WorkflowActionIntent::Provision {
                         cells: cells.clone(),
                         item,
@@ -696,7 +742,16 @@ fn realization_flows(
                     actions.push(WorkflowActionIntent::Plate {
                         plate: plate.clone(),
                         culture: required_reference(action, "culture", &design)?,
-                        selection: resolved_reference(action, "antibiotic", identities, &design)?,
+                        selection: {
+                            let binding = required_reference(action, "medium", &design)?;
+                            let medium = provisioned.get(&binding).unwrap_or(&binding);
+                            selections.get(medium).cloned().ok_or_else(|| {
+                                SourceLoweringError::MissingField {
+                                    artifact: design.clone(),
+                                    field: "selection",
+                                }
+                            })?
+                        },
                     });
                 }
                 operation => {

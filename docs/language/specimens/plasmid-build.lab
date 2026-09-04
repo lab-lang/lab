@@ -6,7 +6,11 @@ use std.lab.plasmid
 buy:
   chassis competent_ecoli:
     competence = competent
+    efficiency = 1e9 cfu/ug
   antibiotic kanamycin
+  medium LB_kanamycin_agar:
+    pouring = poured
+    selection = kanamycin
   restriction_enzyme BsaI
   backbone p15A_kan
   cds GFP
@@ -33,7 +37,7 @@ record PlateObservation is Evidential:
   elapsed: Duration
 
 record ColonyGrowth:
-  plate: Material<Plate>
+  plate: Material<Medium is inoculated>
   observations: List<PlateObservation>
 
   case Ready:
@@ -49,7 +53,7 @@ record SequenceCheck:
   case Mismatch
   case Inconclusive
 
-workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
+workflow await_colonies(plate: Material<Medium is inoculated>) -> ColonyGrowth:
 
   state observations: List<PlateObservation> = []
 
@@ -86,7 +90,9 @@ workflow build_plasmid() -> Accepted<Plasmid> | Rejected<Plasmid>:
   strain, culture <- transform reporter_host from plasmids into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on kanamycin
+  agar <- provision LB_kanamycin_agar
+
+  plate <- plate culture on agar
   <- dispose strain
 
   colony_result <- await_colonies plate

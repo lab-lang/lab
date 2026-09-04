@@ -2,12 +2,9 @@
 
 ## Status
 
-Accepted, partially implemented. Extends
-[0006: Affine material flow in portable workflows](0006-affine-material-flow.md) and is governed by the
-vocabulary rule in [0022: Fixed grammar, open vocabulary](0022-fixed-grammar-open-vocabulary.md).
-
-Facets are declared, exported, and narrow a material. A facet state's declared fields are carried but
-never required at a declaration, so a state cannot yet stand as an acceptance criterion.
+Accepted. Extends [0006: Affine material flow in portable workflows](0006-affine-material-flow.md)
+and is governed by the vocabulary rule in
+[0022: Fixed grammar, open vocabulary](0022-fixed-grammar-open-vocabulary.md).
 
 ## Context
 
@@ -81,10 +78,16 @@ happened to do.
 
 ## Consequences
 
-- `Culture`, `Clone`, and `Plate` stop being types, once a cultivation facet exists to replace them.
-  A culture becomes `Material<Strain>` in a state, so it knows its organism from its type argument
-  and its medium from the state's fields. They remain fieldless prelude types until then, and the
-  27 sites that name them span the Python SDK and the OT-2 adapter as well as the compiler.
+- `Culture`, `Clone`, and `Plate` stop being types. A culture is `Material<Strain is recovered>`, a
+  picked colony is `Material<Strain is isolated>`, and a plate is `Material<Medium is inoculated>`.
+  Each now names the design underneath it, which is what none of them could do.
+- Plating states the medium it spreads on rather than an antibiotic beside it, so what a plate
+  selects for is read from what it is made of.
+- A state's declared fields are required wherever the state is stated. Cells are not competent in the
+  abstract; they are competent to a number, and that number is what a batch is accepted on.
+- An operand may be declared to carry no lineage. A plate is a culture on agar: the culture is the
+  organism and the agar is what it sits on, and counting the agar would make one plate look like two
+  independent things.
 - Provisioning stops minting competent cells for everything. The state of a provisioned material is
   named for the kind that was fetched, so an antibiotic no longer arrives as a value the IR believes
   is a tube of cells.

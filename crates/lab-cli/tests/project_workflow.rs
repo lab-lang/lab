@@ -1634,9 +1634,9 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         solution["facility"],
         "https://example.org/golden-gate/facility"
     );
-    assert_eq!(solution["selections"].as_array().unwrap().len(), 8);
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 9);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 42);
+    assert_eq!(requirements.len(), 43);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -2185,7 +2185,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     );
 
     let solution = read_json(plan_dir.join("compiler/facility-solution.json"));
-    assert_eq!(solution["selections"].as_array().unwrap().len(), 23);
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 27);
     let materials = solution_materials(&solution);
     let reference_input = materials
         .iter()
@@ -2204,7 +2204,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 89);
+    assert_eq!(requirements.len(), 93);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));

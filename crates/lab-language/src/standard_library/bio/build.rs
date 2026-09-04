@@ -33,6 +33,7 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
         ],
         // Realizing a design assembles DNA rather than establishing an
         // organism, so the product carries the lineage of what went into it.
+        inert: &[],
         results: vec![ResultSpec {
             name: "product",
             r#type: concrete(material(named("Plasmid"))),

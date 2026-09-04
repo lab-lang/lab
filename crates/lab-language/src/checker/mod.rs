@@ -763,21 +763,23 @@ plasmid reporter_region:
     #[test]
     fn checks_named_workflow_results_and_multi_result_calls() {
         let module = compile_module(
-            r#"workflow preserve(
+            r#"use std.bio.designs
+
+workflow preserve(
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ) -> (
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   return product, plate
 
 workflow delegate(
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ) -> (
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   preserved_product, preserved_plate <- preserve product plate
   return preserved_product, preserved_plate
@@ -2426,6 +2428,135 @@ buy reagent BsaI:
         );
     }
 
+    /// A measurement composes with another, and the result measures something
+    /// neither operand measured. That is what lets a recipe state concentrations
+    /// once and scale to whatever batch is being made.
+    mod dimensions {
+        use super::*;
+
+        const SCHEMA: &str = r#"record Recipe
+
+artifact Recipe:
+  tryptone?: Quantity<g>
+  salt?: Quantity<any Concentration>
+  buffer?: Quantity<any Molarity>
+  either?: Quantity<any Concentration> | Quantity<any Molarity>
+  bulk?: Quantity<any Mass>
+  length?: Quantity<bp>
+  volume?: Quantity<uL>
+
+"#;
+
+        fn stated(body: &str) -> Result<String, ModuleError> {
+            let module = compile_module(&format!("{SCHEMA}build recipe LB:\n{body}"))?;
+            let declaration = module
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    CheckedDeclaration::Artifact { properties, .. } => properties.first(),
+                    _ => None,
+                })
+                .expect("the property was checked");
+            let CheckedExpression::Quantity { magnitude, unit } = &declaration.value.value else {
+                panic!("a composed measurement is a measurement");
+            };
+            Ok(format!("{magnitude} {unit}"))
+        }
+
+        /// The headline: a recipe holds concentrations and a batch is a volume,
+        /// so what to weigh out is their product.
+        #[test]
+        fn a_recipe_scales_to_a_batch() {
+            assert_eq!(
+                stated("  tryptone = 10 g/L * 500 mL\n").expect("a recipe scales"),
+                "5 g"
+            );
+        }
+
+        /// A concentration divides into a mass to give the volume holding it,
+        /// which is the arithmetic behind every dilution done at a bench.
+        #[test]
+        fn a_mass_over_a_concentration_is_a_volume() {
+            assert_eq!(
+                stated("  volume = (500 ng / 100 ng/uL) in uL\n").expect("a dilution computes"),
+                "5 uL"
+            );
+        }
+
+        /// The result lands in the canonical unit of what it measures, so it is
+        /// predictable rather than inherited from whichever operand came first.
+        #[test]
+        fn a_composed_measurement_lands_in_a_canonical_unit() {
+            assert_eq!(
+                stated("  bulk = 2 mg * 3\n").expect("scaling keeps its unit"),
+                "6 mg"
+            );
+        }
+
+        /// Conversion is written. `12 kb` is what a person means and `12000 bp`
+        /// is what the field holds, and saying so is one word.
+        #[test]
+        fn a_measurement_converts_where_it_is_written() {
+            assert_eq!(
+                stated("  length = 12 kb in bp\n").expect("kilobases are base pairs"),
+                "12000 bp"
+            );
+        }
+
+        #[test]
+        fn refuses_converting_between_different_things() {
+            let error = stated("  length = 12 kb in uL\n").unwrap_err().to_string();
+            assert!(
+                error.contains("do not measure the same thing"),
+                "a length is not a volume: {error}"
+            );
+        }
+
+        /// A field naming a dimension takes any unit of it, so a recipe holds
+        /// milligrams per litre beside grams per litre without pinning either.
+        ///
+        /// Mass in a volume and amount in a volume stay different things: going
+        /// between them needs a molar mass, which is a fact about the substance
+        /// and not about the recipe. A field that holds either says so.
+        #[test]
+        fn a_field_may_ask_for_a_dimension_rather_than_a_unit() {
+            compile_module(&format!("{SCHEMA}build recipe LB:\n  salt = 10 g/L\n"))
+                .expect("grams per litre is a concentration");
+            compile_module(&format!("{SCHEMA}build recipe TE:\n  buffer = 50 mM\n"))
+                .expect("millimolar is a molarity");
+            compile_module(&format!("{SCHEMA}build recipe TE:\n  either = 50 mM\n"))
+                .expect("a field holding either takes both");
+            let error = compile_module(&format!("{SCHEMA}build recipe TE:\n  salt = 50 mM\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("expects Quantity<any Concentration>"),
+                "mass in a volume is not amount in a volume: {error}"
+            );
+
+            let error = compile_module(&format!("{SCHEMA}build recipe LB:\n  bulk = 5 mL\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("expects Quantity<any Mass>"),
+                "a volume is not a mass: {error}"
+            );
+        }
+
+        #[test]
+        fn refuses_a_dimension_this_compiler_does_not_measure() {
+            let error = compile_module(
+                "record R\n\nartifact R:\n  x?: Quantity<any Luminosity>\n\nbuild r a:\n  x = 1 cd\n",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("'Luminosity' is not something this compiler measures"),
+                "the diagnostic names what it does measure: {error}"
+            );
+        }
+    }
+
     /// An assignment refused microlitres against millilitres while arithmetic
     /// and comparison let the same two units meet freely. Both halves of the
     /// language now hold the unit to the same standard.
@@ -2496,15 +2627,23 @@ buy reagent BsaI:
         }
 
         /// Two measurements multiplied give a quantity in neither operand's
-        /// unit. Returning the left one was wrong; saying so is right until a
-        /// quantity's dimension is computed.
+        /// unit. A volume times a volume measures something a laboratory has no
+        /// unit for, so there is nothing to write the answer in.
         #[test]
-        fn refuses_multiplying_one_measurement_by_another() {
+        fn refuses_a_product_with_no_unit_to_write_it_in() {
             let error = refuses("  a = 20 uL * 5 uL\n");
             assert!(
-                error.contains("cannot multiply or divide"),
+                error.contains("no unit to write it in"),
                 "a volume times a volume is not a volume: {error}"
             );
+        }
+
+        /// A measurement divided by one measuring the same thing is a plain
+        /// ratio, which is how a dilution factor is written.
+        #[test]
+        fn one_measurement_over_another_of_the_same_thing_is_a_number() {
+            body("  a = 20 uL\n  require (100 uL / 20 uL) > 4.0\n")
+                .expect("a ratio of volumes is a number");
         }
     }
 
@@ -2730,15 +2869,17 @@ facet Competence on Chassis:
         #[test]
         fn a_kind_carries_several_independent_facets() {
             let module = compile_module(
-                r#"artifact Culture
+                r#"record Broth
 
-facet Dilution on Culture:
+artifact Broth
+
+facet Dilution on Broth:
   neat
   diluted
 
   neat -> diluted
 
-facet Selection on Culture:
+facet Selection on Broth:
   permissive
   selective
 
@@ -2874,6 +3015,7 @@ use std.lab.plasmid
 
 buy chassis DH5alpha:
   competence = competent
+  efficiency = 1e9 cfu/ug
 
 buy chassis Naive:
   competence = naive

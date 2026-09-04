@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::{
     ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FacetDecl, FieldDecl, Item, Module,
-    Path, Provenance, TypeArgument, TypeExpr, WorkflowOutputs, instance_word,
+    Path, Provenance, TypeArgument, TypeExpr, Unit, WorkflowOutputs, instance_word,
 };
 use crate::checked::{
     CheckedAcceptance, CheckedCase, CheckedDeclaration, CheckedPresence, CheckedProperty,
@@ -107,6 +107,7 @@ fn first_mention<'a>(
         } => mention(callee).or_else(|| arguments.iter().find_map(|it| mention(&it.value))),
         Expr::Record { fields, .. } => fields.iter().find_map(|it| mention(&it.value)),
         Expr::Field { subject, .. } => mention(subject),
+        Expr::Convert { value, .. } => mention(value),
         Expr::Unary { operand, .. } => mention(operand),
         Expr::Binary { left, right, .. } => mention(left).or_else(|| mention(right)),
         Expr::Integer { .. } | Expr::Decimal { .. } | Expr::String { .. } => None,
@@ -611,6 +612,34 @@ impl Checker {
             narrowed = Ty::InState(Box::new(narrowed), state.value.clone());
         }
         Ok(narrowed)
+    }
+
+    /// The facet states this declaration puts itself in.
+    ///
+    /// The properties were validated when the type was narrowed, so this reads
+    /// the same pairs back rather than checking them twice.
+    fn stated_facet_states(
+        &self,
+        ty: &Ty,
+        declaration: &ArtifactDecl,
+    ) -> Result<Vec<(String, String)>, SemanticError> {
+        let mut stated = Vec::new();
+        for member in &declaration.members {
+            let ArtifactMember::Property(property) = member else {
+                continue;
+            };
+            let Some(facet) = stated_facet(self, ty, &property.name.value) else {
+                continue;
+            };
+            let Expr::Path(path) = &property.value else {
+                continue;
+            };
+            let [segment] = path.segments.as_slice() else {
+                continue;
+            };
+            stated.push((facet, segment.value.clone()));
+        }
+        Ok(stated)
     }
 
     /// Check that some facet of `subject` admits `state`.
@@ -1194,6 +1223,23 @@ impl Checker {
             )
             .help("'require', 'accept', and 'across' describe a thing a laboratory makes"));
         }
+        // What a material in a state carries is stated alongside the state, so
+        // the fields of every state this declaration puts itself in are
+        // readable here exactly as the kind's own schema fields are.
+        let stated_states = self.stated_facet_states(&produces, declaration)?;
+        let mut state_fields: BTreeMap<String, Ty> = BTreeMap::new();
+        for (facet, state) in &stated_states {
+            let Some(state) = self.facets.get(facet).and_then(|facet| facet.state(state)) else {
+                continue;
+            };
+            for (name, field) in &state.fields {
+                state_fields.insert(name.clone(), field.ty.clone());
+            }
+        }
+        for (name, ty) in &state_fields {
+            environment.insert(name.clone(), ty.clone());
+        }
+
         let mut properties = Vec::new();
         let mut property_names = BTreeSet::new();
         let mut sbol_identity = None;
@@ -1282,14 +1328,20 @@ impl Checker {
                     if stated_facet(self, &produces, &property.name.value).is_some() {
                         continue;
                     }
-                    if !signature.fields.contains_key(&property.name.value) {
+                    if !signature.fields.contains_key(&property.name.value)
+                        && !state_fields.contains_key(&property.name.value)
+                    {
                         let mut error = SemanticError::new(
                             property.name.span,
                             format!("{produces} has no property '{}'", property.name.value),
                         );
                         if let Some(near) = nearest(
                             &property.name.value,
-                            signature.fields.keys().map(String::as_str),
+                            signature
+                                .fields
+                                .keys()
+                                .chain(state_fields.keys())
+                                .map(String::as_str),
                         ) {
                             error = error.help(format!("did you mean '{near}'?"));
                         }
@@ -1379,6 +1431,41 @@ impl Checker {
             )
             .help(format!("every {keyword} states {}", conjunction(&required))));
         }
+        // A state carries what is true of a material in it, so stating the
+        // state and leaving those unstated says less than the facet promised.
+        // Cells are not competent in the abstract; they are competent to a
+        // number, and that number is what a batch is accepted on.
+        for (facet, state) in &stated_states {
+            let signature = self
+                .facets
+                .get(facet)
+                .expect("a facet on this type was collected");
+            let state = signature
+                .state(state)
+                .expect("the stated state was validated when the type was narrowed");
+            let missing = state
+                .fields
+                .keys()
+                .filter(|field| !property_names.contains(field.as_str()))
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                return Err(SemanticError::new(
+                    declaration.span,
+                    format!(
+                        "'{}' is {} but does not state {}",
+                        declaration.name.value,
+                        state.name,
+                        quoted_conjunction(&missing)
+                    ),
+                )
+                .help(format!(
+                    "'{}' carries {}",
+                    state.name,
+                    conjunction(&state.fields.keys().map(String::as_str).collect::<Vec<_>>())
+                )));
+            }
+        }
         if let Some(predicate) = &signature.declares
             && !predicate.satisfied_by(&property_names)
         {
@@ -1457,7 +1544,22 @@ impl Checker {
         generics: &BTreeSet<String>,
     ) -> Result<Ty, SemanticError> {
         match expression {
-            TypeExpr::Quantity { unit, .. } => Ok(Ty::Quantity(unit.clone())),
+            TypeExpr::Quantity { unit, span } => match unit {
+                Unit::Exact(unit) => Ok(Ty::Quantity(unit.clone())),
+                Unit::Dimension(dimension) => {
+                    if crate::units::Dimension::named(dimension).is_none() {
+                        return Err(SemanticError::new(
+                            *span,
+                            format!("'{dimension}' is not something this compiler measures"),
+                        )
+                        .help(
+                            "measurable things are Mass, Volume, Amount, Length, Duration, \
+Temperature, and Count",
+                        ));
+                    }
+                    Ok(Ty::Measuring(dimension.clone()))
+                }
+            },
             TypeExpr::Path {
                 path,
                 arguments,

@@ -85,6 +85,13 @@ pub(crate) struct ActionContractSpec {
     pub operation: &'static str,
     pub phrase: Vec<PhrasePart>,
     pub results: Vec<ResultSpec>,
+    /// Operands whose lineage a result does not carry on.
+    ///
+    /// Lineage answers which samples are the same organism, so only what an
+    /// organism is made of contributes to it. A plate is a culture spread on
+    /// agar: the culture is the organism and the agar is what it sits on, and
+    /// counting the agar would make one plate look like two independent things.
+    pub inert: &'static [&'static str],
 }
 
 impl ActionContractSpec {
@@ -206,6 +213,7 @@ mod tests {
         ActionContractSpec {
             operation: "test.action",
             phrase,
+            inert: &[],
             results: Vec::new(),
         }
     }

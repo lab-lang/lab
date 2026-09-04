@@ -8,6 +8,7 @@ use crate::semantic_error::SemanticError;
 use crate::source::Span;
 use crate::standard_library::ConstructorSpec;
 use crate::type_system::{Substitutions, Ty, substitute, to_checked_type};
+use crate::units;
 
 use super::Checker;
 use super::context::Generics;
@@ -113,6 +114,26 @@ impl Checker {
                 subject: Box::new(self.lower_checked_expr(subject, environment, None)?),
                 field: field.value.clone(),
             },
+            Expr::Convert { value, unit, span } => {
+                let inner = self.lower_checked_expr(value, environment, None)?;
+                let CheckedExpression::Quantity {
+                    magnitude,
+                    unit: from,
+                } = &inner.value
+                else {
+                    return Err(SemanticError::new(
+                        *span,
+                        "only a measurement already known here converts",
+                    )
+                    .help("convert the literal, or bind the converted value first"));
+                };
+                let converted = converted_magnitude(magnitude, from, &unit.value)
+                    .ok_or_else(|| inexact_conversion(magnitude, from, &unit.value, *span))?;
+                CheckedExpression::Quantity {
+                    magnitude: converted,
+                    unit: unit.value.clone(),
+                }
+            }
             Expr::Unary { op, operand, .. } => CheckedExpression::Unary {
                 operator: match op {
                     UnaryOp::Negate => "negate",
@@ -123,11 +144,21 @@ impl Checker {
             },
             Expr::Binary {
                 op, left, right, ..
-            } => CheckedExpression::Binary {
-                operator: binary_operator_name(*op).to_owned(),
-                left: Box::new(self.lower_checked_expr(left, environment, None)?),
-                right: Box::new(self.lower_checked_expr(right, environment, None)?),
-            },
+            } => {
+                let left = self.lower_checked_expr(left, environment, None)?;
+                let right = self.lower_checked_expr(right, environment, None)?;
+                // A recipe scaled to a batch is a measurement, not a sum waiting
+                // to be evaluated. Working it out here means a design states
+                // concentrations and a build reads grams.
+                match folded_quantity(&left.value, &right.value, *op) {
+                    Some(folded) => folded,
+                    None => CheckedExpression::Binary {
+                        operator: binary_operator_name(*op).to_owned(),
+                        left: Box::new(left),
+                        right: Box::new(right),
+                    },
+                }
+            }
         };
         Ok(TypedExpression {
             r#type: to_checked_type(ty),
@@ -174,6 +205,16 @@ impl Checker {
             } => {
                 let subject = self.infer_expr(subject, environment)?;
                 self.field_type(&subject, &field.value, *span)
+            }
+            Expr::Convert { value, unit, span } => {
+                let measured = self.infer_expr(value, environment)?;
+                let Ty::Quantity(from) = &measured else {
+                    return Err(SemanticError::new(
+                        *span,
+                        format!("{measured} is not a measurement, so it converts to nothing"),
+                    ));
+                };
+                convert_to(from, &unit.value, *span).map(Ty::Quantity)
             }
             Expr::Unary { op, operand, span } => {
                 let operand = self.infer_expr(operand, environment)?;
@@ -258,41 +299,28 @@ impl Checker {
                     }
                     // Scaling a measurement by a count keeps its unit, which is
                     // how a recipe states a batch. Multiplying two measurements
-                    // is a different operation: it yields a quantity in neither
-                    // operand's unit, and until dimensions are computed the
-                    // honest answer is that it cannot be written.
-                    BinaryOp::Multiply | BinaryOp::Divide => {
-                        match (&left, &right) {
-                            (Ty::Quantity(_), other) if crate::type_system::dimensionless(other) => {
-                                Ok(left)
-                            }
-                            (other, Ty::Quantity(_))
-                                if crate::type_system::dimensionless(other)
-                                    && matches!(op, BinaryOp::Multiply) =>
-                            {
-                                Ok(right)
-                            }
-                            (Ty::Quantity(left_unit), Ty::Quantity(right_unit)) => {
-                                Err(SemanticError::new(
-                                    *span,
-                                    format!(
-                                        "cannot multiply or divide {left} by {right}"
-                                    ),
-                                )
-                                .help(format!(
-                                    "the result is measured in neither '{left_unit}' nor '{right_unit}', and a quantity's dimension is not yet computed"
-                                ))
-                                .help(
-                                    "scale a measurement by a plain number instead, such as '20 uL * 3'",
-                                ))
-                            }
-                            _ if self.comparable(&left, &right) => Ok(left),
-                            _ => Err(SemanticError::new(
-                                *span,
-                                format!("cannot combine {left} with {right} arithmetically"),
-                            )),
+                    // is a different operation: what comes out measures
+                    // something neither operand measured, and lands in the
+                    // canonical unit of whatever that is.
+                    BinaryOp::Multiply | BinaryOp::Divide => match (&left, &right) {
+                        (Ty::Quantity(_), other) if crate::type_system::dimensionless(other) => {
+                            Ok(left)
                         }
-                    }
+                        (other, Ty::Quantity(_))
+                            if crate::type_system::dimensionless(other)
+                                && matches!(op, BinaryOp::Multiply) =>
+                        {
+                            Ok(right)
+                        }
+                        (Ty::Quantity(left_unit), Ty::Quantity(right_unit)) => {
+                            composed_unit(left_unit, right_unit, *op, *span)
+                        }
+                        _ if self.comparable(&left, &right) => Ok(left),
+                        _ => Err(SemanticError::new(
+                            *span,
+                            format!("cannot combine {left} with {right} arithmetically"),
+                        )),
+                    },
                     BinaryOp::Range => Ok(Ty::List(Box::new(left))),
                 }
             }
@@ -738,6 +766,150 @@ pub(super) fn numeric_text(expression: &Expr) -> Result<String, SemanticError> {
             "quantity magnitude must be numeric",
         )),
     }
+}
+
+/// A product or quotient of two measurements already known here, worked out.
+///
+/// The result lands in the canonical unit of what it measures, so `10 g/L * 500
+/// mL` is `5 g`. Anything whose operands are not both known, or whose quotient
+/// does not terminate, is left as it was written for a later pass to refuse or
+/// evaluate.
+fn folded_quantity(
+    left: &CheckedExpression,
+    right: &CheckedExpression,
+    op: BinaryOp,
+) -> Option<CheckedExpression> {
+    if !matches!(op, BinaryOp::Multiply | BinaryOp::Divide) {
+        return None;
+    }
+    let scale = |value: &CheckedExpression| match value {
+        CheckedExpression::Integer { value } => {
+            Some((units::Decimal::parse(&value.to_string())?, None))
+        }
+        CheckedExpression::Decimal { text } => Some((units::Decimal::parse(text)?, None)),
+        CheckedExpression::Quantity { magnitude, unit } => {
+            Some((units::Decimal::parse(magnitude)?, Some(unit.clone())))
+        }
+        _ => None,
+    };
+    let (left_magnitude, left_unit) = scale(left)?;
+    let (right_magnitude, right_unit) = scale(right)?;
+    let magnitude = match op {
+        BinaryOp::Multiply => left_magnitude.times(right_magnitude)?,
+        _ => left_magnitude.over(right_magnitude)?,
+    };
+    match (left_unit, right_unit) {
+        // Scaling by a count keeps the unit and the magnitude it scaled.
+        (Some(unit), None) => Some(CheckedExpression::Quantity {
+            magnitude: magnitude.to_string(),
+            unit,
+        }),
+        // A count divided by a measurement is a rate nobody wrote, so only
+        // multiplication scales in this direction.
+        (None, Some(unit)) => {
+            matches!(op, BinaryOp::Multiply).then(|| CheckedExpression::Quantity {
+                magnitude: magnitude.to_string(),
+                unit,
+            })
+        }
+        (Some(left), Some(right)) => {
+            let (source, target) = (units::measured(&left)?, units::measured(&right)?);
+            let dimension = match op {
+                BinaryOp::Multiply => source.dimension.times(target.dimension),
+                _ => source.dimension.over(target.dimension),
+            };
+            let decades = match op {
+                BinaryOp::Multiply => source.decade + target.decade,
+                _ => source.decade - target.decade,
+            };
+            let magnitude = magnitude.shifted(decades)?.to_string();
+            if dimension.is_dimensionless() {
+                return Some(CheckedExpression::Decimal { text: magnitude });
+            }
+            Some(CheckedExpression::Quantity {
+                magnitude,
+                unit: units::canonical(dimension)?,
+            })
+        }
+        (None, None) => None,
+    }
+}
+
+/// The unit a conversion lands in, when the two measure the same thing.
+fn convert_to(from: &str, to: &str, span: Span) -> Result<String, SemanticError> {
+    if units::ratio(from, to).is_some() {
+        return Ok(to.to_owned());
+    }
+    let measures = |unit: &str| units::measured(unit).map(|it| it.dimension);
+    Err(match (measures(from), measures(to)) {
+        (Some(source), Some(target)) => SemanticError::new(
+            span,
+            format!("'{from}' and '{to}' do not measure the same thing"),
+        )
+        .help(format!(
+            "'{from}' measures {source} and '{to}' measures {target}"
+        )),
+        _ => SemanticError::new(
+            span,
+            format!("'{from}' and '{to}' are not both units this compiler knows"),
+        )
+        .help("a measurement converts only where both units say what they measure"),
+    })
+}
+
+/// This magnitude written in another unit, when it converts exactly.
+fn converted_magnitude(magnitude: &str, from: &str, to: &str) -> Option<String> {
+    let (numerator, denominator) = units::ratio(from, to)?;
+    Some(
+        units::Decimal::parse(magnitude)?
+            .scaled(numerator, denominator)?
+            .to_string(),
+    )
+}
+
+fn inexact_conversion(magnitude: &str, from: &str, to: &str, span: Span) -> SemanticError {
+    SemanticError::new(
+        span,
+        format!("{magnitude} {from} has no exact value in '{to}'"),
+    )
+    .help("a measurement that cannot be converted exactly is rounded, and a rounded quantity is weighed out wrong")
+}
+
+/// What a product or a quotient of two measurements measures.
+///
+/// The result lands in the canonical unit of whatever it came out measuring, so
+/// `10 g/L * 500 mL` is grams rather than some scaled unit nobody wrote. Two
+/// measurements whose product measures nothing nameable, or either of which this
+/// compiler has no opinion about, have no answer worth guessing at.
+fn composed_unit(left: &str, right: &str, op: BinaryOp, span: Span) -> Result<Ty, SemanticError> {
+    let unknown = |unit: &str| {
+        SemanticError::new(span, format!("'{unit}' is not a unit this compiler knows"))
+            .help("a measurement composes with another only where both say what they measure")
+    };
+    let Some(source) = units::measured(left) else {
+        return Err(unknown(left));
+    };
+    let Some(target) = units::measured(right) else {
+        return Err(unknown(right));
+    };
+    let dimension = match op {
+        BinaryOp::Multiply => source.dimension.times(target.dimension),
+        _ => source.dimension.over(target.dimension),
+    };
+    if dimension.is_dimensionless() {
+        return Ok(Ty::Decimal);
+    }
+    units::canonical(dimension)
+        .map(Ty::Quantity)
+        .ok_or_else(|| {
+            SemanticError::new(
+                span,
+                format!(
+                    "'{left}' and '{right}' compose into a measurement with no unit to write it in"
+                ),
+            )
+            .help(format!("the result measures {dimension}"))
+        })
 }
 
 /// The diagnostic for two measurements that meet in a unit neither shares.

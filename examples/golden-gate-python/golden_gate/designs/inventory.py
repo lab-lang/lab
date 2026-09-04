@@ -12,7 +12,7 @@ from lab.bio.designs import (
     RestrictionEnzyme,
     competent,
 )
-from lab.units import C, minutes
+from lab.units import C, cfu, minutes, ug
 
 module = lab.Module("golden_gate.designs.inventory", doc=__doc__)
 designs = sbol.Document(namespace="https://sbolcanvas.org")
@@ -87,6 +87,7 @@ BsaI = RestrictionEnzyme.buy(
 )
 DH5alpha = Chassis.buy(
     competence=competent,
+    efficiency=10**9 * cfu / ug,
     sbol_identity="https://sbolcanvas.org/DH5alpha",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
@@ -95,6 +96,7 @@ DH5alpha = Chassis.buy(
 )
 BL21 = Chassis.buy(
     competence=competent,
+    efficiency=10**7 * cfu / ug,
     sbol_identity="https://sbolcanvas.org/BL21",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
@@ -102,3 +104,8 @@ BL21 = Chassis.buy(
     recovery_duration=60 * minutes,
 )
 chloramphenicol = Antibiotic.buy()
+LB_chloramphenicol_agar = Medium.buy(
+    sbol_identity="https://example.org/golden-gate/materials/LB_chloramphenicol_agar",
+    pouring=poured,
+    selection=chloramphenicol,
+)

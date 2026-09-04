@@ -16,6 +16,7 @@ mod source;
 mod standard_library;
 mod token;
 mod type_system;
+mod units;
 
 pub use checked::{
     CheckedActionArgument, CheckedArgument, CheckedBinding, CheckedCase, CheckedDeclaration,

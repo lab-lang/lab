@@ -1,7 +1,9 @@
 """Cotransform, recover, dilute, and plate the engineered strain."""
 
 import lab
-from lab import Material, Plasmid, Plate, Strain
+from lab.bio.designs import Medium, inoculated
+from lab import Material, Plasmid
+Strain
 from lab.units import h
 
 from ..designs.inventory import DH5alpha, chloramphenicol
@@ -16,12 +18,13 @@ def build_GVD_strain(
     GVD0011: Material[Plasmid],
     GVD0013: Material[Plasmid],
     GVD0015: Material[Plasmid],
-) -> tuple[Material[Strain], Material[Plate]]:
+) -> tuple[Material[Strain], Material[inoculated[Medium]]]:
     cells = wf.perform(lab.provision(DH5alpha))
     strain, culture = wf.perform(
         lab.transform(GVD_strain, plasmids=[GVD0011, GVD0013, GVD0015], cells=cells)
     )
     culture = wf.perform(lab.recover(culture, duration=1 * h))
     culture = wf.perform(lab.dilute(culture))
-    plate = wf.perform(lab.plate(culture, antibiotic=chloramphenicol))
+    agar = wf.perform(lab.provision(LB_chloramphenicol_agar))
+    plate = wf.perform(lab.plate(culture, medium=agar))
     return strain, plate

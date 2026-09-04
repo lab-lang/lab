@@ -87,6 +87,51 @@ artifact Chassis is FunctionalEntity:
   recovery_duration?: Quantity<min>
 
 /**
+ * Where an organism is in the course of being grown.
+ *
+ * A culture was a type of its own, which is why it could never say what was
+ * growing in it. It is an organism in a state, so the organism is the type and
+ * how far along it is travels beside it.
+ */
+facet Cultivation on Strain:
+  /** A design nothing has been grown from yet. */
+  designed
+  /** Cells that have taken up DNA and are recovering. */
+  transformed
+  /** A recovered culture, ready to be plated or grown on. */
+  recovered
+  /** Thinned so single colonies can be told apart. */
+  diluted
+  /** One colony picked from a plate, which is one transformant. */
+  isolated
+  /** Grown from a single colony. */
+  grown
+
+  designed -> transformed
+  transformed -> recovered
+  recovered -> diluted
+  recovered -> grown
+  diluted -> isolated
+  isolated -> grown
+
+/**
+ * Whether a medium has been poured and what has been put on it.
+ *
+ * A plate was a type of its own and could not say what it was poured from, so
+ * plating on the wrong medium was not something the compiler could see.
+ */
+facet Pouring on Medium:
+  /** Made up, and still in the bottle. */
+  prepared
+  /** Poured into plates and set. */
+  poured
+  /** Poured, and spread with something. */
+  inoculated
+
+  prepared -> poured
+  poured -> inoculated
+
+/**
  * Whether a chassis will take up DNA.
  *
  * Cells are made competent or bought that way, and the difference matters to
@@ -108,6 +153,27 @@ facet Competence on Chassis:
 
 /** A selection agent a transformed culture is plated on. */
 artifact Antibiotic is SimpleChemical
+
+/**
+ * What an organism is grown in or on.
+ *
+ * A medium is a recipe: what goes in it, and how much of each per unit volume.
+ * Concentrations rather than masses, because a recipe is the same whether a
+ * laboratory makes half a litre or five, and what to weigh out is the recipe
+ * times the batch.
+ *
+ * A solid medium is a liquid one with a gelling agent, which is why agar is a
+ * component rather than a second kind.
+ */
+artifact Medium is FunctionalEntity:
+  components?: List<Ingredient>
+  ph?: Decimal
+  selection?: Antibiotic
+
+/** How much of one substance a medium holds per unit volume. */
+record Ingredient:
+  substance: String
+  concentration: Quantity<any Concentration>
 
 /**
  * A DNA design a laboratory can build.

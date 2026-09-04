@@ -22,6 +22,7 @@ OBSERVE = """\
  * Watch a plate until it has something worth picking from.
  */
 
+use std.bio.designs
 use std.lab.plasmid
 
 /** One image, what was counted in it, and how long the plate had grown. */
@@ -32,7 +33,7 @@ record PlateObservation is Evidential:
 
 /** What watching a plate produced. */
 record ColonyGrowth:
-  plate: Material<Plate>
+  plate: Material<Medium is inoculated>
   observations: List<PlateObservation>
 
   case Ready:
@@ -42,7 +43,7 @@ record ColonyGrowth:
 
 /** Image every half hour, and stop at the first plate worth picking from. */
 workflow grow_colonies(
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ) -> ColonyGrowth:
   state observations: List<PlateObservation> = []
 
@@ -182,7 +183,7 @@ class TranslationTests(unittest.TestCase):
 
     def test_several_results_are_named_after_what_the_body_returns(self) -> None:
         self.assertIn("strain: Material<Strain>,", self.build)
-        self.assertIn("plate: Material<Plate>,", self.build)
+        self.assertIn("plate: Material<Medium is inoculated>,", self.build)
 
     def test_one_result_needs_no_name(self) -> None:
         self.assertIn("-> ColonyGrowth:", self.observe)
@@ -207,7 +208,8 @@ class RefusalTests(unittest.TestCase):
         namespace: dict[str, Any] = {}
         source = (
             "import lab\n"
-            "from lab import Material, Plate, Strain\n"
+            "from lab import Material, Strain\n"
+            "from lab.bio.designs import Medium, inoculated\n"
             'module = lab.Module("refusal.demo")\n'
             "@lab.workflow\n" + body
         )

@@ -43,6 +43,7 @@ buy:
   chassis DH5alpha:
     sbol_identity = "https://example.org/golden-gate/materials/DH5alpha"
     competence = competent
+    efficiency = 1e9 cfu/ug
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C
@@ -51,6 +52,7 @@ buy:
   chassis BL21:
     sbol_identity = "https://example.org/golden-gate/materials/BL21"
     competence = competent
+    efficiency = 1e7 cfu/ug
     heat_shock_temperature = 42 C
     cold_incubation = 30 min
     recovery_temperature = 37 C
@@ -58,3 +60,16 @@ buy:
 
   antibiotic chloramphenicol:
     sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"
+
+  // Selective agar, poured and ready to spread on. A plate is a medium that
+  // has been poured, so what a culture is spread on says what it is made of.
+  medium LB_chloramphenicol_agar:
+    sbol_identity = "https://example.org/golden-gate/materials/LB_chloramphenicol_agar"
+    pouring = poured
+    selection = chloramphenicol
+    components = [
+      Ingredient { substance: "tryptone", concentration: 10 g/L },
+      Ingredient { substance: "yeast extract", concentration: 5 g/L },
+      Ingredient { substance: "sodium chloride", concentration: 10 g/L },
+      Ingredient { substance: "agar", concentration: 15 g/L },
+    ]

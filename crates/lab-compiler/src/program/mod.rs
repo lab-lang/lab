@@ -621,8 +621,13 @@ buy restriction_enzyme BsaI:
 buy chassis DH5alpha:
   sbol_identity = "https://sbolcanvas.org/DH5alpha"
   competence = competent
+  efficiency = 1e9 cfu/ug
 buy antibiotic chloramphenicol:
   sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"
+buy medium LB_chloramphenicol_agar:
+  sbol_identity = "https://example.org/golden-gate/materials/LB_chloramphenicol_agar"
+  pouring = poured
+  selection = chloramphenicol
 buy part T4_DNA_ligase:
   sbol_identity = "https://example.org/golden-gate/materials/T4_DNA_ligase"
 buy part T4_DNA_ligase_buffer:
@@ -668,14 +673,15 @@ workflow build_reporter_host(
   p_gfp: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [p_gfp]
   cells <- provision DH5alpha
   strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate
 "#;
 
@@ -728,6 +734,7 @@ use std.lab.plasmid
 
 buy chassis DH5alpha:
   competence = competent
+  efficiency = 1e9 cfu/ug
 buy antibiotic chloramphenicol:
   sbol_identity = "https://example.org/cam"
 

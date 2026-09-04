@@ -4,6 +4,7 @@
  * onto selective agar.
  */
 
+use std.bio.designs
 use std.lab.plasmid
 use golden_gate_extended.designs.inventory
 use golden_gate_extended.designs.plasmids
@@ -19,14 +20,15 @@ workflow build_composite_strain_1(
   composite_plasmid_1: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [composite_plasmid_1]
   cells <- provision DH5alpha
   strain, culture <- transform composite_strain_1 from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate
 
 /** Build the RFP reporter in the same cloning strain. */
@@ -34,14 +36,15 @@ workflow build_composite_strain_2(
   composite_plasmid_2: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [composite_plasmid_2]
   cells <- provision DH5alpha
   strain, culture <- transform composite_strain_2 from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate
 
 /** Build the GFP reporter in BL21, where it is expressed rather than stored. */
@@ -49,14 +52,15 @@ workflow build_expression_strain(
   composite_plasmid_1: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [composite_plasmid_1]
   cells <- provision BL21
   strain, culture <- transform expression_strain from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate
 
 /**
@@ -69,7 +73,7 @@ workflow build_expression_strain(
  */
 workflow build_reference_strain() -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   // The binding takes the artifact's own name, which is how a build order
   // links a strain to the DNA that went into it.
@@ -79,5 +83,6 @@ workflow build_reference_strain() -> (
   strain, culture <- transform reference_strain from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate

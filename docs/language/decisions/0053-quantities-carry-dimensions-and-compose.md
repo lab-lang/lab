@@ -2,11 +2,7 @@
 
 ## Status
 
-Accepted, partially implemented. Amends
-[0025: A quantity type names the unit it is measured in](0025-quantity-types.md).
-
-Unit safety in arithmetic and comparison holds, and `Mass` and `MassConcentration` exist as canonical
-Procedure quantities. Dimensions, written conversion, and dimensional arithmetic do not.
+Accepted. Amends [0025: A quantity type names the unit it is measured in](0025-quantity-types.md).
 
 ## Context
 
@@ -15,9 +11,8 @@ Procedure quantities. Dimensions, written conversion, and dimensional arithmetic
 thousandfold error on the bench is worth refusing. That is right for a field holding one measurement,
 and it stays right.
 
-It cannot express a recipe. LB is 10 g/L tryptone, 5 g/L yeast extract, and 10 g/L sodium chloride;
-a transformation buffer is 50 mM calcium chloride. One component list cannot hold both, because a
-field pins one unit and a recipe is not written in one unit.
+It cannot express a recipe. LB is 10 g/L tryptone, 5 g/L yeast extract, and 10 g/L sodium chloride,
+and a field pinning grams per litre refuses the milligrams per litre the next recipe is written in.
 
 Worse, a recipe states concentrations while a batch is a volume. Someone multiplies 10 g/L by 500 mL
 and weighs out 5 g. That multiplication is done in a head or on a scrap of paper, and getting it
@@ -35,8 +30,11 @@ and temperature are dimensions, along with the products and quotients of them.
 
 **A field may name a dimension instead of a unit.** `Quantity<any Volume>` accepts any volume unit,
 reusing the `any` that already forgets a type argument. Each value still pins its own unit; the field
-declines to pin one. A recipe holds `10 g/L` and `50 mM` in one list because the field asks for a
-concentration rather than for millimolar.
+declines to pin one.
+
+Mass in a volume and amount in a volume are different things, so a field asking for a concentration
+refuses millimolar. Going between them needs a molar mass, which is a fact about the substance rather
+than about the recipe, and a field holding either says so with a union.
 
 **Conversion within a dimension is written.** `500 mL in uL` converts. Implicit conversion stays
 refused, which is what 0025 was protecting, and a field that pins a unit still pins it.
