@@ -8,9 +8,9 @@ resolution and a runtime evidence question.
 import lab
 from lab import dna
 from lab.bio.designs import (
+    CDS,
     Antibiotic,
     Backbone,
-    CDS,
     Chassis,
     Part,
     Promoter,
