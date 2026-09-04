@@ -19,6 +19,7 @@ __all__ = [
     "Accepted",
     "Antibiotic",
     "Backbone",
+    "Buffer",
     "Chassis",
     "Circuit",
     "CloneSet",
@@ -43,6 +44,7 @@ __all__ = [
     "RestrictionEnzyme",
     "Screening",
     "Signal",
+    "Solution",
     "Strain",
     "Topology",
     "WorkflowContext",
@@ -69,6 +71,12 @@ class Antibiotic(LabType):
 
 
 class Backbone(LabType):
+    __lab_uses__ = ()
+
+
+class Buffer(LabType):
+    """A salt solution cells are washed and resuspended in."""
+
     __lab_uses__ = ()
 
 
@@ -193,6 +201,13 @@ class Signal(LabRole):
     """A molecule or condition a circuit responds to."""
 
     __lab_role__ = "Signal"
+    __lab_uses__ = ()
+
+
+class Solution(LabRole):
+    """A poured solution: a buffer or a medium a verb pours the same way."""
+
+    __lab_role__ = "Solution"
     __lab_uses__ = ()
 
 

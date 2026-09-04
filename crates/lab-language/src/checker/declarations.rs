@@ -821,6 +821,25 @@ impl Checker {
     ) -> Result<ContractPhrasePart, SemanticError> {
         match ty {
             Ty::Quantity(unit) => Ok(ContractPhrasePart::quantity(&name.value, false, &[unit])),
+            // A union of measurements is one operand read in any of its units,
+            // which is how a growth endpoint reaches a target the plate reader
+            // reports as OD600 or OD700: the number is written in whichever the
+            // meter gives, and the two do not convert.
+            Ty::Union(alternatives)
+                if !alternatives.is_empty()
+                    && alternatives
+                        .iter()
+                        .all(|alternative| matches!(alternative, Ty::Quantity(_))) =>
+            {
+                let units = alternatives
+                    .iter()
+                    .map(|alternative| match alternative {
+                        Ty::Quantity(unit) => unit.as_str(),
+                        _ => unreachable!("every alternative is a measurement"),
+                    })
+                    .collect::<Vec<_>>();
+                Ok(ContractPhrasePart::quantity(&name.value, false, &units))
+            }
             Ty::Integer => Ok(ContractPhrasePart::integer(&name.value, false)),
             Ty::Measuring(_) => Err(SemanticError::new(
                 name.span,

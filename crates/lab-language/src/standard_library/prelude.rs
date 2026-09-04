@@ -11,6 +11,9 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("Accepted").parameters(1),
         TypeSpec::nominal("Antibiotic"),
         TypeSpec::nominal("Backbone"),
+        TypeSpec::nominal("Buffer")
+            .implements(["Solution"])
+            .documented("A salt solution cells are washed and resuspended in."),
         TypeSpec::nominal("CDS").parameters(1),
         TypeSpec::nominal("Chassis").documented("A host organism that carries engineered DNA."),
         TypeSpec::nominal("Circuit").parameters(2),
@@ -33,7 +36,9 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("Image"),
         TypeSpec::nominal("List").parameters(1),
         TypeSpec::nominal("Material").parameters(1),
-        TypeSpec::nominal("Medium").documented("What an organism is grown in or on."),
+        TypeSpec::nominal("Medium")
+            .implements(["Solution"])
+            .documented("What an organism is grown in or on."),
         TypeSpec::nominal("Part"),
         TypeSpec::nominal("Plasmid")
             .with_fields([
@@ -54,6 +59,8 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::nominal("RestrictionEnzyme"),
         TypeSpec::nominal("Screening").with_fields([("clones", named("CloneSet"))]),
         TypeSpec::role("Signal").documented("A molecule or condition a circuit responds to."),
+        TypeSpec::role("Solution")
+            .documented("A poured solution: a buffer or a medium a verb pours the same way."),
         TypeSpec::nominal("Strain")
             .with_fields([
                 ("chassis", named("Chassis")),

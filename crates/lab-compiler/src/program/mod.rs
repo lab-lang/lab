@@ -1057,6 +1057,67 @@ workflow main() -> Material<Plasmid>:
         );
     }
 
+    /// Making competent cells: the whole point of the declared-verb machinery.
+    ///
+    /// Growing cells up to a target optical density, chilling them, spinning
+    /// them into a pellet, and washing them into cold buffer are four verbs the
+    /// compiler has no Rust for. They arrive from `std.lab.competence` as
+    /// declarations, lower to perform Intents, and refine to derived manual
+    /// methods, so the protocol reaches a planning problem end to end.
+    #[test]
+    fn a_competent_cell_protocol_lowers_and_refines() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+use std.lab.plasmid
+use std.lab.competence
+
+buy buffer cold_cacl2:
+  concentration = 100 mM
+
+build chassis DH5a_competent:
+  heat_shock_temperature = 42 C
+
+workflow prepare() -> Material<Chassis is competent>:
+  cells <- realize DH5a_competent
+  wash <- provision cold_cacl2
+  culture <- grow cells at 37 C to 0.40 OD600
+  chilled <- chill culture for 10 min
+  pellet <- centrifuge chilled at 4000 rcf for 10 min
+  competent <- resuspend pellet in wash
+  return competent
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("the protocol checks");
+        let portable = PortableLairProgram::lower(&module).expect("the protocol lowers");
+        let intent = portable.ir();
+        assert_eq!(
+            intent.matches("workflow.perform").count(),
+            4,
+            "grow, chill, centrifuge, and resuspend each lower to a perform: {intent}"
+        );
+
+        let refined = portable
+            .refine_standard_methods()
+            .expect("every declared verb refines to a derived manual method");
+        let problem = refined.planning_problem().expect("the problem projects");
+        for verb in [
+            "std.lab.competence.grow",
+            "std.lab.competence.chill",
+            "std.lab.competence.centrifuge",
+            "std.lab.competence.resuspend",
+        ] {
+            let choice = problem
+                .choices
+                .iter()
+                .find(|choice| choice.source_operation.as_str() == verb)
+                .unwrap_or_else(|| panic!("'{verb}' becomes a planning choice"));
+            assert_eq!(
+                choice.candidates.len(),
+                1,
+                "'{verb}' has one derived method"
+            );
+        }
+    }
+
     #[test]
     fn standard_methods_replace_every_workflow_op_with_verified_alternatives() {
         let checked = compile_module(

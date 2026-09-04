@@ -90,6 +90,25 @@ fn action_contract_from_surface(surface: &ActionSurface) -> ActionContractSpec {
                 let operand = operand(name);
                 match from_checked_type(&operand.r#type) {
                     Ty::Quantity(unit) => PhrasePart::quantity(name, false, &[unit.as_str()]),
+                    // A union of measurements is one operand read in any of its
+                    // units, the way a growth endpoint is written as OD600 or
+                    // OD700. The reconstruction mirrors what the declaration
+                    // collected, so an imported verb reads the same phrase.
+                    Ty::Union(alternatives)
+                        if !alternatives.is_empty()
+                            && alternatives
+                                .iter()
+                                .all(|alternative| matches!(alternative, Ty::Quantity(_))) =>
+                    {
+                        let units = alternatives
+                            .iter()
+                            .map(|alternative| match alternative {
+                                Ty::Quantity(unit) => unit.as_str(),
+                                _ => unreachable!("every alternative is a measurement"),
+                            })
+                            .collect::<Vec<_>>();
+                        PhrasePart::quantity(name, false, &units)
+                    }
                     Ty::Integer => PhrasePart::integer(name, false),
                     ty => PhrasePart::operand(name, ContractType::Concrete(ty), operand.mode),
                 }
@@ -549,6 +568,19 @@ impl SemanticContext {
                     if let Some(surface) = &export.action {
                         self.actions
                             .insert(name.clone(), action_contract_from_surface(surface));
+                        // The capability an imported verb needs travels with its
+                        // surface, so a workflow that performs it can carry the
+                        // capability to the method the compiler derives.
+                        self.action_contracts.insert(
+                            name.clone(),
+                            CheckedActionContract {
+                                operation: surface.operation.clone(),
+                                phrase: surface.phrase.clone(),
+                                operands: surface.operands.clone(),
+                                results: surface.results.clone(),
+                                capability: surface.capability.clone(),
+                            },
+                        );
                     }
                 }
                 ExportKind::Workflow => {

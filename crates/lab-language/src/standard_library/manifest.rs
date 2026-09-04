@@ -344,7 +344,9 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                     .iter()
                     .map(|token| match token {
                         crate::checked::CheckedPhraseToken::Word(word) => word.clone(),
-                        crate::checked::CheckedPhraseToken::Hole(operand) => operand.clone(),
+                        crate::checked::CheckedPhraseToken::Hole(operand) => {
+                            format!("<{operand}>")
+                        }
                     })
                     .collect(),
                 optional: Vec::new(),

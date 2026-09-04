@@ -106,7 +106,7 @@ follow_imports = "skip"
 # until there is one a program written in the object model is checked by the
 # Lab compiler rather than by mypy. The package itself stays strict.
 [[tool.mypy.overrides]]
-module = ["programs.reporter.*"]
+module = ["programs.reporter.*", "programs.competence"]
 disable_error_code = ["call-arg", "attr-defined", "no-any-return", "return"]
 
 [tool.pytest.ini_options]

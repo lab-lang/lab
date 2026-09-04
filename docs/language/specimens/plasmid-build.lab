@@ -112,8 +112,8 @@ workflow build_plasmid() -> Accepted<Plasmid> | Rejected<Plasmid>:
       screening <- screen candidates against design
 
   clone = screening.clones.highest_confidence
-  culture <- grow clone at 37 C for 16 h
-  plasmid <- purify culture
+  overnight <- culture clone at 37 C for 16 h
+  plasmid <- purify overnight
   retained, aliquot <- split plasmid
   sequence_result <- sequence aliquot
 

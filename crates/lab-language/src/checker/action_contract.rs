@@ -199,7 +199,21 @@ impl Checker {
                         ),
                     )
                 })?;
-                checked_integer_literal(magnitude, *signed, effect.span)?;
+                // A measured operand carries a decimal magnitude: an optical
+                // density is 0.40, not 0. The magnitude rides through as the
+                // text it was written as, so the check is that it is a number
+                // and, where the operand is unsigned, that it is not negative.
+                let negative = magnitude.starts_with('-');
+                if crate::units::Decimal::parse(magnitude).is_none() || (!*signed && negative) {
+                    return Err(SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' expects a {}number for '{name}', found '{magnitude}'",
+                            contract.operation,
+                            if *signed { "" } else { "non-negative " },
+                        ),
+                    ));
+                }
                 let unit = words.get(*cursor + 1).ok_or_else(|| {
                     SemanticError::new(
                         effect.span,
@@ -263,6 +277,7 @@ impl Checker {
             ResolvedAction {
                 operation: contract.operation.to_owned(),
                 callee: None,
+                capability: None,
                 arguments,
                 results: checked_results,
             },

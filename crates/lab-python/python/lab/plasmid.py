@@ -117,13 +117,13 @@ screen = Action(
 Binds screening.
 """
 
-grow = Action(
-    name="grow",
-    phrase=("grow", "<clone>", "at", "<temperature>", "for", "<duration>"),
+culture = Action(
+    name="culture",
+    phrase=("culture", "<clone>", "at", "<temperature>", "for", "<duration>"),
     results=("culture",),
     uses=("std.lab.plasmid",),
 )
-"""Performed as `grow <clone> at <temperature> for <duration>`.
+"""Performed as `culture <clone> at <temperature> for <duration>`.
 
 Binds culture.
 """

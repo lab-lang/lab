@@ -670,7 +670,6 @@ fn realization_flows(
     catalog_types: &BTreeMap<String, String>,
     selections: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
-    let capabilities = action_capabilities(modules);
     let mut result = BTreeMap::new();
     for declaration in declarations(modules) {
         let CheckedDeclaration::Workflow { body, .. } = declaration else {
@@ -800,7 +799,7 @@ fn realization_flows(
                 // bespoke lowering is one a package declared. Its operands,
                 // parameters, and result states come from the checked call.
                 _ => {
-                    actions.push(perform_intent(action, &capabilities)?);
+                    actions.push(perform_intent(action)?);
                 }
             }
         }
@@ -874,18 +873,12 @@ fn dependency_names(
 /// A material argument is an operand the value it names flows into; a scalar or
 /// measurement argument is a parameter; and each result arrives in the state its
 /// type narrows to, or the product state of its kind where it narrows to none.
-fn perform_intent(
-    action: &ResolvedAction,
-    capabilities: &BTreeMap<String, String>,
-) -> Result<WorkflowActionIntent, SourceLoweringError> {
+fn perform_intent(action: &ResolvedAction) -> Result<WorkflowActionIntent, SourceLoweringError> {
     let invalid = || SourceLoweringError::InvalidActionResults {
         artifact: String::new(),
         operation: action.operation.clone(),
     };
-    let capability = capabilities
-        .get(&action.operation)
-        .cloned()
-        .ok_or_else(invalid)?;
+    let capability = action.capability.clone().ok_or_else(invalid)?;
     let mut operands = Vec::new();
     let mut parameters = Vec::new();
     for argument in &action.arguments {
@@ -919,20 +912,6 @@ fn perform_intent(
         operands,
         parameters,
     })
-}
-
-/// The capability each declared verb needs, keyed by the operation it refines.
-fn action_capabilities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
-    declarations(modules)
-        .filter_map(|declaration| match declaration {
-            CheckedDeclaration::Action {
-                operation,
-                capability,
-                ..
-            } => Some((operation.clone(), capability.clone())),
-            _ => None,
-        })
-        .collect()
 }
 
 /// The workflow material state a result type stands for.

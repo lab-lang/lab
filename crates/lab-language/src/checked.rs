@@ -506,6 +506,14 @@ pub struct ResolvedAction {
     /// already the stable semantic operation identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<DefinitionId>,
+    /// The capability a facility must offer to run a declared verb.
+    ///
+    /// A verb declared with `action` states the one capability it needs, and it
+    /// travels with the call so the compiler can derive a method that requires
+    /// it. The six bundled verbs carry their capability in their own lowering,
+    /// so this is absent for them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability: Option<String>,
     pub arguments: Vec<CheckedActionArgument>,
     pub results: Vec<CheckedField>,
 }

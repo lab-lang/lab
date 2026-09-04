@@ -191,9 +191,9 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
             results: vec![result("screening", concrete(named("Screening")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.grow".to_owned(),
+            operation: "std.lab.plasmid.culture".to_owned(),
             phrase: vec![
-                PhrasePart::word("grow"),
+                PhrasePart::word("culture"),
                 operand("clone", concrete(strain("isolated")), take),
                 PhrasePart::word("at"),
                 PhrasePart::quantity("temperature", true, &["C"]),

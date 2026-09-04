@@ -318,6 +318,10 @@ const AUTHORED_SOURCES: &[(&str, &str)] = &[
         "std.bio.golden_gate",
         include_str!("authored/golden_gate.lab"),
     ),
+    (
+        "std.lab.competence",
+        include_str!("authored/competence.lab"),
+    ),
 ];
 
 static AUTHORED: OnceLock<Arc<BTreeMap<&'static str, ModuleInterface>>> = OnceLock::new();
