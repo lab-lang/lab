@@ -398,7 +398,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v2");
+    assert_eq!(plan["format"], "lab.execution-plan.v3");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -415,7 +415,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     assert_eq!(plan["requirements"].as_array().unwrap().len(), 1);
     assert_eq!(plan["nodes"][0]["action"], "manual");
     assert_eq!(
-        plan["nodes"][0]["requirement"],
+        plan["nodes"][0]["requirements"][0],
         plan["requirements"][0]["requirement_instance"]
     );
     assert!(
@@ -580,7 +580,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         "https://example.org/sbolinventory/facility"
     );
     let bindings = read_json(project.join(".lab/build/adapter_bindings.json"));
-    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v3");
+    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v4");
     assert_eq!(
         bindings["facility"],
         "https://example.org/sbolinventory/facility"
@@ -1736,9 +1736,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
                     .as_str()
                     .is_some_and(|requirement| requirement.contains(requirement_fragment))
             })
-        }) || node["requirement"]
-            .as_str()
-            .is_some_and(|requirement| requirement.contains(requirement_fragment))
+        })
     };
     let node_id = |requirement_fragment: &str| {
         execution_nodes
@@ -2009,6 +2007,7 @@ ex:inheco_odtc
             .as_array()
             .unwrap()
             .iter()
+            .filter(|node| node["action"] == "execute")
             .filter_map(|node| node["requirements"].as_array())
             .map(Vec::len)
             .sum::<usize>(),
@@ -2228,7 +2227,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     }));
 
     let execution = read_json(plan_dir.join("plan.execution.json"));
-    assert_eq!(execution["format"], "lab.execution-plan.v2");
+    assert_eq!(execution["format"], "lab.execution-plan.v3");
     assert!(
         execution["materials"]
             .as_array()

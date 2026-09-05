@@ -85,14 +85,16 @@ impl LoadedExecutionPlan {
                         issues.push(format!("node '{}' has no reviewed run document", node.id));
                     }
                 }
-                LoadedExecutionAction::Manual { requirement, .. } => {
-                    check_execution_qualification(
-                        &mut issues,
-                        &node.id,
-                        requirement,
-                        minimum,
-                        mode,
-                    );
+                LoadedExecutionAction::Manual { requirements, .. } => {
+                    for requirement in requirements {
+                        check_execution_qualification(
+                            &mut issues,
+                            &node.id,
+                            requirement,
+                            minimum,
+                            mode,
+                        );
+                    }
                 }
                 LoadedExecutionAction::MoveMaterial { .. } => {}
             }
@@ -151,7 +153,7 @@ pub enum LoadedExecutionAction {
         instructions: String,
     },
     Manual {
-        requirement: Box<ExecutionRequirementBinding>,
+        requirements: Vec<ExecutionRequirementBinding>,
         title: String,
         instructions: String,
     },
@@ -372,17 +374,23 @@ pub fn render_execution_dry_run(loaded: &LoadedExecutionPlan) -> String {
                 );
             }
             LoadedExecutionAction::Manual {
-                requirement,
+                requirements,
                 title,
                 instructions,
             } => {
+                let asset = &requirements[0].asset;
+                let capabilities = requirements
+                    .iter()
+                    .map(|requirement| requirement.capability_kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let _ = writeln!(
                     text,
                     "\n[{}] {} - by hand on {} for {}: {}: {}",
                     index + 1,
                     node.id,
-                    requirement.asset,
-                    requirement.capability_kind,
+                    asset,
+                    capabilities,
                     title,
                     instructions
                 );
@@ -615,15 +623,20 @@ fn execute_execution_node(
             Ok(NodeExecution::Done)
         }
         LoadedExecutionAction::Manual {
-            requirement,
+            requirements,
             title,
             instructions,
         } => {
+            let asset = &requirements[0].asset;
+            let offerings = requirements
+                .iter()
+                .map(|requirement| requirement.offering.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             events.emit(RunEvent::AttentionRequired {
                 node: node.id.clone(),
                 prompt: format!(
-                    "{title} on Asset '{}' using CapabilityOffering '{}': {instructions}",
-                    requirement.asset, requirement.offering
+                    "{title} on Asset '{asset}' using CapabilityOfferings [{offerings}]: {instructions}"
                 ),
             });
             let confirmed = operator.confirm(
@@ -779,19 +792,22 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                 instructions: instructions.clone(),
             },
             ExecutionPlanAction::Manual {
-                requirement,
+                requirements: node_requirements,
                 title,
                 instructions,
-            } => {
-                let binding = requirements
-                    .get(requirement.as_str())
-                    .expect("execution-plan validation resolved every requirement");
-                LoadedExecutionAction::Manual {
-                    requirement: Box::new((*binding).clone()),
-                    title: title.clone(),
-                    instructions: instructions.clone(),
-                }
-            }
+            } => LoadedExecutionAction::Manual {
+                requirements: node_requirements
+                    .iter()
+                    .map(|requirement| {
+                        (*requirements
+                            .get(requirement.as_str())
+                            .expect("execution-plan validation resolved every requirement"))
+                        .clone()
+                    })
+                    .collect(),
+                title: title.clone(),
+                instructions: instructions.clone(),
+            },
         };
         nodes.push(LoadedExecutionNode {
             id: node.id.clone(),
@@ -1626,7 +1642,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     id: "prepare".to_owned(),
                     after: Vec::new(),
                     action: ExecutionPlanAction::Manual {
-                        requirement: "workflow/main/deck-preparation".to_owned(),
+                        requirements: vec!["workflow/main/deck-preparation".to_owned()],
                         title: "Prepare the deck".to_owned(),
                         instructions: "Confirm the reviewed deck layout.".to_owned(),
                     },

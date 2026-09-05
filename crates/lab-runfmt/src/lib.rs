@@ -35,7 +35,7 @@ pub const OPENTRONS_PYTHON_PROTOCOL_FORMAT: &str = "opentrons.python-protocol";
 pub const OPENTRONS_PROTOCOL_DESIGNER_FORMAT: &str = "opentrons.protocol-designer-json";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v2";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v3";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -119,7 +119,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v2` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v3` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
@@ -325,33 +325,52 @@ impl ExecutionPlanDocument {
                     }
                 }
                 ExecutionPlanAction::Manual {
-                    requirement,
+                    requirements: node_requirements,
                     title,
                     instructions,
                 } => {
-                    let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
-                        format!(
-                            "manual node '{}' references unknown requirement '{}'",
-                            node.id, requirement
-                        )
-                    })?;
-                    if binding.control_mode != lab_capability::ControlMode::Manual.iri() {
+                    if node_requirements.is_empty() {
                         return Err(format!(
-                            "manual node '{}' references requirement '{}' with non-manual control mode '{}'",
-                            node.id, requirement, binding.control_mode
+                            "manual node '{}' has no capability requirements",
+                            node.id
                         ));
                     }
-                    if binding.adapter.is_some() {
-                        return Err(format!(
-                            "manual node '{}' references requirement '{}' with a runtime adapter",
-                            node.id, requirement
-                        ));
-                    }
-                    if !scheduled_requirements.insert(requirement.as_str()) {
-                        return Err(format!(
-                            "requirement '{}' is scheduled by more than one execution node",
-                            requirement
-                        ));
+                    let mut asset = None;
+                    for requirement in node_requirements {
+                        let binding = requirements.get(requirement.as_str()).ok_or_else(|| {
+                            format!(
+                                "manual node '{}' references unknown requirement '{}'",
+                                node.id, requirement
+                            )
+                        })?;
+                        if binding.control_mode != lab_capability::ControlMode::Manual.iri() {
+                            return Err(format!(
+                                "manual node '{}' references requirement '{}' with non-manual control mode '{}'",
+                                node.id, requirement, binding.control_mode
+                            ));
+                        }
+                        if binding.adapter.is_some() {
+                            return Err(format!(
+                                "manual node '{}' references requirement '{}' with a runtime adapter",
+                                node.id, requirement
+                            ));
+                        }
+                        if let Some(expected) = asset {
+                            if expected != binding.asset {
+                                return Err(format!(
+                                    "manual node '{}' combines requirements allocated to different Assets",
+                                    node.id
+                                ));
+                            }
+                        } else {
+                            asset = Some(binding.asset.as_str());
+                        }
+                        if !scheduled_requirements.insert(requirement.as_str()) {
+                            return Err(format!(
+                                "requirement '{}' is scheduled by more than one execution node",
+                                requirement
+                            ));
+                        }
                     }
                     if title.trim().is_empty() {
                         return Err(format!("manual node '{}' has an empty title", node.id));
@@ -552,7 +571,7 @@ pub enum ExecutionPlanAction {
         instructions: String,
     },
     Manual {
-        requirement: String,
+        requirements: Vec<String>,
         title: String,
         instructions: String,
     },
@@ -814,6 +833,39 @@ mod tests {
     }
 
     #[test]
+    fn one_manual_node_can_satisfy_an_atomic_requirement_set() {
+        let mut plan = execution_plan();
+        let mut first = plan.requirements[0].clone();
+        first.requirement_instance = "example::main/thermal/block".to_owned();
+        first.requirement_template = "example::thermal/block".to_owned();
+        first.control_mode = lab_capability::ControlMode::Manual.iri().to_owned();
+        first.adapter = None;
+        let mut second = first.clone();
+        second.requirement_instance = "example::main/thermal/lid".to_owned();
+        second.requirement_template = "example::thermal/lid".to_owned();
+        second.capability_kind =
+            "https://sbol.io/ns/capability#HeatedLidTemperatureControl".to_owned();
+        plan.requirements = vec![first, second];
+        plan.nodes = vec![ExecutionPlanNode {
+            id: "manual-0001".to_owned(),
+            after: Vec::new(),
+            action: ExecutionPlanAction::Manual {
+                requirements: vec![
+                    "example::main/thermal/block".to_owned(),
+                    "example::main/thermal/lid".to_owned(),
+                ],
+                title: "Run the thermal program".to_owned(),
+                instructions: "Follow the reviewed profile".to_owned(),
+            },
+        }];
+
+        plan.validate().unwrap();
+
+        plan.requirements[1].asset = "https://example.org/other-device".to_owned();
+        assert!(plan.validate().unwrap_err().contains("different Assets"));
+    }
+
+    #[test]
     fn compiler_derived_plans_freeze_method_and_intermediate_artifact_identity() {
         let mut plan = execution_plan();
         plan.planning = Some(planning_reference());
@@ -851,7 +903,7 @@ mod tests {
             id: "manual-0002".to_owned(),
             after: vec!["execute-0001".to_owned()],
             action: ExecutionPlanAction::Manual {
-                requirement: "example::main/body[1]".to_owned(),
+                requirements: vec!["example::main/body[1]".to_owned()],
                 title: "inspect".to_owned(),
                 instructions: "confirm".to_owned(),
             },

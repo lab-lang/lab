@@ -846,6 +846,10 @@ fn selected_adapters(
     let Some(program) = &task.program else {
         return vec![selected_adapter(binding, None)];
     };
+    let required_features = program
+        .validate()
+        .expect("a validated planning problem contains valid Procedure programs")
+        .features();
     binding
         .procedure_implementations
         .iter()
@@ -853,6 +857,12 @@ fn selected_adapters(
         .filter(|implementation| implementation.operations.contains(&task.operation))
         .filter(|implementation| implementation.capability_kinds.contains(capability_kind))
         .filter(|implementation| implementation.services.planning)
+        .filter(|implementation| {
+            implementation
+                .program_features
+                .get(&task.operation)
+                .is_some_and(|realized| required_features.is_subset(realized))
+        })
         .filter(|implementation| {
             implementation
                 .control_modes
@@ -1429,9 +1439,15 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                     == lab_compiler::procedure::vocabulary::PIPETTING_PROGRAM_V1
             })
             .expect("the OT-2 binding carries its pipetting implementation");
-        implementation
-            .operations
-            .insert(OperationId::new(TEST_PIPETTING_OPERATION).unwrap());
+        let operation = OperationId::new(TEST_PIPETTING_OPERATION).unwrap();
+        let features = implementation
+            .program_features
+            .values()
+            .next()
+            .expect("the OT-2 pipetting implementation declares program features")
+            .clone();
+        implementation.operations.insert(operation.clone());
+        implementation.program_features.insert(operation, features);
         bindings
     }
 
@@ -1620,6 +1636,60 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         );
         problem.validate().unwrap();
         let adapters = ot2_bindings(&inventory);
+
+        let error = solve_facility_planning(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            Some(&adapters),
+            FacilityPlanningPolicy {
+                method_pins: Vec::new(),
+                asset_pins: Vec::new(),
+                adapter_requirement: AdapterRequirement::NonManual,
+            },
+        )
+        .unwrap_err();
+
+        let FacilityPlanningError::NoFeasibleMethod { candidates, .. } = error else {
+            panic!("expected method infeasibility")
+        };
+        assert!(candidates.iter().any(|candidate| {
+            candidate.rejected_requirements.iter().any(|requirement| {
+                requirement.candidates.iter().any(|offering| {
+                    offering
+                        .reasons
+                        .contains(&PlanningCandidateRejectionReason::MissingPlanningAdapter)
+                })
+            })
+        }));
+    }
+
+    #[test]
+    fn normalized_tasks_reject_an_implementation_missing_a_required_program_feature() {
+        let (_directory, inventory) = inventory(false);
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        normalize_test_task(
+            &mut problem.choices[0].candidates[0].tasks[0],
+            TEST_PIPETTING_OPERATION,
+        );
+        problem.validate().unwrap();
+        let mut adapters = ot2_bindings_with_test_pipetting_operation(&inventory);
+        let implementation = adapters.bindings[0]
+            .procedure_implementations
+            .iter_mut()
+            .find(|implementation| {
+                implementation.contract.as_str()
+                    == lab_compiler::procedure::vocabulary::PIPETTING_PROGRAM_V1
+            })
+            .unwrap();
+        implementation
+            .program_features
+            .get_mut(&OperationId::new(TEST_PIPETTING_OPERATION).unwrap())
+            .unwrap()
+            .remove(&lab_compiler::procedure::ProgramFeature::Mix);
 
         let error = solve_facility_planning(
             &problem,

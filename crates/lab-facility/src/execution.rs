@@ -213,15 +213,40 @@ pub fn build_execution_plan_from_invocations(
             }
 
             if binding_scope == BindingScope::AtomicAssetAssembly {
-                if task_requirements
+                let has_manual = task_requirements
                     .iter()
-                    .any(|(_, _, is_manual, _)| *is_manual)
-                {
+                    .any(|(_, _, is_manual, _)| *is_manual);
+                let all_manual = !task_requirements.is_empty()
+                    && task_requirements
+                        .iter()
+                        .all(|(_, _, is_manual, _)| *is_manual);
+                if has_manual && !all_manual {
                     return Err(ExecutionPlanBuildError::UnsupportedAtomicExecution {
                         task: task.id.to_string(),
-                        message: "atomic manual-control requirement sets are not yet representable"
+                        message: "one atomic task mixes manual and adapter-controlled requirements"
                             .to_owned(),
                     });
+                }
+                if all_manual {
+                    let id = format!("manual-{:04}", nodes.len() + 1);
+                    nodes.push(ExecutionPlanNode {
+                        id: id.clone(),
+                        after: Vec::new(),
+                        action: ExecutionPlanAction::Manual {
+                            requirements: task_requirements
+                                .iter()
+                                .map(|(requirement, _, _, _)| requirement.clone())
+                                .collect(),
+                            title: format!("Perform {}", task.operation),
+                            instructions: manual_instructions(
+                                task,
+                                task_requirements.iter().map(|(_, binding, _, _)| *binding),
+                            ),
+                        },
+                    });
+                    node_tasks.push(BTreeSet::from([task.id.clone()]));
+                    task_nodes.entry(task.id.clone()).or_default().push(id);
+                    continue;
                 }
                 let document = task_requirements
                     .first()
@@ -321,9 +346,9 @@ pub fn build_execution_plan_from_invocations(
                     (
                         format!("manual-{:04}", nodes.len() + 1),
                         ExecutionPlanAction::Manual {
-                            requirement,
+                            requirements: vec![requirement],
                             title: format!("Perform {}", task.operation),
-                            instructions: manual_instructions(task, binding),
+                            instructions: manual_instructions(task, std::iter::once(binding)),
                         },
                     )
                 } else {
@@ -687,13 +712,23 @@ fn display_property_value(value: &lab_capability::PropertyValue) -> String {
     }
 }
 
-fn manual_instructions(
+fn manual_instructions<'a>(
     task: &AllocatedProcedureTask,
-    binding: &AllocatedRequirementBinding,
+    bindings: impl IntoIterator<Item = &'a AllocatedRequirementBinding>,
 ) -> String {
+    let resources = bindings
+        .into_iter()
+        .map(|binding| {
+            format!(
+                "CapabilityOffering '{}' on Asset '{}'",
+                binding.offering, binding.asset
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut instructions = format!(
-        "Use CapabilityOffering '{}' on Asset '{}' to perform Procedure operation '{}'. Follow the facility's reviewed local SOP for this operation and confirm completion.",
-        binding.offering, binding.asset, task.operation
+        "Use {resources} to perform Procedure operation '{}'. Follow the facility's reviewed local SOP for this operation and confirm completion.",
+        task.operation
     );
     if !task.parameters.is_empty() {
         let parameters = task

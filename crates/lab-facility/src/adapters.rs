@@ -1,11 +1,12 @@
 //! Exact operational bindings between configured adapters and SBOLInventory offerings.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use lab_capability::{
     CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
 };
+use lab_compiler::procedure::ProgramFeature;
 use lab_inventory::{FacilityAssetError, FacilityScalarValue, InventorySnapshot};
 use sbol_inventory::vocabulary::Qualification;
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,7 @@ use lab_adapters::{
     adapter_catalog,
 };
 
-pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v3";
+pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v4";
 
 #[derive(Clone, Debug)]
 pub struct AdapterBindingRequest {
@@ -204,6 +205,7 @@ pub struct BoundProcedureImplementation {
     pub control_modes: BTreeSet<ControlMode>,
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
+    pub program_features: BTreeMap<OperationId, BTreeSet<ProgramFeature>>,
     pub services: AdapterServices,
 }
 
@@ -217,6 +219,7 @@ impl From<&ProcedureImplementationDescriptor> for BoundProcedureImplementation {
             control_modes: value.control_modes.clone(),
             accepted_run_formats: value.accepted_run_formats.clone(),
             emitted_run_formats: value.emitted_run_formats.clone(),
+            program_features: value.program_features.clone(),
             services: value.services.clone(),
         }
     }
