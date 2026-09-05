@@ -17,6 +17,8 @@ use crate::events::EventSink;
 #[cfg(feature = "hardware")]
 use crate::events::{ProgramExtent, RunEvent};
 use crate::execution::{DocumentExecutor, LoadedReviewedDocument};
+#[cfg(feature = "hardware")]
+use crate::reviewed_documents::LoadedStarRun;
 
 /// A no-hardware executor for an already validated reviewed document.
 ///
@@ -79,9 +81,11 @@ impl DocumentExecutor for HamiltonStarExecutor {
         loaded: &LoadedReviewedDocument,
         events: &mut dyn EventSink,
     ) -> Result<()> {
-        let LoadedReviewedDocument::Star { document, commands } = loaded else {
-            bail!("the Hamilton STAR executor received a non-STAR document");
-        };
+        let loaded = loaded
+            .require_payload::<LoadedStarRun>()
+            .context("the Hamilton STAR executor received an incompatible document")?;
+        let document = &loaded.document;
+        let commands = &loaded.commands;
         events.emit(RunEvent::ProgramStarted {
             asset: self.asset.clone(),
             title: document.title.clone(),
@@ -157,9 +161,9 @@ impl DocumentExecutor for OdtcExecutor {
         loaded: &LoadedReviewedDocument,
         events: &mut dyn EventSink,
     ) -> Result<()> {
-        let LoadedReviewedDocument::Thermocycle(document) = loaded else {
-            bail!("the Inheco ODTC executor received a non-thermocycle document");
-        };
+        let document = loaded
+            .require_payload::<lab_runfmt::ThermocycleRunDocument>()
+            .context("the Inheco ODTC executor received an incompatible document")?;
         events.emit(RunEvent::ProgramStarted {
             asset: self.asset.clone(),
             title: document.title.clone(),

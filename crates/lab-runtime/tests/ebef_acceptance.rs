@@ -12,12 +12,13 @@ use lab_runtime::clock::Clock;
 use lab_runtime::device_executors::ReviewedDocumentSimulationExecutor;
 use lab_runtime::events::{RecordingSink, RunEvent};
 use lab_runtime::execution::{
-    ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, load_execution_directory,
-    render_execution_dry_run, run_execution_plan,
+    ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, ReviewedDocumentLoaderRegistry,
+    load_execution_directory, render_execution_dry_run, run_execution_plan,
 };
 use lab_runtime::mode::ExecutionMode;
 use lab_runtime::operator::AutoOperator;
 use lab_runtime::provenance::{SIMULATION_INVENTORY_RESULT_FILE, write_inventory_result};
+use lab_runtime::reviewed_documents::load_simulation_run;
 use sbol_inventory::InventoryDocument;
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, ControlMode, INCUBATION, LIQUID_HANDLING, PROV_ENTITY,
@@ -48,7 +49,11 @@ fn ebef_derived_facility_composes_three_capabilities_without_claiming_hardware_c
     let directory = materialize_reviewed_simulation();
     let source_path = directory.path().join("inventory-source.ttl");
     let source_before = fs::read(&source_path).unwrap();
-    let loaded = load_execution_directory(directory.path()).unwrap();
+    let mut document_loaders = ReviewedDocumentLoaderRegistry::new();
+    document_loaders
+        .register(SIMULATOR, SIMULATION_RUN_FORMAT, load_simulation_run)
+        .unwrap();
+    let loaded = load_execution_directory(directory.path(), &document_loaders).unwrap();
 
     for asset in [PHYSICAL_MICROLAB, PHYSICAL_EPOCH] {
         let physical = loaded.inventory.facility_asset(asset).unwrap();

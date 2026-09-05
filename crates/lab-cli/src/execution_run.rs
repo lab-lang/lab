@@ -3,23 +3,31 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use lab_adapters::{adapter_catalog, hamilton::star::StarAdapterProfile};
-use lab_runfmt::{STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
+use lab_runfmt::{
+    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT,
+    SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT,
+};
 use lab_runtime::clock::WallClock;
 use lab_runtime::device_executors::{
     HamiltonStarExecutor, OdtcExecutor, ReviewedDocumentSimulationExecutor,
 };
 use lab_runtime::events::{EventSink, ProgramExtent, RunEvent};
 use lab_runtime::execution::{
-    ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, LoadedExecutionAction,
-    load_execution_directory, render_execution_dry_run, run_execution_plan,
+    DocumentExecutor, ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry,
+    LoadedExecutionAction, ReviewedDocumentLoaderRegistry, load_execution_directory,
+    render_execution_dry_run, run_execution_plan,
 };
 use lab_runtime::mode::ExecutionMode;
 use lab_runtime::operator::StdinOperator;
 use lab_runtime::provenance::{inventory_result_file, write_inventory_result};
+use lab_runtime::reviewed_documents::{
+    load_opentrons_protocol_designer, load_opentrons_python_protocol, load_plate_read,
+    load_simulation_run, load_star_run, load_thermocycle_run,
+};
 
 use crate::Output;
 
@@ -32,7 +40,8 @@ pub(crate) fn run_execution_command(
     asset_endpoints: Vec<String>,
     output: &Output,
 ) -> Result<()> {
-    let loaded = load_execution_directory(&directory)?;
+    let document_loaders = document_loader_registry()?;
+    let loaded = load_execution_directory(&directory, &document_loaders)?;
     if dry_run {
         return output.success(
             "dry-run",
@@ -125,6 +134,26 @@ pub(crate) fn run_execution_command(
             "node '{node}' failed: {error}; resolve the facility and continue the same reviewed plan with --resume"
         ),
     }
+}
+
+/// The runtime executable's explicit set of reviewed document integrations.
+fn document_loader_registry() -> Result<ReviewedDocumentLoaderRegistry> {
+    let mut registry = ReviewedDocumentLoaderRegistry::new();
+    registry.register("hamilton.star", STAR_RUN_FORMAT, load_star_run)?;
+    registry.register("inheco.odtc", THERMOCYCLE_RUN_FORMAT, load_thermocycle_run)?;
+    registry.register("byonoy.absorbance96", PLATE_READ_FORMAT, load_plate_read)?;
+    registry.register("lab.simulator", SIMULATION_RUN_FORMAT, load_simulation_run)?;
+    registry.register(
+        "opentrons.ot2",
+        OPENTRONS_PYTHON_PROTOCOL_FORMAT,
+        load_opentrons_python_protocol,
+    )?;
+    registry.register(
+        "opentrons.flex",
+        OPENTRONS_PROTOCOL_DESIGNER_FORMAT,
+        load_opentrons_protocol_designer,
+    )?;
+    Ok(registry)
 }
 
 fn build_simulation_registry(
@@ -226,6 +255,145 @@ fn parse_asset_endpoints(entries: &[String]) -> Result<BTreeMap<String, SocketAd
     Ok(addresses)
 }
 
+struct LiveExecutorFactoryRequest<'a> {
+    execution_directory: &'a Path,
+    asset: &'a str,
+    profile_path: &'a str,
+    endpoint: Option<SocketAddr>,
+}
+
+struct BuiltLiveExecutor {
+    executor: Box<dyn DocumentExecutor>,
+    consumed_endpoint: bool,
+}
+
+trait LiveExecutorFactory {
+    fn build(&mut self, request: LiveExecutorFactoryRequest<'_>) -> Result<BuiltLiveExecutor>;
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct LiveExecutorFactoryKey {
+    adapter_id: String,
+    format: String,
+}
+
+#[derive(Default)]
+struct LiveExecutorFactoryRegistry {
+    factories: BTreeMap<LiveExecutorFactoryKey, Box<dyn LiveExecutorFactory>>,
+}
+
+impl LiveExecutorFactoryRegistry {
+    fn register(
+        &mut self,
+        adapter_id: impl Into<String>,
+        format: impl Into<String>,
+        factory: Box<dyn LiveExecutorFactory>,
+    ) -> Result<()> {
+        let key = LiveExecutorFactoryKey {
+            adapter_id: adapter_id.into(),
+            format: format.into(),
+        };
+        if key.adapter_id.is_empty() || key.format.is_empty() {
+            bail!("a live executor factory requires a non-empty adapter ID and format");
+        }
+        if self.factories.insert(key.clone(), factory).is_some() {
+            bail!(
+                "a live executor factory is already registered for adapter '{}' and format '{}'",
+                key.adapter_id,
+                key.format
+            );
+        }
+        Ok(())
+    }
+
+    fn build(
+        &mut self,
+        adapter_id: &str,
+        format: &str,
+        request: LiveExecutorFactoryRequest<'_>,
+    ) -> Result<BuiltLiveExecutor> {
+        self.factories
+            .get_mut(&LiveExecutorFactoryKey {
+                adapter_id: adapter_id.to_owned(),
+                format: format.to_owned(),
+            })
+            .with_context(|| {
+                format!(
+                    "this Lab runtime has no live executor factory for adapter '{adapter_id}' and format '{format}'"
+                )
+            })?
+            .build(request)
+    }
+}
+
+#[derive(Default)]
+struct HamiltonStarExecutorFactory {
+    bound_asset: Option<String>,
+}
+
+impl LiveExecutorFactory for HamiltonStarExecutorFactory {
+    fn build(&mut self, request: LiveExecutorFactoryRequest<'_>) -> Result<BuiltLiveExecutor> {
+        if let Some(bound) = &self.bound_asset
+            && bound != request.asset
+        {
+            bail!(
+                "this runtime can address only one Hamilton STAR over USB, but the reviewed plan binds '{}' and '{}'",
+                bound,
+                request.asset
+            );
+        }
+        let path = request.execution_directory.join(request.profile_path);
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let name = path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .context("a STAR adapter profile needs a UTF-8 file name")?;
+        let profile = StarAdapterProfile::parse(name, &text)
+            .with_context(|| format!("failed to parse frozen profile {}", path.display()))?;
+        self.bound_asset = Some(request.asset.to_owned());
+        Ok(BuiltLiveExecutor {
+            executor: Box::new(HamiltonStarExecutor::new(
+                request.asset,
+                profile.run.autoload_park_track,
+            )),
+            consumed_endpoint: false,
+        })
+    }
+}
+
+struct OdtcExecutorFactory;
+
+impl LiveExecutorFactory for OdtcExecutorFactory {
+    fn build(&mut self, request: LiveExecutorFactoryRequest<'_>) -> Result<BuiltLiveExecutor> {
+        let address = request.endpoint.with_context(|| {
+            format!(
+                "Inheco ODTC Asset '{}' has no runtime address; pass --asset-endpoint '{}=<ip:port>'",
+                request.asset, request.asset
+            )
+        })?;
+        Ok(BuiltLiveExecutor {
+            executor: Box::new(OdtcExecutor::new(request.asset, address)),
+            consumed_endpoint: true,
+        })
+    }
+}
+
+fn live_executor_factory_registry() -> Result<LiveExecutorFactoryRegistry> {
+    let mut registry = LiveExecutorFactoryRegistry::default();
+    registry.register(
+        "hamilton.star",
+        STAR_RUN_FORMAT,
+        Box::<HamiltonStarExecutorFactory>::default(),
+    )?;
+    registry.register(
+        "inheco.odtc",
+        THERMOCYCLE_RUN_FORMAT,
+        Box::new(OdtcExecutorFactory),
+    )?;
+    Ok(registry)
+}
+
 fn build_hardware_registry(
     loaded: &lab_runtime::execution::LoadedExecutionPlan,
     addresses: &BTreeMap<String, SocketAddr>,
@@ -263,66 +431,24 @@ fn build_hardware_registry(
         }
     }
 
-    let star_assets = bindings
-        .keys()
-        .filter(|(_, driver, _)| driver == "hamilton.star")
-        .map(|(asset, _, _)| asset)
-        .collect::<BTreeSet<_>>();
-    if star_assets.len() > 1 {
-        bail!(
-            "this runtime can address only one Hamilton STAR over USB, but the reviewed plan binds {}",
-            star_assets
-                .iter()
-                .copied()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-
+    let mut factories = live_executor_factory_registry()?;
     let mut used_addresses = BTreeSet::new();
     let mut registry = ExecutorRegistry::new();
     for ((asset, driver, format), (profile_path, _profile_sha256)) in bindings {
-        match (driver.as_str(), format.as_str()) {
-            ("hamilton.star", STAR_RUN_FORMAT) => {
-                let path = loaded.directory.join(&profile_path);
-                let text = fs::read_to_string(&path)
-                    .with_context(|| format!("failed to read {}", path.display()))?;
-                let name = path
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .context("a STAR adapter profile needs a UTF-8 file name")?;
-                let profile = StarAdapterProfile::parse(name, &text).with_context(|| {
-                    format!("failed to parse frozen profile {}", path.display())
-                })?;
-                registry.register(
-                    &asset,
-                    &driver,
-                    &format,
-                    Box::new(HamiltonStarExecutor::new(
-                        &asset,
-                        profile.run.autoload_park_track,
-                    )),
-                )?;
-            }
-            ("inheco.odtc", THERMOCYCLE_RUN_FORMAT) => {
-                let address = addresses.get(&asset).with_context(|| {
-                    format!(
-                        "Inheco ODTC Asset '{asset}' has no runtime address; pass --asset-endpoint '{asset}=<ip:port>'"
-                    )
-                })?;
-                used_addresses.insert(asset.clone());
-                registry.register(
-                    &asset,
-                    &driver,
-                    &format,
-                    Box::new(OdtcExecutor::new(&asset, *address)),
-                )?;
-            }
-            _ => bail!(
-                "this Lab runtime has no live executor for asset '{asset}', adapter '{driver}', format '{format}'"
-            ),
+        let built = factories.build(
+            &driver,
+            &format,
+            LiveExecutorFactoryRequest {
+                execution_directory: &loaded.directory,
+                asset: &asset,
+                profile_path: &profile_path,
+                endpoint: addresses.get(&asset).copied(),
+            },
+        )?;
+        if built.consumed_endpoint {
+            used_addresses.insert(asset.clone());
         }
+        registry.register(&asset, &driver, &format, built.executor)?;
     }
     if let Some(unused) = addresses
         .keys()

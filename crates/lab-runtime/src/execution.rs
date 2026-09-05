@@ -6,12 +6,13 @@
 //! topological walk. A live runner receives only a [`LoadedExecutionPlan`], so it cannot discover
 //! a bad document after an instrument has already moved.
 
+use std::any::{Any, type_name};
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use hamilton_star::RawCommand;
 use lab_capability::{
     AbsoluteIri, ExactDecimal, ExactInteger, PropertyConstraint, PropertyKind, PropertyValue,
     ScalarValue, UnitIri,
@@ -20,9 +21,6 @@ use lab_inventory::{FacilityScalarValue, InventorySnapshot};
 use lab_runfmt::{
     EXECUTION_PLAN_FILE, EXECUTION_PLAN_FORMAT, ExecutionParameterValue, ExecutionPlanAction,
     ExecutionPlanDocument, ExecutionPlanNode, ExecutionRequirementBinding,
-    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, PLATE_READ_FORMAT,
-    PlateReadDocument, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT, SimulationRunDocument,
-    StarRunDocument, THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument,
 };
 use sbol3::{DisplayId, Iri, Namespace, Resource};
 use sha2::{Digest, Sha256};
@@ -159,43 +157,160 @@ pub enum LoadedExecutionAction {
     },
 }
 
-#[derive(Debug)]
-pub enum LoadedReviewedDocument {
-    Star {
-        document: StarRunDocument,
-        commands: Vec<RawCommand>,
-    },
-    Thermocycle(ThermocycleRunDocument),
-    PlateRead(PlateReadDocument),
-    Simulation(SimulationRunDocument),
-    /// A reviewed file whose execution is delegated to an external device application.
-    /// The runtime validates and narrates it, but does not claim a live connector.
-    ExternalFile {
-        format: String,
-        title: String,
-        contents: Vec<u8>,
-    },
+/// One eagerly validated reviewed document with an adapter-defined typed payload.
+///
+/// The runtime core owns only the stable format and presentation metadata. A loader registered by
+/// the application owns parsing and semantic validation, and stores whatever payload its exact
+/// executor needs. That keeps new document formats out of a central runtime enum.
+pub struct LoadedReviewedDocument {
+    format: String,
+    title: String,
+    payload: Box<dyn Any + Send + Sync>,
 }
 
 impl LoadedReviewedDocument {
-    pub fn format(&self) -> &str {
-        match self {
-            Self::Star { .. } => STAR_RUN_FORMAT,
-            Self::Thermocycle(_) => THERMOCYCLE_RUN_FORMAT,
-            Self::PlateRead(_) => PLATE_READ_FORMAT,
-            Self::Simulation(_) => SIMULATION_RUN_FORMAT,
-            Self::ExternalFile { format, .. } => format,
+    pub fn new<T>(format: impl Into<String>, title: impl Into<String>, payload: T) -> Result<Self>
+    where
+        T: Any + Send + Sync,
+    {
+        let format = format.into();
+        let title = title.into();
+        if format.is_empty() || title.is_empty() {
+            bail!("a loaded reviewed document requires a non-empty format and title");
         }
+        Ok(Self {
+            format,
+            title,
+            payload: Box::new(payload),
+        })
+    }
+
+    pub fn format(&self) -> &str {
+        &self.format
     }
 
     pub fn title(&self) -> &str {
-        match self {
-            Self::Star { document, .. } => &document.title,
-            Self::Thermocycle(document) => &document.title,
-            Self::PlateRead(document) => &document.title,
-            Self::Simulation(document) => &document.title,
-            Self::ExternalFile { title, .. } => title,
+        &self.title
+    }
+
+    /// Borrows the adapter-defined payload when it has the requested exact Rust type.
+    pub fn payload<T: Any>(&self) -> Option<&T> {
+        self.payload.downcast_ref()
+    }
+
+    /// Borrows the adapter-defined payload or reports a precise executor/loader mismatch.
+    pub fn require_payload<T: Any>(&self) -> Result<&T> {
+        self.payload::<T>().with_context(|| {
+            format!(
+                "reviewed document '{}' does not carry payload type '{}'",
+                self.format,
+                type_name::<T>()
+            )
+        })
+    }
+}
+
+impl fmt::Debug for LoadedReviewedDocument {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoadedReviewedDocument")
+            .field("format", &self.format)
+            .field("title", &self.title)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Immutable context passed to one exact reviewed-document loader.
+#[derive(Clone, Copy, Debug)]
+pub struct ReviewedDocumentLoadRequest<'a> {
+    pub adapter_id: &'a str,
+    pub format: &'a str,
+    pub expected_capability_kind: &'a str,
+    pub bytes: &'a [u8],
+    pub path: &'a Path,
+}
+
+type ReviewedDocumentLoader =
+    dyn for<'a> Fn(ReviewedDocumentLoadRequest<'a>) -> Result<LoadedReviewedDocument> + Send + Sync;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ReviewedDocumentLoaderKey {
+    adapter_id: String,
+    format: String,
+}
+
+/// Exact reviewed-document loaders linked into one runtime application.
+///
+/// There is no fallback by capability, manufacturer, filename, or similar format. The reviewed
+/// plan must name an adapter ID and format explicitly registered by the composition root.
+#[derive(Default)]
+pub struct ReviewedDocumentLoaderRegistry {
+    loaders: BTreeMap<ReviewedDocumentLoaderKey, Box<ReviewedDocumentLoader>>,
+}
+
+impl ReviewedDocumentLoaderRegistry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register<F>(
+        &mut self,
+        adapter_id: impl Into<String>,
+        format: impl Into<String>,
+        loader: F,
+    ) -> Result<()>
+    where
+        F: for<'a> Fn(ReviewedDocumentLoadRequest<'a>) -> Result<LoadedReviewedDocument>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let key = ReviewedDocumentLoaderKey {
+            adapter_id: adapter_id.into(),
+            format: format.into(),
+        };
+        if key.adapter_id.is_empty() || key.format.is_empty() {
+            bail!("a document loader key requires a non-empty adapter ID and format");
         }
+        if self.loaders.insert(key.clone(), Box::new(loader)).is_some() {
+            bail!(
+                "a reviewed-document loader is already registered for adapter '{}' and format '{}'",
+                key.adapter_id,
+                key.format
+            );
+        }
+        Ok(())
+    }
+
+    pub fn load(
+        &self,
+        adapter_id: &str,
+        format: &str,
+        expected_capability_kind: &str,
+        bytes: &[u8],
+        path: &Path,
+    ) -> Result<LoadedReviewedDocument> {
+        let key = ReviewedDocumentLoaderKey {
+            adapter_id: adapter_id.to_owned(),
+            format: format.to_owned(),
+        };
+        let loader = self.loaders.get(&key).with_context(|| {
+            format!("adapter '{adapter_id}' has no reviewed-document loader for format '{format}'")
+        })?;
+        let document = loader(ReviewedDocumentLoadRequest {
+            adapter_id,
+            format,
+            expected_capability_kind,
+            bytes,
+            path,
+        })?;
+        if document.format() != format {
+            bail!(
+                "the loader registered for adapter '{adapter_id}' and format '{format}' returned format '{}'",
+                document.format()
+            );
+        }
+        Ok(document)
     }
 }
 
@@ -656,7 +771,13 @@ fn execute_execution_node(
 }
 
 /// Loads and eagerly validates the well-known reviewed plan in `directory`.
-pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan> {
+///
+/// Document semantics come exclusively from `document_loaders`, the exact set of adapter-format
+/// implementations linked by the calling application.
+pub fn load_execution_directory(
+    directory: &Path,
+    document_loaders: &ReviewedDocumentLoaderRegistry,
+) -> Result<LoadedExecutionPlan> {
     let directory = fs::canonicalize(directory).with_context(|| {
         format!(
             "failed to resolve execution directory {}",
@@ -765,7 +886,7 @@ pub fn load_execution_directory(directory: &Path) -> Result<LoadedExecutionPlan>
                             &document.sha256,
                             &format!("reviewed run document for node '{}'", node.id),
                         )?;
-                        Some(load_reviewed_document(
+                        Some(document_loaders.load(
                             &adapter.driver,
                             &document.format,
                             &binding.capability_kind,
@@ -1192,182 +1313,6 @@ fn read_frozen_input(
     Ok(bytes)
 }
 
-fn load_reviewed_document(
-    driver: &str,
-    format: &str,
-    expected_capability_kind: &str,
-    bytes: &[u8],
-    path: &Path,
-) -> Result<LoadedReviewedDocument> {
-    match (driver, format) {
-        ("hamilton.star", STAR_RUN_FORMAT) => {
-            let document: StarRunDocument = parse_json_document(bytes, path)?;
-            if document.format != STAR_RUN_FORMAT {
-                bail!(
-                    "{} declares format '{}', expected '{}'",
-                    path.display(),
-                    document.format,
-                    STAR_RUN_FORMAT
-                );
-            }
-            if !document.manual_after.is_empty() {
-                bail!(
-                    "{} carries manual-after steps; facility execution requires explicit Manual plan nodes",
-                    path.display()
-                );
-            }
-            let commands = document
-                .steps
-                .iter()
-                .map(|step| {
-                    RawCommand::parse(&step.frame).with_context(|| {
-                        format!("{} carries an unreplayable STAR frame", path.display())
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            Ok(LoadedReviewedDocument::Star { document, commands })
-        }
-        ("inheco.odtc", THERMOCYCLE_RUN_FORMAT) => {
-            let document: ThermocycleRunDocument = parse_json_document(bytes, path)?;
-            if document.format != THERMOCYCLE_RUN_FORMAT {
-                bail!(
-                    "{} declares format '{}', expected '{}'",
-                    path.display(),
-                    document.format,
-                    THERMOCYCLE_RUN_FORMAT
-                );
-            }
-            document
-                .run
-                .validate(&lab_instruments::odtc_thermal_limits())
-                .with_context(|| {
-                    format!("{} is outside the Inheco ODTC run contract", path.display())
-                })?;
-            Ok(LoadedReviewedDocument::Thermocycle(document))
-        }
-        ("byonoy.absorbance96", PLATE_READ_FORMAT) => {
-            let document: PlateReadDocument = parse_json_document(bytes, path)?;
-            if document.format != PLATE_READ_FORMAT {
-                bail!(
-                    "{} declares format '{}', expected '{}'",
-                    path.display(),
-                    document.format,
-                    PLATE_READ_FORMAT
-                );
-            }
-            Ok(LoadedReviewedDocument::PlateRead(document))
-        }
-        ("lab.simulator", SIMULATION_RUN_FORMAT) => {
-            let document: SimulationRunDocument = parse_json_document(bytes, path)?;
-            if document.format != SIMULATION_RUN_FORMAT {
-                bail!(
-                    "{} declares format '{}', expected '{}'",
-                    path.display(),
-                    document.format,
-                    SIMULATION_RUN_FORMAT
-                );
-            }
-            Iri::new(document.capability_kind.clone()).with_context(|| {
-                format!("{} declares an invalid capability-kind IRI", path.display())
-            })?;
-            if document.capability_kind != expected_capability_kind {
-                bail!(
-                    "{} simulates capability '{}', but its frozen requirement binds '{}'",
-                    path.display(),
-                    document.capability_kind,
-                    expected_capability_kind
-                );
-            }
-            Ok(LoadedReviewedDocument::Simulation(document))
-        }
-        ("opentrons.ot2", OPENTRONS_PYTHON_PROTOCOL_FORMAT) => {
-            let source = std::str::from_utf8(bytes).with_context(|| {
-                format!(
-                    "{} is not a UTF-8 Opentrons Python protocol",
-                    path.display()
-                )
-            })?;
-            for marker in [
-                "from opentrons import protocol_api",
-                "def run(protocol: protocol_api.ProtocolContext) -> None:",
-                "# LAB:INVOCATION_PLAN",
-            ] {
-                if !source.contains(marker) {
-                    bail!(
-                        "{} is missing required Opentrons protocol marker {:?}",
-                        path.display(),
-                        marker
-                    );
-                }
-            }
-            let capability = expected_capability_kind
-                .rsplit(['#', '/'])
-                .find(|segment| !segment.is_empty())
-                .unwrap_or(expected_capability_kind);
-            Ok(LoadedReviewedDocument::ExternalFile {
-                format: format.to_owned(),
-                title: format!("Opentrons OT-2 {capability} protocol"),
-                contents: bytes.to_vec(),
-            })
-        }
-        ("opentrons.flex", OPENTRONS_PROTOCOL_DESIGNER_FORMAT) => {
-            let protocol: serde_json::Value = parse_json_document(bytes, path)?;
-            if protocol
-                .get("schemaVersion")
-                .and_then(serde_json::Value::as_u64)
-                != Some(8)
-            {
-                bail!(
-                    "{} is not an Opentrons Protocol Designer schema 8 document",
-                    path.display()
-                );
-            }
-            if protocol
-                .pointer("/robot/model")
-                .and_then(serde_json::Value::as_str)
-                != Some("OT-3 Standard")
-            {
-                bail!(
-                    "{} does not target the Opentrons Flex robot model",
-                    path.display()
-                );
-            }
-            let commands = protocol
-                .get("commands")
-                .and_then(serde_json::Value::as_array)
-                .with_context(|| {
-                    format!(
-                        "{} has no Protocol Designer command sequence",
-                        path.display()
-                    )
-                })?;
-            if commands.is_empty() {
-                bail!(
-                    "{} has an empty Protocol Designer command sequence",
-                    path.display()
-                );
-            }
-            let capability = expected_capability_kind
-                .rsplit(['#', '/'])
-                .find(|segment| !segment.is_empty())
-                .unwrap_or(expected_capability_kind);
-            Ok(LoadedReviewedDocument::ExternalFile {
-                format: format.to_owned(),
-                title: format!("Opentrons Flex {capability} protocol"),
-                contents: bytes.to_vec(),
-            })
-        }
-        _ => bail!(
-            "adapter '{driver}' has no runtime executor for reviewed document format '{format}'"
-        ),
-    }
-}
-
-fn parse_json_document<T: serde::de::DeserializeOwned>(bytes: &[u8], path: &Path) -> Result<T> {
-    serde_json::from_slice(bytes)
-        .with_context(|| format!("{} is not a valid reviewed run document", path.display()))
-}
-
 fn topological_nodes(nodes: &[ExecutionPlanNode]) -> Vec<&ExecutionPlanNode> {
     let by_id = nodes
         .iter()
@@ -1429,6 +1374,10 @@ pub(crate) mod tests {
     use crate::clock::Clock;
     use crate::events::{RecordingSink, RunEvent};
     use crate::operator::AutoOperator;
+    use crate::reviewed_documents::{
+        LoadedExternalFile, load_opentrons_protocol_designer, load_opentrons_python_protocol,
+        load_plate_read, load_simulation_run, load_star_run, load_thermocycle_run,
+    };
 
     const INVENTORY: &str = r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
@@ -1478,6 +1427,133 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         calls: Arc<Mutex<Vec<String>>>,
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    struct CustomReviewedPayload(String);
+
+    fn load_custom_document(
+        request: ReviewedDocumentLoadRequest<'_>,
+    ) -> Result<LoadedReviewedDocument> {
+        LoadedReviewedDocument::new(
+            request.format,
+            "Custom reviewed document",
+            CustomReviewedPayload(String::from_utf8(request.bytes.to_vec())?),
+        )
+    }
+
+    pub(crate) fn document_loaders() -> ReviewedDocumentLoaderRegistry {
+        let mut registry = ReviewedDocumentLoaderRegistry::new();
+        registry
+            .register("hamilton.star", STAR_RUN_FORMAT, load_star_run)
+            .unwrap();
+        registry
+            .register(
+                "inheco.odtc",
+                lab_runfmt::THERMOCYCLE_RUN_FORMAT,
+                load_thermocycle_run,
+            )
+            .unwrap();
+        registry
+            .register(
+                "byonoy.absorbance96",
+                lab_runfmt::PLATE_READ_FORMAT,
+                load_plate_read,
+            )
+            .unwrap();
+        registry
+            .register(
+                "lab.simulator",
+                lab_runfmt::SIMULATION_RUN_FORMAT,
+                load_simulation_run,
+            )
+            .unwrap();
+        registry
+            .register(
+                "opentrons.ot2",
+                lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT,
+                load_opentrons_python_protocol,
+            )
+            .unwrap();
+        registry
+            .register(
+                "opentrons.flex",
+                lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT,
+                load_opentrons_protocol_designer,
+            )
+            .unwrap();
+        registry
+    }
+
+    #[test]
+    fn reviewed_document_loaders_are_exact_and_payloads_are_extensible() {
+        let mut registry = ReviewedDocumentLoaderRegistry::new();
+        registry
+            .register(
+                "example.custom",
+                "example.reviewed.v1",
+                load_custom_document,
+            )
+            .unwrap();
+
+        let loaded = registry
+            .load(
+                "example.custom",
+                "example.reviewed.v1",
+                "https://example.org/capability",
+                b"typed payload",
+                Path::new("custom.reviewed"),
+            )
+            .unwrap();
+        assert_eq!(loaded.format(), "example.reviewed.v1");
+        assert_eq!(
+            loaded.payload::<CustomReviewedPayload>(),
+            Some(&CustomReviewedPayload("typed payload".to_owned()))
+        );
+
+        let error = registry
+            .load(
+                "different.adapter",
+                "example.reviewed.v1",
+                "https://example.org/capability",
+                b"typed payload",
+                Path::new("custom.reviewed"),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no reviewed-document loader"), "{error}");
+
+        let duplicate = registry
+            .register(
+                "example.custom",
+                "example.reviewed.v1",
+                load_custom_document,
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(duplicate.contains("already registered"), "{duplicate}");
+    }
+
+    #[test]
+    fn a_loader_cannot_return_a_different_format_than_its_exact_key() {
+        let mut registry = ReviewedDocumentLoaderRegistry::new();
+        registry
+            .register("example.custom", "example.reviewed.v1", |_request| {
+                LoadedReviewedDocument::new("wrong.format", "Wrong", ())
+            })
+            .unwrap();
+
+        let error = registry
+            .load(
+                "example.custom",
+                "example.reviewed.v1",
+                "https://example.org/capability",
+                b"",
+                Path::new("custom.reviewed"),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("returned format 'wrong.format'"), "{error}");
+    }
+
     #[test]
     fn preflight_validates_external_ot2_protocols_without_claiming_a_live_executor() {
         let source = br#"from opentrons import protocol_api
@@ -1485,31 +1561,36 @@ PLAN_JSON = "{}"  # LAB:INVOCATION_PLAN
 def run(protocol: protocol_api.ProtocolContext) -> None:
     pass
 "#;
-        let loaded = load_reviewed_document(
-            "opentrons.ot2",
-            "opentrons.python-protocol",
-            "https://sbol.io/ns/capability#LiquidHandling",
-            source,
-            Path::new("automation_protocol.py"),
-        )
-        .unwrap();
+        let loaded = document_loaders()
+            .load(
+                "opentrons.ot2",
+                "opentrons.python-protocol",
+                "https://sbol.io/ns/capability#LiquidHandling",
+                source,
+                Path::new("automation_protocol.py"),
+            )
+            .unwrap();
 
         assert_eq!(loaded.format(), "opentrons.python-protocol");
         assert_eq!(loaded.title(), "Opentrons OT-2 LiquidHandling protocol");
-        assert!(matches!(
-            loaded,
-            LoadedReviewedDocument::ExternalFile { contents, .. } if contents == source
-        ));
+        assert_eq!(
+            loaded
+                .payload::<LoadedExternalFile>()
+                .expect("the Opentrons loader returns its reviewed file")
+                .contents,
+            source
+        );
 
-        let error = load_reviewed_document(
-            "opentrons.ot2",
-            "opentrons.python-protocol",
-            "https://sbol.io/ns/capability#LiquidHandling",
-            b"def run(): pass\n",
-            Path::new("automation_protocol.py"),
-        )
-        .unwrap_err()
-        .to_string();
+        let error = document_loaders()
+            .load(
+                "opentrons.ot2",
+                "opentrons.python-protocol",
+                "https://sbol.io/ns/capability#LiquidHandling",
+                b"def run(): pass\n",
+                Path::new("automation_protocol.py"),
+            )
+            .unwrap_err()
+            .to_string();
         assert!(
             error.contains("missing required Opentrons protocol marker"),
             "{error}"
@@ -1660,7 +1741,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         let directory = write_execution_package();
         let plan_bytes = fs::read(directory.path().join(EXECUTION_PLAN_FILE)).unwrap();
 
-        let loaded = load_execution_directory(directory.path()).unwrap();
+        let loaded = load_execution_directory(directory.path(), &document_loaders()).unwrap();
 
         assert_eq!(loaded.plan_sha256, sha256_hex(&plan_bytes));
         assert_eq!(loaded.nodes[0].id, "prepare");
@@ -1684,7 +1765,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             format!("{INVENTORY}\n# changed\n"),
         )
         .unwrap();
-        let error = load_execution_directory(inventory.path())
+        let error = load_execution_directory(inventory.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("reviewed plan requires"), "{error}");
@@ -1695,7 +1776,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             "changed = true\n",
         )
         .unwrap();
-        let error = load_execution_directory(profile.path())
+        let error = load_execution_directory(profile.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("adapter profile"), "{error}");
@@ -1703,7 +1784,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
 
         let document = write_execution_package();
         fs::write(document.path().join("runs/transfer.star.json"), "{}\n").unwrap();
-        let error = load_execution_directory(document.path())
+        let error = load_execution_directory(document.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("reviewed run document"), "{error}");
@@ -1750,10 +1831,10 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         let mut bytes = serde_json::to_vec_pretty(&plan).unwrap();
         bytes.push(b'\n');
         fs::write(&plan_path, bytes).unwrap();
-        load_execution_directory(directory.path()).unwrap();
+        load_execution_directory(directory.path(), &document_loaders()).unwrap();
 
         fs::write(compiler.join("allocated.lair"), "changed\n").unwrap();
-        let error = load_execution_directory(directory.path())
+        let error = load_execution_directory(directory.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("compiler allocated LAIR"), "{error}");
@@ -1786,7 +1867,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         plan_bytes.push(b'\n');
         fs::write(&plan_path, plan_bytes).unwrap();
 
-        let error = load_execution_directory(directory.path())
+        let error = load_execution_directory(directory.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("unreplayable STAR frame"), "{error}");
@@ -1803,7 +1884,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         bytes.push(b'\n');
         fs::write(&plan_path, bytes).unwrap();
 
-        let error = load_execution_directory(directory.path())
+        let error = load_execution_directory(directory.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("does not own"), "{error}");
@@ -1820,7 +1901,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         bytes.push(b'\n');
         fs::write(&plan_path, bytes).unwrap();
 
-        let error = load_execution_directory(directory.path())
+        let error = load_execution_directory(directory.path(), &document_loaders())
             .unwrap_err()
             .to_string();
         assert!(error.contains("references missing Component"), "{error}");
@@ -1830,7 +1911,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     #[test]
     fn the_generic_runner_uses_only_the_exact_registered_executor_and_resumes() {
         let directory = write_execution_package();
-        let loaded = load_execution_directory(directory.path()).unwrap();
+        let loaded = load_execution_directory(directory.path(), &document_loaders()).unwrap();
         let calls = Arc::new(Mutex::new(Vec::new()));
         let mut registry = registry(Arc::clone(&calls));
         let mut events = RecordingSink::default();
@@ -1901,7 +1982,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     #[test]
     fn missing_or_inexact_executor_bindings_fail_before_a_ledger_exists() {
         let directory = write_execution_package();
-        let loaded = load_execution_directory(directory.path()).unwrap();
+        let loaded = load_execution_directory(directory.path(), &document_loaders()).unwrap();
         let mut wrong_registry = ExecutorRegistry::new();
         wrong_registry
             .register(
@@ -1940,7 +2021,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
     #[test]
     fn declining_the_pre_run_gate_leaves_no_execution_ledger() {
         let directory = write_execution_package();
-        let loaded = load_execution_directory(directory.path()).unwrap();
+        let loaded = load_execution_directory(directory.path(), &document_loaders()).unwrap();
         let mut registry = registry(Arc::new(Mutex::new(Vec::new())));
 
         let outcome = run_execution_plan(

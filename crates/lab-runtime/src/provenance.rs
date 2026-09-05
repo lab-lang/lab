@@ -444,7 +444,10 @@ mod tests {
 
     use super::*;
     use crate::clock::Clock;
-    use crate::execution::{load_execution_directory, tests::write_execution_package};
+    use crate::execution::{
+        load_execution_directory,
+        tests::{document_loaders, write_execution_package},
+    };
     use crate::ledger::{ExecutionLedger, LedgerEvent};
     use crate::mode::ExecutionMode;
 
@@ -459,7 +462,7 @@ mod tests {
     #[test]
     fn completion_writes_a_new_conformant_inventory_with_run_evidence_and_lineage() {
         let directory = write_execution_package();
-        let loaded = load_execution_directory(directory.path()).unwrap();
+        let loaded = load_execution_directory(directory.path(), &document_loaders()).unwrap();
         let source_before = fs::read(loaded.inventory.source_path()).unwrap();
         let nodes = loaded
             .nodes

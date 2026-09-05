@@ -22,6 +22,7 @@ pub mod ledger;
 pub mod mode;
 pub mod operator;
 pub mod provenance;
+pub mod reviewed_documents;
 pub mod star;
 
 pub use hamilton_star;
