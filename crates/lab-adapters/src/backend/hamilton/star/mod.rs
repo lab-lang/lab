@@ -1,10 +1,11 @@
 //! Hamilton STAR/STARlet lowering for exact facility-allocated Procedure invocations.
 //!
-//! The emitted `lab.star-run.v0` document is the review boundary: `lab run` replays its frames verbatim, adding only command ids.
+//! The emitted `lab.star-run.v0` document is the review boundary: `lab run` replays its frames verbatim, adding only command ids. Operational liquid knowledge lives in the versioned, data-defined [`liquid_classes`] extension surface; reviewed plans pin every selected class by ID, version, and content digest.
 
 pub mod catalog;
 mod emit;
 mod invocation;
+pub mod liquid_classes;
 mod plan;
 pub mod profile;
 

@@ -11,13 +11,14 @@ use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLower
 use crate::backend::document::{Column, Doc, DocMeta, bold, code, text};
 use crate::backend::hamilton::star::BACKEND;
 use crate::backend::hamilton::star::emit::render_run;
+use crate::backend::hamilton::star::liquid_classes::LiquidClassEvidence;
 use crate::backend::hamilton::star::plan::{
     SetupAddition, SourceFill, plan_dilution_invocation, plan_setup_invocation,
 };
 use crate::backend::hamilton::star::profile::StarAdapterProfile;
 use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::procedure::{
-    SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup, normalized_serial_dilution,
+    SerialDilution, SetupGoldenGate, normalized_golden_gate_setup, normalized_serial_dilution,
     require_basic_golden_gate_techniques,
 };
 use crate::backend::resources::{PlateAllocator, Well, assign_source_wells, plate_wells};
@@ -28,7 +29,7 @@ use lab_compiler::planning::{
     SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
 };
 
-const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v1";
+const TASK_PLAN_SCHEMA: &str = "lab.hamilton-star-task.v2";
 
 #[derive(Serialize)]
 struct StarTaskPlan {
@@ -41,6 +42,7 @@ struct StarTaskPlan {
     requirements: Vec<RequirementReview>,
     task: TaskReview,
     execution: StarTaskExecution,
+    liquid_classes: Vec<LiquidClassEvidence>,
     source_fills: Vec<SourceFill>,
     tip_usage: std::collections::BTreeMap<String, usize>,
 }
@@ -163,6 +165,7 @@ pub(in crate::backend) fn lower_invocation(
                 materials: member.task.materials.clone(),
             },
             execution,
+            liquid_classes: device_plan.liquid_classes.clone(),
             source_fills: device_plan.source_fills.clone(),
             tip_usage: device_plan.tip_usage.clone(),
         };
@@ -222,11 +225,17 @@ fn plan_task(
     ),
     String,
 > {
-    match task.operation.as_str() {
-        SETUP_GOLDEN_GATE => plan_setup(profile, task, requirements),
-        SERIAL_DILUTION => plan_dilution(profile, task, requirements),
-        operation => Err(format!(
-            "STAR invocation contains unsupported Procedure operation '{operation}' in task '{}'; the STAR adapter implements liquid-handling tasks only",
+    let setup = normalized_golden_gate_setup("STAR", task, requirements);
+    let dilution = normalized_serial_dilution("STAR", task, requirements);
+    match (setup, dilution) {
+        (Ok(setup), Err(_)) => plan_setup(profile, task, setup),
+        (Err(_), Ok(dilution)) => plan_dilution(profile, task, dilution),
+        (Ok(_), Ok(_)) => Err(format!(
+            "STAR Procedure task '{}' ambiguously matches both supported canonical pipetting shapes",
+            task.id
+        )),
+        (Err(setup_error), Err(dilution_error)) => Err(format!(
+            "STAR Procedure task '{}' does not match a supported canonical pipetting shape; Golden Gate setup projection: {setup_error}; serial dilution projection: {dilution_error}",
             task.id
         )),
     }
@@ -235,7 +244,7 @@ fn plan_task(
 fn plan_setup(
     profile: &StarAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirements: &[&AllocatedRequirementBinding],
+    procedure: SetupGoldenGate<'_>,
 ) -> Result<
     (
         &'static str,
@@ -244,7 +253,6 @@ fn plan_setup(
     ),
     String,
 > {
-    let procedure = normalized_golden_gate_setup("STAR", task, requirements)?;
     require_basic_golden_gate_techniques("STAR", task, &procedure)?;
     let view = ProcedureTaskView::new("STAR", task);
     let source_keys = procedure
@@ -321,7 +329,7 @@ fn plan_setup(
 fn plan_dilution(
     profile: &StarAdapterProfile,
     task: &AllocatedProcedureTask,
-    requirements: &[&AllocatedRequirementBinding],
+    procedure: SerialDilution<'_>,
 ) -> Result<
     (
         &'static str,
@@ -330,7 +338,6 @@ fn plan_dilution(
     ),
     String,
 > {
-    let procedure = normalized_serial_dilution("STAR", task, requirements)?;
     let view = ProcedureTaskView::new("STAR", task);
     let mut allocator = PlateAllocator::new(
         BACKEND,
@@ -454,6 +461,26 @@ fn render_manual(plan: &StarTaskPlan) -> Doc {
                     fill.location.resource, fill.location.well
                 ))],
                 vec![text(format!("{:.1} µL", fill.load_ul))],
+            ]
+        }),
+    );
+    doc.heading(1, [text("Liquid classes")]);
+    doc.table(
+        [
+            Column::left("Stable class"),
+            Column::left("Version"),
+            Column::left("Content SHA-256"),
+            Column::left("Calibration source"),
+        ],
+        plan.liquid_classes.iter().map(|class| {
+            vec![
+                vec![code(&class.identity.id)],
+                vec![code(&class.identity.version)],
+                vec![code(&class.identity.content_sha256)],
+                vec![text(format!(
+                    "{} ({})",
+                    class.calibration.source, class.calibration.source_version
+                ))],
             ]
         }),
     );

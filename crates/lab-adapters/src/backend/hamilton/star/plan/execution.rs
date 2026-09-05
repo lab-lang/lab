@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
+use crate::backend::hamilton::star::liquid_classes::{LiquidClassEvidence, LiquidClassIdentity};
+use crate::backend::hamilton::star::profile::LldPolicy;
 use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
 /// A well on a named plan resource. Resource keys are stable strings the
@@ -51,6 +53,9 @@ pub struct StarExecutionPlan {
     pub source_fills: Vec<SourceFill>,
     /// Tips consumed per tip-rack resource, against its capacity.
     pub tip_usage: BTreeMap<String, usize>,
+    /// Exact liquid-class snapshots selected while lowering this plan. The
+    /// identity of each snapshot is also carried by every liquid channel.
+    pub liquid_classes: Vec<LiquidClassEvidence>,
     /// The ordered program: robot runs with the manual steps that follow
     /// each one.
     pub runs: Vec<StarRunPlan>,
@@ -255,8 +260,23 @@ pub struct ChannelLiquid {
     pub minimum_z: u32,
     /// What the science asked for, µL.
     pub target_ul: f64,
+    /// Exact data-defined class that supplied correction and motion settings.
+    pub liquid_class: LiquidClassIdentity,
     /// The liquid-class-corrected wire volume `av`/`dv`, 0.1 µL.
     pub corrected_volume: u32,
+    /// Aspirate speed, 0.1 µL/s.
+    pub aspirate_speed: u32,
+    /// Dispense speed, 0.1 µL/s.
+    pub dispense_speed: u32,
+    /// Aspirate-side mix speed, 0.1 µL/s.
+    pub aspirate_mix_speed: u32,
+    /// Dispense-side mix speed, 0.1 µL/s.
+    pub dispense_mix_speed: u32,
+    /// Effective LLD mode after applying the class policy to the Asset
+    /// profile's checked setting.
+    pub lld: LldPolicy,
+    pub gamma_lld_sensitivity: u32,
+    pub pressure_lld_sensitivity: u32,
     /// Mix volume `mv`, 0.1 µL; zero when the operation does not mix.
     pub mix_volume: u32,
     /// Mix cycles `mc`.

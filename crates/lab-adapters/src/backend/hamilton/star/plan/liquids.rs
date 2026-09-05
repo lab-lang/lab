@@ -2,35 +2,26 @@
 //! height derivation every command's Z parameters come from.
 //!
 //! Planning is a pure function of program and profile: every height is
-//! computed from the catalog geometry and the tracked volumes, never
-//! detected at runtime. The named margins below are the whole safety
-//! policy, stated once:
+//! computed from the catalog geometry, tracked volumes, and selected class,
+//! never invented at runtime. The class margins are the whole vertical
+//! safety policy:
 //!
-//! - aspiration immerses 2 mm below the tracked surface, clamped to a
-//!   0.5 mm standoff above the vessel bottom, so a mistracked surface digs
-//!   at the floor rather than into the vessel;
-//! - dispensing jets from 2 mm above the post-dispense surface;
+//! - aspiration immersion and bottom standoff come from the selected liquid
+//!   class, so a mistracked surface clamps at an explicit calibrated floor;
+//! - dispense and LLD clearances likewise come from that exact class;
 //! - agar spotting dispenses at a fixed 6 mm above the well bottom
 //!   (≈4 mm of agar fill plus the jet clearance), never tracking volume;
-//! - the LLD search window opens 5 mm above the surface, matching the
-//!   driver crate's clearance constant, so a bench that opts into gamma
-//!   detection searches where planning says the liquid is.
+//! - a bench that opts into gamma detection searches where the selected
+//!   class says it should.
 
 use std::collections::BTreeMap;
 
 use crate::backend::hamilton::star::catalog::{DeckPosition, HeightModel};
+use crate::backend::hamilton::star::liquid_classes::PipettingMargins;
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::StarWell;
 use crate::backend::hamilton::star::profile::{ResolvedSite, StarAdapterProfile, StarProfileError};
 
-/// Aspiration depth below the tracked liquid surface, mm.
-pub const IMMERSION_DEPTH_MM: f64 = 2.0;
-/// The floor above the vessel bottom no tip goes below, mm.
-pub const BOTTOM_STANDOFF_MM: f64 = 0.5;
-/// The LLD search window above the tracked surface, mm.
-pub const LLD_CLEARANCE_MM: f64 = 5.0;
-/// Jet dispense clearance above the post-dispense surface, mm.
-pub const DISPENSE_CLEARANCE_MM: f64 = 2.0;
 /// Dead volume the operator loads beyond consumption: sample tubes, µL.
 pub const TUBE_DEAD_VOLUME_UL: f64 = 50.0;
 /// Dead volume for troughs, µL.
@@ -200,14 +191,20 @@ impl LiquidState {
 
     /// The heights for aspirating `volume_ul` from a well, computed at the
     /// current surface, then the ledger debit.
-    pub fn aspirate(&mut self, deck: &DeckIndex, well: &StarWell, volume_ul: f64) -> LiquidHeights {
+    pub fn aspirate(
+        &mut self,
+        deck: &DeckIndex,
+        well: &StarWell,
+        volume_ul: f64,
+        margins: &PipettingMargins,
+    ) -> LiquidHeights {
         let position = deck.position(well);
         let (_, _, model) = deck.vessel(&well.resource);
         let surface = position.z + model.height_at(self.volume(well));
-        let floor = position.z + BOTTOM_STANDOFF_MM;
+        let floor = position.z + margins.bottom_standoff_mm;
         let heights = LiquidHeights {
-            position_z: wire_mm((surface - IMMERSION_DEPTH_MM).max(floor)),
-            lld_search_z: wire_mm(surface + LLD_CLEARANCE_MM),
+            position_z: wire_mm((surface - margins.aspiration_immersion_mm).max(floor)),
+            lld_search_z: wire_mm(surface + margins.lld_search_clearance_mm),
             minimum_z: wire_mm(floor),
         };
         *self.volumes.entry(Self::key(well)).or_insert(0.0) -= volume_ul;
@@ -224,31 +221,39 @@ impl LiquidState {
         well: &StarWell,
         volume_ul: f64,
         fixed_height_mm: Option<f64>,
+        margins: &PipettingMargins,
     ) -> LiquidHeights {
         let position = deck.position(well);
         let (_, _, model) = deck.vessel(&well.resource);
         *self.volumes.entry(Self::key(well)).or_insert(0.0) += volume_ul;
         let height_above_bottom = match fixed_height_mm {
             Some(fixed) => fixed,
-            None => model.height_at(self.volume(well)) + DISPENSE_CLEARANCE_MM,
+            None => model.height_at(self.volume(well)) + margins.dispense_clearance_mm,
         };
-        let floor = position.z + BOTTOM_STANDOFF_MM;
+        let floor = position.z + margins.bottom_standoff_mm;
         LiquidHeights {
             position_z: wire_mm((position.z + height_above_bottom).max(floor)),
-            lld_search_z: wire_mm(position.z + height_above_bottom + LLD_CLEARANCE_MM),
+            lld_search_z: wire_mm(
+                position.z + height_above_bottom + margins.lld_search_clearance_mm,
+            ),
             minimum_z: wire_mm(floor),
         }
     }
 
     /// The heights for mixing in place at the current surface.
-    pub fn mix(&mut self, deck: &DeckIndex, well: &StarWell) -> LiquidHeights {
+    pub fn mix(
+        &mut self,
+        deck: &DeckIndex,
+        well: &StarWell,
+        margins: &PipettingMargins,
+    ) -> LiquidHeights {
         let position = deck.position(well);
         let (_, _, model) = deck.vessel(&well.resource);
         let surface = position.z + model.height_at(self.volume(well));
-        let floor = position.z + BOTTOM_STANDOFF_MM;
+        let floor = position.z + margins.bottom_standoff_mm;
         LiquidHeights {
-            position_z: wire_mm((surface - IMMERSION_DEPTH_MM).max(floor)),
-            lld_search_z: wire_mm(surface + LLD_CLEARANCE_MM),
+            position_z: wire_mm((surface - margins.aspiration_immersion_mm).max(floor)),
+            lld_search_z: wire_mm(surface + margins.lld_search_clearance_mm),
             minimum_z: wire_mm(floor),
         }
     }
@@ -263,14 +268,23 @@ mod tests {
         DeckIndex::build(&StarAdapterProfile::default()).expect("the reference bench resolves")
     }
 
+    fn margins() -> PipettingMargins {
+        PipettingMargins {
+            aspiration_immersion_mm: 2.0,
+            bottom_standoff_mm: 0.5,
+            dispense_clearance_mm: 2.0,
+            lld_search_clearance_mm: 5.0,
+        }
+    }
+
     #[test]
     fn a_source_surface_drops_across_successive_aspirates() {
         let deck = deck();
         let mut liquids = LiquidState::new();
         let tube = StarWell::new("assembly_sources", "A1");
         liquids.seed(&tube, 2000.0);
-        let first = liquids.aspirate(&deck, &tube, 500.0);
-        let second = liquids.aspirate(&deck, &tube, 500.0);
+        let first = liquids.aspirate(&deck, &tube, 500.0, &margins());
+        let second = liquids.aspirate(&deck, &tube, 500.0, &margins());
         assert!(
             second.position_z < first.position_z,
             "drawing 500 µL lowers the next aspirate: {} then {}",
@@ -284,7 +298,7 @@ mod tests {
         let deck = deck();
         let mut liquids = LiquidState::new();
         let tube = StarWell::new("assembly_sources", "A1");
-        let heights = liquids.aspirate(&deck, &tube, 10.0);
+        let heights = liquids.aspirate(&deck, &tube, 10.0, &margins());
         assert_eq!(
             heights.position_z, heights.minimum_z,
             "with no tracked liquid the tip sits at the 0.5 mm floor, never below"
@@ -296,10 +310,11 @@ mod tests {
         let deck = deck();
         let mut liquids = LiquidState::new();
         let well = StarWell::new("reaction_plate", "A1");
-        let heights = liquids.dispense(&deck, &well, 20.0, None);
+        let heights = liquids.dispense(&deck, &well, 20.0, None, &margins());
         let position = deck.position(&well);
         let (_, _, model) = deck.vessel("reaction_plate");
-        let expected = wire_mm(position.z + model.height_at(20.0) + DISPENSE_CLEARANCE_MM);
+        let expected =
+            wire_mm(position.z + model.height_at(20.0) + margins().dispense_clearance_mm);
         assert_eq!(
             heights.position_z, expected,
             "the jet clears the surface the dispense itself creates"
@@ -317,7 +332,7 @@ mod tests {
         let mut liquids = LiquidState::new();
         let well = StarWell::new("agar_plate/1", "A1");
         let fixed_height_mm = 6.0;
-        let heights = liquids.dispense(&deck, &well, 4.0, Some(fixed_height_mm));
+        let heights = liquids.dispense(&deck, &well, 4.0, Some(fixed_height_mm), &margins());
         let position = deck.position(&well);
         assert_eq!(
             heights.position_z,

@@ -10,16 +10,23 @@
 //!   dispenses before it use partial jets (`dm0`);
 //! - tips are never reused across different source liquids.
 
-use hamilton_star::catalog::{CorrectionCurve, TipType};
+use std::collections::BTreeMap;
+
+use hamilton_star::catalog::TipType;
 
 use crate::backend::AdapterConstraintError;
 use crate::backend::hamilton::star::BACKEND;
 use crate::backend::hamilton::star::catalog::LabwareDefinition;
+use crate::backend::hamilton::star::liquid_classes::{
+    LiquidClass, LiquidClassError, LiquidClassEvidence, LiquidClassIdentity, LiquidClassLibrary,
+    LiquidClassLldMode, LiquidClassQuery,
+};
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::{
     ChannelLiquid, StarOperation, StarWell, TipClass, TipPickupPosition,
 };
 use crate::backend::hamilton::star::plan::liquids::{DeckIndex, LiquidState, wire_mm, wire_ul};
+use crate::backend::hamilton::star::profile::LldPolicy;
 use crate::backend::resources::{PlateCapacity, plate_wells};
 
 /// One logical transfer the choreographer lowers.
@@ -31,6 +38,11 @@ pub struct Transfer {
     pub volume_ul: f64,
     /// Mix cycles and volume applied at the target with the same tip.
     pub mix_after: Option<(u32, f64)>,
+    /// Open liquid vocabulary consumed only by liquid-class applicability.
+    pub liquid: String,
+    /// Open physical technique vocabulary consumed only by liquid-class
+    /// applicability.
+    pub technique: String,
 }
 
 impl Transfer {
@@ -40,11 +52,23 @@ impl Transfer {
             target,
             volume_ul,
             mix_after: None,
+            liquid: "aqueous".to_owned(),
+            technique: "surface".to_owned(),
         }
     }
 
     pub fn with_mix(mut self, mix: (u32, f64)) -> Transfer {
         self.mix_after = Some(mix);
+        self
+    }
+
+    pub fn with_liquid(mut self, liquid: impl Into<String>) -> Transfer {
+        self.liquid = liquid.into();
+        self
+    }
+
+    pub fn with_technique(mut self, technique: impl Into<String>) -> Transfer {
+        self.technique = technique.into();
         self
     }
 }
@@ -56,6 +80,8 @@ pub struct TipFeeder {
     prefix: String,
     /// The tip the racks feed.
     pub tip: TipType,
+    /// Stable STAR catalog identifier used by liquid-class applicability.
+    tip_id: &'static str,
     rack_count: usize,
     capacity: PlateCapacity,
     wells: Vec<String>,
@@ -81,6 +107,7 @@ impl TipFeeder {
         TipFeeder {
             prefix: prefix.to_string(),
             tip,
+            tip_id: labware.id,
             rack_count,
             capacity,
             wells: plate_wells(capacity),
@@ -151,34 +178,20 @@ pub struct RunBuilder<'a> {
     liquids: &'a mut LiquidState,
     small: Option<TipFeeder>,
     large: Option<TipFeeder>,
-    curves: Curves,
+    classes: &'a LiquidClassLibrary,
+    profile_lld: LldPolicy,
+    used_classes: BTreeMap<LiquidClassIdentity, LiquidClassEvidence>,
     operations: Vec<StarOperation>,
 }
 
-/// The vendored water correction curves, chosen per tip class: the
-/// standard-volume filter surface table covers the small tip's 0.5–300 µL
-/// range densely; the high-volume filter jet table covers the large tip's.
-pub struct Curves {
-    small: CorrectionCurve,
-    large: CorrectionCurve,
-}
-
-impl Default for Curves {
-    fn default() -> Curves {
-        Curves {
-            small: hamilton_star::catalog::water_standard_volume_filter_surface(),
-            large: hamilton_star::catalog::water_high_volume_filter_jet(),
-        }
-    }
-}
-
-impl Curves {
-    fn corrected(&self, class: TipClass, target_ul: f64) -> f64 {
-        match class {
-            TipClass::Small => self.small.corrected_volume(target_ul),
-            TipClass::Large => self.large.corrected_volume(target_ul),
-        }
-    }
+struct ChannelLiquidSpec<'a> {
+    channel: usize,
+    location: &'a StarWell,
+    target_ul: f64,
+    corrected_wire: u32,
+    heights: crate::backend::hamilton::star::plan::liquids::LiquidHeights,
+    mix: Option<(u32, f64)>,
+    class: &'a LiquidClass,
 }
 
 impl<'a> RunBuilder<'a> {
@@ -187,21 +200,29 @@ impl<'a> RunBuilder<'a> {
         liquids: &'a mut LiquidState,
         small: Option<TipFeeder>,
         large: Option<TipFeeder>,
+        classes: &'a LiquidClassLibrary,
+        profile_lld: LldPolicy,
     ) -> RunBuilder<'a> {
         RunBuilder {
             deck,
             liquids,
             small,
             large,
-            curves: Curves::default(),
+            classes,
+            profile_lld,
+            used_classes: BTreeMap::new(),
             operations: Vec::new(),
         }
     }
 
     /// The finished operation list and the feeders (for usage accounting).
-    pub fn finish(self) -> (Vec<StarOperation>, Vec<TipFeeder>) {
+    pub fn finish(self) -> (Vec<StarOperation>, Vec<TipFeeder>, Vec<LiquidClassEvidence>) {
         let feeders = [self.small, self.large].into_iter().flatten().collect();
-        (self.operations, feeders)
+        (
+            self.operations,
+            feeders,
+            self.used_classes.into_values().collect(),
+        )
     }
 
     fn feeder(&mut self, class: TipClass) -> &mut TipFeeder {
@@ -221,6 +242,40 @@ impl<'a> RunBuilder<'a> {
         match class {
             TipClass::Small => self.small.as_ref().expect("small tips are declared").tip,
             TipClass::Large => self.large.as_ref().expect("large tips are declared").tip,
+        }
+    }
+
+    fn tip_id(&self, class: TipClass) -> &'static str {
+        match class {
+            TipClass::Small => self.small.as_ref().expect("small tips are declared").tip_id,
+            TipClass::Large => self.large.as_ref().expect("large tips are declared").tip_id,
+        }
+    }
+
+    fn select_class(
+        &self,
+        class: TipClass,
+        transfer: &Transfer,
+    ) -> Result<LiquidClass, StarPlanningError> {
+        let source_labware = self.deck.site(&transfer.source.resource).labware.id;
+        let destination_labware = self.deck.site(&transfer.target.resource).labware.id;
+        self.classes
+            .select(LiquidClassQuery {
+                liquid: &transfer.liquid,
+                technique: &transfer.technique,
+                tip: self.tip_id(class),
+                source_labware,
+                destination_labware,
+                volume_ul: transfer.volume_ul,
+            })
+            .cloned()
+            .map_err(Into::into)
+    }
+
+    fn effective_lld(&self, class: &LiquidClass) -> LldPolicy {
+        match class.definition().lld.mode {
+            LiquidClassLldMode::Off => LldPolicy::Off,
+            LiquidClassLldMode::Profile => self.profile_lld,
         }
     }
 
@@ -283,30 +338,35 @@ impl<'a> RunBuilder<'a> {
             .push(StarOperation::DiscardTips { channels });
     }
 
-    fn channel_liquid(
-        &mut self,
-        channel: usize,
-        location: &StarWell,
-        target_ul: f64,
-        corrected_wire: u32,
-        heights: crate::backend::hamilton::star::plan::liquids::LiquidHeights,
-        mix: Option<(u32, f64)>,
-    ) -> ChannelLiquid {
-        let (mix_cycles, mix_volume) = match mix {
+    fn channel_liquid(&mut self, spec: ChannelLiquidSpec<'_>) -> ChannelLiquid {
+        let (mix_cycles, mix_volume) = match spec.mix {
             Some((cycles, volume)) => (cycles, wire_ul(volume)),
             None => (0, 0),
         };
-        let position = self.deck.position(location);
+        let position = self.deck.position(spec.location);
+        self.used_classes
+            .entry(spec.class.identity().clone())
+            .or_insert_with(|| spec.class.evidence());
+        let speeds = &spec.class.definition().speeds;
+        let lld = &spec.class.definition().lld;
         ChannelLiquid {
-            channel,
-            location: location.clone(),
+            channel: spec.channel,
+            location: spec.location.clone(),
             x: wire_mm(position.x),
             y: wire_mm(position.y),
-            position_z: heights.position_z,
-            lld_search_z: heights.lld_search_z,
-            minimum_z: heights.minimum_z,
-            target_ul,
-            corrected_volume: corrected_wire,
+            position_z: spec.heights.position_z,
+            lld_search_z: spec.heights.lld_search_z,
+            minimum_z: spec.heights.minimum_z,
+            target_ul: spec.target_ul,
+            liquid_class: spec.class.identity().clone(),
+            corrected_volume: spec.corrected_wire,
+            aspirate_speed: wire_ul(speeds.aspirate_ul_s),
+            dispense_speed: wire_ul(speeds.dispense_ul_s),
+            aspirate_mix_speed: wire_ul(speeds.aspirate_mix_ul_s),
+            dispense_mix_speed: wire_ul(speeds.dispense_mix_ul_s),
+            lld: self.effective_lld(spec.class),
+            gamma_lld_sensitivity: lld.gamma_sensitivity,
+            pressure_lld_sensitivity: lld.pressure_sensitivity,
             mix_volume,
             mix_cycles,
         }
@@ -326,19 +386,42 @@ impl<'a> RunBuilder<'a> {
             return Ok(());
         }
         let working = self.working_volume(class);
-        let mut chunks: Vec<Vec<&Transfer>> = Vec::new();
+        let selected = transfers
+            .iter()
+            .map(|transfer| {
+                self.select_class(class, transfer)
+                    .map(|class| (transfer, class))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut chunks: Vec<Vec<usize>> = Vec::new();
         let mut load = 0.0;
-        for transfer in transfers {
-            let corrected = self.curves.corrected(class, transfer.volume_ul);
+        for (index, (transfer, liquid_class)) in selected.iter().enumerate() {
+            let corrected = liquid_class.corrected_volume(transfer.volume_ul);
+            if corrected > working {
+                return Err(AdapterConstraintError::CapacityExceeded {
+                    adapter: BACKEND.into(),
+                    operation: "liquid_class_correction".into(),
+                    subject: liquid_class.identity().id.clone(),
+                    resource: "tip".into(),
+                    required: wire_ul(corrected).into(),
+                    capacity: wire_ul(working).into(),
+                    unit: "0.1 uL".into(),
+                }
+                .into());
+            }
             let alone = transfer.mix_after.is_some();
-            let fits = load + corrected <= working && !alone;
+            let same_class = chunks
+                .last()
+                .and_then(|chunk| chunk.first())
+                .is_none_or(|previous| selected[*previous].1.identity() == liquid_class.identity());
+            let fits = load + corrected <= working && !alone && same_class;
             match chunks.last_mut() {
                 Some(chunk) if fits && !chunk.is_empty() => {
-                    chunk.push(transfer);
+                    chunk.push(index);
                     load += corrected;
                 }
                 _ => {
-                    chunks.push(vec![transfer]);
+                    chunks.push(vec![index]);
                     load = corrected;
                 }
             }
@@ -351,43 +434,59 @@ impl<'a> RunBuilder<'a> {
         for chunk in chunks {
             let channels = self.pick_up(class, 1)?;
             let channel = channels[0];
-            let source = &chunk[0].source;
+            let source = &selected[chunk[0]].0.source;
+            let liquid_class = &selected[chunk[0]].1;
             let corrected_each: Vec<u32> = chunk
                 .iter()
-                .map(|transfer| wire_ul(self.curves.corrected(class, transfer.volume_ul)))
+                .map(|index| {
+                    let (transfer, class) = &selected[*index];
+                    wire_ul(class.corrected_volume(transfer.volume_ul))
+                })
                 .collect();
             let total_wire: u32 = corrected_each.iter().sum();
-            let total_ul = f64::from(total_wire) / 10.0;
-            let heights = self.liquids.aspirate(self.deck, source, total_ul);
-            let aspirate = self.channel_liquid(
-                channel,
-                &source.clone(),
+            let total_ul: f64 = chunk.iter().map(|index| selected[*index].0.volume_ul).sum();
+            let heights = self.liquids.aspirate(
+                self.deck,
+                source,
                 total_ul,
-                total_wire,
-                heights,
-                None,
+                &liquid_class.definition().margins,
             );
+            let aspirate = self.channel_liquid(ChannelLiquidSpec {
+                channel,
+                location: source,
+                target_ul: total_ul,
+                corrected_wire: total_wire,
+                heights,
+                mix: None,
+                class: liquid_class,
+            });
             self.operations.push(StarOperation::Aspirate {
                 tip: class,
                 channels: vec![aspirate],
             });
-            for (index, transfer) in chunk.iter().enumerate() {
-                let heights =
-                    self.liquids
-                        .dispense(self.deck, &transfer.target, transfer.volume_ul, None);
-                let liquid = self.channel_liquid(
-                    channel,
+            for (position, index) in chunk.iter().enumerate() {
+                let (transfer, liquid_class) = &selected[*index];
+                let heights = self.liquids.dispense(
+                    self.deck,
                     &transfer.target,
                     transfer.volume_ul,
-                    corrected_each[index],
-                    heights,
-                    transfer.mix_after,
+                    None,
+                    &liquid_class.definition().margins,
                 );
+                let liquid = self.channel_liquid(ChannelLiquidSpec {
+                    channel,
+                    location: &transfer.target,
+                    target_ul: transfer.volume_ul,
+                    corrected_wire: corrected_each[position],
+                    heights,
+                    mix: transfer.mix_after,
+                    class: liquid_class,
+                });
                 self.operations.push(StarOperation::Dispense {
                     tip: class,
                     // Partial jets leave the stop-back in the tip for the
                     // next target; the load's last dispense blows out.
-                    mode: if index + 1 == chunk.len() { 1 } else { 0 },
+                    mode: if position + 1 == chunk.len() { 1 } else { 0 },
                     channels: vec![liquid],
                 });
             }
@@ -410,8 +509,26 @@ impl<'a> RunBuilder<'a> {
             return Ok(());
         }
         let working = self.working_volume(class);
-        for transfer in transfers {
-            let corrected = self.curves.corrected(class, transfer.volume_ul);
+        let selected = transfers
+            .iter()
+            .map(|transfer| {
+                self.select_class(class, transfer)
+                    .map(|class| (transfer, class))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let first_class = selected[0].1.identity();
+        if selected
+            .iter()
+            .any(|(_, class)| class.identity() != first_class)
+        {
+            return Err(LiquidClassError::Invalid(
+                "one continuous fluid path selected more than one liquid class; split the path or supply a class that covers it"
+                    .to_owned(),
+            )
+            .into());
+        }
+        for (transfer, liquid_class) in &selected {
+            let corrected = liquid_class.corrected_volume(transfer.volume_ul);
             if corrected > working {
                 return Err(AdapterConstraintError::CapacityExceeded {
                     adapter: BACKEND.into(),
@@ -427,33 +544,43 @@ impl<'a> RunBuilder<'a> {
         }
         let channels = self.pick_up(class, 1)?;
         let channel = channels[0];
-        for transfer in transfers {
-            let corrected = wire_ul(self.curves.corrected(class, transfer.volume_ul));
-            let total_ul = f64::from(corrected) / 10.0;
-            let heights = self.liquids.aspirate(self.deck, &transfer.source, total_ul);
-            let aspirate = self.channel_liquid(
-                channel,
+        for (transfer, liquid_class) in &selected {
+            let corrected = wire_ul(liquid_class.corrected_volume(transfer.volume_ul));
+            let heights = self.liquids.aspirate(
+                self.deck,
                 &transfer.source,
-                total_ul,
-                corrected,
-                heights,
-                None,
+                transfer.volume_ul,
+                &liquid_class.definition().margins,
             );
+            let aspirate = self.channel_liquid(ChannelLiquidSpec {
+                channel,
+                location: &transfer.source,
+                target_ul: transfer.volume_ul,
+                corrected_wire: corrected,
+                heights,
+                mix: None,
+                class: liquid_class,
+            });
             self.operations.push(StarOperation::Aspirate {
                 tip: class,
                 channels: vec![aspirate],
             });
-            let heights =
-                self.liquids
-                    .dispense(self.deck, &transfer.target, transfer.volume_ul, None);
-            let liquid = self.channel_liquid(
-                channel,
+            let heights = self.liquids.dispense(
+                self.deck,
                 &transfer.target,
                 transfer.volume_ul,
-                corrected,
-                heights,
-                transfer.mix_after,
+                None,
+                &liquid_class.definition().margins,
             );
+            let liquid = self.channel_liquid(ChannelLiquidSpec {
+                channel,
+                location: &transfer.target,
+                target_ul: transfer.volume_ul,
+                corrected_wire: corrected,
+                heights,
+                mix: transfer.mix_after,
+                class: liquid_class,
+            });
             self.operations.push(StarOperation::Dispense {
                 tip: class,
                 mode: 1,
@@ -474,8 +601,22 @@ impl<'a> RunBuilder<'a> {
     ) -> Result<(), StarPlanningError> {
         for well in wells {
             let channels = self.pick_up(class, 1)?;
-            let heights = self.liquids.mix(self.deck, well);
-            let liquid = self.channel_liquid(channels[0], well, 0.0, 0, heights, Some(mix));
+            let transfer = Transfer::new(well.clone(), well.clone(), mix.1)
+                .with_liquid("aqueous")
+                .with_technique("mix");
+            let liquid_class = self.select_class(class, &transfer)?;
+            let heights = self
+                .liquids
+                .mix(self.deck, well, &liquid_class.definition().margins);
+            let liquid = self.channel_liquid(ChannelLiquidSpec {
+                channel: channels[0],
+                location: well,
+                target_ul: 0.0,
+                corrected_wire: 0,
+                heights,
+                mix: Some(mix),
+                class: &liquid_class,
+            });
             self.operations.push(StarOperation::Aspirate {
                 tip: class,
                 channels: vec![liquid],
@@ -489,6 +630,7 @@ impl<'a> RunBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::hamilton::star::liquid_classes::LiquidClassLibrary;
     use crate::backend::hamilton::star::plan::liquids::{DeckIndex, LiquidState};
     use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
@@ -499,6 +641,101 @@ mod tests {
             1,
             PlateCapacity::new(96).unwrap(),
         )
+    }
+
+    fn contributed_library() -> LiquidClassLibrary {
+        LiquidClassLibrary::parse_toml(
+            r#"
+schema_version = "lab.hamilton-star-liquid-classes.v1"
+
+[[classes]]
+id = "org.example.viscous"
+version = "3.2.1"
+
+[classes.applicability]
+liquids = ["*"]
+techniques = ["*"]
+tips = ["*"]
+source_labware = ["*"]
+destination_labware = ["*"]
+min_volume_ul = 0.0
+max_volume_ul = 60.0
+
+[classes.correction]
+points = [
+  { target_ul = 0.0, commanded_ul = 0.0 },
+  { target_ul = 60.0, commanded_ul = 75.0 },
+]
+
+[classes.speeds]
+aspirate_ul_s = 42.0
+dispense_ul_s = 43.0
+aspirate_mix_ul_s = 44.0
+dispense_mix_ul_s = 45.0
+
+[classes.lld]
+mode = "off"
+gamma_sensitivity = 2
+pressure_sensitivity = 3
+
+[classes.margins]
+aspiration_immersion_mm = 1.0
+bottom_standoff_mm = 0.8
+dispense_clearance_mm = 3.0
+lld_search_clearance_mm = 6.0
+
+[classes.calibration]
+source = "example calibration"
+source_version = "run-9"
+instrument = "STAR-example"
+performed_by = "example operator"
+observed_at = "2026-09-05"
+notes = "A class contributed entirely as data."
+"#,
+        )
+        .expect("the contributed library validates")
+    }
+
+    #[test]
+    fn choreographer_uses_a_contributed_class_without_rust_dispatch() {
+        let profile = StarAdapterProfile::default();
+        let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
+        let classes = contributed_library();
+        let mut liquids = LiquidState::new();
+        let source = StarWell::new("assembly_sources", "A1");
+        liquids.seed(&source, 100.0);
+        let mut builder = RunBuilder::new(
+            &deck,
+            &mut liquids,
+            Some(feeder(&deck)),
+            None,
+            &classes,
+            LldPolicy::Gamma,
+        );
+        builder
+            .distribute(
+                TipClass::Small,
+                &[Transfer::new(
+                    source,
+                    StarWell::new("reaction_plate", "A1"),
+                    20.0,
+                )],
+            )
+            .expect("the data-defined class lowers");
+        let (operations, _, evidence) = builder.finish();
+        let channel = operations
+            .iter()
+            .find_map(|operation| match operation {
+                StarOperation::Aspirate { channels, .. } => channels.first(),
+                _ => None,
+            })
+            .expect("the transfer has an aspirate channel");
+
+        assert_eq!(channel.liquid_class.id, "org.example.viscous");
+        assert_eq!(channel.corrected_volume, 250);
+        assert_eq!(channel.aspirate_speed, 420);
+        assert_eq!(channel.lld, LldPolicy::Off);
+        assert_eq!(evidence[0].identity, channel.liquid_class);
     }
 
     #[test]
@@ -518,24 +755,34 @@ mod tests {
                 )
             })
             .collect();
-        let mut builder = RunBuilder::new(&deck, &mut liquids, Some(feeder(&deck)), None);
+        let classes = LiquidClassLibrary::embedded_v1().expect("built-in classes validate");
+        let mut builder = RunBuilder::new(
+            &deck,
+            &mut liquids,
+            Some(feeder(&deck)),
+            None,
+            &classes,
+            profile.run.lld,
+        );
         builder
             .distribute(TipClass::Small, &transfers)
             .expect("the distribution lowers");
-        let (operations, feeders) = builder.finish();
+        let (operations, feeders, evidence) = builder.finish();
         let aspirates = operations
             .iter()
             .filter(|op| matches!(op, StarOperation::Aspirate { .. }))
             .count();
         assert_eq!(
             aspirates, 2,
-            "two 46.4 µL loads carry four 23.2 µL dispenses"
+            "two 46.4 µL piston commands carry four requested 20 µL dispenses"
         );
         assert_eq!(
             feeders[0].usage(),
             vec![("assembly_small_tips/1".to_string(), 2)],
             "one tip per load, no tip reuse across loads"
         );
+        assert_eq!(evidence.len(), 1, "one exact class covers this run");
+        assert_eq!(evidence[0].identity.content_sha256.len(), 64);
         let modes: Vec<u32> = operations
             .iter()
             .filter_map(|op| match op {

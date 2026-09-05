@@ -1,0 +1,111 @@
+schema_version = "lab.hamilton-star-liquid-classes.v1"
+
+# The initial tables reproduce the correction curves and command defaults
+# previously embedded in choreograph.rs and hamilton-star 0.1.0. Their
+# provenance is intentionally conservative: these are transcribed reference
+# tables, not a claim of qualification on a particular laboratory instrument.
+
+[[classes]]
+id = "org.lab-lang.hamilton.water.standard-volume-filter.surface"
+version = "1.0.0"
+priority = 0
+
+[classes.applicability]
+liquids = ["*", "aqueous", "cell_suspension", "dna", "enzyme", "water"]
+techniques = ["*", "distribution", "mix", "serial_dilution", "surface"]
+tips = ["tip_rack_50ul_filter"]
+source_labware = ["*", "pcr_plate_96", "sample_tubes_24"]
+destination_labware = ["*", "pcr_plate_96"]
+min_volume_ul = 0.0
+max_volume_ul = 50.0
+
+[classes.correction]
+points = [
+  { target_ul = 0.0, commanded_ul = 0.0 },
+  { target_ul = 0.5, commanded_ul = 0.9 },
+  { target_ul = 1.0, commanded_ul = 1.6 },
+  { target_ul = 2.0, commanded_ul = 2.8 },
+  { target_ul = 5.0, commanded_ul = 6.3 },
+  { target_ul = 10.0, commanded_ul = 11.9 },
+  { target_ul = 20.0, commanded_ul = 23.2 },
+  { target_ul = 50.0, commanded_ul = 55.1 },
+  { target_ul = 100.0, commanded_ul = 107.2 },
+  { target_ul = 200.0, commanded_ul = 211.0 },
+  { target_ul = 300.0, commanded_ul = 313.5 },
+]
+
+[classes.speeds]
+aspirate_ul_s = 100.0
+dispense_ul_s = 120.0
+aspirate_mix_ul_s = 100.0
+dispense_mix_ul_s = 1.0
+
+[classes.lld]
+mode = "profile"
+gamma_sensitivity = 1
+pressure_sensitivity = 1
+
+[classes.margins]
+aspiration_immersion_mm = 2.0
+bottom_standoff_mm = 0.5
+dispense_clearance_mm = 2.0
+lld_search_clearance_mm = 5.0
+
+[classes.calibration]
+source = "hamilton-star crate water_standard_volume_filter_surface table"
+source_version = "hamilton-star 0.1.0"
+instrument = "reference table; instrument not recorded"
+performed_by = "reference table; operator not recorded"
+observed_at = "reference table; date not recorded"
+notes = "Initial Lab class transcribed from the existing driver catalog; qualify locally before physical use."
+
+[[classes]]
+id = "org.lab-lang.hamilton.water.high-volume-filter.jet"
+version = "1.0.0"
+priority = 0
+
+[classes.applicability]
+liquids = ["*", "aqueous", "culture_medium", "water"]
+techniques = ["*", "distribution", "serial_dilution", "surface"]
+tips = ["tip_rack_1000ul_filter"]
+source_labware = ["*", "pcr_plate_96", "trough_60ml"]
+destination_labware = ["*", "pcr_plate_96"]
+min_volume_ul = 0.0
+max_volume_ul = 1000.0
+
+[classes.correction]
+points = [
+  { target_ul = 0.0, commanded_ul = 0.0 },
+  { target_ul = 10.0, commanded_ul = 13.3 },
+  { target_ul = 20.0, commanded_ul = 24.6 },
+  { target_ul = 50.0, commanded_ul = 57.2 },
+  { target_ul = 100.0, commanded_ul = 109.6 },
+  { target_ul = 200.0, commanded_ul = 212.9 },
+  { target_ul = 500.0, commanded_ul = 521.7 },
+  { target_ul = 1000.0, commanded_ul = 1034.0 },
+]
+
+[classes.speeds]
+aspirate_ul_s = 100.0
+dispense_ul_s = 120.0
+aspirate_mix_ul_s = 100.0
+dispense_mix_ul_s = 1.0
+
+[classes.lld]
+mode = "profile"
+gamma_sensitivity = 1
+pressure_sensitivity = 1
+
+[classes.margins]
+aspiration_immersion_mm = 2.0
+bottom_standoff_mm = 0.5
+dispense_clearance_mm = 2.0
+lld_search_clearance_mm = 5.0
+
+[classes.calibration]
+source = "hamilton-star crate water_high_volume_filter_jet table"
+source_version = "hamilton-star 0.1.0"
+instrument = "reference table; instrument not recorded"
+performed_by = "reference table; operator not recorded"
+observed_at = "reference table; date not recorded"
+notes = "Initial Lab class transcribed from the existing driver catalog; qualify locally before physical use."

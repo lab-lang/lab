@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::ArtifactError;
 use crate::backend::AdapterConstraintError;
+use crate::backend::hamilton::star::liquid_classes::LiquidClassError;
 use crate::backend::hamilton::star::profile::StarProfileError;
 
 #[derive(Debug, Error, PartialEq)]
@@ -10,6 +11,8 @@ pub enum StarPlanningError {
     Constraint(Box<AdapterConstraintError>),
     #[error(transparent)]
     Profile(#[from] StarProfileError),
+    #[error(transparent)]
+    LiquidClass(#[from] LiquidClassError),
 }
 
 impl From<AdapterConstraintError> for StarPlanningError {

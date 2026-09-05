@@ -220,9 +220,13 @@ fn operation_step(
                     channel.liquid_surface = liquid.position_z;
                     channel.minimum_height = liquid.minimum_z;
                     channel.volume = liquid.corrected_volume;
+                    channel.speed = liquid.aspirate_speed;
                     channel.mix_volume = liquid.mix_volume;
                     channel.mix_cycles = liquid.mix_cycles;
-                    channel.lld_mode = lld_mode(profile.run.lld);
+                    channel.mix_speed = liquid.aspirate_mix_speed;
+                    channel.lld_mode = lld_mode(liquid.lld);
+                    channel.gamma_lld_sensitivity = liquid.gamma_lld_sensitivity;
+                    channel.pressure_lld_sensitivity = liquid.pressure_lld_sensitivity;
                     channel
                 })
                 .collect();
@@ -242,8 +246,13 @@ fn operation_step(
                     channel.liquid_surface = liquid.position_z;
                     channel.minimum_height = liquid.minimum_z;
                     channel.volume = liquid.corrected_volume;
+                    channel.speed = liquid.dispense_speed;
                     channel.mix_volume = liquid.mix_volume;
                     channel.mix_cycles = liquid.mix_cycles;
+                    channel.mix_speed = liquid.dispense_mix_speed;
+                    channel.lld_mode = lld_mode(liquid.lld);
+                    channel.gamma_lld_sensitivity = liquid.gamma_lld_sensitivity;
+                    channel.pressure_lld_sensitivity = liquid.pressure_lld_sensitivity;
                     channel
                 })
                 .collect();
@@ -357,20 +366,26 @@ fn describe_liquid(verb: &str, channels: &[ChannelLiquid], preposition: &str) ->
             String::new()
         };
         format!(
-            "{verb} {volume}{preposition} {} {} on channel {}{mix}",
+            "{verb} {volume}{preposition} {} {} on channel {}{mix}; liquid class {}@{} sha256:{}",
             liquid.location.resource,
             liquid.location.well,
             liquid.channel + 1,
+            liquid.liquid_class.id,
+            liquid.liquid_class.version,
+            liquid.liquid_class.content_sha256,
         )
     } else {
         let first = &channels[0];
         let last = &channels[channels.len() - 1];
         format!(
-            "{verb} {preposition} {} {}–{} across {} channels",
+            "{verb} {preposition} {} {}–{} across {} channels; liquid class {}@{} sha256:{}",
             first.location.resource,
             first.location.well,
             last.location.well,
             channels.len(),
+            first.liquid_class.id,
+            first.liquid_class.version,
+            first.liquid_class.content_sha256,
         )
     }
 }

@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use crate::backend::AdapterConstraintError;
 use crate::backend::hamilton::star::BACKEND;
+use crate::backend::hamilton::star::liquid_classes::{LiquidClassEvidence, LiquidClassLibrary};
 use crate::backend::hamilton::star::plan::choreograph::{RunBuilder, TipFeeder, Transfer};
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::{
@@ -35,6 +36,7 @@ pub(in crate::backend::hamilton::star) fn plan_setup_invocation(
 ) -> Result<StarExecutionPlan, StarPlanningError> {
     profile.validate()?;
     let deck = DeckIndex::build(profile)?;
+    let classes = LiquidClassLibrary::embedded_v1()?;
     ensure_well_volume(
         &deck,
         "reaction_plate",
@@ -60,6 +62,8 @@ pub(in crate::backend::hamilton::star) fn plan_setup_invocation(
                 profile.stages.assembly.small_tips.capacity,
             )),
             None,
+            &classes,
+            profile.run.lld,
         );
         for addition in additions {
             let source = StarWell::new(
@@ -77,6 +81,8 @@ pub(in crate::backend::hamilton::star) fn plan_setup_invocation(
                         StarWell::new("reaction_plate", well.clone()),
                         addition.volume_ul,
                     )
+                    .with_liquid("aqueous")
+                    .with_technique("distribution")
                 })
                 .collect::<Vec<_>>();
             builder.distribute(TipClass::Small, &transfers)?;
@@ -104,13 +110,14 @@ pub(in crate::backend::hamilton::star) fn plan_setup_invocation(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let mut liquids = seeded_liquids(&source_fills);
-    let (operations, feeders) = choreograph(&mut liquids)?;
+    let (operations, feeders, liquid_classes) = choreograph(&mut liquids)?;
 
     Ok(execution_plan(
         profile,
         source_wells,
         source_fills,
         tip_usage(feeders),
+        liquid_classes,
         StarRunPlan {
             id: "setup_golden_gate_reaction".to_owned(),
             title: "Set up Golden Gate reaction".to_owned(),
@@ -134,6 +141,7 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
 ) -> Result<StarExecutionPlan, StarPlanningError> {
     profile.validate()?;
     let deck = DeckIndex::build(profile)?;
+    let classes = LiquidClassLibrary::embedded_v1()?;
     ensure_well_volume(
         &deck,
         "dilution_plate/1",
@@ -171,10 +179,16 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
                 profile.stages.plating.large_tips.slots.len(),
                 profile.stages.plating.large_tips.capacity,
             )),
+            &classes,
+            profile.run.lld,
         );
         let medium_transfers = targets
             .iter()
-            .map(|target| Transfer::new(medium.clone(), target.clone(), medium_volume_ul))
+            .map(|target| {
+                Transfer::new(medium.clone(), target.clone(), medium_volume_ul)
+                    .with_liquid("culture_medium")
+                    .with_technique("distribution")
+            })
             .collect::<Vec<_>>();
         builder.distribute(TipClass::Large, &medium_transfers)?;
         // Each biological replicate is its own dilution series carried on one tip; the series
@@ -185,7 +199,10 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
             for dilution in 0..serial_dilutions {
                 let target = targets[dilution * replicates + replicate].clone();
                 series.push(
-                    Transfer::new(source.clone(), target.clone(), culture_volume_ul).with_mix(mix),
+                    Transfer::new(source.clone(), target.clone(), culture_volume_ul)
+                        .with_mix(mix)
+                        .with_liquid("cell_suspension")
+                        .with_technique("serial_dilution"),
                 );
                 source = target;
             }
@@ -217,13 +234,14 @@ pub(in crate::backend::hamilton::star) fn plan_dilution_invocation(
         TROUGH_DEAD_VOLUME_UL,
     )?]);
     let mut liquids = seeded_liquids(&source_fills);
-    let (operations, feeders) = choreograph(&mut liquids)?;
+    let (operations, feeders, liquid_classes) = choreograph(&mut liquids)?;
 
     Ok(execution_plan(
         profile,
         BTreeMap::new(),
         source_fills,
         tip_usage(feeders),
+        liquid_classes,
         StarRunPlan {
             id: "serial_dilution".to_owned(),
             title: "Serially dilute recovered culture".to_owned(),
@@ -239,10 +257,11 @@ fn execution_plan(
     assembly_source_wells: BTreeMap<String, String>,
     source_fills: Vec<SourceFill>,
     tip_usage: BTreeMap<String, usize>,
+    liquid_classes: Vec<LiquidClassEvidence>,
     run: StarRunPlan,
 ) -> StarExecutionPlan {
     StarExecutionPlan {
-        schema_version: "lab.automation.v1".to_owned(),
+        schema_version: "lab.automation.v2".to_owned(),
         adapter: BACKEND.to_owned(),
         deck: profile.clone(),
         assembly_source_wells,
@@ -252,6 +271,7 @@ fn execution_plan(
         strains: Vec::new(),
         source_fills,
         tip_usage,
+        liquid_classes,
         runs: vec![run],
     }
 }
@@ -350,4 +370,57 @@ fn ensure_tip_volume(
         .into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::hamilton::star::emit::render_run;
+    use crate::backend::hamilton::star::plan::StarOperation;
+
+    #[test]
+    fn reviewed_plan_and_run_pin_the_selected_liquid_class() {
+        let profile = StarAdapterProfile::default();
+        let plan = plan_setup_invocation(
+            &profile,
+            BTreeMap::from([("water".to_owned(), "A1".to_owned())]),
+            vec!["A1".to_owned()],
+            &[SetupAddition {
+                symbol: "water".to_owned(),
+                volume_ul: 20.0,
+            }],
+            (3, 10.0),
+        )
+        .expect("the reference setup plan lowers");
+
+        assert_eq!(plan.liquid_classes.len(), 1);
+        let evidence = &plan.liquid_classes[0];
+        assert_eq!(
+            evidence.identity.id,
+            "org.lab-lang.hamilton.water.standard-volume-filter.surface"
+        );
+        assert_eq!(evidence.identity.version, "1.0.0");
+        assert_eq!(evidence.identity.content_sha256.len(), 64);
+        assert!(
+            plan.runs[0]
+                .operations
+                .iter()
+                .all(|operation| match operation {
+                    StarOperation::Aspirate { channels, .. }
+                    | StarOperation::Dispense { channels, .. } => channels
+                        .iter()
+                        .all(|channel| channel.liquid_class == evidence.identity),
+                    _ => true,
+                }),
+            "every liquid channel pins the reviewed class identity"
+        );
+
+        let reviewed_json = serde_json::to_string(&plan).unwrap();
+        assert!(reviewed_json.contains(&evidence.identity.id));
+        assert!(reviewed_json.contains(&evidence.identity.content_sha256));
+        let run_json = render_run(&plan, &plan.runs[0]).expect("the run renders");
+        assert!(run_json.contains(&evidence.identity.id));
+        assert!(run_json.contains(&evidence.identity.version));
+        assert!(run_json.contains(&evidence.identity.content_sha256));
+    }
 }
