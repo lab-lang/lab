@@ -172,6 +172,22 @@ pub enum PackageError {
     NotAPackage { path: PathBuf },
 }
 
+/// The source generator of the package nearest `start`: the command its
+/// manifest declares and the package root to run it from.
+///
+/// This reads only the manifest, because the whole point of a generator is
+/// that the sources it writes may not exist yet, and loading the package
+/// validates its entry against the sources on disk.
+pub fn source_generator(
+    start: impl AsRef<Path>,
+) -> Result<Option<(PathBuf, String)>, PackageError> {
+    let root = find_manifest_directory(start.as_ref())?;
+    let LabManifest::Package(manifest) = read_manifest(&root)? else {
+        return Ok(None);
+    };
+    Ok(manifest.build.generate.map(|command| (root, command)))
+}
+
 fn find_manifest_directory(start: &Path) -> Result<PathBuf, PackageError> {
     let mut directory = if start.is_file() {
         start

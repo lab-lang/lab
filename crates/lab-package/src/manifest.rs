@@ -81,6 +81,12 @@ pub struct PackageMetadata {
 #[serde(deny_unknown_fields)]
 pub struct BuildMetadata {
     pub entry: Option<PathBuf>,
+    /// A command that regenerates this package's sources, run from the package
+    /// root before the CLI compiles. A workspace whose Lab is emitted by
+    /// another frontend, such as the Python SDK, names its exporter here so
+    /// `lab check`, `lab plan`, and `lab build` always compile what the source
+    /// of truth says.
+    pub generate: Option<String>,
 }
 
 /// Portable Method documents contributed by this package.

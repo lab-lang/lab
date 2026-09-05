@@ -74,6 +74,32 @@ workflow main() -> Material<Plasmid>:
     )
 }
 
+/// Run the package's source generator, where its manifest declares one.
+///
+/// A workspace whose Lab another frontend emits stays compiled from its source
+/// of truth: the generator runs from the package root before every check,
+/// plan, and build, the way a build script would. Its output surfaces only on
+/// failure.
+fn generate_sources(path: &Path) -> Result<()> {
+    let Some((root, command)) = lab_package::source_generator(path)? else {
+        return Ok(());
+    };
+    let generated = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .current_dir(&root)
+        .output()
+        .with_context(|| format!("failed to run build.generate command `{command}`"))?;
+    if !generated.status.success() {
+        bail!(
+            "build.generate command `{command}` failed:\n{}{}",
+            String::from_utf8_lossy(&generated.stdout),
+            String::from_utf8_lossy(&generated.stderr),
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
     if path.is_file() && path.extension().is_some_and(|extension| extension == "lab") {
         let text = fs::read_to_string(&path)
@@ -107,6 +133,7 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
         );
     }
 
+    generate_sources(&path)?;
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     validate_project_inventories(&project)?;
@@ -135,6 +162,7 @@ pub(crate) fn build(
     program: Option<String>,
     output: &Output,
 ) -> Result<()> {
+    generate_sources(&path)?;
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     validate_project_inventories(&project)?;
@@ -346,6 +374,7 @@ pub(crate) fn plan(
     program: Option<String>,
     output: &Output,
 ) -> Result<()> {
+    generate_sources(&path)?;
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     let compiled = project.compile()?;
