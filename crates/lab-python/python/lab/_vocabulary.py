@@ -59,11 +59,18 @@ class State(Expression):
 class Symbol(Expression):
     """A name a Lab module exports."""
 
-    __slots__ = ("_role_base", "name", "uses")
+    __slots__ = ("_role_base", "definition", "name", "uses")
 
-    def __init__(self, *, name: str, uses: Sequence[str] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        name: str,
+        uses: Sequence[str] = (),
+        definition: tuple[str, str] | None = None,
+    ) -> None:
         self.name = name
         self.uses = tuple(uses)
+        self.definition = definition
         self._role_base: type | None = None
 
     def render(self) -> str:
@@ -105,7 +112,50 @@ class Symbol(Expression):
 class Function(Symbol):
     """A pure function a Lab module exports, such as `dna`."""
 
-    __slots__ = ()
+    __slots__ = ("inputs", "python_to_input")
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        inputs: Sequence[str] = (),
+        python_inputs: Sequence[str] = (),
+        uses: Sequence[str] = (),
+        definition: tuple[str, str] | None = None,
+    ) -> None:
+        super().__init__(name=name, uses=uses, definition=definition)
+        self.inputs = tuple(inputs)
+        python_inputs = tuple(python_inputs) or self.inputs
+        if len(python_inputs) != len(self.inputs) or len(set(python_inputs)) != len(
+            python_inputs
+        ):
+            raise ValueError(
+                f"{self.name} needs one unique Python name for each Lab input"
+            )
+        self.python_to_input = dict(zip(python_inputs, self.inputs, strict=True))
+
+    def __call__(self, *arguments: object, **named: object) -> Expression:
+        if not self.inputs:
+            return super().__call__(*arguments, **named)
+        if len(arguments) > len(self.inputs):
+            raise TypeError(
+                f"{self.name} takes {len(self.inputs)} argument(s), "
+                f"{len(arguments)} were given positionally"
+            )
+        bound = dict(zip(self.inputs, arguments, strict=False))
+        for python_name, value in named.items():
+            input_name = self.python_to_input.get(python_name)
+            if input_name is None:
+                raise TypeError(f"{self.name} has no Python input '{python_name}'")
+            if input_name in bound:
+                raise TypeError(f"{self.name} got input '{python_name}' twice")
+            bound[input_name] = value
+        missing = [input_name for input_name in self.inputs if input_name not in bound]
+        if missing:
+            raise TypeError(f"{self.name} is missing input(s) {', '.join(missing)}")
+        # Checked Lab callables have a stable input order. Emit positional Lab arguments so a
+        # Python-safe alias never leaks into the Lab source as a different named parameter.
+        return super().__call__(*(bound[input_name] for input_name in self.inputs))
 
     def __repr__(self) -> str:
         return f"<lab function {self.name}>"
@@ -128,6 +178,8 @@ class ArtifactKind:
     uses: ClassVar[tuple[str, ...]] = ()
     #: The property names the kind's schema contributes.
     properties: ClassVar[tuple[str, ...]] = ()
+    #: Stable identity of the declaration that exported this artifact kind.
+    definition: ClassVar[tuple[str, str] | None] = None
 
     @classmethod
     def build(

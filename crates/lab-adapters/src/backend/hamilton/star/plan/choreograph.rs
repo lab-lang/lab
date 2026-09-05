@@ -18,8 +18,8 @@ use crate::backend::AdapterConstraintError;
 use crate::backend::hamilton::star::BACKEND;
 use crate::backend::hamilton::star::catalog::LabwareDefinition;
 use crate::backend::hamilton::star::liquid_classes::{
-    LiquidClass, LiquidClassError, LiquidClassEvidence, LiquidClassIdentity, LiquidClassLibrary,
-    LiquidClassLldMode, LiquidClassQuery,
+    LiquidClass, LiquidClassEvidence, LiquidClassIdentity, LiquidClassLibrary, LiquidClassLldMode,
+    LiquidClassQuery,
 };
 use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::{
@@ -45,6 +45,19 @@ pub struct Transfer {
     pub technique: String,
 }
 
+/// One operation on an explicitly continuous canonical fluid path.
+///
+/// Unlike recipe planners, this representation can preserve an arbitrary ordered sequence of
+/// transfers and in-place mixes that share a `fluid_path_group`.
+pub enum FluidPathOperation {
+    Transfer(Transfer),
+    Mix {
+        well: StarWell,
+        cycles: u32,
+        volume_ul: f64,
+    },
+}
+
 impl Transfer {
     pub fn new(source: StarWell, target: StarWell, volume_ul: f64) -> Transfer {
         Transfer {
@@ -55,11 +68,6 @@ impl Transfer {
             liquid: "aqueous".to_owned(),
             technique: "surface".to_owned(),
         }
-    }
-
-    pub fn with_mix(mut self, mix: (u32, f64)) -> Transfer {
-        self.mix_after = Some(mix);
-        self
     }
 
     pub fn with_liquid(mut self, liquid: impl Into<String>) -> Transfer {
@@ -76,7 +84,7 @@ impl Transfer {
 /// Hands out tip positions across one stage's racks in column-major order,
 /// counting consumption per rack resource.
 pub struct TipFeeder {
-    /// The stage resource prefix, e.g. `assembly_small_tips`.
+    /// The resource prefix, e.g. `small_tips`.
     prefix: String,
     /// The tip the racks feed.
     pub tip: TipType,
@@ -495,47 +503,33 @@ impl<'a> RunBuilder<'a> {
         Ok(())
     }
 
-    /// Carries one continuous fluid path through an ordered series on a single tip.
-    ///
-    /// Canonical steps that share a `fluid_path_group` must not change tips between them, so this
-    /// is not `distribute`: each transfer's target becomes the next transfer's source, and the tip
-    /// is discarded only once the series ends.
-    pub fn chain(
+    /// Execute an ordered canonical fluid-path group without changing tips between operations.
+    pub fn fluid_path(
         &mut self,
         class: TipClass,
-        transfers: &[Transfer],
+        operations: &[FluidPathOperation],
     ) -> Result<(), StarPlanningError> {
-        if transfers.is_empty() {
+        if operations.is_empty() {
             return Ok(());
         }
         let working = self.working_volume(class);
-        let selected = transfers
-            .iter()
-            .map(|transfer| {
-                self.select_class(class, transfer)
-                    .map(|class| (transfer, class))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let first_class = selected[0].1.identity();
-        if selected
-            .iter()
-            .any(|(_, class)| class.identity() != first_class)
-        {
-            return Err(LiquidClassError::Invalid(
-                "one continuous fluid path selected more than one liquid class; split the path or supply a class that covers it"
-                    .to_owned(),
-            )
-            .into());
-        }
-        for (transfer, liquid_class) in &selected {
-            let corrected = liquid_class.corrected_volume(transfer.volume_ul);
-            if corrected > working {
+        for operation in operations {
+            let transfer = match operation {
+                FluidPathOperation::Transfer(transfer) => transfer.clone(),
+                FluidPathOperation::Mix {
+                    well, volume_ul, ..
+                } => Transfer::new(well.clone(), well.clone(), *volume_ul)
+                    .with_liquid("aqueous")
+                    .with_technique("mix"),
+            };
+            let selected = self.select_class(class, &transfer)?;
+            if selected.corrected_volume(transfer.volume_ul) > working {
                 return Err(AdapterConstraintError::CapacityExceeded {
                     adapter: BACKEND.into(),
-                    operation: "chained_transfer".into(),
-                    subject: "automation_batch".into(),
+                    operation: "fluid_path_group".into(),
+                    subject: "canonical_program".into(),
                     resource: "tip".into(),
-                    required: wire_ul(corrected).into(),
+                    required: wire_ul(selected.corrected_volume(transfer.volume_ul)).into(),
                     capacity: wire_ul(working).into(),
                     unit: "0.1 uL".into(),
                 }
@@ -544,50 +538,81 @@ impl<'a> RunBuilder<'a> {
         }
         let channels = self.pick_up(class, 1)?;
         let channel = channels[0];
-        for (transfer, liquid_class) in &selected {
-            let corrected = wire_ul(liquid_class.corrected_volume(transfer.volume_ul));
-            let heights = self.liquids.aspirate(
-                self.deck,
-                &transfer.source,
-                transfer.volume_ul,
-                &liquid_class.definition().margins,
-            );
-            let aspirate = self.channel_liquid(ChannelLiquidSpec {
-                channel,
-                location: &transfer.source,
-                target_ul: transfer.volume_ul,
-                corrected_wire: corrected,
-                heights,
-                mix: None,
-                class: liquid_class,
-            });
-            self.operations.push(StarOperation::Aspirate {
-                tip: class,
-                channels: vec![aspirate],
-            });
-            let heights = self.liquids.dispense(
-                self.deck,
-                &transfer.target,
-                transfer.volume_ul,
-                None,
-                &liquid_class.definition().margins,
-            );
-            let liquid = self.channel_liquid(ChannelLiquidSpec {
-                channel,
-                location: &transfer.target,
-                target_ul: transfer.volume_ul,
-                corrected_wire: corrected,
-                heights,
-                mix: transfer.mix_after,
-                class: liquid_class,
-            });
-            self.operations.push(StarOperation::Dispense {
-                tip: class,
-                mode: 1,
-                channels: vec![liquid],
-            });
+        for operation in operations {
+            match operation {
+                FluidPathOperation::Transfer(transfer) => {
+                    let liquid_class = self.select_class(class, transfer)?;
+                    let corrected = wire_ul(liquid_class.corrected_volume(transfer.volume_ul));
+                    let heights = self.liquids.aspirate(
+                        self.deck,
+                        &transfer.source,
+                        transfer.volume_ul,
+                        &liquid_class.definition().margins,
+                    );
+                    let aspirate = self.channel_liquid(ChannelLiquidSpec {
+                        channel,
+                        location: &transfer.source,
+                        target_ul: transfer.volume_ul,
+                        corrected_wire: corrected,
+                        heights,
+                        mix: None,
+                        class: &liquid_class,
+                    });
+                    self.operations.push(StarOperation::Aspirate {
+                        tip: class,
+                        channels: vec![aspirate],
+                    });
+                    let heights = self.liquids.dispense(
+                        self.deck,
+                        &transfer.target,
+                        transfer.volume_ul,
+                        None,
+                        &liquid_class.definition().margins,
+                    );
+                    let dispense = self.channel_liquid(ChannelLiquidSpec {
+                        channel,
+                        location: &transfer.target,
+                        target_ul: transfer.volume_ul,
+                        corrected_wire: corrected,
+                        heights,
+                        mix: None,
+                        class: &liquid_class,
+                    });
+                    self.operations.push(StarOperation::Dispense {
+                        tip: class,
+                        mode: 1,
+                        channels: vec![dispense],
+                    });
+                }
+                FluidPathOperation::Mix {
+                    well,
+                    cycles,
+                    volume_ul,
+                } => {
+                    let transfer = Transfer::new(well.clone(), well.clone(), *volume_ul)
+                        .with_liquid("aqueous")
+                        .with_technique("mix");
+                    let liquid_class = self.select_class(class, &transfer)?;
+                    let heights =
+                        self.liquids
+                            .mix(self.deck, well, &liquid_class.definition().margins);
+                    let liquid = self.channel_liquid(ChannelLiquidSpec {
+                        channel,
+                        location: well,
+                        target_ul: 0.0,
+                        corrected_wire: 0,
+                        heights,
+                        mix: Some((*cycles, *volume_ul)),
+                        class: &liquid_class,
+                    });
+                    self.operations.push(StarOperation::Aspirate {
+                        tip: class,
+                        channels: vec![liquid],
+                    });
+                }
+            }
         }
-        self.discard(vec![channel]);
+        self.discard(channels);
         Ok(())
     }
 
@@ -635,18 +660,15 @@ mod tests {
     use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
     fn feeder(deck: &DeckIndex) -> TipFeeder {
-        TipFeeder::new(
-            "assembly_small_tips",
-            deck,
-            1,
-            PlateCapacity::new(96).unwrap(),
-        )
+        TipFeeder::new("small_tips", deck, 1, PlateCapacity::new(96).unwrap())
     }
 
     fn contributed_library() -> LiquidClassLibrary {
         LiquidClassLibrary::parse_toml(
             r#"
 schema_version = "lab.hamilton-star-liquid-classes.v1"
+id = "org.example.hamilton-liquid-classes"
+version = "1.0.0"
 
 [[classes]]
 id = "org.example.viscous"
@@ -702,7 +724,7 @@ notes = "A class contributed entirely as data."
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
         let classes = contributed_library();
         let mut liquids = LiquidState::new();
-        let source = StarWell::new("assembly_sources", "A1");
+        let source = StarWell::new("sources", "A1");
         liquids.seed(&source, 100.0);
         let mut builder = RunBuilder::new(
             &deck,
@@ -715,11 +737,7 @@ notes = "A class contributed entirely as data."
         builder
             .distribute(
                 TipClass::Small,
-                &[Transfer::new(
-                    source,
-                    StarWell::new("reaction_plate", "A1"),
-                    20.0,
-                )],
+                &[Transfer::new(source, StarWell::new("work", "A1"), 20.0)],
             )
             .expect("the data-defined class lowers");
         let (operations, _, evidence) = builder.finish();
@@ -745,12 +763,12 @@ notes = "A class contributed entirely as data."
         let mut liquids = LiquidState::new();
         // 4 × 20 µL of water correct to ~4 × 23.2 µL; a 60 µL working
         // volume fits two per load, so four targets need two tip loads.
-        let source = StarWell::new("assembly_sources", "A1");
+        let source = StarWell::new("sources", "A1");
         let transfers: Vec<Transfer> = (0..4)
             .map(|row| {
                 Transfer::new(
                     source.clone(),
-                    StarWell::new("reaction_plate", format!("{}1", char::from(b'A' + row))),
+                    StarWell::new("work", format!("{}1", char::from(b'A' + row))),
                     20.0,
                 )
             })
@@ -778,7 +796,7 @@ notes = "A class contributed entirely as data."
         );
         assert_eq!(
             feeders[0].usage(),
-            vec![("assembly_small_tips/1".to_string(), 2)],
+            vec![("small_tips/1".to_string(), 2)],
             "one tip per load, no tip reuse across loads"
         );
         assert_eq!(evidence.len(), 1, "one exact class covers this run");
@@ -801,17 +819,12 @@ notes = "A class contributed entirely as data."
     fn tip_exhaustion_names_the_rack_resource() {
         let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
-        let mut feeder = TipFeeder::new(
-            "assembly_small_tips",
-            &deck,
-            1,
-            PlateCapacity::new(96).unwrap(),
-        );
+        let mut feeder = TipFeeder::new("small_tips", &deck, 1, PlateCapacity::new(96).unwrap());
         feeder.take(96).expect("the rack holds 96 tips");
         let error = feeder.take(1).expect_err("the 97th tip does not exist");
         let message = error.to_string();
         assert!(
-            message.contains("assembly_small_tips") && message.contains("97"),
+            message.contains("small_tips") && message.contains("97"),
             "the error names the rack and the requirement: {message}"
         );
     }
@@ -820,12 +833,7 @@ notes = "A class contributed entirely as data."
     fn multi_channel_pickups_split_at_rack_column_boundaries() {
         let profile = StarAdapterProfile::default();
         let deck = DeckIndex::build(&profile).expect("the reference bench resolves");
-        let mut feeder = TipFeeder::new(
-            "assembly_small_tips",
-            &deck,
-            1,
-            PlateCapacity::new(96).unwrap(),
-        );
+        let mut feeder = TipFeeder::new("small_tips", &deck, 1, PlateCapacity::new(96).unwrap());
         feeder.take(6).expect("six tips leave two in the column");
         let groups = feeder.take(4).expect("four more tips exist");
         assert_eq!(

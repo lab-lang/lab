@@ -14,4 +14,4 @@ pub(in crate::backend::hamilton::star) const BACKEND: &str = "hamilton.star";
 
 pub use crate::backend::hamilton::star::profile::{StarAdapterProfile, StarProfileError};
 
-pub(in crate::backend) use invocation::lower_invocation;
+pub(in crate::backend) use invocation::{check_task_feasibility, lower_invocation};

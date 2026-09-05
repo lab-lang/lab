@@ -12,9 +12,8 @@ pub enum Ot2ProfileError {
         "{context} claims deck slot '{slot}', which the installed thermocycler already occupies"
     )]
     ThermocyclerSlot { context: String, slot: String },
-    #[error("deck slot '{slot}' is claimed by both {first} and {second} during {stage}")]
+    #[error("deck slot '{slot}' is claimed by both {first} and {second}")]
     SlotConflict {
-        stage: &'static str,
         slot: String,
         first: String,
         second: String,

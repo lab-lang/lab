@@ -10,7 +10,7 @@ Putting Method definitions directly in `lab.toml` would mix a large typed graph 
 
 ## Decision
 
-`lab_compiler::method` owns a versioned, RDF-free JSON document contract named `lab.method-catalog.v1`. A document contains only its schema version and portable `MethodDefinition` records. Every Method retains an absolute identity, one exact Intent operation, a typed signature, topologically ordered Procedure tasks, typed values and material expressions, and first-class Capability requirements. It cannot name a Facility, Zone, Asset, CapabilityOffering, MaterialLot, adapter, schedule, endpoint, or credential.
+`lab_compiler::method` owns a versioned, RDF-free JSON document contract named `lab.method-catalog.v2`. A document contains only its schema version and portable `MethodDefinition` records. Every Method retains an absolute identity, one exact Intent operation, a typed signature, topologically ordered Procedure tasks, typed values and material expressions, and an explicit execution form for each task. A template task carries an exact Procedure contract, declarative JSON body, and execution policy; a builder task names one registered builder, exact contract, and policy; a primitive task states its first-class Capability requirements. It cannot name a Facility, Zone, Asset, CapabilityOffering, MaterialLot, adapter, schedule, endpoint, or credential.
 
 A package contributes documents by path:
 
@@ -23,7 +23,7 @@ Paths are package-relative JSON files without parent traversal. Project loading 
 
 `lab check` and project compilation validate the composed registry even when no facility plan is requested. `lab build` uses that captured registry for both inventory-free refinement and facility planning. `lab.toml` planning entries remain separate exact pins over the resulting alternatives; they do not redefine a Method.
 
-Python's `lab.methods` types serialize the same records. `MethodCatalog.write` emits `lab.method-catalog.v1`, and `lab.plan` or `lab.plan_project` composes package-contributed documents with any additional in-memory Python Methods before invoking the same Rust validator and planner. Python does not parse, validate, refine, or allocate the persistent catalog independently.
+Python's `lab.methods` types serialize the same records. `MethodCatalog.write` emits `lab.method-catalog.v2`, and `lab.plan` or `lab.plan_project` composes package-contributed documents with any additional in-memory Python Methods before invoking the same Rust validator and planner. Python does not parse, validate, refine, or allocate the persistent catalog independently.
 
 ## Consequences
 

@@ -255,7 +255,7 @@ An effect may return more than one result:
 strain, culture <- transform reporter_host from plasmids into cells
 ```
 
-The phrase after `<-` is resolved through an imported action contract. The contract—not a verb-specific parser rule—determines operand slots, ownership, result types, and required capability.
+The phrase after `<-` is resolved through an imported action contract. The contract, not a verb-specific parser rule, determines the exact operation identity, operand slots, ownership, result types, and result lineage. Capability requirements are introduced later by applicable Methods.
 
 ## Callable signatures
 
@@ -396,7 +396,7 @@ record PlateObservation:
   colonies: ColonyMap
 ```
 
-Duplicate property names are rejected. Portable checked IR preserves the property name and typed value; method selection or an allocated adapter may consume a documented subset without the core AST growing one field per implementation.
+Duplicate property names are rejected. Portable checked IR preserves the property name and typed value; a Method may consume a documented subset without the core AST growing one field per scientific implementation. Adapters consume the resulting canonical Procedure program rather than the source property bag.
 
 ## Plasmid requirements and acceptance
 
@@ -451,9 +451,9 @@ strain reporter_host:
   serial_dilutions = 2
 ```
 
-An `sbol_identity` is an absolute IRI naming the SBOL Component represented by a built or bought declaration. A bought item's `supplier_identity` names what a supplier's order line calls it and defaults to the declared name; `identity` remains a legacy alias for `supplier_identity`. The source symbol, design identity, and supplier identity are distinct, so renaming one does not silently rewrite the others. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
+An `sbol_identity` is an absolute IRI naming the SBOL Component represented by a built or bought declaration. A bought item's `supplier_identity` names what a supplier's order line calls it and defaults to the declared name. The source symbol, design identity, and supplier identity are distinct, so renaming one does not silently rewrite the others. Source symbols are values regardless of capitalization: `J23101`, `BsaI`, and `DH5alpha` do not become types because their names begin with capitals.
 
-The current plasmid-build method interprets the scientific properties after ordinary module checking, and the OT-2 adapter interprets its documented operational subset only after facility allocation. Another method or compatible adapter may interpret other metadata or reject the module. Method- and adapter-specific property names are not encoded in the core checker.
+The current plasmid-build Method interprets the scientific properties after ordinary module checking. After facility allocation, the OT-2 adapter accepts only canonical Procedure contracts, feature values, and exact profiles it can preserve; it never dispatches on the biological operation name. Another Method may interpret other metadata, and another adapter may implement the same Procedure contract. Method- and adapter-specific property names are not encoded in the core checker.
 
 The component list above has type `List<Part>`. A list that refers to both a dependent plasmid and ordinary parts has the inferred type `List<Plasmid | Part>`:
 
@@ -463,7 +463,7 @@ components: [promoter_carrier, B0034, GFP, B0015]
 
 The union preserves the nominal alternatives; it does not convert the symbols to strings or a universal metadata value.
 
-Multiple property-bearing artifacts and their realization workflows may be compiled by a supported method and lowered through a compatible facility adapter. Replicate and dilution settings are currently interpreted by the initial plasmid-build method and OT-2 adapter, not by the core language.
+Multiple property-bearing artifacts and their realization workflows may be compiled by a supported Method and lowered through a compatible facility adapter. Replicate and dilution settings are interpreted by the initial plasmid-build Method's explicit Procedure builders, not by the core language or by an adapter-specific reading of source properties.
 
 ## Plasmids and strains
 
@@ -560,7 +560,7 @@ buy restriction_enzyme BsaI:
 ```
 
 `require`, `accept`, and a place in the build order attach to `build`. An
-`identity` to order against attaches to `buy`, and belongs to buying rather than
+`supplier_identity` to order against attaches to `buy`, and belongs to buying rather than
 to any kind's schema. Claiming to build something bought is refused.
 
 A provenance verb followed by `:` opens a block, and states one origin over

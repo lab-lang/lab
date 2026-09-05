@@ -8,15 +8,15 @@ use crate::type_system::Ty;
 pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
     let named = Ty::named;
     let types = [
-        TypeSpec::nominal("Accepted").parameters(1),
+        TypeSpec::nominal("Accepted").parameters(["Value"]),
         TypeSpec::nominal("Antibiotic"),
         TypeSpec::nominal("Backbone"),
         TypeSpec::nominal("Buffer")
             .implements(["Solution"])
             .documented("A salt solution cells are washed and resuspended in."),
-        TypeSpec::nominal("CDS").parameters(1),
+        TypeSpec::nominal("CDS").parameters(["Product"]),
         TypeSpec::nominal("Chassis").documented("A host organism that carries engineered DNA."),
-        TypeSpec::nominal("Circuit").parameters(2),
+        TypeSpec::nominal("Circuit").parameters(["Trigger", "Product"]),
         TypeSpec::nominal("CloneSet").with_fields([(
             "highest_confidence",
             Ty::material(Ty::InState(
@@ -34,8 +34,8 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
         TypeSpec::law("Event").documented("An occurrence the durable workflow journal records."),
         TypeSpec::nominal("Fragment"),
         TypeSpec::nominal("Image"),
-        TypeSpec::nominal("List").parameters(1),
-        TypeSpec::nominal("Material").parameters(1),
+        TypeSpec::nominal("List").parameters(["Item"]),
+        TypeSpec::nominal("Material").parameters(["Subject"]),
         TypeSpec::nominal("Medium")
             .implements(["Solution"])
             .documented("What an organism is grown in or on."),
@@ -50,12 +50,12 @@ pub(in crate::standard_library) fn modules() -> Vec<StandardModule> {
                 ("design", named("Plasmid")),
             ])
             .documented("A backend-neutral plasmid design."),
-        TypeSpec::nominal("Promoter").parameters(1),
+        TypeSpec::nominal("Promoter").parameters(["Trigger"]),
         TypeSpec::role("Protein").documented("A gene product a coding sequence expresses."),
         TypeSpec::nominal("Reason"),
         TypeSpec::nominal("Regulation")
             .documented("Which way a promoter answers the signal it responds to."),
-        TypeSpec::nominal("Rejected").parameters(1),
+        TypeSpec::nominal("Rejected").parameters(["Value"]),
         TypeSpec::nominal("RestrictionEnzyme"),
         TypeSpec::nominal("Screening").with_fields([("clones", named("CloneSet"))]),
         TypeSpec::role("Signal").documented("A molecule or condition a circuit responds to."),

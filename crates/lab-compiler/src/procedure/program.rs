@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::procedure::contract::{ProcedureContractAnalysis, builtin_procedure_contracts};
+use crate::method::LocalId;
+use crate::procedure::contract::ProcedureContractAnalysis;
 use crate::procedure::vocabulary::{PIPETTING_PROGRAM_V1, THERMAL_PROGRAM_V1};
 use crate::procedure::{
     PipettingProgramV1, ProcedureContractRegistry, ThermalProgramV1, ValidatedPipettingProgramV1,
@@ -43,11 +44,7 @@ impl ProcedureProgram {
         }
     }
 
-    pub fn validate(&self) -> Result<ValidatedProcedureProgram, ProcedureProgramValidationError> {
-        self.validate_with(builtin_procedure_contracts())
-    }
-
-    pub fn validate_with(
+    pub fn validate(
         &self,
         registry: &ProcedureContractRegistry,
     ) -> Result<ValidatedProcedureProgram, ProcedureProgramValidationError> {
@@ -161,6 +158,34 @@ pub enum ProcedureProgramDecodeError {
     },
 }
 
+/// Validate the optional Procedure program carried by one task against an explicit composition.
+pub fn validate_task_program(
+    task: &LocalId,
+    program: Option<&ProcedureProgram>,
+    contracts: &ProcedureContractRegistry,
+) -> Result<Option<ValidatedProcedureProgram>, ProcedureTaskProgramValidationError> {
+    program
+        .map(|program| program.validate(contracts))
+        .transpose()
+        .map_err(
+            |source| ProcedureTaskProgramValidationError::InvalidProgram {
+                task: task.clone(),
+                source: Box::new(source),
+            },
+        )
+}
+
+/// A Procedure task carrying a program that its compiler composition cannot validate.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum ProcedureTaskProgramValidationError {
+    #[error("Procedure task `{task}` has an invalid program: {source}")]
+    InvalidProgram {
+        task: LocalId,
+        #[source]
+        source: Box<ProcedureProgramValidationError>,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use crate::procedure::{
@@ -173,6 +198,10 @@ mod tests {
 
     fn id(value: &str) -> ProcedureLocalId {
         ProcedureLocalId::new(value).unwrap()
+    }
+
+    fn contracts() -> &'static ProcedureContractRegistry {
+        crate::procedure::builtin_procedure_contracts()
     }
 
     fn pipetting() -> ValidatedPipettingProgramV1 {
@@ -230,7 +259,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&document).unwrap();
         let round_trip = serde_json::from_str::<ProcedureProgram>(&json).unwrap();
         assert_eq!(round_trip, document);
-        let validated = round_trip.validate().unwrap();
+        let validated = round_trip.validate(contracts()).unwrap();
         assert_eq!(validated.contract().as_str(), PIPETTING_PROGRAM_V1);
         validated
             .decode_body::<crate::procedure::PipettingProgramV1>(PIPETTING_PROGRAM_V1)
@@ -246,7 +275,7 @@ mod tests {
             body: serde_json::json!({}),
         };
         assert!(matches!(
-            unknown.validate(),
+            unknown.validate(contracts()),
             Err(ProcedureProgramValidationError::UnknownContract { .. })
         ));
 
@@ -255,7 +284,7 @@ mod tests {
             body: serde_json::json!({"steps": []}),
         };
         assert!(matches!(
-            malformed.validate(),
+            malformed.validate(contracts()),
             Err(ProcedureProgramValidationError::InvalidBody { .. })
         ));
     }
@@ -288,7 +317,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&document).unwrap();
         let round_trip = serde_json::from_str::<ProcedureProgram>(&json).unwrap();
         assert_eq!(round_trip, document);
-        let validated = round_trip.validate().unwrap();
+        let validated = round_trip.validate(contracts()).unwrap();
         assert_eq!(validated.contract().as_str(), THERMAL_PROGRAM_V1);
         validated
             .decode_body::<ThermalProgramV1>(THERMAL_PROGRAM_V1)

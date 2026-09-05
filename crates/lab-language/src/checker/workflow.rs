@@ -7,7 +7,8 @@ use std::collections::{BTreeSet, HashMap};
 use crate::ast::{BindingStmt, EffectStmt, Pattern, Stmt, Trigger, WorkflowDecl};
 use crate::checked::{
     CheckedActionArgument, CheckedBinding, CheckedDeclaration, CheckedFieldValue, CheckedMatchCase,
-    CheckedState, CheckedStatement, CheckedTrigger, OwnershipMode, ResolvedAction,
+    CheckedState, CheckedStatement, CheckedTrigger, ResolvedAction, ResolvedActionCallee,
+    ResultLineage,
 };
 use crate::semantic_error::SemanticError;
 use crate::type_system::{Ty, substitute, to_checked_type};
@@ -165,7 +166,7 @@ impl Checker {
                             effect.span,
                             format!(
                                 "operation '{}' returns {} value(s), but {} name(s) were provided",
-                                action.operation,
+                                action.display_name(),
                                 result_types.len(),
                                 effect.names.len()
                             ),
@@ -276,14 +277,11 @@ impl Checker {
                             terminates: block.terminates,
                         });
                     }
-                    if !has_binding_pattern
-                        && let Ty::Named(name, _) = &matched_type
-                        && let Some(signature) = self.data.get(name)
-                        && !signature.cases.is_empty()
-                    {
-                        let missing = signature
+                    if !has_binding_pattern && let Ty::Named(name, _) = &matched_type {
+                        let missing = self
                             .cases
-                            .keys()
+                            .iter()
+                            .filter_map(|(case, parent)| (parent == name).then_some(case))
                             .filter(|name| !seen_patterns.contains(*name))
                             .cloned()
                             .collect::<Vec<_>>();
@@ -458,17 +456,7 @@ impl Checker {
             .copied()
             .ok_or_else(|| SemanticError::new(effect.span, "empty effect action"))?;
         if let Some(contract) = self.actions.get(operation).cloned() {
-            let (mut action, types) =
-                self.check_standard_action_contract(effect, &words, environment, contract)?;
-            // A declared verb states the capability it needs; the call carries
-            // it so the compiler can derive a method that requires it. The six
-            // bundled verbs are not in this map and keep their capability in
-            // their own lowering.
-            action.capability = self
-                .action_contracts
-                .get(operation)
-                .map(|contract| contract.capability.clone());
-            return Ok((action, types));
+            return self.check_standard_action_contract(effect, &words, environment, contract);
         }
         let providers = self.standard_library.action_providers(operation);
         if let [required_module] = providers.as_slice() {
@@ -525,11 +513,7 @@ impl Checker {
             .enumerate()
             .map(|(index, ((word, _), ty))| CheckedActionArgument {
                 name: format!("input_{index}"),
-                mode: if self.type_contains_material(ty, &mut BTreeSet::new()) {
-                    OwnershipMode::Take
-                } else {
-                    OwnershipMode::Copy
-                },
+                mode: self.effective_action_ownership(ty, None),
                 value: action_contract::action_reference(
                     self.definition_for_action_word(word),
                     word,
@@ -537,15 +521,36 @@ impl Checker {
                 ),
             })
             .collect::<Vec<_>>();
+        let lineage_sources = arguments
+            .iter()
+            .filter(|argument| {
+                self.type_contains_material(
+                    &crate::type_system::from_checked_type(&argument.value.r#type),
+                    &mut BTreeSet::new(),
+                )
+            })
+            .map(|argument| argument.name.clone())
+            .collect::<Vec<_>>();
+        let result_lineage = if lineage_sources.is_empty() {
+            ResultLineage::Begins
+        } else {
+            ResultLineage::Continues {
+                from: lineage_sources,
+            }
+        };
         Ok((
             ResolvedAction {
-                operation: format!("workflow.{operation}"),
-                callee: Some(self.definition_for_action_word(operation)),
-                capability: None,
+                callee: ResolvedActionCallee::Workflow {
+                    definition: self.definition_for_action_word(operation),
+                },
                 arguments,
                 results: outputs
                     .iter()
-                    .map(|(name, ty)| super::checked_field(name, ty))
+                    .map(|(name, ty)| crate::checked::CheckedActionResult {
+                        name: name.clone(),
+                        r#type: crate::type_system::to_checked_type(ty),
+                        lineage: result_lineage.clone(),
+                    })
                     .collect(),
             },
             results,

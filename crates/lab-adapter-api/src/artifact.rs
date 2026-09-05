@@ -1,9 +1,12 @@
+//! In-memory artifacts emitted by one adapter invocation.
+
 use std::collections::BTreeMap;
 use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// One generated file in an adapter artifact bundle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GeneratedArtifact {
     path: String,
@@ -53,6 +56,7 @@ impl GeneratedArtifact {
     }
 }
 
+/// A collision-checked set of files emitted by one adapter lowerer.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactBundle {
     artifacts: BTreeMap<String, GeneratedArtifact>,
@@ -65,10 +69,15 @@ impl ArtifactBundle {
 
     pub fn insert(&mut self, artifact: GeneratedArtifact) -> Result<(), ArtifactError> {
         let path = artifact.path.clone();
-        if self.artifacts.insert(path.clone(), artifact).is_some() {
-            return Err(ArtifactError::DuplicatePath(path));
+        match self.artifacts.entry(path.clone()) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(artifact);
+                Ok(())
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {
+                Err(ArtifactError::DuplicatePath(path))
+            }
         }
-        Ok(())
     }
 
     pub fn insert_text(
@@ -111,12 +120,9 @@ fn validate_package_path(path: &str) -> Result<(), ArtifactError> {
     let path_value = Path::new(path);
     if path.is_empty()
         || path_value.is_absolute()
-        || path_value.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
+        || path_value
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
     {
         return Err(ArtifactError::InvalidPath(path.to_owned()));
     }
@@ -125,25 +131,29 @@ fn validate_package_path(path: &str) -> Result<(), ArtifactError> {
 
 #[cfg(test)]
 mod tests {
-    use crate::artifact::bundle::*;
+    use super::*;
 
     #[test]
-    fn rejects_paths_that_escape_the_package() {
-        assert_eq!(
+    fn paths_cannot_escape_and_cannot_collide() {
+        assert!(matches!(
             GeneratedArtifact::text("../protocol.py", "text/x-python", "pass"),
-            Err(ArtifactError::InvalidPath("../protocol.py".into()))
-        );
-    }
-
-    #[test]
-    fn rejects_duplicate_artifact_paths() {
+            Err(ArtifactError::InvalidPath(_))
+        ));
         let mut bundle = ArtifactBundle::new();
         bundle
-            .insert_text("protocol.py", "text/x-python", "pass")
+            .insert_text("protocol.py", "text/x-python", "original")
             .unwrap();
+        assert!(matches!(
+            bundle.insert_text("protocol.py", "text/x-python", "replacement"),
+            Err(ArtifactError::DuplicatePath(_))
+        ));
         assert_eq!(
-            bundle.insert_text("protocol.py", "text/x-python", "pass"),
-            Err(ArtifactError::DuplicatePath("protocol.py".into()))
+            bundle.get("protocol.py").unwrap().text_contents().unwrap(),
+            "original"
         );
+        assert!(matches!(
+            GeneratedArtifact::text(".", "text/plain", "invalid"),
+            Err(ArtifactError::InvalidPath(_))
+        ));
     }
 }

@@ -82,12 +82,6 @@ fn render_blocks(blocks: &[Block]) -> String {
             Block::Notice(content) => {
                 writeln!(output, "#notice[{}]\n", markup(content)).unwrap();
             }
-            Block::Bullets(items) => {
-                for item in items {
-                    writeln!(output, "- {}", markup(item)).unwrap();
-                }
-                output.push('\n');
-            }
             Block::Table { columns, rows } => {
                 writeln!(output, "#lab-table(").unwrap();
                 let align = columns

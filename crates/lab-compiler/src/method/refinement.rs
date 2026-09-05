@@ -4,15 +4,13 @@ use std::collections::BTreeMap;
 
 use crate::method::{
     IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodRegistry,
-    PortType, ProcedureValue, ProcedureValueExpression, ScalarType, ScalarValueExpression,
-    ValueReference,
+    PortType, ProcedureTaskExecutionDefinition, ProcedureValue, ProcedureValueExpression,
+    ScalarValueExpression, ValueReference,
 };
 use lab_capability::{
-    CapabilityKind, ControlMode, ExactDecimal, ExactInteger, PropertyConstraint, PropertyValue,
-    QualificationLevel, ScalarValue, UnitIri,
+    CapabilityKind, ControlMode, PropertyConstraint, PropertyValue, QualificationLevel, ScalarValue,
 };
-use pliron::attribute::AttrObj;
-use pliron::builtin::attributes::{StringAttr, VecAttr};
+use pliron::builtin::attributes::StringAttr;
 use pliron::context::{Context, Ptr};
 use pliron::input_err;
 use pliron::irbuild::dialect_conversion::{
@@ -30,39 +28,44 @@ use pliron::value::Value;
 
 use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::design::ir::DesignType;
-use crate::ir::attributes::{quantity_entry, u32_value};
 use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
 use crate::procedure::ir::{
     DataType as ProcedureDataType, MaterialInputOp, MaterialType as ProcedureMaterialType,
     ParameterOp, TaskOp,
 };
-use crate::procedure::normalization::{
-    ProcedureTaskInstance, ResolvedProcedureMaterial, ResolvedProcedureParameter, normalize_task,
+use crate::procedure::{
+    ProcedureCompiler, ProcedureProgramBuildContext, ResolvedProcedureMaterial,
+    ResolvedProcedureParameter,
 };
-use crate::workflow::chemistry::{ASSEMBLY_CHEMISTRY_KEYS, STRAIN_CHEMISTRY_KEYS};
 use crate::workflow::ir::{
-    DiluteOp, MaterialType as WorkflowMaterialType, PerformOp, PlateOp, ProvisionOp, RealizeOp,
-    RecoverOp, TransformOp,
+    DataType as WorkflowDataType, MaterialType as WorkflowMaterialType, PerformOp,
 };
 
 pub(crate) fn refine_method_alternatives(
     context: &mut Context,
     root: Ptr<Operation>,
     registry: &MethodRegistry,
+    procedures: &ProcedureCompiler,
 ) -> Result<()> {
-    apply_dialect_conversion(context, &mut MethodRefinement::new(registry), root)?;
+    apply_dialect_conversion(
+        context,
+        &mut MethodRefinement::new(registry, procedures),
+        root,
+    )?;
     Ok(())
 }
 
 struct MethodRefinement<'a> {
     registry: &'a MethodRegistry,
+    procedures: &'a ProcedureCompiler,
     next_choice: BTreeMap<IntentOperationId, usize>,
 }
 
 impl<'a> MethodRefinement<'a> {
-    fn new(registry: &'a MethodRegistry) -> Self {
+    fn new(registry: &'a MethodRegistry, procedures: &'a ProcedureCompiler) -> Self {
         Self {
             registry,
+            procedures,
             next_choice: BTreeMap::new(),
         }
     }
@@ -74,14 +77,13 @@ impl DialectConversion for MethodRefinement<'_> {
     }
 
     fn can_convert_type(&self, context: &Context, ty: TypeHandle) -> bool {
-        ty.deref(context)
-            .downcast_ref::<WorkflowMaterialType>()
-            .is_some()
+        let ty = ty.deref(context);
+        ty.downcast_ref::<WorkflowMaterialType>().is_some()
+            || ty.downcast_ref::<WorkflowDataType>().is_some()
     }
 
     fn convert_type(&mut self, context: &mut Context, ty: TypeHandle) -> Result<TypeHandle> {
-        let state = workflow_material_state(context, ty);
-        Ok(state.map_or(ty, |state| procedure_material_type(context, &state)))
+        Ok(converted_type(context, ty))
     }
 
     fn rewrite(
@@ -92,17 +94,7 @@ impl DialectConversion for MethodRefinement<'_> {
         _operands_info: &OperandsInfo,
     ) -> Result<()> {
         let instance = intent_instance(context, operation)?;
-        // A declared verb has no registered method: the compiler derives one
-        // manual bench method from the operands, parameters, and result states
-        // the Intent already carries, and refines against that.
-        let derived;
-        let declared_candidates: &[MethodDefinition] =
-            if Operation::get_op::<PerformOp>(operation, context).is_some() {
-                derived = vec![derived_method(context, operation)];
-                &derived
-            } else {
-                self.registry.methods_for(&instance.operation)
-            };
+        let declared_candidates = self.registry.methods_for(&instance.operation);
         if declared_candidates.is_empty() {
             return input_err!(
                 operation.deref(context).loc(),
@@ -114,8 +106,20 @@ impl DialectConversion for MethodRefinement<'_> {
             .validate()
             .expect("MethodRegistry contains only validated definitions");
         let operands = operation.deref(context).operands().collect::<Vec<_>>();
-        verify_inputs(context, operation, &signature.inputs, &operands)?;
-        verify_results(context, operation, &signature.outputs)?;
+        verify_inputs(
+            context,
+            operation,
+            &instance.operation,
+            &signature.inputs,
+            &instance.input_names,
+            &operands,
+        )?;
+        verify_results(
+            context,
+            operation,
+            &signature.outputs,
+            &instance.output_names,
+        )?;
         let candidates = declared_candidates
             .iter()
             .filter(|candidate| method_is_applicable(candidate, &instance.parameters))
@@ -147,9 +151,22 @@ impl DialectConversion for MethodRefinement<'_> {
             .zip(requested.iter().copied())
             .map(|(output, requested)| port_type(context, &output.port_type, requested))
             .collect::<Vec<_>>();
-        let choice_artifact = text_parameter(&instance.parameters, "artifact");
-        let choice_dependencies = text_list_parameter(&instance.parameters, "dependencies");
-        let choice = ChoiceOp::new(
+        let choice_artifact = instance
+            .intent
+            .action
+            .results
+            .iter()
+            .any(|result| result.lineage == lab_language::ResultLineage::Begins)
+            .then(|| {
+                instance.intent.artifact.as_ref().map(|artifact| {
+                    format!(
+                        "{}::{}",
+                        artifact.definition.module, artifact.definition.local
+                    )
+                })
+            })
+            .flatten();
+        let choice = ChoiceOp::new_with_intent(
             context,
             &choice_id,
             instance.operation.as_str(),
@@ -169,17 +186,22 @@ impl DialectConversion for MethodRefinement<'_> {
                     .collect(),
             },
             choice_artifact.as_deref(),
-            &choice_dependencies,
+            &instance.intent.artifact_dependencies,
+            &instance.intent,
         );
 
         for (candidate_index, candidate) in candidates.iter().enumerate() {
+            let parameters = resolve_method_parameters(candidate, &instance.parameters)
+                .expect("applicable Method parameters resolve deterministically");
             append_candidate(
                 context,
                 &choice,
                 candidate_index,
                 &choice_id,
                 candidate,
-                &instance.parameters,
+                &instance.intent,
+                &parameters,
+                self.procedures,
             )?;
         }
         rewriter.insert_operation(context, choice.get_operation());
@@ -197,323 +219,63 @@ impl DialectConversion for MethodRefinement<'_> {
     }
 }
 
-fn text_parameter(parameters: &BTreeMap<LocalId, ProcedureValue>, name: &str) -> Option<String> {
-    let ProcedureValue::Scalar { value } = parameters.get(&local(name))? else {
-        return None;
-    };
-    let ScalarValue::Text(value) = &value.value else {
-        return None;
-    };
-    Some(value.clone())
-}
-
-fn text_list_parameter(parameters: &BTreeMap<LocalId, ProcedureValue>, name: &str) -> Vec<String> {
-    let Some(ProcedureValue::List { values, .. }) = parameters.get(&local(name)) else {
-        return Vec::new();
-    };
-    values
-        .iter()
-        .filter_map(|value| match &value.value {
-            ScalarValue::Text(value) => Some(value.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
 struct IntentInstance {
+    intent: crate::workflow::IntentAction,
     operation: IntentOperationId,
     parameters: BTreeMap<LocalId, ProcedureValue>,
-}
-
-/// Build the manual bench method for one performed declared verb.
-///
-/// Everything the method needs is on the operation: the states its operands
-/// arrive in, the parameters it carries, how many results it yields, and the
-/// capability that runs it. The result states are read from the Intent when the
-/// candidate is built, so the method's outputs are requested rather than named.
-fn derived_method(context: &Context, operation: Ptr<Operation>) -> MethodDefinition {
-    let perform = Operation::get_op::<PerformOp>(operation, context)
-        .expect("derived_method is only called for a workflow.perform operation");
-    let operand_states = operation
-        .deref(context)
-        .operands()
-        .map(|value| {
-            material_state_iri(context, value.get_type(context))
-                .expect("a performed verb takes material operands")
-        })
-        .collect::<Vec<_>>();
-    let parameter_names = perform
-        .parameters(context)
-        .into_iter()
-        .map(|(name, _)| name)
-        .collect::<Vec<_>>();
-    let result_count = operation.deref(context).results().count();
-    crate::method::derived_manual_method(
-        &perform.operation(context),
-        &perform.capability(context),
-        &operand_states,
-        &parameter_names,
-        result_count,
-    )
-}
-
-/// The absolute state IRI a material value carries, on either side of the
-/// Workflow-to-Procedure boundary.
-fn material_state_iri(context: &Context, ty: TypeHandle) -> Option<String> {
-    let handle = ty.deref(context);
-    if let Some(material) = handle.downcast_ref::<WorkflowMaterialType>() {
-        return Some(material.iri().to_owned());
-    }
-    handle
-        .downcast_ref::<ProcedureMaterialType>()
-        .map(|material| material.state().to_owned())
+    input_names: Vec<LocalId>,
+    output_names: Vec<LocalId>,
 }
 
 fn intent_operation(context: &Context, operation: Ptr<Operation>) -> Option<IntentOperationId> {
-    if let Some(perform) = Operation::get_op::<PerformOp>(operation, context) {
-        return IntentOperationId::new(perform.operation(context)).ok();
-    }
-    let value = if Operation::get_op::<RealizeOp>(operation, context).is_some() {
-        "std.bio.build.realize"
-    } else if Operation::get_op::<ProvisionOp>(operation, context).is_some() {
-        "std.lab.plasmid.provision"
-    } else if Operation::get_op::<TransformOp>(operation, context).is_some() {
-        "std.lab.plasmid.transform"
-    } else if Operation::get_op::<RecoverOp>(operation, context).is_some() {
-        "std.lab.plasmid.recover"
-    } else if Operation::get_op::<DiluteOp>(operation, context).is_some() {
-        "std.lab.plasmid.dilute"
-    } else if Operation::get_op::<PlateOp>(operation, context).is_some() {
-        "std.lab.plasmid.plate"
-    } else {
-        return None;
-    };
-    Some(IntentOperationId::new(value).expect("standard Intent operation identities are valid"))
+    Operation::get_op::<PerformOp>(operation, context)
+        .and_then(|perform| IntentOperationId::new(perform.operation(context)).ok())
 }
 
 fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<IntentInstance> {
-    let semantic_operation = intent_operation(context, operation)
-        .expect("dialect conversion only queues supported Workflow operations");
-    let mut parameters = BTreeMap::new();
-    if let Some(realize) = Operation::get_op::<RealizeOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "artifact",
-            required_string(realize.get_attr_realize_artifact(context)),
-        );
-        insert_text_list(
-            &mut parameters,
-            "dependencies",
-            required_strings(realize.get_attr_realize_dependencies(context)),
-        );
-        if let Some(restriction_enzyme) = realize.get_attr_realize_restriction_enzyme(context) {
-            insert_text(
-                &mut parameters,
-                "backbone",
-                required_string(realize.get_attr_realize_backbone(context)),
-            );
-            insert_text_list(
-                &mut parameters,
-                "components",
-                required_strings(realize.get_attr_realize_components(context)),
-            );
-            insert_text(
-                &mut parameters,
-                "restriction_enzyme",
-                restriction_enzyme.as_str().to_owned(),
-            );
-            insert_integer(
-                &mut parameters,
-                "assembly_replicates",
-                u32_value(
-                    &realize
-                        .get_attr_realize_assembly_replicates(context)
-                        .expect("verified Golden Gate recipe is complete"),
-                ),
-            );
-            let chemistry = realize
-                .get_attr_realize_chemistry(context)
-                .expect("verified Golden Gate recipe is complete");
-            insert_chemistry(&mut parameters, &chemistry, ASSEMBLY_CHEMISTRY_KEYS);
-        }
-    } else if let Some(provision) = Operation::get_op::<ProvisionOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "item",
-            required_string(provision.get_attr_provision_item(context)),
-        );
-    } else if let Some(transform) = Operation::get_op::<TransformOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "artifact",
-            required_string(transform.get_attr_transform_artifact(context)),
-        );
-        insert_text(
-            &mut parameters,
-            "chassis",
-            required_string(transform.get_attr_transform_chassis(context)),
-        );
-        insert_text_list(
-            &mut parameters,
-            "plasmids",
-            required_strings(transform.get_attr_transform_plasmids(context)),
-        );
-        insert_text_list(
-            &mut parameters,
-            "dependencies",
-            required_strings(transform.get_attr_transform_dependencies(context)),
-        );
-        insert_integer(
-            &mut parameters,
-            "replicates",
-            u32_value(&transform.get_attr_transform_replicates(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "dna_count",
-            u32::try_from(required_strings(transform.get_attr_transform_plasmids(context)).len())
-                .expect("verified string-vector length fits u32"),
-        );
-        let chemistry = transform.get_attr_transform_chemistry(context).unwrap();
-        insert_chemistry(&mut parameters, &chemistry, STRAIN_CHEMISTRY_KEYS);
-    } else if let Some(recover) = Operation::get_op::<RecoverOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "subject",
-            required_string(recover.get_attr_recover_artifact(context)),
-        );
-        let magnitude = required_string(recover.get_attr_recover_duration_magnitude(context));
-        let scalar = ExactDecimal::parse(&magnitude)
-            .map_err(|error| pliron::input_error!(operation.deref(context).loc(), error))?;
-        let source_unit = required_string(recover.get_attr_recover_duration_unit(context));
-        let unit = match source_unit.as_str() {
-            "h" => UnitIri::new("http://qudt.org/vocab/unit/HR").unwrap(),
-            "min" => UnitIri::new("http://qudt.org/vocab/unit/MIN").unwrap(),
-            _ => {
-                return input_err!(
-                    operation.deref(context).loc(),
-                    "unsupported recovery duration unit '{source_unit}'"
-                );
-            }
-        };
-        parameters.insert(
-            local("duration"),
-            ProcedureValue::Scalar {
-                value: PropertyValue::new(ScalarValue::Real(scalar), Some(unit)).unwrap(),
-            },
-        );
-        insert_integer(
-            &mut parameters,
-            "replicates",
-            u32_value(&recover.get_attr_recover_replicates(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "initial_volume_ul",
-            u32_value(&recover.get_attr_recover_initial_volume_ul(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "recovery_aliquot_volume_ul",
-            u32_value(
-                &recover
-                    .get_attr_recover_medium_aliquot_volume_ul(context)
-                    .unwrap(),
-            ),
-        );
-        insert_integer(
-            &mut parameters,
-            "recovery_volume_ul",
-            u32_value(&recover.get_attr_recover_medium_volume_ul(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "recovery_temperature_c",
-            u32_value(&recover.get_attr_recover_temperature_c(context).unwrap()),
-        );
-    } else if let Some(dilute) = Operation::get_op::<DiluteOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "subject",
-            required_string(dilute.get_attr_dilute_artifact(context)),
-        );
-        insert_integer(
-            &mut parameters,
-            "serial_dilutions",
-            u32_value(&dilute.get_attr_dilute_serial_dilutions(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "replicates",
-            u32_value(&dilute.get_attr_dilute_replicates(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "initial_volume_ul",
-            u32_value(&dilute.get_attr_dilute_initial_volume_ul(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "medium_volume_ul",
-            u32_value(&dilute.get_attr_dilute_medium_volume_ul(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "culture_volume_ul",
-            u32_value(&dilute.get_attr_dilute_culture_volume_ul(context).unwrap()),
-        );
-    } else if let Some(plate) = Operation::get_op::<PlateOp>(operation, context) {
-        insert_text(
-            &mut parameters,
-            "subject",
-            required_string(plate.get_attr_plate_artifact(context)),
-        );
-        insert_text(
-            &mut parameters,
-            "selection",
-            required_string(plate.get_attr_plate_selection(context)),
-        );
-        insert_integer(
-            &mut parameters,
-            "replicates",
-            u32_value(&plate.get_attr_plate_replicates(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "culture_replicates",
-            u32_value(&plate.get_attr_plate_culture_replicates(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "serial_dilutions",
-            u32_value(&plate.get_attr_plate_serial_dilutions(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "medium_volume_ul",
-            u32_value(&plate.get_attr_plate_medium_volume_ul(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "culture_volume_ul",
-            u32_value(&plate.get_attr_plate_culture_volume_ul(context).unwrap()),
-        );
-        insert_integer(
-            &mut parameters,
-            "colony_volume_ul",
-            u32_value(&plate.get_attr_plate_colony_volume_ul(context).unwrap()),
-        );
-    } else if let Some(perform) = Operation::get_op::<PerformOp>(operation, context) {
-        // A declared verb carries its scalar parameters as the text they were
-        // written as. The derived method reads each one back verbatim, so a
-        // manual protocol shows "4000 rcf" the way the workflow said it.
-        for (name, value) in perform.parameters(context) {
-            insert_text(&mut parameters, &name, value);
-        }
-    }
+    let perform = Operation::get_op::<PerformOp>(operation, context)
+        .expect("dialect conversion only queues workflow.perform operations");
+    let intent = perform.intent(context);
+    let semantic_operation = IntentOperationId::new(
+        intent
+            .operation()
+            .expect("a verified Intent action has an operation"),
+    )
+    .expect("a verified Intent action has a stable operation ID");
+    let parameters = intent
+        .parameters
+        .iter()
+        .map(|(name, value)| {
+            Ok((
+                LocalId::new(name)
+                    .map_err(|error| pliron::input_error!(operation.deref(context).loc(), error))?,
+                value.clone(),
+            ))
+        })
+        .collect::<Result<BTreeMap<_, _>>>()?;
+    let input_names = perform
+        .operand_names(context)
+        .into_iter()
+        .map(|name| {
+            LocalId::new(name)
+                .map_err(|error| pliron::input_error!(operation.deref(context).loc(), error))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let output_names = intent
+        .action
+        .results
+        .iter()
+        .map(|result| {
+            LocalId::new(&result.name)
+                .map_err(|error| pliron::input_error!(operation.deref(context).loc(), error))
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(IntentInstance {
+        intent,
         operation: semantic_operation,
         parameters,
+        input_names,
+        output_names,
     })
 }
 
@@ -523,7 +285,9 @@ fn append_candidate(
     candidate_index: usize,
     choice_id: &str,
     method: &MethodDefinition,
+    intent: &crate::workflow::IntentAction,
     parameters: &BTreeMap<LocalId, ProcedureValue>,
+    procedures: &ProcedureCompiler,
 ) -> Result<()> {
     let candidate_inputs = choice
         .candidate_region(context, candidate_index)
@@ -667,41 +431,88 @@ fn append_candidate(
             );
         }
 
-        let semantic_node_id =
-            LocalId::new(&node_id).expect("qualified Method task identity is stable");
-        let normalized_program = normalize_task(&ProcedureTaskInstance {
-            id: &semantic_node_id,
-            operation: &task.operation,
-            input_count: task.inputs.len(),
-            outputs: &output_names,
-            parameters: &resolved_parameters,
-            materials: &resolved_materials,
-        })
-        .map_err(|error| pliron::input_error!(operation_location(choice, context), error))?;
-        if let Some(program) = &normalized_program {
-            task_op.set_semantic_program(context, program);
-        }
-
-        if let Some(program) = &normalized_program {
-            let [policy] = task.requirements.as_slice() else {
-                return input_err!(
-                    operation_location(choice, context),
-                    "normalized Procedure task '{}' must declare exactly one execution policy requirement before capability derivation",
-                    task.id
-                );
-            };
-            if !policy.constraints.is_empty() {
-                return input_err!(
-                    operation_location(choice, context),
-                    "normalized Procedure task '{}' execution policy cannot carry capability constraints; the canonical program derives them",
-                    task.id
-                );
+        let derived_program = match &task.execution {
+            ProcedureTaskExecutionDefinition::Template {
+                contract,
+                body,
+                policy,
+            } => Some((
+                procedures
+                    .render_template(
+                        contract,
+                        body,
+                        &ProcedureProgramBuildContext {
+                            intent,
+                            input_count: task.inputs.len(),
+                            outputs: &output_names,
+                            parameters: &resolved_parameters,
+                            materials: &resolved_materials,
+                        },
+                    )
+                    .map_err(|error| {
+                        pliron::input_error!(operation_location(choice, context), error)
+                    })?,
+                policy,
+            )),
+            ProcedureTaskExecutionDefinition::Builder {
+                builder,
+                contract,
+                policy,
+            } => Some((
+                procedures
+                    .build(
+                        builder,
+                        contract,
+                        &ProcedureProgramBuildContext {
+                            intent,
+                            input_count: task.inputs.len(),
+                            outputs: &output_names,
+                            parameters: &resolved_parameters,
+                            materials: &resolved_materials,
+                        },
+                    )
+                    .map_err(|error| {
+                        pliron::input_error!(operation_location(choice, context), error)
+                    })?,
+                policy,
+            )),
+            ProcedureTaskExecutionDefinition::Primitive { requirements } => {
+                for requirement in requirements {
+                    let requirement_id = format!("{node_id}::requirement::{}", requirement.id);
+                    let constraints = requirement
+                        .constraints
+                        .iter()
+                        .map(|constraint| {
+                            let required = resolve_scalar_value(
+                                operation_location(choice, context),
+                                &constraint.required,
+                                parameters,
+                            )?;
+                            Ok(PropertyConstraint {
+                                property_kind: constraint.property_kind.clone(),
+                                relation: constraint.relation,
+                                required,
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    append_requirement(
+                        context,
+                        choice,
+                        candidate_index,
+                        &node_id,
+                        &requirement_id,
+                        &requirement.capability_kind,
+                        requirement.minimum_qualification,
+                        requirement.accepted_control_modes.iter().copied(),
+                        &constraints,
+                    );
+                }
+                None
             }
-            let formula = program
-                .validate()
-                .expect("compiler normalization returns a validated Procedure program")
-                .capability_formula();
-            for clause in formula.all_of {
+        };
+        if let Some((validated, policy)) = derived_program {
+            task_op.set_semantic_program(context, validated.document());
+            for clause in validated.capability_formula().all_of {
                 let requirement_id = format!("{node_id}::requirement::{}", clause.role);
                 append_requirement(
                     context,
@@ -713,37 +524,6 @@ fn append_candidate(
                     policy.minimum_qualification,
                     policy.accepted_control_modes.iter().copied(),
                     &clause.constraints,
-                );
-            }
-        } else {
-            for requirement in &task.requirements {
-                let requirement_id = format!("{node_id}::requirement::{}", requirement.id);
-                let constraints = requirement
-                    .constraints
-                    .iter()
-                    .map(|constraint| {
-                        let required = resolve_scalar_value(
-                            operation_location(choice, context),
-                            &constraint.required,
-                            parameters,
-                        )?;
-                        Ok(PropertyConstraint {
-                            property_kind: constraint.property_kind.clone(),
-                            relation: constraint.relation,
-                            required,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                append_requirement(
-                    context,
-                    choice,
-                    candidate_index,
-                    &node_id,
-                    &requirement_id,
-                    &requirement.capability_kind,
-                    requirement.minimum_qualification,
-                    requirement.accepted_control_modes.iter().copied(),
-                    &constraints,
                 );
             }
         }
@@ -886,19 +666,38 @@ fn resolve_procedure_value(
 fn verify_inputs(
     context: &Context,
     operation: Ptr<Operation>,
+    intent_operation: &IntentOperationId,
     expected: &[crate::method::MethodInput],
+    actual_names: &[LocalId],
     operands: &[Value],
 ) -> Result<()> {
-    if expected.len() != operands.len() {
+    if expected.len() != operands.len() || actual_names.len() != operands.len() {
         return input_err!(
             operation.deref(context).loc(),
-            "method signature expects {} inputs, but Intent operation has {}",
+            "Method for Intent operation '{}' expects {} inputs, but the checked action has {}",
+            intent_operation,
             expected.len(),
             operands.len()
         );
     }
-    for (expected, actual) in expected.iter().zip(operands) {
-        if port_type_readonly(context, &expected.port_type, None) != actual.get_type(context) {
+    for ((expected, actual_name), actual) in expected.iter().zip(actual_names).zip(operands) {
+        if &expected.name != actual_name {
+            return input_err!(
+                operation.deref(context).loc(),
+                "Intent input '{}' does not match Method input '{}'",
+                actual_name,
+                expected.name
+            );
+        }
+        let actual_type = actual.get_type(context);
+        let matches = if matches!(expected.port_type, PortType::MaterialAsSupplied) {
+            let actual = actual_type.deref(context);
+            actual.downcast_ref::<WorkflowMaterialType>().is_some()
+                || actual.downcast_ref::<ProcedureMaterialType>().is_some()
+        } else {
+            port_type_readonly(context, &expected.port_type, None) == actual_type
+        };
+        if !matches {
             return input_err!(
                 operation.deref(context).loc(),
                 "Intent input '{}' does not match its method signature",
@@ -913,20 +712,39 @@ fn method_is_applicable(
     method: &MethodDefinition,
     actual: &BTreeMap<LocalId, ProcedureValue>,
 ) -> bool {
-    method.parameters.iter().all(|parameter| {
-        actual
-            .get(&parameter.name)
-            .is_some_and(|value| value.value_type() == parameter.value_type)
-    })
+    resolve_method_parameters(method, actual).is_some()
+}
+
+/// Bind a Method's local parameter names to exact Intent values, applying only defaults declared
+/// by that Method. A present value with the wrong type makes the candidate inapplicable; it never
+/// falls through to a default and hides a malformed scientific statement.
+fn resolve_method_parameters(
+    method: &MethodDefinition,
+    actual: &BTreeMap<LocalId, ProcedureValue>,
+) -> Option<BTreeMap<LocalId, ProcedureValue>> {
+    method
+        .parameters
+        .iter()
+        .map(|parameter| {
+            let source = parameter.source.as_ref().unwrap_or(&parameter.name);
+            let value = match actual.get(source) {
+                Some(value) if value.value_type() == parameter.value_type => value.clone(),
+                Some(_) => return None,
+                None => parameter.resolved_default().ok().flatten()?,
+            };
+            Some((parameter.name.clone(), value))
+        })
+        .collect()
 }
 
 fn verify_results(
     context: &Context,
     operation: Ptr<Operation>,
     expected: &[crate::method::TaskOutput],
+    actual_names: &[LocalId],
 ) -> Result<()> {
     let actual = operation.deref(context).results().collect::<Vec<_>>();
-    if expected.len() != actual.len() {
+    if expected.len() != actual.len() || actual_names.len() != actual.len() {
         return input_err!(
             operation.deref(context).loc(),
             "method signature yields {} results, but Intent operation has {}",
@@ -934,7 +752,15 @@ fn verify_results(
             actual.len()
         );
     }
-    for (expected, actual) in expected.iter().zip(actual) {
+    for ((expected, actual_name), actual) in expected.iter().zip(actual_names).zip(actual) {
+        if &expected.name != actual_name {
+            return input_err!(
+                operation.deref(context).loc(),
+                "Intent result '{}' does not match Method output '{}'",
+                actual_name,
+                expected.name
+            );
+        }
         let actual_type = converted_type_readonly(context, actual.get_type(context));
         if port_type_readonly(context, &expected.port_type, Some(actual_type)) != actual_type {
             return input_err!(
@@ -948,21 +774,19 @@ fn verify_results(
 }
 
 fn converted_type_readonly(context: &Context, ty: TypeHandle) -> TypeHandle {
-    let state = workflow_material_state(context, ty);
-    state.map_or(ty, |state| {
-        ProcedureMaterialType::get(context, StringAttr::new(state)).into()
-    })
+    let handle = ty.deref(context);
+    if let Some(material) = handle.downcast_ref::<WorkflowMaterialType>() {
+        return ProcedureMaterialType::get(context, StringAttr::new(material.iri().to_owned()))
+            .into();
+    }
+    if let Some(data) = handle.downcast_ref::<WorkflowDataType>() {
+        return ProcedureDataType::get(context, StringAttr::new(data.iri().to_owned())).into();
+    }
+    ty
 }
 
-/// The state a Workflow material names, if the type is one.
-///
-/// Refinement carries the state across the dialect boundary unchanged. Both
-/// sides name a state by the same IRI, so there is nothing to translate and no
-/// table that could fall out of step with the states a package declares.
-fn workflow_material_state(context: &Context, ty: TypeHandle) -> Option<String> {
-    ty.deref(context)
-        .downcast_ref::<WorkflowMaterialType>()
-        .map(|material| material.iri().to_owned())
+fn converted_type(context: &mut Context, ty: TypeHandle) -> TypeHandle {
+    converted_type_readonly(context, ty)
 }
 
 /// The concrete type of one port.
@@ -980,6 +804,8 @@ fn port_type(
         PortType::Material { state } => procedure_material_type(context, state.as_str()),
         PortType::MaterialAsRequested => requested
             .expect("a requested port is resolved against the Intent result it corresponds to"),
+        PortType::MaterialAsSupplied => requested
+            .expect("a supplied port is resolved against the Intent operand it corresponds to"),
         PortType::Data { data_kind } => {
             ProcedureDataType::get(context, StringAttr::new(data_kind.to_string())).into()
         }
@@ -998,6 +824,8 @@ fn port_type_readonly(
         }
         PortType::MaterialAsRequested => requested
             .expect("a requested port is resolved against the Intent result it corresponds to"),
+        PortType::MaterialAsSupplied => requested
+            .expect("a supplied port is resolved against the Intent operand it corresponds to"),
         PortType::Data { data_kind } => {
             ProcedureDataType::get(context, StringAttr::new(data_kind.to_string())).into()
         }
@@ -1021,75 +849,6 @@ fn procedure_material_type(context: &mut Context, state: &str) -> TypeHandle {
     ProcedureMaterialType::get(context, StringAttr::new(state.to_owned())).into()
 }
 
-fn insert_text(parameters: &mut BTreeMap<LocalId, ProcedureValue>, name: &str, value: String) {
-    parameters.insert(
-        local(name),
-        ProcedureValue::Scalar {
-            value: PropertyValue::unitless(ScalarValue::Text(value)),
-        },
-    );
-}
-
-fn insert_text_list(
-    parameters: &mut BTreeMap<LocalId, ProcedureValue>,
-    name: &str,
-    values: Vec<String>,
-) {
-    parameters.insert(
-        local(name),
-        ProcedureValue::List {
-            element_type: ScalarType::Text,
-            values: values
-                .into_iter()
-                .map(|value| PropertyValue::unitless(ScalarValue::Text(value)))
-                .collect(),
-        },
-    );
-}
-
-fn insert_integer(parameters: &mut BTreeMap<LocalId, ProcedureValue>, name: &str, value: u32) {
-    parameters.insert(
-        local(name),
-        ProcedureValue::Scalar {
-            value: PropertyValue::unitless(ScalarValue::Integer(
-                ExactInteger::parse(value.to_string()).unwrap(),
-            )),
-        },
-    );
-}
-
-fn insert_chemistry(
-    parameters: &mut BTreeMap<LocalId, ProcedureValue>,
-    chemistry: &pliron::builtin::attributes::DictAttr,
-    keys: &[&str],
-) {
-    for key in keys {
-        insert_integer(parameters, key, quantity_entry(Some(chemistry), key, 0));
-    }
-}
-
-fn required_string(value: Option<std::cell::Ref<'_, StringAttr>>) -> String {
-    value
-        .expect("verified Workflow operation carries its required string attribute")
-        .as_str()
-        .to_owned()
-}
-
-fn required_strings(value: Option<std::cell::Ref<'_, VecAttr>>) -> Vec<String> {
-    value
-        .expect("verified Workflow operation carries its required vector attribute")
-        .0
-        .iter()
-        .map(|value: &AttrObj| {
-            value
-                .downcast_ref::<StringAttr>()
-                .expect("verified Workflow vector contains strings")
-                .as_str()
-                .to_owned()
-        })
-        .collect()
-}
-
 fn qualified_id(choice: &str, method: &lab_capability::MethodId, local: &LocalId) -> String {
     format!("{choice}::{method}::{local}")
 }
@@ -1110,8 +869,4 @@ fn choice_label(operation: &IntentOperationId) -> String {
 
 fn operation_location(choice: &ChoiceOp, context: &Context) -> pliron::location::Location {
     choice.loc(context)
-}
-
-fn local(value: &str) -> LocalId {
-    LocalId::new(value).expect("built-in parameter names are stable local identities")
 }

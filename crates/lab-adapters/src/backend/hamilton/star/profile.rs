@@ -12,10 +12,13 @@ use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
+pub use crate::backend::profile::TipRacks;
 
 use crate::backend::hamilton::star::catalog::{
     self, CarrierDefinition, DeckPosition, LabwareDefinition,
+};
+use crate::backend::hamilton::star::liquid_classes::{
+    LiquidClassError, LiquidClassLibraryRegistry,
 };
 
 /// The error raised when a profile cannot describe a workable bench.
@@ -97,18 +100,14 @@ pub enum StarProfileError {
     TipRackExpected { context: String, labware: String },
     #[error("'{context}' needs a liquid vessel, but labware '{labware}' is a tip rack")]
     VesselExpected { context: String, labware: String },
-    #[error("'{context}' names well '{well}', which labware '{labware}' cannot address")]
-    UnknownWell {
-        context: String,
-        labware: String,
-        well: String,
-    },
     #[error(
         "liquid level detection mode '{found}' is unknown; this backend knows 'off' and 'gamma'"
     )]
     UnknownLldMode { found: String },
     #[error("'{context}' declares no sites; a stage resource needs at least one")]
     NoSites { context: String },
+    #[error("the STAR liquid-class registry is invalid: {0}")]
+    LiquidClasses(#[source] Box<LiquidClassError>),
 }
 
 /// The machine variant, which fixes the deck's rail count.
@@ -179,105 +178,45 @@ pub struct PlacedLabware {
     pub capacity: PlateCapacity,
 }
 
-/// The deck: carriers on rails plus the two fixtures every stage shares.
+/// Carrier placements on the physical deck.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StarDeck {
     #[serde(default = "default_carriers")]
     pub carriers: BTreeMap<String, CarrierPlacement>,
-    /// The chilled source-tube rack assembly and transformation draw
-    /// reagents, DNA, enzymes, and cells from.
-    #[serde(default = "default_source_rack")]
-    pub source_rack: PlacedLabware,
-    /// The reaction plate that carries reactions from assembly through
-    /// plating. It stays in place across every run.
-    #[serde(default = "default_reaction_plate")]
-    pub reaction_plate: PlacedLabware,
 }
 
 impl Default for StarDeck {
     fn default() -> Self {
         Self {
             carriers: default_carriers(),
-            source_rack: default_source_rack(),
-            reaction_plate: default_reaction_plate(),
         }
     }
 }
 
+/// Physical resources consumed by the canonical pipetting interpreter.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AssemblyStage {
-    #[serde(default = "default_assembly_small_tips")]
+pub struct StarResources {
+    #[serde(default = "default_sources")]
+    pub sources: PlacedLabware,
+    #[serde(default = "default_work")]
+    pub work: PlacedLabware,
+    #[serde(default = "default_small_tips")]
     pub small_tips: TipRacks,
-}
-
-impl Default for AssemblyStage {
-    fn default() -> Self {
-        Self {
-            small_tips: default_assembly_small_tips(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TransformationStage {
-    /// Plate holding the plasmids a transformation draws from.
-    #[serde(default = "default_dna_plate")]
-    pub dna_plate: Plates,
-    #[serde(default = "default_transformation_small_tips")]
-    pub small_tips: TipRacks,
-    #[serde(default = "default_transformation_large_tips")]
+    #[serde(default = "default_large_tips")]
     pub large_tips: TipRacks,
 }
 
-impl Default for TransformationStage {
+impl Default for StarResources {
     fn default() -> Self {
         Self {
-            dna_plate: default_dna_plate(),
-            small_tips: default_transformation_small_tips(),
-            large_tips: default_transformation_large_tips(),
+            sources: default_sources(),
+            work: default_work(),
+            small_tips: default_small_tips(),
+            large_tips: default_large_tips(),
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PlatingStage {
-    #[serde(default = "default_dilution_plate")]
-    pub dilution_plate: Plates,
-    #[serde(default = "default_agar_plate")]
-    pub agar_plate: Plates,
-    #[serde(default = "default_media_rack")]
-    pub media_rack: MediaRack,
-    #[serde(default = "default_plating_small_tips")]
-    pub small_tips: TipRacks,
-    #[serde(default = "default_plating_large_tips")]
-    pub large_tips: TipRacks,
-}
-
-impl Default for PlatingStage {
-    fn default() -> Self {
-        Self {
-            dilution_plate: default_dilution_plate(),
-            agar_plate: default_agar_plate(),
-            media_rack: default_media_rack(),
-            small_tips: default_plating_small_tips(),
-            large_tips: default_plating_large_tips(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct StarStages {
-    #[serde(default)]
-    pub assembly: AssemblyStage,
-    #[serde(default)]
-    pub transformation: TransformationStage,
-    #[serde(default)]
-    pub plating: PlatingStage,
 }
 
 /// The liquid level detection policy a bench opts into. Planning always
@@ -330,9 +269,13 @@ pub struct StarAdapterProfile {
     #[serde(default)]
     pub deck: StarDeck,
     #[serde(default)]
-    pub stages: StarStages,
+    pub resources: StarResources,
     #[serde(default)]
     pub run: RunOptions,
+    /// Package-local versioned liquid-class registrations and the exact
+    /// library this Asset uses.
+    #[serde(default)]
+    pub liquid_classes: LiquidClassLibraryRegistry,
 }
 
 impl Default for StarAdapterProfile {
@@ -341,8 +284,9 @@ impl Default for StarAdapterProfile {
             name: "hamilton.star".to_owned(),
             machine: Machine::default(),
             deck: StarDeck::default(),
-            stages: StarStages::default(),
+            resources: StarResources::default(),
             run: RunOptions::default(),
+            liquid_classes: LiquidClassLibraryRegistry::default(),
         }
     }
 }
@@ -381,6 +325,25 @@ impl StarAdapterProfile {
                 found: self.machine.channels,
             });
         }
+        for (context, slots) in [
+            (
+                "resources.small_tips",
+                self.resources.small_tips.slots.as_slice(),
+            ),
+            (
+                "resources.large_tips",
+                self.resources.large_tips.slots.as_slice(),
+            ),
+        ] {
+            if slots.is_empty() {
+                return Err(StarProfileError::NoSites {
+                    context: context.to_owned(),
+                });
+            }
+        }
+        self.liquid_classes
+            .resolve_selected()
+            .map_err(|source| StarProfileError::LiquidClasses(Box::new(source)))?;
         self.validate_carriers()?;
         let mut claimed: Vec<(String, String)> = Vec::new();
         for (context, address, labware, capacity, needs_tips) in self.site_claims() {
@@ -410,22 +373,6 @@ impl StarAdapterProfile {
                 }
                 _ => {}
             }
-        }
-        let media = &self.stages.plating.media_rack;
-        let resolved =
-            self.resolve_labware("stages.plating.media_rack", &media.slot, &media.labware)?;
-        if resolved.labware.tip().is_some() {
-            return Err(StarProfileError::VesselExpected {
-                context: "stages.plating.media_rack".into(),
-                labware: media.labware.clone(),
-            });
-        }
-        if resolved.well(&media.medium_well).is_none() {
-            return Err(StarProfileError::UnknownWell {
-                context: "stages.plating.media_rack".into(),
-                labware: media.labware.clone(),
-                well: media.medium_well.clone(),
-            });
         }
         Ok(())
     }
@@ -465,22 +412,22 @@ impl StarAdapterProfile {
         Ok(())
     }
 
-    /// Every stage resource's `(context, site address, labware, declared
+    /// Every canonical resource's `(context, site address, labware, declared
     /// capacity, expects tips)`, for validation and deck summaries.
     fn site_claims(&self) -> Vec<(String, String, String, PlateCapacity, bool)> {
         let mut claims = vec![
             (
-                "deck.source_rack".to_string(),
-                self.deck.source_rack.site.clone(),
-                self.deck.source_rack.labware.clone(),
-                self.deck.source_rack.capacity,
+                "resources.sources".to_string(),
+                self.resources.sources.site.clone(),
+                self.resources.sources.labware.clone(),
+                self.resources.sources.capacity,
                 false,
             ),
             (
-                "deck.reaction_plate".to_string(),
-                self.deck.reaction_plate.site.clone(),
-                self.deck.reaction_plate.labware.clone(),
-                self.deck.reaction_plate.capacity,
+                "resources.work".to_string(),
+                self.resources.work.site.clone(),
+                self.resources.work.labware.clone(),
+                self.resources.work.capacity,
                 false,
             ),
         ];
@@ -495,51 +442,8 @@ impl StarAdapterProfile {
                 ));
             }
         };
-        add_racks(
-            "stages.assembly.small_tips",
-            &self.stages.assembly.small_tips,
-            true,
-        );
-        add_racks(
-            "stages.transformation.small_tips",
-            &self.stages.transformation.small_tips,
-            true,
-        );
-        add_racks(
-            "stages.transformation.large_tips",
-            &self.stages.transformation.large_tips,
-            true,
-        );
-        add_racks(
-            "stages.plating.small_tips",
-            &self.stages.plating.small_tips,
-            true,
-        );
-        add_racks(
-            "stages.plating.large_tips",
-            &self.stages.plating.large_tips,
-            true,
-        );
-        let mut add_plates = |context: &str, plates: &Plates| {
-            for (index, slot) in plates.slots.iter().enumerate() {
-                claims.push((
-                    format!("{context}[{index}]"),
-                    slot.clone(),
-                    plates.labware.clone(),
-                    plates.capacity,
-                    false,
-                ));
-            }
-        };
-        add_plates(
-            "stages.transformation.dna_plate",
-            &self.stages.transformation.dna_plate,
-        );
-        add_plates(
-            "stages.plating.dilution_plate",
-            &self.stages.plating.dilution_plate,
-        );
-        add_plates("stages.plating.agar_plate", &self.stages.plating.agar_plate);
+        add_racks("resources.small_tips", &self.resources.small_tips, true);
+        add_racks("resources.large_tips", &self.resources.large_tips, true);
         claims
     }
 
@@ -627,8 +531,7 @@ fn default_traverse_height() -> f64 {
     245.0
 }
 
-/// The reference bench: one tip carrier feeding every stage, the tube and
-/// trough carriers for sources and media, and two plate carriers.
+/// The reference bench: one carrier each for tips, sources, and work vessels.
 fn default_carriers() -> BTreeMap<String, CarrierPlacement> {
     BTreeMap::from([
         (
@@ -646,30 +549,16 @@ fn default_carriers() -> BTreeMap<String, CarrierPlacement> {
             },
         ),
         (
-            "media".to_string(),
-            CarrierPlacement {
-                catalog: "trough_carrier_5".into(),
-                rail: 8,
-            },
-        ),
-        (
-            "plates_a".to_string(),
+            "work".to_string(),
             CarrierPlacement {
                 catalog: "plate_carrier_l5".into(),
                 rail: 9,
             },
         ),
-        (
-            "plates_b".to_string(),
-            CarrierPlacement {
-                catalog: "plate_carrier_l5".into(),
-                rail: 15,
-            },
-        ),
     ])
 }
 
-fn default_source_rack() -> PlacedLabware {
+fn default_sources() -> PlacedLabware {
     PlacedLabware {
         site: "sources/1".into(),
         labware: "sample_tubes_24".into(),
@@ -677,15 +566,15 @@ fn default_source_rack() -> PlacedLabware {
     }
 }
 
-fn default_reaction_plate() -> PlacedLabware {
+fn default_work() -> PlacedLabware {
     PlacedLabware {
-        site: "plates_a/1".into(),
+        site: "work/1".into(),
         labware: "pcr_plate_96".into(),
         capacity: star_capacity(96),
     }
 }
 
-fn default_assembly_small_tips() -> TipRacks {
+fn default_small_tips() -> TipRacks {
     TipRacks {
         labware: "tip_rack_50ul_filter".into(),
         slots: vec!["tips/1".into()],
@@ -693,66 +582,10 @@ fn default_assembly_small_tips() -> TipRacks {
     }
 }
 
-fn default_dna_plate() -> Plates {
-    Plates {
-        labware: "pcr_plate_96".into(),
-        slots: vec!["plates_a/2".into()],
-        capacity: star_capacity(96),
-    }
-}
-
-fn default_transformation_small_tips() -> TipRacks {
+fn default_large_tips() -> TipRacks {
     TipRacks {
-        labware: "tip_rack_50ul_filter".into(),
+        labware: "tip_rack_1000ul_filter".into(),
         slots: vec!["tips/2".into()],
-        capacity: star_capacity(96),
-    }
-}
-
-fn default_transformation_large_tips() -> TipRacks {
-    TipRacks {
-        labware: "tip_rack_1000ul_filter".into(),
-        slots: vec!["tips/3".into()],
-        capacity: star_capacity(96),
-    }
-}
-
-fn default_dilution_plate() -> Plates {
-    Plates {
-        labware: "pcr_plate_96".into(),
-        slots: vec!["plates_a/3".into(), "plates_a/4".into()],
-        capacity: star_capacity(96),
-    }
-}
-
-fn default_agar_plate() -> Plates {
-    Plates {
-        labware: "pcr_plate_96".into(),
-        slots: vec!["plates_b/1".into(), "plates_b/2".into()],
-        capacity: star_capacity(96),
-    }
-}
-
-fn default_media_rack() -> MediaRack {
-    MediaRack {
-        labware: "trough_60ml".into(),
-        slot: "media/1".into(),
-        medium_well: "A1".into(),
-    }
-}
-
-fn default_plating_small_tips() -> TipRacks {
-    TipRacks {
-        labware: "tip_rack_50ul_filter".into(),
-        slots: vec!["tips/4".into()],
-        capacity: star_capacity(96),
-    }
-}
-
-fn default_plating_large_tips() -> TipRacks {
-    TipRacks {
-        labware: "tip_rack_1000ul_filter".into(),
-        slots: vec!["tips/5".into()],
         capacity: star_capacity(96),
     }
 }
@@ -784,6 +617,41 @@ mod tests {
             MachineVariant::Starlet,
             "the reference bench is a STARlet"
         );
+        assert_eq!(
+            profile.liquid_classes.selected_library.id,
+            "org.lab-lang.hamilton.liquid-classes"
+        );
+    }
+
+    #[test]
+    fn every_tip_resource_requires_at_least_one_site() {
+        let mut profile = StarAdapterProfile::default();
+        profile.resources.small_tips.slots.clear();
+
+        assert_eq!(
+            profile.validate(),
+            Err(StarProfileError::NoSites {
+                context: "resources.small_tips".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn profile_validation_rejects_an_unregistered_liquid_class_library() {
+        let mut profile = StarAdapterProfile::default();
+        profile.liquid_classes.selected_library.version = "99.0.0".to_owned();
+
+        let error = profile
+            .validate()
+            .expect_err("library selection is checked with the rest of the Asset profile");
+        assert!(
+            matches!(
+                &error,
+                StarProfileError::LiquidClasses(source)
+                    if matches!(source.as_ref(), LiquidClassError::UnknownSelectedLibrary { .. })
+            ),
+            "the error retains the registry failure: {error}"
+        );
     }
 
     #[test]
@@ -792,6 +660,16 @@ mod tests {
             StarAdapterProfile::parse("star-runtime", "[target]\nbackend = \"opentrons.flex\"\n")
                 .expect_err("only the exact Asset binding may select an adapter");
         assert!(error.to_string().contains("target"), "{error}");
+    }
+
+    #[test]
+    fn scientific_stage_profiles_are_rejected() {
+        let error = StarAdapterProfile::parse(
+            "star-runtime",
+            "[stages.assembly]\nsmall_tips = { labware = \"tip_rack_50ul_filter\", slots = [\"tips/1\"], capacity = 96 }\n",
+        )
+        .expect_err("the canonical adapter has no assembly-specific profile surface");
+        assert!(error.to_string().contains("stages"), "{error}");
     }
 
     #[test]
@@ -832,7 +710,7 @@ mod tests {
         );
         let error = profile
             .validate()
-            .expect_err("rail 10 is inside the plates_a carrier's span");
+            .expect_err("rail 10 is inside the work carrier's span");
         assert!(
             matches!(error, StarProfileError::CarrierOverlap { .. }),
             "the error names both carriers: {error}"
@@ -842,10 +720,10 @@ mod tests {
     #[test]
     fn two_resources_cannot_share_a_site() {
         let mut profile = StarAdapterProfile::default();
-        profile.stages.transformation.dna_plate.slots = vec!["plates_a/1".into()];
+        profile.resources.large_tips.slots = vec!["work/1".into()];
         let error = profile
             .validate()
-            .expect_err("plates_a/1 already holds the reaction plate");
+            .expect_err("work/1 already holds the work plate");
         assert!(
             matches!(error, StarProfileError::SiteConflict { .. }),
             "the error names both claimants: {error}"
@@ -855,7 +733,7 @@ mod tests {
     #[test]
     fn a_vessel_where_tips_belong_is_rejected() {
         let mut profile = StarAdapterProfile::default();
-        profile.stages.assembly.small_tips.labware = "pcr_plate_96".into();
+        profile.resources.small_tips.labware = "pcr_plate_96".into();
         let error = profile
             .validate()
             .expect_err("a PCR plate cannot feed tips");
@@ -872,14 +750,14 @@ mod tests {
     #[test]
     fn labware_capacity_must_match_the_catalog() {
         let mut profile = StarAdapterProfile::default();
-        profile.deck.source_rack.capacity = star_capacity(96);
+        profile.resources.sources.capacity = star_capacity(96);
         let error = profile
             .validate()
             .expect_err("the tube strip holds 24 positions, not 96");
         assert_eq!(
             error,
             StarProfileError::CapacityMismatch {
-                context: "deck.source_rack".into(),
+                context: "resources.sources".into(),
                 labware: "sample_tubes_24".into(),
                 declared: 96,
                 actual: 24,
@@ -892,9 +770,9 @@ mod tests {
     fn site_addresses_resolve_to_catalog_geometry() {
         let profile = StarAdapterProfile::default();
         let site = profile
-            .resolve_labware("test", "plates_a/1", "pcr_plate_96")
-            .expect("the reaction plate site resolves");
-        assert_eq!(site.rail, 9, "plates_a sits on rail 9");
+            .resolve_labware("test", "work/1", "pcr_plate_96")
+            .expect("the work plate site resolves");
+        assert_eq!(site.rail, 9, "work sits on rail 9");
         let a1 = site.well("A1").expect("A1 resolves");
         assert!(
             (a1.x - (100.0 + 8.0 * 22.5 + 4.0 + 9.5)).abs() < 1e-9,

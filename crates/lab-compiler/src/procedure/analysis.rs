@@ -82,7 +82,8 @@ mod tests {
     use lab_capability::{MethodId, OperationId};
     use pliron::builtin::attributes::StringAttr;
 
-    use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp};
+    use crate::design::ir::DesignArtifactOp;
+    use crate::design::synthetic_artifact_design;
     use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::procedure::ir::{MaterialType, TaskOp};
 
@@ -95,10 +96,7 @@ mod tests {
         let block = module.get_region(ctx).deref(ctx).get_head().unwrap();
         let mut inserter = IRInserter::<DummyListener>::new_at_block_end(block);
 
-        let sequence = DesignDnaSequenceOp::new(ctx, "p_test_sequence", "ACGT");
-        let sequence_value = sequence.get_result_sequence(ctx);
-        inserter.append_op(ctx, &sequence);
-        let design = DesignPlasmidOp::new(ctx, "p_test", sequence_value, 1, true, None, None);
+        let design = DesignArtifactOp::new(ctx, &synthetic_artifact_design("p_test"));
         let design_value = design.get_result_design(ctx);
         inserter.append_op(ctx, &design);
         let material_type = MaterialType::get(
@@ -145,10 +143,7 @@ mod tests {
         let block = module.get_region(ctx).deref(ctx).get_head().unwrap();
         let mut inserter = IRInserter::<DummyListener>::new_at_block_end(block);
 
-        let sequence = DesignDnaSequenceOp::new(ctx, "sequence", "ACGT");
-        let sequence_value = sequence.get_result_sequence(ctx);
-        inserter.append_op(ctx, &sequence);
-        let design = DesignPlasmidOp::new(ctx, "design", sequence_value, 1, true, None, None);
+        let design = DesignArtifactOp::new(ctx, &synthetic_artifact_design("design"));
         let design_value = design.get_result_design(ctx);
         inserter.append_op(ctx, &design);
         let material_type = MaterialType::get(

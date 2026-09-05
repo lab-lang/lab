@@ -53,3 +53,9 @@ impl DefinitionId {
         }
     }
 }
+
+impl fmt::Display for DefinitionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}::{}", self.module, self.local)
+    }
+}

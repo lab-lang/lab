@@ -373,7 +373,7 @@ mod tests {
         .validate()
         .unwrap();
         ProcedureProgram::from_pipetting(&program)
-            .validate()
+            .validate(crate::procedure::builtin_procedure_contracts())
             .unwrap()
     }
 
@@ -400,7 +400,9 @@ mod tests {
         }
         .validate()
         .unwrap();
-        ProcedureProgram::from_thermal(&program).validate().unwrap()
+        ProcedureProgram::from_thermal(&program)
+            .validate(crate::procedure::builtin_procedure_contracts())
+            .unwrap()
     }
 
     fn requirements(

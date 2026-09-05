@@ -9,8 +9,6 @@
 //! - aspiration immersion and bottom standoff come from the selected liquid
 //!   class, so a mistracked surface clamps at an explicit calibrated floor;
 //! - dispense and LLD clearances likewise come from that exact class;
-//! - agar spotting dispenses at a fixed 6 mm above the well bottom
-//!   (≈4 mm of agar fill plus the jet clearance), never tracking volume;
 //! - a bench that opts into gamma detection searches where the selected
 //!   class says it should.
 
@@ -22,11 +20,9 @@ use crate::backend::hamilton::star::plan::error::StarPlanningError;
 use crate::backend::hamilton::star::plan::execution::StarWell;
 use crate::backend::hamilton::star::profile::{ResolvedSite, StarAdapterProfile, StarProfileError};
 
-/// Dead volume the operator loads beyond consumption: sample tubes, µL.
+/// Dead volume the operator loads beyond consumption in source tubes, µL.
 pub const TUBE_DEAD_VOLUME_UL: f64 = 50.0;
-/// Dead volume for troughs, µL.
-pub const TROUGH_DEAD_VOLUME_UL: f64 = 2000.0;
-/// Dead volume for operator-loaded plate wells (the DNA plate), µL.
+/// Dead volume for operator-loaded work-plate wells, µL.
 pub const PLATE_DEAD_VOLUME_UL: f64 = 5.0;
 
 /// Converts millimeters to the firmware's 0.1 mm wire unit.
@@ -46,7 +42,7 @@ pub struct DeckIndex {
 }
 
 impl DeckIndex {
-    /// Resolves every deck and stage resource of a validated profile.
+    /// Resolves every resource of a validated profile.
     pub fn build(profile: &StarAdapterProfile) -> Result<DeckIndex, StarPlanningError> {
         let mut resources = BTreeMap::new();
         let mut place = |key: String, site: Result<ResolvedSite, StarProfileError>| {
@@ -54,60 +50,25 @@ impl DeckIndex {
                 resources.insert(key, site);
             })
         };
-        // The one physical source rack serves both stages, reloaded by the
-        // operator between runs, so each stage gets its own ledger resource
-        // over the same site: assembly's water in A1 and transformation's
-        // cells in A1 are different liquids at different times.
-        for key in ["assembly_sources", "transformation_sources"] {
-            place(
-                key.into(),
-                profile.resolve_labware(
-                    "deck.source_rack",
-                    &profile.deck.source_rack.site,
-                    &profile.deck.source_rack.labware,
-                ),
-            )?;
-        }
         place(
-            "reaction_plate".into(),
+            "sources".into(),
             profile.resolve_labware(
-                "deck.reaction_plate",
-                &profile.deck.reaction_plate.site,
-                &profile.deck.reaction_plate.labware,
+                "resources.sources",
+                &profile.resources.sources.site,
+                &profile.resources.sources.labware,
             ),
         )?;
         place(
-            "media_rack".into(),
+            "work".into(),
             profile.resolve_labware(
-                "stages.plating.media_rack",
-                &profile.stages.plating.media_rack.slot,
-                &profile.stages.plating.media_rack.labware,
+                "resources.work",
+                &profile.resources.work.site,
+                &profile.resources.work.labware,
             ),
         )?;
-        for (prefix, plates) in [
-            ("dna_plate", &profile.stages.transformation.dna_plate),
-            ("dilution_plate", &profile.stages.plating.dilution_plate),
-            ("agar_plate", &profile.stages.plating.agar_plate),
-        ] {
-            for (index, slot) in plates.slots.iter().enumerate() {
-                place(
-                    format!("{prefix}/{}", index + 1),
-                    profile.resolve_labware(prefix, slot, &plates.labware),
-                )?;
-            }
-        }
         for (prefix, racks) in [
-            ("assembly_small_tips", &profile.stages.assembly.small_tips),
-            (
-                "transformation_small_tips",
-                &profile.stages.transformation.small_tips,
-            ),
-            (
-                "transformation_large_tips",
-                &profile.stages.transformation.large_tips,
-            ),
-            ("plating_small_tips", &profile.stages.plating.small_tips),
-            ("plating_large_tips", &profile.stages.plating.large_tips),
+            ("small_tips", &profile.resources.small_tips),
+            ("large_tips", &profile.resources.large_tips),
         ] {
             for (index, slot) in racks.slots.iter().enumerate() {
                 place(
@@ -214,7 +175,7 @@ impl LiquidState {
 
     /// The heights for jet-dispensing `volume_ul` into a well: the ledger
     /// credit happens first so the jet clears the post-dispense surface. A
-    /// fixed height (agar spotting) bypasses the tracked surface.
+    /// an explicitly requested fixed height bypasses the tracked surface.
     pub fn dispense(
         &mut self,
         deck: &DeckIndex,
@@ -281,7 +242,7 @@ mod tests {
     fn a_source_surface_drops_across_successive_aspirates() {
         let deck = deck();
         let mut liquids = LiquidState::new();
-        let tube = StarWell::new("assembly_sources", "A1");
+        let tube = StarWell::new("sources", "A1");
         liquids.seed(&tube, 2000.0);
         let first = liquids.aspirate(&deck, &tube, 500.0, &margins());
         let second = liquids.aspirate(&deck, &tube, 500.0, &margins());
@@ -297,7 +258,7 @@ mod tests {
     fn an_empty_well_clamps_to_the_bottom_standoff() {
         let deck = deck();
         let mut liquids = LiquidState::new();
-        let tube = StarWell::new("assembly_sources", "A1");
+        let tube = StarWell::new("sources", "A1");
         let heights = liquids.aspirate(&deck, &tube, 10.0, &margins());
         assert_eq!(
             heights.position_z, heights.minimum_z,
@@ -309,10 +270,10 @@ mod tests {
     fn dispensing_credits_the_well_before_placing_the_jet() {
         let deck = deck();
         let mut liquids = LiquidState::new();
-        let well = StarWell::new("reaction_plate", "A1");
+        let well = StarWell::new("work", "A1");
         let heights = liquids.dispense(&deck, &well, 20.0, None, &margins());
         let position = deck.position(&well);
-        let (_, _, model) = deck.vessel("reaction_plate");
+        let (_, _, model) = deck.vessel("work");
         let expected =
             wire_mm(position.z + model.height_at(20.0) + margins().dispense_clearance_mm);
         assert_eq!(
@@ -327,17 +288,17 @@ mod tests {
     }
 
     #[test]
-    fn agar_spots_use_the_fixed_height_not_the_ledger() {
+    fn explicit_dispense_offsets_use_a_fixed_height_not_the_ledger() {
         let deck = deck();
         let mut liquids = LiquidState::new();
-        let well = StarWell::new("agar_plate/1", "A1");
+        let well = StarWell::new("work", "A1");
         let fixed_height_mm = 6.0;
         let heights = liquids.dispense(&deck, &well, 4.0, Some(fixed_height_mm), &margins());
         let position = deck.position(&well);
         assert_eq!(
             heights.position_z,
             wire_mm(position.z + fixed_height_mm),
-            "spotting height is the documented 6 mm above the well bottom"
+            "the explicit height is measured above the well bottom"
         );
     }
 }

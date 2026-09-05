@@ -15,7 +15,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 flate2 = "1.1.9"
-lab-adapters.workspace = true
+lab-adapters = { workspace = true, features = ["hardware"] }
 lab-facility.workspace = true
 lab-compiler.workspace = true
 lab-capability.workspace = true
@@ -27,6 +27,7 @@ lab-runfmt.workspace = true
 lab-runtime = { workspace = true, features = ["hardware"] }
 lab-package.workspace = true
 lab-project.workspace = true
+lab-python-bindings.workspace = true
 self-replace = "1.5.0"
 semver.workspace = true
 serde.workspace = true

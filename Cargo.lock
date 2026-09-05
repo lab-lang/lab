@@ -1662,14 +1662,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-adapter-api"
+version = "0.1.2"
+dependencies = [
+ "lab-capability",
+ "lab-compiler",
+ "lab-language",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "lab-adapters"
 version = "0.1.2"
 dependencies = [
+ "anyhow",
  "hamilton-star",
+ "lab-adapter-api",
  "lab-capability",
  "lab-compiler",
  "lab-instruments",
+ "lab-language",
  "lab-runfmt",
+ "lab-runtime",
  "opentrons-protocol",
  "sbol-inventory",
  "schemars",
@@ -1706,6 +1725,7 @@ dependencies = [
  "lab-language",
  "lab-package",
  "lab-project",
+ "lab-python-bindings",
  "lab-runfmt",
  "lab-runtime",
  "self-replace",
@@ -1745,6 +1765,7 @@ dependencies = [
 name = "lab-facility"
 version = "0.1.2"
 dependencies = [
+ "lab-adapter-api",
  "lab-adapters",
  "lab-capability",
  "lab-compiler",
@@ -1838,6 +1859,8 @@ dependencies = [
 name = "lab-project"
 version = "0.1.2"
 dependencies = [
+ "anyhow",
+ "lab-adapter-api",
  "lab-adapters",
  "lab-capability",
  "lab-compiler",
@@ -1845,11 +1868,14 @@ dependencies = [
  "lab-inventory",
  "lab-language",
  "lab-package",
+ "lab-runfmt",
  "lab-sbol",
  "sbol3",
  "semver",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror",
  "toml 0.8.23",
 ]
@@ -1863,9 +1889,21 @@ dependencies = [
  "lab-facility",
  "lab-language",
  "lab-project",
+ "lab-python-bindings",
  "pyo3",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "lab-python-bindings"
+version = "0.1.2"
+dependencies = [
+ "lab-language",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

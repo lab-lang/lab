@@ -5,8 +5,8 @@ use crate::procedure::{
     ThermalStage, ThermalStep, TransferTechnique, Vessel, VesselRole, Volume,
 };
 
-use super::ProcedureTaskInstance;
 use super::view::{TaskView, material_symbols, procedure_id};
+use crate::procedure::ProcedureProgramBuildContext;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const MILLIMETRE: &str = "http://qudt.org/vocab/unit/MilliM";
@@ -14,7 +14,7 @@ const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
 const MINUTE: &str = "http://qudt.org/vocab/unit/MIN";
 
 pub(super) fn normalize_prepare(
-    task: &ProcedureTaskInstance<'_>,
+    task: &ProcedureProgramBuildContext<'_>,
 ) -> Result<ProcedureProgram, String> {
     if task.input_count != 2 {
         return Err(format!(
@@ -207,7 +207,7 @@ pub(super) fn normalize_prepare(
 }
 
 pub(super) fn normalize_heat_shock(
-    task: &ProcedureTaskInstance<'_>,
+    task: &ProcedureProgramBuildContext<'_>,
 ) -> Result<ProcedureProgram, String> {
     if task.input_count != 1 || task.outputs.len() != 2 {
         return Err(format!(

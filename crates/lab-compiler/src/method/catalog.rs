@@ -5,7 +5,7 @@ use thiserror::Error;
 use crate::method::{MethodDefinition, MethodRegistry, MethodRegistryError};
 
 /// The exact serialization contract for portable Method documents consumed by Lab packages.
-pub const METHOD_CATALOG_SCHEMA_VERSION: &str = "lab.method-catalog.v1";
+pub const METHOD_CATALOG_SCHEMA_VERSION: &str = "lab.method-catalog.v2";
 
 /// A versioned, portable collection of facility-independent Method definitions.
 ///
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn unknown_document_fields_are_rejected() {
         let error = serde_json::from_str::<MethodCatalogDocument>(
-            r#"{"schema_version":"lab.method-catalog.v1","methods":[],"methodz":[]}"#,
+            r#"{"schema_version":"lab.method-catalog.v2","methods":[],"methodz":[]}"#,
         )
         .unwrap_err();
 

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 use crate::ast::EffectStmt;
 use crate::checked::{
-    CheckedActionArgument, CheckedExpression, CheckedType, OwnershipMode, ResolvedAction,
-    TypedExpression,
+    CheckedActionArgument, CheckedActionResult, CheckedExpression, CheckedType, OwnershipMode,
+    ResolvedAction, ResolvedActionCallee, TypedExpression,
 };
 use crate::semantic_error::SemanticError;
 use crate::semantics::DefinitionId;
@@ -24,6 +24,11 @@ impl Checker {
         environment: &HashMap<String, Ty>,
         contract: ActionContractSpec,
     ) -> Result<(ResolvedAction, Vec<Ty>), SemanticError> {
+        let definition = self.definition_for_action_word(
+            contract
+                .source_name()
+                .expect("validated action contracts begin with their source name"),
+        );
         let mut cursor = 0;
         let mut operands = HashMap::new();
         let mut arguments = Vec::new();
@@ -57,7 +62,7 @@ impl Checker {
                         operands.insert((*name).to_owned(), ty.clone());
                         arguments.push(CheckedActionArgument {
                             name: (*name).to_owned(),
-                            mode: *mode,
+                            mode: self.effective_action_ownership(&ty, Some(*mode)),
                             value: TypedExpression {
                                 r#type: to_checked_type(&ty),
                                 value: CheckedExpression::List {
@@ -86,7 +91,7 @@ impl Checker {
                 format!("malformed '{}' action phrase", contract.operation),
             ));
         }
-        Self::finish_action_contract(effect, contract, operands, arguments)
+        self.finish_action_contract(effect, contract, definition, operands, arguments)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -162,7 +167,7 @@ impl Checker {
                 operands.insert((*name).to_owned(), actual.clone());
                 arguments.push(CheckedActionArgument {
                     name: (*name).to_owned(),
-                    mode: *mode,
+                    mode: self.effective_action_ownership(&actual, Some(*mode)),
                     value: action_reference(self.definition_for_action_word(word), word, &actual),
                 });
                 *cursor += 1;
@@ -252,8 +257,10 @@ impl Checker {
     }
 
     pub fn finish_action_contract(
+        &self,
         effect: &EffectStmt,
         contract: ActionContractSpec,
+        definition: DefinitionId,
         operands: HashMap<String, Ty>,
         arguments: Vec<CheckedActionArgument>,
     ) -> Result<(ResolvedAction, Vec<Ty>), SemanticError> {
@@ -262,7 +269,14 @@ impl Checker {
             .iter()
             .map(|result| {
                 let ty = resolve_contract_type(&result.r#type, &operands, effect.span)?;
-                Ok((super::checked_field(&result.name, &ty), ty))
+                Ok((
+                    CheckedActionResult {
+                        name: result.name.clone(),
+                        r#type: to_checked_type(&ty),
+                        lineage: result.lineage.clone(),
+                    },
+                    ty,
+                ))
             })
             .collect::<Result<Vec<_>, SemanticError>>()?;
         let results = result_contracts
@@ -275,9 +289,10 @@ impl Checker {
             .collect::<Vec<_>>();
         Ok((
             ResolvedAction {
-                operation: contract.operation.to_owned(),
-                callee: None,
-                capability: None,
+                callee: ResolvedActionCallee::Action {
+                    definition,
+                    operation: contract.operation,
+                },
                 arguments,
                 results: checked_results,
             },

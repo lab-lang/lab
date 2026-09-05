@@ -18,17 +18,18 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// the ontology term it stands for, an artifact kind carries the roles its
 /// produced type plays, and artifact instances preserve exact SBOL identities
 /// independently of laboratory provenance. Durable actions preserve stable
-/// Intent operation identities, typed values, ownership, and exact workflow
-/// callees, while Method definitions separately own capability refinement. A
+/// Intent operation identities, typed values, ownership, exact declaration
+/// identities, and result lineage, while Method definitions separately own
+/// capability refinement. A
 /// facet is a declaration of its own, carrying the states a kind's materials
 /// may be in and the changes between them, a type argument may be narrowed to one
 /// of those states, and an action declares a durable verb with its phrase,
-/// operands, results, and capability.
+/// operands, results, and lineage behavior.
 ///
 /// Grounding, design identities, and Intent operation identities are semantic
 /// contracts, so each incompatible change raises the version rather than
 /// riding along as an optional field.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v11";
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v13";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -83,8 +84,8 @@ pub enum CheckedDeclaration {
     /// A durable laboratory verb a package declares.
     ///
     /// The phrase a workflow writes, its operands and results and their types,
-    /// and the capability it needs travel together, so an importer checks a
-    /// workflow against it and the compiler derives a manual method to run it.
+    /// and each result's lineage behavior travel together, so an importer
+    /// checks the same contract the declaring module did.
     Action {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         doc: Option<String>,
@@ -96,8 +97,6 @@ pub enum CheckedDeclaration {
         phrase: Vec<CheckedPhraseToken>,
         operands: Vec<CheckedActionOperand>,
         results: Vec<CheckedActionResult>,
-        /// The capability a facility must offer to run this verb.
-        capability: String,
     },
     /// A name a supplier lists, and the Lab type it stands for.
     ///
@@ -148,10 +147,26 @@ pub enum CheckedDeclaration {
     },
     Artifact {
         doc: Option<String>,
+        /// Exact identity of this artifact declaration.
+        definition: DefinitionId,
         /// The word a package supplied for this kind.
         artifact: String,
+        /// Exact identities of every artifact-kind declaration whose merged
+        /// schema checked this instance.
+        ///
+        /// Several packages may deliberately extend the same source word. We
+        /// retain every contributor rather than pretending the last import was
+        /// the kind's identity.
+        artifact_definitions: Vec<DefinitionId>,
         name: String,
         produces: CheckedType,
+        /// Exact identity of the nominal type this artifact produces.
+        type_definition: DefinitionId,
+        /// Facet states stated by this artifact. Facet members are not ordinary
+        /// schema properties, so they must travel explicitly or lowering loses
+        /// both the classifying declaration and the state.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        facets: Vec<CheckedArtifactFacet>,
         /// Exact SBOL Component IRI for the biological design, when stated.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         sbol_identity: Option<String>,
@@ -358,11 +373,28 @@ pub struct CheckedActionOperand {
     pub mode: OwnershipMode,
 }
 
-/// One result an action yields: its name and the type it arrives as.
+/// One result an action yields: its name, type, and lineage behavior.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedActionResult {
     pub name: String,
     pub r#type: CheckedType,
+    pub lineage: ResultLineage,
+}
+
+/// How an action result relates to biological entities already in the graph.
+///
+/// The operand names refer to `ResolvedAction.arguments`, not to source text,
+/// so this contract remains valid after a workflow renames a result.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResultLineage {
+    /// This invocation establishes a new biological entity. All `Begins`
+    /// results from one invocation share that one event origin.
+    Begins,
+    /// Carry on exactly the named physical operands' origins.
+    Continues { from: Vec<String> },
+    /// Repeatedly naming the same values denotes the same origin.
+    IdentifiedBy { operands: Vec<String> },
 }
 
 /// One state a facet admits, together with what a material in it carries.
@@ -410,6 +442,14 @@ pub struct CheckedAcceptance {
     /// the claim believed on whatever evidence is offered.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replicates: Option<u64>,
+}
+
+/// One exact facet declaration and state stated by an artifact instance.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedArtifactFacet {
+    pub definition: DefinitionId,
+    pub name: String,
+    pub state: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -498,24 +538,47 @@ pub enum OwnershipMode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResolvedActionCallee {
+    /// A durable action declaration refining a stable Intent operation.
+    Action {
+        definition: DefinitionId,
+        operation: String,
+    },
+    /// Another workflow, identified independently of any same-named workflow
+    /// in another module.
+    Workflow { definition: DefinitionId },
+}
+
+impl ResolvedActionCallee {
+    pub fn definition(&self) -> &DefinitionId {
+        match self {
+            Self::Action { definition, .. } | Self::Workflow { definition } => definition,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedAction {
-    pub operation: String,
-    /// Exact declaration identity for a durable workflow call.
-    ///
-    /// Standard-library actions have no callee because their `operation` is
-    /// already the stable semantic operation identity.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub callee: Option<DefinitionId>,
-    /// The capability a facility must offer to run a declared verb.
-    ///
-    /// A verb declared with `action` states the one capability it needs, and it
-    /// travels with the call so the compiler can derive a method that requires
-    /// it. The six bundled verbs carry their capability in their own lowering,
-    /// so this is absent for them.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub capability: Option<String>,
+    pub callee: ResolvedActionCallee,
     pub arguments: Vec<CheckedActionArgument>,
-    pub results: Vec<CheckedField>,
+    pub results: Vec<CheckedActionResult>,
+}
+
+impl ResolvedAction {
+    /// Stable Intent operation for an action declaration. Workflow calls have
+    /// no operation until their bodies are expanded.
+    pub fn operation(&self) -> Option<&str> {
+        match &self.callee {
+            ResolvedActionCallee::Action { operation, .. } => Some(operation),
+            ResolvedActionCallee::Workflow { .. } => None,
+        }
+    }
+
+    pub fn display_name(&self) -> &str {
+        self.operation()
+            .unwrap_or_else(|| self.callee.definition().local.as_str())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

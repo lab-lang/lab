@@ -5,8 +5,8 @@ use crate::procedure::{
     Vessel, VesselRole, Volume,
 };
 
-use super::ProcedureTaskInstance;
 use super::view::{TaskView, procedure_id};
+use crate::procedure::ProcedureProgramBuildContext;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
@@ -14,7 +14,7 @@ const HOUR: &str = "http://qudt.org/vocab/unit/HR";
 const MINUTE: &str = "http://qudt.org/vocab/unit/MIN";
 
 pub(super) fn normalize_add_medium(
-    task: &ProcedureTaskInstance<'_>,
+    task: &ProcedureProgramBuildContext<'_>,
 ) -> Result<ProcedureProgram, String> {
     if task.input_count != 1 || task.outputs.len() != 1 {
         return Err(format!(
@@ -27,7 +27,7 @@ pub(super) fn normalize_add_medium(
     view.require_material_roles(&["medium"])?;
     let medium = view.one_material("medium")?;
     let replicates = positive(&view, "replicates", None)?;
-    let initial_volume = positive(&view, "initial_volume_ul", Some(MICROLITRE))?;
+    let initial_volume = transformation_volume(&view)?;
     let recovery_aliquot_volume = positive(&view, "recovery_aliquot_volume_ul", Some(MICROLITRE))?;
     let recovery_volume = positive(&view, "recovery_volume_ul", Some(MICROLITRE))?;
     let air_gap = positive(&view, "air_gap_ul", Some(MICROLITRE))?;
@@ -94,7 +94,7 @@ pub(super) fn normalize_add_medium(
 }
 
 pub(super) fn normalize_incubation(
-    task: &ProcedureTaskInstance<'_>,
+    task: &ProcedureProgramBuildContext<'_>,
 ) -> Result<ProcedureProgram, String> {
     if task.input_count != 1 || task.outputs.len() != 1 {
         return Err(format!(
@@ -106,7 +106,7 @@ pub(super) fn normalize_incubation(
     let view = TaskView::new(task);
     view.require_material_roles(&[])?;
     let replicates = positive(&view, "replicates", None)?;
-    let initial_volume = positive(&view, "initial_volume_ul", Some(MICROLITRE))?;
+    let initial_volume = transformation_volume(&view)?;
     let recovery_volume = positive(&view, "recovery_volume_ul", Some(MICROLITRE))?;
     let temperature_c = view.integer_parameter("recovery_temperature_c", Some(DEGREE_CELSIUS))?;
     let hold_temperature = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
@@ -157,6 +157,19 @@ fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u
         return Err(format!("parameter `{name}` must be greater than zero"));
     }
     Ok(value)
+}
+
+/// Volume entering recovery is determined by the transformation Method, not source lowering.
+/// Keeping the derivation beside the Procedure builder lets another transformation Method choose
+/// a different formula without teaching the generic Intent boundary any biology.
+fn transformation_volume(view: &TaskView<'_, '_>) -> Result<u32, String> {
+    let cells = positive(view, "cell_volume_ul", Some(MICROLITRE))?;
+    let dna_each = positive(view, "dna_volume_ul", Some(MICROLITRE))?;
+    let dna_count = positive(view, "dna_count", None)?;
+    dna_each
+        .checked_mul(dna_count)
+        .and_then(|dna| cells.checked_add(dna))
+        .ok_or_else(|| "transformation input volume arithmetic overflows".to_owned())
 }
 
 fn volume(value: u32) -> Result<Volume, String> {

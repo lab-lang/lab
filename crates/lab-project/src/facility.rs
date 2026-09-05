@@ -9,17 +9,19 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use lab_adapters::{
-    AdapterInvocationError, AdapterInvocationPlan, AdapterProfileContractError,
-    validate_adapter_profile,
+use lab_adapter_api::{
+    AdapterInvocationError, AdapterInvocationPlan, AdapterProfileContractError, AdapterRegistry,
 };
+use lab_adapters::builtin_adapter_registry;
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
 use lab_compiler::method::{IntentOperationId, LocalId, MethodRegistry};
 use lab_compiler::planning::{
     AdapterRequirement, AssetPin, AssetPinSelector, FacilityPlanningPolicy,
-    FacilityPlanningSolution, MethodPin, MethodPinSelector, PlanningProblemExtractionError,
+    FacilityPlanningSolution, MethodPin, MethodPinSelector, PlanningProblem,
+    PlanningProblemExtractionError,
 };
+use lab_compiler::procedure::ProcedureCompiler;
 use lab_compiler::program::{
     AllocatedLairError, AllocatedLairProgram, PortableLairError, PortableLairProgram,
     RefinedLairError,
@@ -36,6 +38,12 @@ use thiserror::Error;
 
 use crate::{CompiledProject, LabProject};
 
+#[derive(Clone, Copy)]
+enum MethodPinScope {
+    ExactPackageProgram,
+    MatchingEntry,
+}
+
 /// One complete, immutable facility-planning result for a compiled Lab package.
 ///
 /// The textual refined IR is retained as review evidence. The allocated IR remains an owned,
@@ -47,6 +55,10 @@ pub struct FacilityPlanningResult {
     pub inventory: InventorySnapshot,
     pub material_inventory: MaterialLotInventory,
     pub adapter_bindings: Option<AdapterBindingSnapshot>,
+    /// The exact statically composed adapter integrations used to bind, plan, and lower.
+    pub adapters: AdapterRegistry,
+    /// The exact Procedure contracts and builders used to refine and revalidate this program.
+    pub procedures: ProcedureCompiler,
     pub refined_lair: String,
     pub problem: lab_compiler::planning::PlanningProblem,
     pub solution: FacilityPlanningSolution,
@@ -66,10 +78,6 @@ impl FacilityPlanningResult {
 
 #[derive(Debug, Error)]
 pub enum FacilityProjectError {
-    #[error(
-        "package '{package}' is a library with no build.entry; a facility plan needs an exact main workflow"
-    )]
-    MissingEntry { package: String },
     #[error(
         "package '{package}' has no inventory.document; facility planning consumes a validated SBOLInventory document"
     )]
@@ -112,6 +120,8 @@ pub enum FacilityProjectError {
         #[source]
         source: Box<AdapterProfileContractError>,
     },
+    #[error("failed to describe the adapters linked into this application")]
+    AdapterCatalog(#[source] AdapterProfileContractError),
     #[error("failed to bind configured adapters to SBOLInventory capability offerings")]
     AdapterBindings(#[source] AdapterBindingError),
     #[error("invalid package planning policy: {0}")]
@@ -139,48 +149,14 @@ pub enum FacilityProjectError {
 }
 
 impl LabProject {
-    /// Plans the default runnable package against its selected facility using an explicit Method registry.
-    pub fn plan_facility(
-        &self,
-        compiled: &CompiledProject,
-        methods: &MethodRegistry,
-    ) -> Result<FacilityPlanningResult, FacilityProjectError> {
-        let package = self.default_package();
-        if package.entry_source().is_none() {
-            return Err(FacilityProjectError::MissingEntry {
-                package: package.manifest.package.name.clone(),
-            });
-        }
-        let inventory = load_package_inventory(package)?.ok_or_else(|| {
-            FacilityProjectError::MissingInventory {
-                package: package.manifest.package.name.clone(),
-            }
-        })?;
-        let program_packages = self.program_packages();
-        let modules = compiled
-            .modules
-            .iter()
-            .filter(|module| program_packages.contains(&module.package))
-            .map(|module| &module.module)
-            .collect::<Vec<_>>();
-        plan_modules_with_inventory(package, &modules, methods, inventory, None)
-    }
-
-    /// Plans with the standard and package-contributed Methods captured during compilation.
-    pub fn plan_facility_with_package_methods(
-        &self,
-        compiled: &CompiledProject,
-    ) -> Result<FacilityPlanningResult, FacilityProjectError> {
-        self.plan_facility(compiled, &compiled.methods)
-    }
-
-    /// Plans one program of the default runnable package: the build the named
-    /// entry module's `main` reaches through workflow calls. What the workspace
-    /// declares beyond that is a library and stays unplanned.
-    pub fn plan_facility_program(
+    /// Internal implementation behind [`crate::ProjectCompilation::plan`].
+    pub(crate) fn plan_facility_program_with_methods(
         &self,
         compiled: &CompiledProject,
         entry_module: &str,
+        methods: &MethodRegistry,
+        procedures: &ProcedureCompiler,
+        adapters: &AdapterRegistry,
     ) -> Result<FacilityPlanningResult, FacilityProjectError> {
         let package = self.default_package();
         let inventory = load_package_inventory(package)?.ok_or_else(|| {
@@ -198,9 +174,12 @@ impl LabProject {
         plan_modules_with_inventory(
             package,
             &modules,
-            &compiled.methods,
+            methods,
+            procedures,
+            adapters,
             inventory,
-            Some(entry_module),
+            entry_module,
+            MethodPinScope::ExactPackageProgram,
         )
     }
 }
@@ -210,42 +189,61 @@ impl LabProject {
 /// This is the embedding boundary used by non-file frontends such as Python. The caller owns
 /// frontend checking and module order; the package contributes only inventory selection, planning
 /// policy, and local adapter configuration.
-pub fn plan_modules_for_package(
+pub(crate) fn plan_modules_for_package(
     package: &LabPackage,
     modules: &[&lab_language::CheckedModule],
+    entry_module: &str,
     methods: &MethodRegistry,
+    procedures: &ProcedureCompiler,
+    adapters: &AdapterRegistry,
 ) -> Result<FacilityPlanningResult, FacilityProjectError> {
     let inventory =
         load_package_inventory(package)?.ok_or_else(|| FacilityProjectError::MissingInventory {
             package: package.manifest.package.name.clone(),
         })?;
-    plan_modules_with_inventory(package, modules, methods, inventory, None)
+    plan_modules_with_inventory(
+        package,
+        modules,
+        methods,
+        procedures,
+        adapters,
+        inventory,
+        entry_module,
+        MethodPinScope::MatchingEntry,
+    )
 }
 
 fn plan_modules_with_inventory(
     package: &LabPackage,
     modules: &[&lab_language::CheckedModule],
     methods: &MethodRegistry,
+    procedures: &ProcedureCompiler,
+    adapters: &AdapterRegistry,
     inventory: InventorySnapshot,
-    entry: Option<&str>,
+    entry_module: &str,
+    method_pin_scope: MethodPinScope,
 ) -> Result<FacilityPlanningResult, FacilityProjectError> {
-    let portable = PortableLairProgram::lower_program_rooted(modules, entry)
+    let portable = PortableLairProgram::lower_entry_program(modules, entry_module)
         .map_err(FacilityProjectError::PortableLair)?;
     let refined = portable
-        .refine_methods(methods)
+        .refine_methods(methods, procedures)
         .map_err(FacilityProjectError::RefinedLair)?;
     let refined_lair = refined.ir();
     let problem = refined
         .planning_problem()
         .map_err(FacilityProjectError::PlanningProblem)?;
-    let adapter_bindings = resolve_package_adapter_bindings(package, &inventory)?;
+    let adapter_bindings = resolve_package_adapter_bindings(package, &inventory, &adapters)?;
     let material_inventory = semantic_material_inventory(modules, &inventory)?;
+    let policy = facility_planning_policy(package)?;
+    let policy = scope_method_pins(policy, &problem, method_pin_scope);
     let solution = solve_facility_planning(
         &problem,
         &inventory,
         &material_inventory,
         adapter_bindings.as_ref(),
-        facility_planning_policy(package)?,
+        Some(adapters),
+        procedures.contracts(),
+        policy,
     )
     .map_err(FacilityProjectError::FacilityPlanning)?;
     let allocated = refined
@@ -253,8 +251,12 @@ fn plan_modules_with_inventory(
         .map_err(FacilityProjectError::Allocation)?;
     let adapter_invocations = AdapterInvocationPlan::from_allocated_lair(&allocated)
         .map_err(FacilityProjectError::AdapterInvocations)?;
-    validate_allocated_material_inventory(&adapter_invocations.allocated, &material_inventory)
-        .map_err(FacilityProjectError::AllocatedMaterialInventory)?;
+    validate_allocated_material_inventory(
+        &adapter_invocations.allocated,
+        &material_inventory,
+        procedures.contracts(),
+    )
+    .map_err(FacilityProjectError::AllocatedMaterialInventory)?;
 
     Ok(FacilityPlanningResult {
         package: package.manifest.package.name.clone(),
@@ -262,6 +264,8 @@ fn plan_modules_with_inventory(
         inventory,
         material_inventory,
         adapter_bindings,
+        adapters: adapters.clone(),
+        procedures: procedures.clone(),
         refined_lair,
         problem,
         solution,
@@ -270,8 +274,30 @@ fn plan_modules_with_inventory(
     })
 }
 
+fn scope_method_pins(
+    mut policy: FacilityPlanningPolicy,
+    problem: &PlanningProblem,
+    scope: MethodPinScope,
+) -> FacilityPlanningPolicy {
+    if matches!(scope, MethodPinScope::MatchingEntry) {
+        // An embedded entry may invoke only one workflow from a package whose manifest also pins
+        // Methods for its other runnable programs. Retain every pin relevant to this exact entry;
+        // the solver still validates those pins strictly, while unrelated package policy cannot
+        // make a valid in-memory subprogram impossible to plan.
+        policy.method_pins.retain(|pin| {
+            problem.choices.iter().any(|choice| match &pin.selector {
+                MethodPinSelector::Choice { choice: selected } => selected == &choice.id,
+                MethodPinSelector::SourceOperation { source_operation } => {
+                    source_operation == &choice.source_operation
+                }
+            })
+        });
+    }
+    policy
+}
+
 /// Loads and validates the package's selected SBOLInventory document, if configured.
-pub fn load_package_inventory(
+pub(crate) fn load_package_inventory(
     package: &LabPackage,
 ) -> Result<Option<InventorySnapshot>, FacilityProjectError> {
     let inventory = &package.manifest.inventory;
@@ -287,9 +313,10 @@ pub fn load_package_inventory(
 }
 
 /// Resolves local operational configuration against exact Assets and offerings in the catalog.
-pub fn resolve_package_adapter_bindings(
+pub(crate) fn resolve_package_adapter_bindings(
     package: &LabPackage,
     inventory: &InventorySnapshot,
+    adapters: &AdapterRegistry,
 ) -> Result<Option<AdapterBindingSnapshot>, FacilityProjectError> {
     if package.manifest.execution.adapters.is_empty() {
         return Ok(None);
@@ -330,14 +357,13 @@ pub fn resolve_package_adapter_bindings(
             .ok_or_else(|| FacilityProjectError::InvalidAdapterProfileName {
                 path: binding.profile.clone(),
             })?;
-        let profile =
-            validate_adapter_profile(&binding.driver, name, &contents).map_err(|source| {
-                FacilityProjectError::InvalidAdapterProfile {
-                    asset: binding.asset.clone(),
-                    driver: binding.driver.clone(),
-                    path: binding.profile.clone(),
-                    source: Box::new(source),
-                }
+        let profile = adapters
+            .validate_profile(&binding.driver, name, &contents)
+            .map_err(|source| FacilityProjectError::InvalidAdapterProfile {
+                asset: binding.asset.clone(),
+                driver: binding.driver.clone(),
+                path: binding.profile.clone(),
+                source: Box::new(source),
             })?;
         requests.push(AdapterBindingRequest {
             asset: binding.asset.clone(),
@@ -346,9 +372,14 @@ pub fn resolve_package_adapter_bindings(
             profile,
         });
     }
-    AdapterBindingSnapshot::resolve(inventory, requests)
+    AdapterBindingSnapshot::resolve(inventory, requests, adapters.descriptors())
         .map(Some)
         .map_err(FacilityProjectError::AdapterBindings)
+}
+
+/// The concrete adapter composition used by the default Lab application.
+pub(crate) fn builtin_project_adapter_registry() -> Result<AdapterRegistry, FacilityProjectError> {
+    builtin_adapter_registry().map_err(FacilityProjectError::AdapterCatalog)
 }
 
 fn semantic_material_inventory(

@@ -77,6 +77,22 @@ impl ProcedureContractRegistry {
         self.registrations.get(id)
     }
 
+    /// Return a new composition containing this registry plus one contract.
+    ///
+    /// Registries are immutable at compiler-use sites. Extension assembly therefore happens once
+    /// at the application boundary, while every later stage receives the same exact composition.
+    pub fn with_registration(
+        &self,
+        registration: ProcedureContractRegistration,
+    ) -> Result<Self, ProcedureContractRegistryError> {
+        Self::new(
+            self.registrations
+                .values()
+                .cloned()
+                .chain(std::iter::once(registration)),
+        )
+    }
+
     pub fn contracts(&self) -> impl Iterator<Item = &ProcedureContractId> {
         self.registrations.keys()
     }
@@ -180,6 +196,19 @@ mod tests {
             error,
             ProcedureContractRegistryError::Duplicate { contract: id }
         );
+    }
+
+    #[test]
+    fn a_contract_can_be_composed_onto_an_existing_registry() {
+        let id = ProcedureContractId::new("https://example.org/procedure/TestV1").unwrap();
+        let registry = ProcedureContractRegistry::default()
+            .with_registration(ProcedureContractRegistration::new(
+                id.clone(),
+                empty_analysis,
+            ))
+            .unwrap();
+
+        assert!(registry.registration(&id).is_some());
     }
 
     #[test]

@@ -39,7 +39,7 @@ fn parser_rejects_trailing_input_and_leaves_the_session_reusable() {
 
 #[test]
 fn parsing_and_biological_verification_are_distinct_failures() {
-    let invalid = allocated_ir().replace("ACGT", "ACGN");
+    let invalid = allocated_ir().replace("https://example.org/design/sample", "not-an-iri");
     let mut session = CompilerSession::default();
 
     session.parse_ir(&invalid).unwrap();
@@ -47,9 +47,20 @@ fn parsing_and_biological_verification_are_distinct_failures() {
     let SessionError::VerificationFailed(diagnostic) = error else {
         panic!("expected biological verification failure");
     };
-    assert!(diagnostic.contains(
-        "design.dna_sequence elements must be non-empty, uppercase, and unambiguous DNA"
-    ));
+    assert!(diagnostic.contains("artifact design SBOL identity must be an absolute IRI"));
+}
+
+#[test]
+fn allocated_method_ports_must_match_the_retained_source_intent() {
+    let tampered = allocated_ir().replacen(
+        "selected_input_names: builtin.vec [builtin.string \"design\"]",
+        "selected_input_names: builtin.vec [builtin.string \"other\"]",
+        1,
+    );
+    let mut session = CompilerSession::default();
+    session.parse_ir(&tampered).unwrap();
+    let error = session.verify().unwrap_err().to_string();
+    assert!(error.contains("not a retained action argument"), "{error}");
 }
 
 #[test]

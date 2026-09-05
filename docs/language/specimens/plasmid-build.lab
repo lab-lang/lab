@@ -45,14 +45,6 @@ record ColonyGrowth:
 
   case TimedOut
 
-record SequenceCheck:
-  material: Material<Plasmid>
-  evidence: List<Evidence>
-
-  case Exact
-  case Mismatch
-  case Inconclusive
-
 workflow await_colonies(plate: Material<Medium is inoculated>) -> ColonyGrowth:
 
   state observations: List<PlateObservation> = []

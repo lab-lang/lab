@@ -222,7 +222,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
 
-    let created = run(&["new", &project_text, "--name", "test-project"]);
+    let created = run(&["new", "project", &project_text, "--name", "test-project"]);
     assert!(
         created.status.success(),
         "{}",
@@ -256,7 +256,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
     let index_path = project.join(".lab/build/package.json");
     let index = read_json(index_path);
-    assert_eq!(index["schema_version"], 7);
+    assert_eq!(index["schema_version"], 8);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
     assert_eq!(index["compiler"]["refined_lair"], "compiler/refined.lair");
@@ -270,7 +270,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert!(index.get("facility").is_none());
     assert!(project.join(".lab/build/compiler/refined.lair").is_file());
     let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
-    assert_eq!(problem["schema_version"], "lab.planning-problem.v1");
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v2");
     assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
         problem["choices"][0]["source_operation"],
@@ -307,6 +307,144 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
 
     std::fs::remove_dir_all(&project).unwrap();
+}
+
+#[test]
+fn focused_scaffolds_expose_their_conformance_paths() {
+    let parent = temporary_project();
+    std::fs::create_dir_all(&parent).unwrap();
+
+    let methods = parent.join("thermal-methods");
+    let methods_text = methods.to_string_lossy().into_owned();
+    let created = run(&[
+        "new",
+        "method-pack",
+        &methods_text,
+        "--name",
+        "thermal-methods",
+    ]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(methods.join("methods/methods.json").is_file());
+    assert!(
+        std::fs::read_to_string(methods.join("methods/methods.json"))
+            .unwrap()
+            .contains("lab.method-catalog.v2")
+    );
+    assert!(
+        std::fs::read_to_string(methods.join("methods/methods.json"))
+            .unwrap()
+            .contains("thermal_methods.vocabulary.prepare")
+    );
+    assert!(
+        std::fs::read_to_string(methods.join("src/vocabulary.lab"))
+            .unwrap()
+            .contains("action prepare <sample> -> prepared:")
+    );
+    assert!(
+        std::fs::read_to_string(methods.join("README.md"))
+            .unwrap()
+            .contains("declarative `template`")
+    );
+    let conformed = run(&["check", &methods_text]);
+    assert!(
+        conformed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&conformed.stderr)
+    );
+
+    let adapter = parent.join("acme-cycler");
+    let adapter_text = adapter.to_string_lossy().into_owned();
+    let created = run(&["new", "adapter", &adapter_text, "--driver", "acme.cycler"]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let source = std::fs::read_to_string(adapter.join("src/lib.rs")).unwrap();
+    let manifest_path = adapter.join("Cargo.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    assert!(manifest.contains(&format!(
+        "lab-adapter-api = {:?}",
+        env!("CARGO_PKG_VERSION")
+    )));
+    assert!(!manifest.contains("lab-adapters ="));
+    assert!(!manifest.contains("lab-compiler ="));
+    assert!(!manifest.contains("lab-capability ="));
+    assert!(source.contains("AdapterRegistration::new("));
+    assert!(source.contains("fn check_program_feasibility("));
+    assert!(source.contains("_task: &PlanningProcedureTask"));
+    assert!(source.contains("fn lower_invocation("));
+    assert!(source.contains("_plan: &AdapterInvocationPlan"));
+    assert!(source.contains("_contracts: &ProcedureContractRegistry"));
+    assert!(source.contains("check_program_feasibility,"));
+    assert!(source.contains("lower_invocation,"));
+    assert!(source.contains("AdapterRegistry::new([super::registration()])"));
+    assert!(source.contains("canonical_adapter_profile(DRIVER, name"));
+    assert!(source.contains("registration_conforms_to_the_adapter_api"));
+
+    // Compile and run the scaffold exactly as an independent crate. Point its sole Lab
+    // dependency at this checkout so the test exercises the generated source against the API
+    // that emitted it instead of requiring a publication first.
+    let adapter_api = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lab-adapter-api")
+        .canonicalize()
+        .unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace(
+            &format!("lab-adapter-api = {:?}", env!("CARGO_PKG_VERSION")),
+            &format!("lab-adapter-api = {{ path = {adapter_api:?} }}"),
+        ),
+    )
+    .unwrap();
+    let conformed = Command::new(env!("CARGO"))
+        .args(["test", "--quiet", "--manifest-path"])
+        .arg(&manifest_path)
+        .output()
+        .unwrap();
+    assert!(
+        conformed.status.success(),
+        "generated adapter did not compile and pass its conformance test:\n{}\n{}",
+        String::from_utf8_lossy(&conformed.stdout),
+        String::from_utf8_lossy(&conformed.stderr),
+    );
+
+    std::fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn python_bindings_are_generated_from_the_checked_package_interface() {
+    let project = temporary_project();
+    let project_text = project.to_string_lossy().into_owned();
+    let created = run(&["new", "project", &project_text, "--name", "binding-fixture"]);
+    assert!(created.status.success());
+
+    let generated = run(&["bindings", "python", &project_text]);
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let runtime = project.join("bindings/python/binding_fixture/programs/main.py");
+    let stub = project.join("bindings/python/binding_fixture/programs/main.pyi");
+    assert!(runtime.is_file());
+    assert!(stub.is_file());
+    assert!(
+        std::fs::read_to_string(runtime)
+            .unwrap()
+            .contains("ImportedWorkflow(")
+    );
+    assert!(
+        std::fs::read_to_string(stub)
+            .unwrap()
+            .contains("-> WorkflowCall[")
+    );
+
+    std::fs::remove_dir_all(project).unwrap();
 }
 
 #[test]
@@ -380,7 +518,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     let solution = read_json(project.join(".lab/plan/compiler/facility-solution.json"));
     assert_eq!(
         solution["schema_version"],
-        "lab.facility-planning-solution.v1"
+        "lab.facility-planning-solution.v3"
     );
     assert_eq!(
         solution["selections"][0]["method"],
@@ -398,7 +536,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v3");
+    assert_eq!(plan["format"], "lab.execution-plan.v4");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -464,7 +602,7 @@ fn run_requires_a_reviewed_facility_plan() {
 fn registry_dependencies_fail_closed_without_being_ignored() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
-    let created = run(&["new", &project_text]);
+    let created = run(&["new", "project", &project_text]);
     assert!(created.status.success());
     let manifest = project.join("lab.toml");
     let mut text = std::fs::read_to_string(&manifest).unwrap();
@@ -482,7 +620,7 @@ fn registry_dependencies_fail_closed_without_being_ignored() {
 fn check_validates_a_configured_sbol_inventory() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
-    let created = run(&["new", &project_text]);
+    let created = run(&["new", "project", &project_text]);
     assert!(created.status.success());
 
     let manifest = project.join("lab.toml");
@@ -517,7 +655,7 @@ fn check_validates_a_configured_sbol_inventory() {
 fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
-    let created = run(&["new", &project_text]);
+    let created = run(&["new", "project", &project_text]);
     assert!(created.status.success());
 
     let manifest = project.join("lab.toml");
@@ -565,7 +703,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     );
 
     let index = read_json(project.join(".lab/build/package.json"));
-    assert_eq!(index["schema_version"], 7);
+    assert_eq!(index["schema_version"], 8);
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
     assert_eq!(
         index["compiler"]["facility_solution"],
@@ -580,7 +718,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         "https://example.org/sbolinventory/facility"
     );
     let bindings = read_json(project.join(".lab/build/adapter_bindings.json"));
-    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v4");
+    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v7");
     assert_eq!(
         bindings["facility"],
         "https://example.org/sbolinventory/facility"
@@ -1096,9 +1234,9 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         .expect("the authored thermal program is rendered");
     assert!(deactivate_sources < execute_thermal);
     assert_eq!(
-        manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
-        serde_json::json!(["5"]),
-        "the allocated adapter emits the concrete deck plan"
+        manifest["deck"]["resources"]["small_tips"]["slots"],
+        serde_json::json!(["2"]),
+        "the allocated adapter emits its concrete physical resources"
     );
     let transformation = read_json(target_root.join("transformation_manifest.json"));
     assert_eq!(transformation["execution"]["kind"], "transformation");
@@ -1435,7 +1573,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     assert!(out_dir.join("package.json").is_file());
     let index = read_json(out_dir.join("package.json"));
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
-    assert_eq!(index["schema_version"], 7);
+    assert_eq!(index["schema_version"], 8);
     assert_eq!(
         index["compiler"]["planning_problem"],
         "compiler/planning-problem.json"
@@ -1452,7 +1590,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v2");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v3");
     assert!(invocations.get("material_inventory").is_none());
     let j23101_binding = invocations["methods"]
         .as_array()
@@ -2234,7 +2372,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     }));
 
     let execution = read_json(plan_dir.join("plan.execution.json"));
-    assert_eq!(execution["format"], "lab.execution-plan.v3");
+    assert_eq!(execution["format"], "lab.execution-plan.v4");
     assert!(
         execution["materials"]
             .as_array()
@@ -2449,9 +2587,9 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     .unwrap();
     assert_eq!(manifest["adapter"], "opentrons.flex");
     assert_eq!(
-        manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
-        serde_json::json!(["B2", "B3"]),
-        "the emitted plan carries the allocated adapter's deck configuration"
+        manifest["deck"]["resources"]["small_tips"]["slots"],
+        serde_json::json!(["C2"]),
+        "the emitted plan carries the allocated adapter's physical resources"
     );
 
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));

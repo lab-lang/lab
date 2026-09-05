@@ -6,6 +6,7 @@
 
 pub(crate) mod analysis;
 pub mod binding;
+pub mod builder;
 pub mod capability;
 pub mod contract;
 pub mod feature;
@@ -15,9 +16,17 @@ pub(crate) mod normalization;
 pub mod pipetting;
 pub mod program;
 pub mod quantity;
+pub mod template;
 pub mod thermal;
 pub mod vocabulary;
 
+pub use builder::{
+    ProcedureCompiler, ProcedureCompilerError, ProcedureMethodRegistryError,
+    ProcedureProgramBuildContext, ProcedureProgramBuildError, ProcedureProgramBuilder,
+    ProcedureProgramBuilderId, ProcedureProgramBuilderRegistration,
+    ProcedureProgramBuilderRegistry, ProcedureProgramBuilderRegistryError,
+    ResolvedProcedureMaterial, ResolvedProcedureParameter, builtin_procedure_compiler,
+};
 pub use capability::{BindingScope, CapabilityClause, CapabilityFormula};
 pub use contract::{
     ProcedureContractAnalysis, ProcedureContractRegistration, ProcedureContractRegistry,
@@ -25,9 +34,6 @@ pub use contract::{
 };
 pub use feature::{ProgramFeature, pipetting_features, thermal_features};
 pub use id::{ProcedureLocalId, ProcedureLocalIdError};
-pub use normalization::{
-    ProcedureNormalizationError, ProcedureTaskProgramValidationError, validate_task_program,
-};
 pub use pipetting::{
     AspirationStrategy, DispenseStrategy, FluidPathPolicy, LiquidLedger, Location, MaterialInput,
     MaterialOutput, MixTechnique, PipettingConstraints, PipettingProgramV1,
@@ -36,11 +42,14 @@ pub use pipetting::{
 };
 pub use program::{
     ProcedureProgram, ProcedureProgramDecodeError, ProcedureProgramValidationError,
-    ValidatedProcedureProgram,
+    ProcedureTaskProgramValidationError, ValidatedProcedureProgram, validate_task_program,
 };
 pub use quantity::{
     Duration, Length, Mass, MassConcentration, QuantityError, Temperature, TemperatureRampRate,
     TemperatureRange, Volume,
+};
+pub use template::{
+    ProcedureProgramTemplateError, ProcedureTemplateEvaluationError, evaluate_procedure_template,
 };
 pub use thermal::{
     ThermalLoad, ThermalProgramV1, ThermalProgramValidationError, ThermalStage, ThermalStep,

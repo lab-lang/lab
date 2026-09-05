@@ -419,11 +419,18 @@ impl Checker {
     ) -> Result<Ty, SemanticError> {
         let name = super::path_text(constructor);
         let result = if let Some(parent) = self.cases.get(&name) {
-            let signature = &self.data[parent];
-            let mut expected = signature.fields.clone();
-            expected.extend(signature.cases[&name].clone());
-            self.check_constructor_fields(&name, fields, &expected, environment, span)?;
-            Ty::named(parent)
+            if let Some(signature) = self.data.get(parent) {
+                let mut expected = signature.fields.clone();
+                expected.extend(signature.cases[&name].clone());
+                self.check_constructor_fields(&name, fields, &expected, environment, span)?;
+                Ty::named(parent)
+            } else if let Some(constructor) = self.constructors.get(&name) {
+                let expected = self.constructor_fields(constructor);
+                self.check_constructor_fields(&name, fields, &expected, environment, span)?;
+                constructor.result.clone()
+            } else {
+                unreachable!("every registered outcome case has a constructor signature")
+            }
         } else if let Some(signature) = self.data.get(&name) {
             self.check_constructor_fields(&name, fields, &signature.fields, environment, span)?;
             Ty::named(&name)

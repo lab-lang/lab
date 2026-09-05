@@ -224,6 +224,7 @@ impl fmt::Debug for LoadedReviewedDocument {
 #[derive(Clone, Copy, Debug)]
 pub struct ReviewedDocumentLoadRequest<'a> {
     pub adapter_id: &'a str,
+    pub procedure_implementation: &'a str,
     pub format: &'a str,
     pub expected_capability_kind: &'a str,
     pub bytes: &'a [u8],
@@ -236,6 +237,7 @@ type ReviewedDocumentLoader =
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct ReviewedDocumentLoaderKey {
     adapter_id: String,
+    procedure_implementation: String,
     format: String,
 }
 
@@ -256,6 +258,7 @@ impl ReviewedDocumentLoaderRegistry {
     pub fn register<F>(
         &mut self,
         adapter_id: impl Into<String>,
+        procedure_implementation: impl Into<String>,
         format: impl Into<String>,
         loader: F,
     ) -> Result<()>
@@ -267,15 +270,22 @@ impl ReviewedDocumentLoaderRegistry {
     {
         let key = ReviewedDocumentLoaderKey {
             adapter_id: adapter_id.into(),
+            procedure_implementation: procedure_implementation.into(),
             format: format.into(),
         };
-        if key.adapter_id.is_empty() || key.format.is_empty() {
-            bail!("a document loader key requires a non-empty adapter ID and format");
+        if key.adapter_id.is_empty()
+            || key.procedure_implementation.is_empty()
+            || key.format.is_empty()
+        {
+            bail!(
+                "a document loader key requires a non-empty adapter ID, Procedure implementation, and format"
+            );
         }
         if self.loaders.insert(key.clone(), Box::new(loader)).is_some() {
             bail!(
-                "a reviewed-document loader is already registered for adapter '{}' and format '{}'",
+                "a reviewed-document loader is already registered for adapter '{}', Procedure implementation '{}', and format '{}'",
                 key.adapter_id,
+                key.procedure_implementation,
                 key.format
             );
         }
@@ -285,6 +295,7 @@ impl ReviewedDocumentLoaderRegistry {
     pub fn load(
         &self,
         adapter_id: &str,
+        procedure_implementation: &str,
         format: &str,
         expected_capability_kind: &str,
         bytes: &[u8],
@@ -292,13 +303,17 @@ impl ReviewedDocumentLoaderRegistry {
     ) -> Result<LoadedReviewedDocument> {
         let key = ReviewedDocumentLoaderKey {
             adapter_id: adapter_id.to_owned(),
+            procedure_implementation: procedure_implementation.to_owned(),
             format: format.to_owned(),
         };
         let loader = self.loaders.get(&key).with_context(|| {
-            format!("adapter '{adapter_id}' has no reviewed-document loader for format '{format}'")
+            format!(
+                "adapter '{adapter_id}' implementation '{procedure_implementation}' has no reviewed-document loader for format '{format}'"
+            )
         })?;
         let document = loader(ReviewedDocumentLoadRequest {
             adapter_id,
+            procedure_implementation,
             format,
             expected_capability_kind,
             bytes,
@@ -306,7 +321,7 @@ impl ReviewedDocumentLoaderRegistry {
         })?;
         if document.format() != format {
             bail!(
-                "the loader registered for adapter '{adapter_id}' and format '{format}' returned format '{}'",
+                "the loader registered for adapter '{adapter_id}', implementation '{procedure_implementation}', and format '{format}' returned format '{}'",
                 document.format()
             );
         }
@@ -327,6 +342,7 @@ pub trait DocumentExecutor {
 struct ExecutorKey {
     asset: String,
     driver: String,
+    procedure_implementation: String,
     format: String,
 }
 
@@ -346,32 +362,48 @@ impl ExecutorRegistry {
         &mut self,
         asset: impl Into<String>,
         driver: impl Into<String>,
+        procedure_implementation: impl Into<String>,
         format: impl Into<String>,
         executor: Box<dyn DocumentExecutor>,
     ) -> Result<()> {
         let key = ExecutorKey {
             asset: asset.into(),
             driver: driver.into(),
+            procedure_implementation: procedure_implementation.into(),
             format: format.into(),
         };
-        if key.asset.is_empty() || key.driver.is_empty() || key.format.is_empty() {
-            bail!("an executor key requires a non-empty Asset IRI, adapter ID, and format");
+        if key.asset.is_empty()
+            || key.driver.is_empty()
+            || key.procedure_implementation.is_empty()
+            || key.format.is_empty()
+        {
+            bail!(
+                "an executor key requires a non-empty Asset IRI, adapter ID, Procedure implementation, and format"
+            );
         }
         if self.executors.insert(key.clone(), executor).is_some() {
             bail!(
-                "an executor is already registered for asset '{}', adapter '{}', format '{}'",
+                "an executor is already registered for asset '{}', adapter '{}', Procedure implementation '{}', format '{}'",
                 key.asset,
                 key.driver,
+                key.procedure_implementation,
                 key.format
             );
         }
         Ok(())
     }
 
-    fn contains(&self, asset: &str, driver: &str, format: &str) -> bool {
+    fn contains(
+        &self,
+        asset: &str,
+        driver: &str,
+        procedure_implementation: &str,
+        format: &str,
+    ) -> bool {
         self.executors.contains_key(&ExecutorKey {
             asset: asset.to_owned(),
             driver: driver.to_owned(),
+            procedure_implementation: procedure_implementation.to_owned(),
             format: format.to_owned(),
         })
     }
@@ -380,11 +412,13 @@ impl ExecutorRegistry {
         &mut self,
         asset: &str,
         driver: &str,
+        procedure_implementation: &str,
         format: &str,
     ) -> Option<&mut (dyn DocumentExecutor + '_)> {
         let key = ExecutorKey {
             asset: asset.to_owned(),
             driver: driver.to_owned(),
+            procedure_implementation: procedure_implementation.to_owned(),
             format: format.to_owned(),
         };
         match self.executors.get_mut(&key) {
@@ -540,12 +574,25 @@ pub fn run_execution_plan(
         let Some(adapter) = &requirement.adapter else {
             continue;
         };
-        if !registry.contains(&requirement.asset, &adapter.driver, document.format()) {
+        let Some(implementation) = requirement.procedure_implementation.as_deref() else {
             readiness.push(format!(
-                "node '{}' has no registered executor for asset '{}', adapter '{}', format '{}'",
+                "node '{}' has an adapter but no exact Procedure implementation",
+                node.id
+            ));
+            continue;
+        };
+        if !registry.contains(
+            &requirement.asset,
+            &adapter.driver,
+            implementation,
+            document.format(),
+        ) {
+            readiness.push(format!(
+                "node '{}' has no registered executor for asset '{}', adapter '{}', Procedure implementation '{}', format '{}'",
                 node.id,
                 requirement.asset,
                 adapter.driver,
+                implementation,
                 document.format()
             ));
         }
@@ -688,6 +735,10 @@ fn execute_execution_node(
                 .adapter
                 .as_ref()
                 .expect("runtime readiness requires an adapter");
+            let implementation = requirement
+                .procedure_implementation
+                .as_deref()
+                .expect("runtime readiness requires a Procedure implementation");
             events.emit(RunEvent::DocumentStarted {
                 asset: requirement.asset.clone(),
                 driver: adapter.driver.clone(),
@@ -695,7 +746,12 @@ fn execute_execution_node(
                 title: document.title().to_owned(),
             });
             registry
-                .executor_mut(&requirement.asset, &adapter.driver, document.format())
+                .executor_mut(
+                    &requirement.asset,
+                    &adapter.driver,
+                    implementation,
+                    document.format(),
+                )
                 .expect("runtime readiness resolved the exact executor")
                 .execute(document, events)
                 .with_context(|| {
@@ -888,6 +944,12 @@ pub fn load_execution_directory(
                         )?;
                         Some(document_loaders.load(
                             &adapter.driver,
+                            binding.procedure_implementation.as_deref().with_context(|| {
+                                format!(
+                                    "execute node '{}' has a reviewed document but no exact Procedure implementation",
+                                    node.id
+                                )
+                            })?,
                             &document.format,
                             &binding.capability_kind,
                             &bytes,
@@ -1379,6 +1441,13 @@ pub(crate) mod tests {
         load_plate_read, load_simulation_run, load_star_run, load_thermocycle_run,
     };
 
+    const STAR_IMPLEMENTATION: &str = "https://example.org/implementation/star-v1";
+    const ODTC_IMPLEMENTATION: &str = "https://example.org/implementation/odtc-v1";
+    const BYONOY_IMPLEMENTATION: &str = "https://example.org/implementation/byonoy-v1";
+    const SIMULATOR_IMPLEMENTATION: &str = "https://example.org/implementation/simulator-v1";
+    const OT2_IMPLEMENTATION: &str = "https://example.org/implementation/ot2-v1";
+    const FLEX_IMPLEMENTATION: &str = "https://example.org/implementation/flex-v1";
+
     const INVENTORY: &str = r#"@prefix cap: <https://sbol.io/ns/capability#> .
 @prefix ex: <https://example.org/facility/> .
 @prefix fac: <https://sbol.io/ns/facility#> .
@@ -1443,11 +1512,17 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
     pub(crate) fn document_loaders() -> ReviewedDocumentLoaderRegistry {
         let mut registry = ReviewedDocumentLoaderRegistry::new();
         registry
-            .register("hamilton.star", STAR_RUN_FORMAT, load_star_run)
+            .register(
+                "hamilton.star",
+                STAR_IMPLEMENTATION,
+                STAR_RUN_FORMAT,
+                load_star_run,
+            )
             .unwrap();
         registry
             .register(
                 "inheco.odtc",
+                ODTC_IMPLEMENTATION,
                 lab_runfmt::THERMOCYCLE_RUN_FORMAT,
                 load_thermocycle_run,
             )
@@ -1455,6 +1530,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         registry
             .register(
                 "byonoy.absorbance96",
+                BYONOY_IMPLEMENTATION,
                 lab_runfmt::PLATE_READ_FORMAT,
                 load_plate_read,
             )
@@ -1462,6 +1538,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         registry
             .register(
                 "lab.simulator",
+                SIMULATOR_IMPLEMENTATION,
                 lab_runfmt::SIMULATION_RUN_FORMAT,
                 load_simulation_run,
             )
@@ -1469,6 +1546,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         registry
             .register(
                 "opentrons.ot2",
+                OT2_IMPLEMENTATION,
                 lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT,
                 load_opentrons_python_protocol,
             )
@@ -1476,6 +1554,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         registry
             .register(
                 "opentrons.flex",
+                FLEX_IMPLEMENTATION,
                 lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT,
                 load_opentrons_protocol_designer,
             )
@@ -1489,6 +1568,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         registry
             .register(
                 "example.custom",
+                "https://example.org/implementation/custom-v1",
                 "example.reviewed.v1",
                 load_custom_document,
             )
@@ -1497,6 +1577,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         let loaded = registry
             .load(
                 "example.custom",
+                "https://example.org/implementation/custom-v1",
                 "example.reviewed.v1",
                 "https://example.org/capability",
                 b"typed payload",
@@ -1512,6 +1593,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         let error = registry
             .load(
                 "different.adapter",
+                "https://example.org/implementation/custom-v1",
                 "example.reviewed.v1",
                 "https://example.org/capability",
                 b"typed payload",
@@ -1524,6 +1606,7 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
         let duplicate = registry
             .register(
                 "example.custom",
+                "https://example.org/implementation/custom-v1",
                 "example.reviewed.v1",
                 load_custom_document,
             )
@@ -1536,14 +1619,18 @@ ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
     fn a_loader_cannot_return_a_different_format_than_its_exact_key() {
         let mut registry = ReviewedDocumentLoaderRegistry::new();
         registry
-            .register("example.custom", "example.reviewed.v1", |_request| {
-                LoadedReviewedDocument::new("wrong.format", "Wrong", ())
-            })
+            .register(
+                "example.custom",
+                "https://example.org/implementation/custom-v1",
+                "example.reviewed.v1",
+                |_request| LoadedReviewedDocument::new("wrong.format", "Wrong", ()),
+            )
             .unwrap();
 
         let error = registry
             .load(
                 "example.custom",
+                "https://example.org/implementation/custom-v1",
                 "example.reviewed.v1",
                 "https://example.org/capability",
                 b"",
@@ -1564,6 +1651,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         let loaded = document_loaders()
             .load(
                 "opentrons.ot2",
+                OT2_IMPLEMENTATION,
                 "opentrons.python-protocol",
                 "https://sbol.io/ns/capability#LiquidHandling",
                 source,
@@ -1584,6 +1672,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
         let error = document_loaders()
             .load(
                 "opentrons.ot2",
+                OT2_IMPLEMENTATION,
                 "opentrons.python-protocol",
                 "https://sbol.io/ns/capability#LiquidHandling",
                 b"def run(): pass\n",
@@ -1614,6 +1703,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             .register(
                 "https://example.org/facility/star",
                 "hamilton.star",
+                STAR_IMPLEMENTATION,
                 STAR_RUN_FORMAT,
                 Box::new(RecordingExecutor { calls }),
             )
@@ -1664,7 +1754,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
                     minimum_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                     observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                     control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
-                    procedure_implementation: None,
+                    procedure_implementation: Some(STAR_IMPLEMENTATION.to_owned()),
                     parameters: Vec::new(),
                     adapter: Some(ExecutionAdapterBinding {
                         driver: "hamilton.star".to_owned(),
@@ -1824,6 +1914,9 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             methods: vec![ExecutionMethodSelection {
                 choice: "main::body[0]".to_owned(),
                 source_operation: "std.bio.build.realize".to_owned(),
+                source_intent: serde_json::json!({
+                    "operation": "std.bio.build.realize",
+                }),
                 method: "https://example.org/method#automated".to_owned(),
                 tasks: vec!["main::body[0]::setup".to_owned()],
             }],
@@ -1988,6 +2081,7 @@ def run(protocol: protocol_api.ProtocolContext) -> None:
             .register(
                 "https://example.org/facility/another-star",
                 "hamilton.star",
+                STAR_IMPLEMENTATION,
                 STAR_RUN_FORMAT,
                 Box::new(RecordingExecutor {
                     calls: Arc::new(Mutex::new(Vec::new())),

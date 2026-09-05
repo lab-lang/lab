@@ -3,8 +3,7 @@
 use crate::backend::resources::PlateCapacity;
 
 use crate::backend::opentrons::flex::profile::schema::{
-    AssemblyStage, MediaRack, Pipette, Plates, PlatingStage, TemperatureModule, Thermocycler,
-    TipRacks, TransformationStage, Trash,
+    Pipette, TemperatureModule, Thermocycler, TipRacks, Trash,
 };
 
 pub(super) fn default_small_pipette() -> Pipette {
@@ -21,7 +20,7 @@ pub(super) fn default_large_pipette() -> Pipette {
     }
 }
 
-pub(super) fn default_temperature_module() -> TemperatureModule {
+pub(super) fn default_sources() -> TemperatureModule {
     TemperatureModule {
         model: "temperatureModuleV2".to_owned(),
         slot: "C1".to_owned(),
@@ -30,7 +29,7 @@ pub(super) fn default_temperature_module() -> TemperatureModule {
     }
 }
 
-pub(super) fn default_thermocycler() -> Thermocycler {
+pub(super) fn default_work() -> Thermocycler {
     Thermocycler {
         model: "thermocyclerModuleV2".to_owned(),
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
@@ -48,7 +47,7 @@ pub(super) fn default_plate_capacity() -> PlateCapacity {
     plate_capacity(96)
 }
 
-pub(super) fn default_assembly_small_tips() -> TipRacks {
+pub(super) fn default_small_tips() -> TipRacks {
     TipRacks {
         labware: "opentrons_flex_96_tiprack_50ul".to_owned(),
         slots: vec!["C2".to_owned()],
@@ -56,91 +55,11 @@ pub(super) fn default_assembly_small_tips() -> TipRacks {
     }
 }
 
-pub(super) fn default_assembly_stage() -> AssemblyStage {
-    AssemblyStage {
-        small_tips: default_assembly_small_tips(),
-    }
-}
-
-pub(super) fn default_transformation_dna_plate() -> Plates {
-    Plates {
-        labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        slots: vec!["C2".to_owned()],
-        capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_transformation_small_tips() -> TipRacks {
-    TipRacks {
-        labware: "opentrons_flex_96_tiprack_50ul".to_owned(),
-        slots: vec!["C3".to_owned()],
-        capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_transformation_large_tips() -> TipRacks {
+pub(super) fn default_large_tips() -> TipRacks {
     TipRacks {
         labware: "opentrons_flex_96_tiprack_1000ul".to_owned(),
         slots: vec!["D2".to_owned()],
         capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_transformation_stage() -> TransformationStage {
-    TransformationStage {
-        dna_plate: default_transformation_dna_plate(),
-        small_tips: default_transformation_small_tips(),
-        large_tips: default_transformation_large_tips(),
-    }
-}
-
-pub(super) fn default_dilution_plate() -> Plates {
-    Plates {
-        labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        slots: vec!["C2".to_owned(), "C3".to_owned()],
-        capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_agar_plate() -> Plates {
-    Plates {
-        labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
-        slots: vec!["B2".to_owned(), "B3".to_owned()],
-        capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_media_rack() -> MediaRack {
-    MediaRack {
-        labware: "opentrons_15_tuberack_falcon_15ml_conical".to_owned(),
-        slot: "D1".to_owned(),
-        medium_well: "A1".to_owned(),
-    }
-}
-
-pub(super) fn default_plating_small_tips() -> TipRacks {
-    TipRacks {
-        labware: "opentrons_flex_96_tiprack_50ul".to_owned(),
-        slots: vec!["D2".to_owned()],
-        capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_plating_large_tips() -> TipRacks {
-    TipRacks {
-        labware: "opentrons_flex_96_tiprack_1000ul".to_owned(),
-        slots: vec!["D3".to_owned()],
-        capacity: default_plate_capacity(),
-    }
-}
-
-pub(super) fn default_plating_stage() -> PlatingStage {
-    PlatingStage {
-        dilution_plate: default_dilution_plate(),
-        agar_plate: default_agar_plate(),
-        media_rack: default_media_rack(),
-        small_tips: default_plating_small_tips(),
-        large_tips: default_plating_large_tips(),
     }
 }
 

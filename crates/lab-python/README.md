@@ -52,7 +52,7 @@ print(module["declarations"])
 
 ## Portable Methods and capability refinement
 
-Python can also contribute portable Methods at the same semantic boundary as the Rust compiler. A Method refines one Intent operation into a Procedure graph with typed values, parameters, and capability requirements. It does not name a facility, asset, offering, material lot, adapter, or schedule; the facility planner makes those choices later.
+Python can also contribute portable Methods at the same semantic boundary as the Rust compiler. A Method refines one Intent operation into a Procedure graph with typed values and parameters. Each task uses one of three explicit execution forms: `TemplateExecution` renders a declarative contract body, `BuilderExecution` names a registered construction algorithm, and `PrimitiveExecution` states capability requirements directly. Templates and builders derive capabilities from the contract-validated program. A Method does not name a facility, asset, offering, material lot, adapter, or schedule; the facility planner makes those choices later.
 
 ```python
 import lab
@@ -91,11 +91,13 @@ sequence_synthesis = m.Method(
                     m.ProcedureValueExpression.intent_parameter("dependencies"),
                 ),
             ),
-            requirements=(
-                m.Requirement(
-                    id="synthesis",
-                    capability_kind="https://example.org/capability#SequenceSynthesis",
-                    accepted_control_modes=(m.ControlMode.REVIEWED_FILE,),
+            execution=m.PrimitiveExecution(
+                requirements=(
+                    m.Requirement(
+                        id="synthesis",
+                        capability_kind="https://example.org/capability#SequenceSynthesis",
+                        accepted_control_modes=(m.ControlMode.REVIEWED_FILE,),
+                    ),
                 ),
             ),
         ),
@@ -104,11 +106,18 @@ sequence_synthesis = m.Method(
 )
 
 program = lab.check_sources({"example.main": source})
-refined = lab.refine(program, methods=(sequence_synthesis,), include_standard=False)
+refined = lab.refine(
+    program,
+    entry_module="example.main",
+    methods=(sequence_synthesis,),
+    include_standard=False,
+)
 print(refined.planning_problem)
 ```
 
-The Python classes serialize the LAIR-owned Method contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v1` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+The Python classes serialize the LAIR-owned Method contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v2` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
+
+Declarative templates are ordinary JSON. A slot is an object whose only key is `$lab`, for example `{"$lab": {"kind": "integer", "id": "cycles"}}`. The closed slot kinds are `intent`, `artifact`, `parameter`, `scalar`, `integer`, `text`, `boolean`, `iri`, `input`, `output`, and `material`. `intent` and `artifact` expose the complete checked source action and owning design without another projection ABI. `parameter` inserts the complete tagged Procedure value; `scalar` inserts a complete typed property value; the scalar projections require an exact matching, unitless scalar. Input indices and output or material IDs are checked against the enclosing task before the rendered body is validated by its Procedure contract.
 
 The same typed authoring surface writes a persistent package catalog:
 
@@ -122,11 +131,11 @@ catalog.write("methods/synthesis.json")
 documents = ["methods/synthesis.json"]
 ```
 
-`write` validates through Rust and emits the versioned `lab.method-catalog.v1` envelope. `include_standard` controls validation and in-memory refinement; it is not serialized because a package document contributes only its own portable definitions. Lab loads documents from the runnable package and its reachable path dependencies, composes them with the standard registry, and fails `lab check` on an unknown version, duplicate Method identity, incompatible Intent signature, or invalid Procedure graph.
+`write` validates through Rust and emits the versioned `lab.method-catalog.v2` envelope. `include_standard` controls validation and in-memory refinement; it is not serialized because a package document contributes only its own portable definitions. Lab loads documents from the runnable package and its reachable path dependencies, composes them with the standard registry, and fails `lab check` on an unknown version, duplicate Method identity, incompatible Intent signature, or invalid Procedure graph.
 
 ## Facility planning
 
-Python calls the same project service as `lab plan`; it does not implement a separate allocator. A package's `lab.toml` contributes persistent Method catalogs, selects its SBOLInventory document, and declares local adapter bindings. `plan_project` composes those catalogs with any `methods=` supplied in memory, then compiles the package through Method refinement, exact MaterialLot and capability-offering allocation, allocated Procedure LAIR, and adapter invocation projection.
+Python calls the same project service as `lab plan`; it does not implement a separate build prelude or allocator. The service runs `[build].generate` before loading either file-backed or Python-supplied programs. A package's `lab.toml` contributes persistent Method catalogs, selects its SBOLInventory document, and declares local adapter bindings. `plan_project` composes those catalogs with any `methods=` supplied in memory, then compiles the package through Method refinement, exact MaterialLot and capability-offering allocation, allocated Procedure LAIR, and adapter invocation projection.
 
 ```python
 import lab
@@ -150,11 +159,19 @@ for invocation in planned.invocations:
 An in-memory `Program`, including one emitted by the Python object model, can use an existing package as its facility and policy context:
 
 ```python
-program = lab.check(designs.module, workflows.module)
-planned = lab.plan(program, project="path/to/facility-package")
+program = lab.check(
+    designs.module,
+    workflows.module,
+    project="path/to/facility-package",
+)
+planned = lab.plan(
+    program,
+    entry_module="my_protocol",
+    project="path/to/facility-package",
+)
 ```
 
-The returned `FacilityPlan` provides typed Method, Procedure task, canonical program, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. Its top-level `material_inventory` retains the complete candidate MaterialLot evidence used for planning; `adapter_invocations` contains only selected material bindings and the source inventory digest. `lab.procedures` exposes immutable `PipettingProgramV1` and `ThermalProgramV1` bodies with exact `Decimal` quantities, typed vessel roles and liquid operations, portable aspiration and dispense strategies, air gaps, blowout and touch-tip requirements, and typed thermal stages and steps. Rust remains the authority that normalizes and validates these programs, constructs the exact liquid ledger, and derives their capability formulas; Python reads the frozen result. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
+The returned `FacilityPlan` provides typed Method, Procedure task, canonical program, exact parameter and port, MaterialLot, capability offering, Asset, adapter, and invocation selections. Its top-level `material_inventory` retains the complete candidate MaterialLot evidence used for planning; `adapter_invocations` contains only selected material bindings and the source inventory digest. `lab.procedures` exposes immutable `PipettingProgramV1` and `ThermalProgramV1` bodies with exact `Decimal` quantities, typed vessel roles and liquid operations, portable aspiration and dispense strategies, air gaps, blowout and touch-tip requirements, and typed thermal stages and steps. Rust remains the authority that renders a declarative template or runs an explicit builder, validates the result, constructs the exact liquid ledger, and derives its capability formula; Python reads the frozen result. `task(id)`, `invocation_tasks(invocation)`, and the corresponding lookup helpers resolve the stable identities without making callers traverse raw dictionaries. The complete planning problem, adapter-binding snapshot, and raw invocation document remain available as interoperability escape hatches.
 
 ## Adapter discovery and profile validation
 
@@ -422,7 +439,7 @@ One limitation worth knowing: a record's fields are Lab types written as annotat
 `lab` itself and `lab.bio.*` hold the same words `std.prelude` and `std.bio.*` do. Lab imports the prelude into every module without being asked, and the Python namespace that is always reachable is the package, so `from lab import Material, dna` is what `use std.prelude` would have been. They are generated from the compiler's own catalog, so the mirror cannot drift from what a Lab program sees, and they are checked in so an editor and a typechecker can use them without running anything. Regenerate after changing the standard library:
 
 ```sh
-cd crates/lab-python && uv run python -m lab.codegen
+lab bindings python std --out-dir crates/lab-python/python/lab
 ```
 
 `tests/test_codegen.py` fails if the checked-in mirror is stale. Types and roles are generated as classes so annotations written with them typecheck; values, functions, and durable actions are generated as the objects that render them.

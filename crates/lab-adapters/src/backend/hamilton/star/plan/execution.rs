@@ -1,19 +1,18 @@
-//! The resource-allocated STAR execution plan: the science each artifact
-//! carries, the deck and source allocation, and the lowered per-run
-//! operation sequences whose numbers are already in firmware wire units.
+//! Resource-allocated STAR runs whose canonical liquid operations have been lowered to firmware
+//! wire units.
 
 use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::backend::hamilton::star::liquid_classes::{LiquidClassEvidence, LiquidClassIdentity};
+use crate::backend::hamilton::star::liquid_classes::{
+    LiquidClassEvidence, LiquidClassIdentity, LiquidClassLibraryIdentity,
+};
 use crate::backend::hamilton::star::profile::LldPolicy;
 use crate::backend::hamilton::star::profile::StarAdapterProfile;
 
-/// A well on a named plan resource. Resource keys are stable strings the
-/// deck summary and emitters share: `source_rack`, `reaction_plate`,
-/// `media_rack`, and indexed stage plates like `dna_plate/1`; tip racks are
-/// `assembly_small_tips/1` and siblings.
+/// A well on a named profile resource. Resource keys are stable strings shared by the deck
+/// summary and emitters.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct StarWell {
     pub resource: String,
@@ -29,9 +28,7 @@ impl StarWell {
     }
 }
 
-/// Every well, source position, and replicate the machine will touch,
-/// allocated once and shared by every emitted artifact, plus the lowered
-/// run sequences.
+/// Every source fill, tip allocation, liquid class, and lowered run emitted for one task.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StarExecutionPlan {
     pub schema_version: String,
@@ -39,20 +36,14 @@ pub struct StarExecutionPlan {
     pub adapter: String,
     /// Checked implementation configuration for the allocated Asset binding.
     pub deck: StarAdapterProfile,
-    /// Source-rack well for each assembly-stage reagent, DNA, and enzyme
-    /// key.
-    pub assembly_source_wells: BTreeMap<String, String>,
-    /// Source-rack well for each transformation-stage cells/media key.
-    pub transformation_source_wells: BTreeMap<String, String>,
-    /// DNA-plate well holding each plasmid a strain is transformed from.
-    pub dna_source_wells: BTreeMap<String, StarWell>,
-    pub assemblies: Vec<StarAssemblyPlan>,
-    pub strains: Vec<StarStrainPlan>,
     /// The volume the operator loads into each source position: everything
     /// the runs consume plus the vessel's dead volume.
     pub source_fills: Vec<SourceFill>,
     /// Tips consumed per tip-rack resource, against its capacity.
     pub tip_usage: BTreeMap<String, usize>,
+    /// Exact profile-selected library from which all class evidence below was
+    /// resolved.
+    pub liquid_class_library: LiquidClassLibraryIdentity,
     /// Exact liquid-class snapshots selected while lowering this plan. The
     /// identity of each snapshot is also carried by every liquid channel.
     pub liquid_classes: Vec<LiquidClassEvidence>,
@@ -64,8 +55,7 @@ pub struct StarExecutionPlan {
 /// One source position and the volume to load into it.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct SourceFill {
-    /// The planning key (`reagent:…`, `dna:…`, `enzyme:…`, `cells:…`, or
-    /// `medium`).
+    /// The exact material allocation symbol or Procedure-input identity.
     pub key: String,
     pub location: StarWell,
     /// Total volume the runs draw, µL.
@@ -74,119 +64,15 @@ pub struct SourceFill {
     pub load_ul: f64,
 }
 
-/// One plasmid artifact assembled on the reaction plate.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct StarAssemblyPlan {
-    pub artifact: String,
-    pub sequence: String,
-    pub backbone: String,
-    pub components: Vec<String>,
-    pub dependencies: Vec<String>,
-    pub restriction_enzyme: String,
-    pub assembly_replicates: u8,
-    pub water_volume_ul: u16,
-    pub assembly_wells: Vec<String>,
-    pub chemistry: StarAssemblyChemistry,
-}
-
-/// Golden Gate reaction parameters stated by the plasmid design.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct StarAssemblyChemistry {
-    pub reaction_volume_ul: u16,
-    pub part_volume_ul: u16,
-    pub enzyme_volume_ul: u16,
-    pub ligase_volume_ul: u16,
-    pub buffer_volume_ul: u16,
-    pub cycles: u16,
-    pub digest_temperature_c: u16,
-    pub digest_minutes: u16,
-    pub ligate_temperature_c: u16,
-    pub ligate_minutes: u16,
-}
-
-/// One strain artifact transformed from plasmids and plated.
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct StarStrainPlan {
-    pub artifact: String,
-    pub host: String,
-    pub plasmids: Vec<String>,
-    pub dependencies: Vec<String>,
-    pub selection: String,
-    pub transformation_replicates: u8,
-    pub plating_replicates: u8,
-    pub serial_dilutions: u8,
-    pub transformations: Vec<StarTransformationPlan>,
-    pub plating: Vec<StarPlatingPlan>,
-    pub chemistry: StarStrainChemistry,
-}
-
-/// Heat-shock transformation and plating parameters stated by the strain.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct StarStrainChemistry {
-    pub cell_volume_ul: u16,
-    pub dna_volume_ul: u16,
-    pub recovery_volume_ul: u16,
-    pub cold_minutes: u16,
-    pub heat_shock_temperature_c: u16,
-    pub heat_shock_minutes: u16,
-    pub recovery_temperature_c: u16,
-    pub recovery_minutes: u16,
-    pub medium_volume_ul: u16,
-    pub culture_volume_ul: u16,
-    pub colony_volume_ul: u16,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct StarTransformationPlan {
-    pub culture_well: String,
-    /// DNA-plate wells whose contents enter this reaction.
-    pub source_wells: Vec<StarWell>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct StarPlatingPlan {
-    pub culture_well: String,
-    pub dilution_wells: Vec<StarWell>,
-    pub agar_wells: Vec<Vec<StarWell>>,
-}
-
 /// One robot run and the manual steps that follow it before the next run
 /// may start.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct StarRunPlan {
-    /// The run's file stem, e.g. `assembly_run`.
+    /// Stable identifier for this canonical run.
     pub id: String,
     pub title: String,
     pub operations: Vec<StarOperation>,
     pub manual_after: Vec<ManualStep>,
-    /// The thermal programs behind this run's manual steps, structured for
-    /// projection into separate thermocycler documents. On a standalone STAR
-    /// adapter the operator prose in `manual_after` is the whole story, so
-    /// these never reach the serialized manifest.
-    #[serde(skip)]
-    pub thermal_after: Vec<ThermalRequirement>,
-}
-
-/// A thermal program a run needs after its liquid handling. Each
-/// requirement shadows one step of `manual_after` (named by
-/// `fallback_index`) so a facility plan can replace the prose with an exact
-/// thermocycler binding.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ThermalRequirement {
-    /// Stable identity within the run, e.g. `assembly_thermocycle`.
-    pub id: String,
-    pub title: String,
-    /// The deck resource that carries the reactions through the program.
-    pub plate: String,
-    pub profile: lab_instruments::ThermalProfile,
-    /// Temperature held after the profile ends, until retrieval.
-    pub final_hold_celsius: Option<f64>,
-    /// Approximate per-well fill, which thermocyclers use to pick a
-    /// volume-dependent control class.
-    pub fill_volume_ul: f64,
-    /// The position of this requirement's operator fallback in the run's
-    /// `manual_after`.
-    pub fallback_index: usize,
 }
 
 pub use lab_runfmt::ManualStep;

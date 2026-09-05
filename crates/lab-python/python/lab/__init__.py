@@ -8,7 +8,7 @@ Lab those objects describe and hands it to the compiler.
 The standard library is mirrored as ordinary Python packages, so `plasmid` is
 `lab.bio.designs.Plasmid` and importing it is what puts `use std.bio.designs`
 in the emitted module. Those mirrors are generated from the compiler's own
-catalog by `lab.codegen`.
+catalog by `lab bindings python std`.
 
 Checking is never reimplemented here. The language's own frontend is the only
 authority on whether a program is well formed, and a diagnostic it reports is

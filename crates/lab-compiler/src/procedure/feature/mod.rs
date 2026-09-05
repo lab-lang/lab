@@ -12,15 +12,14 @@
 
 use std::collections::BTreeSet;
 
+use lab_capability::AbsoluteIri;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::procedure::{PipettingProgramV1, ThermalProgramV1};
 
 /// One observable property an implementation must realize to run a program faithfully.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgramFeature {
     /// A logical vessel addresses more than one position, so the realization must lay out and
@@ -54,11 +53,19 @@ pub enum ProgramFeature {
     ThermalHeatedLid,
     ThermalFinalHold,
     ThermalMultiSample,
+    /// An observable property introduced by an out-of-tree Procedure contract.
+    ///
+    /// The absolute identity lets a contract and adapter agree on semantics without adding a
+    /// variant to the Lab compiler. Built-in contracts keep concise, exhaustively matched variants
+    /// because their typed Rust representations are maintained in this repository.
+    Extension {
+        id: AbsoluteIri,
+    },
 }
 
 impl ProgramFeature {
     /// A stable human-readable name for diagnostics.
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &str {
         match self {
             Self::MultiPositionVessel => "multi_position_vessel",
             Self::Transfer => "transfer",
@@ -86,6 +93,7 @@ impl ProgramFeature {
             Self::ThermalHeatedLid => "thermal_heated_lid",
             Self::ThermalFinalHold => "thermal_final_hold",
             Self::ThermalMultiSample => "thermal_multi_sample",
+            Self::Extension { id } => id.as_str(),
         }
     }
 }
@@ -104,4 +112,25 @@ pub fn pipetting_features(program: &PipettingProgramV1) -> BTreeSet<ProgramFeatu
 /// Every feature a thermal program requires of its implementation.
 pub fn thermal_features(program: &ThermalProgramV1) -> BTreeSet<ProgramFeature> {
     crate::procedure::thermal::required_features(program)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_features_round_trip_by_absolute_identity() {
+        let feature = ProgramFeature::Extension {
+            id: AbsoluteIri::new("https://example.org/procedure-feature#PulseWidth").unwrap(),
+        };
+        let json = serde_json::to_string(&feature).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ProgramFeature>(&json).unwrap(),
+            feature
+        );
+        assert_eq!(
+            feature.as_str(),
+            "https://example.org/procedure-feature#PulseWidth"
+        );
+    }
 }

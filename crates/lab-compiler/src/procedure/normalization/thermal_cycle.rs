@@ -3,14 +3,16 @@ use crate::procedure::{
     ThermalStep, Volume,
 };
 
-use super::ProcedureTaskInstance;
 use super::view::{TaskView, procedure_id};
+use crate::procedure::ProcedureProgramBuildContext;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
 const MINUTE: &str = "http://qudt.org/vocab/unit/MIN";
 
-pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedureProgram, String> {
+pub(super) fn normalize(
+    task: &ProcedureProgramBuildContext<'_>,
+) -> Result<ProcedureProgram, String> {
     if task.input_count != 1 {
         return Err(format!(
             "the Golden Gate thermal contract requires exactly one reaction input, found {}",

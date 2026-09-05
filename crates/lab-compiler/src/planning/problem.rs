@@ -7,9 +7,10 @@ use crate::procedure::binding::{
     ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
 };
 use crate::procedure::{
-    BindingScope, ProcedureProgram, ProcedureTaskProgramValidationError, ValidatedProcedureProgram,
-    validate_task_program,
+    BindingScope, ProcedureContractRegistry, ProcedureProgram, ProcedureTaskProgramValidationError,
+    ValidatedProcedureProgram, validate_task_program,
 };
+use crate::workflow::IntentAction;
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, OperationId, PropertyConstraint, PropertyKind,
     QualificationLevel,
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v1";
+pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v2";
 
 /// Every unresolved method choice and its complete Procedure requirement graph.
 ///
@@ -27,15 +28,24 @@ pub const PLANNING_PROBLEM_SCHEMA_VERSION: &str = "lab.planning-problem.v1";
 /// facility planner combines it with one validated inventory snapshot and explicit adapter
 /// bindings to construct the global allocation problem.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningProblem {
     pub schema_version: String,
     pub choices: Vec<PlanningMethodChoice>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningMethodChoice {
     pub id: LocalId,
     pub source_operation: IntentOperationId,
+    /// The complete checked action that this Method choice refines.
+    ///
+    /// Schemars represents this as arbitrary JSON because the checked-language
+    /// graph intentionally has no schema-generation dependency. Serde still
+    /// encodes and decodes the exact typed `IntentAction`.
+    #[schemars(with = "serde_json::Value")]
+    pub source_intent: IntentAction,
     /// Explicit completion dependencies that are not represented by an SSA operand, such as a
     /// strain build's requirement for a separately realized plasmid.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -48,6 +58,7 @@ pub struct PlanningMethodChoice {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningPort {
     pub name: LocalId,
     pub port_type: PortType,
@@ -58,6 +69,7 @@ pub struct PlanningPort {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningMethodCandidate {
     pub method: MethodId,
     pub tasks: Vec<PlanningProcedureTask>,
@@ -66,6 +78,7 @@ pub struct PlanningMethodCandidate {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningProcedureTask {
     pub id: LocalId,
     pub operation: OperationId,
@@ -89,6 +102,7 @@ pub struct PlanningProcedureTask {
 
 /// One stable physical material input before facility allocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningMaterialInput {
     pub id: LocalId,
     pub symbol: String,
@@ -97,7 +111,7 @@ pub struct PlanningMaterialInput {
 
 /// The physical origin of a Procedure material input before facility allocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlanningMaterialSource {
     /// Resolve the symbol through its checked SBOL Component identity and an active MaterialLot.
     Inventory,
@@ -106,18 +120,21 @@ pub enum PlanningMaterialSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningTaskInput {
     pub source: PlanningValueSource,
     pub port_type: PortType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningTaskOutput {
     pub name: LocalId,
     pub port_type: PortType,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningProcedureParameter {
     pub id: LocalId,
     pub property_kind: PropertyKind,
@@ -125,6 +142,7 @@ pub struct PlanningProcedureParameter {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningCapabilityRequirement {
     pub id: LocalId,
     pub capability_kind: CapabilityKind,
@@ -135,6 +153,7 @@ pub struct PlanningCapabilityRequirement {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningMethodYield {
     pub output: LocalId,
     pub source: PlanningValueSource,
@@ -142,7 +161,7 @@ pub struct PlanningMethodYield {
 
 /// A stable edge in one candidate Procedure graph.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlanningValueSource {
     ChoiceInput { input: LocalId },
     ChoiceOutput { choice: LocalId, output: LocalId },
@@ -158,7 +177,10 @@ impl PlanningProblem {
     }
 
     /// Validate a deserialized problem before a solver or facility query consumes it.
-    pub fn validate(&self) -> Result<(), PlanningProblemValidationError> {
+    pub fn validate(
+        &self,
+        contracts: &ProcedureContractRegistry,
+    ) -> Result<(), PlanningProblemValidationError> {
         if self.schema_version != PLANNING_PROBLEM_SCHEMA_VERSION {
             return Err(PlanningProblemValidationError::WrongSchema {
                 found: self.schema_version.clone(),
@@ -179,8 +201,37 @@ impl PlanningProblem {
                     choice: choice.id.clone(),
                 });
             }
+            choice.source_intent.validate().map_err(|message| {
+                PlanningProblemValidationError::InvalidSourceIntent {
+                    choice: choice.id.clone(),
+                    message,
+                }
+            })?;
+            if choice.source_intent.operation() != Some(choice.source_operation.as_str()) {
+                return Err(PlanningProblemValidationError::SourceOperationMismatch {
+                    choice: choice.id.clone(),
+                });
+            }
             validate_ports(&choice.id, "input", &choice.inputs)?;
             validate_ports(&choice.id, "output", &choice.outputs)?;
+            choice
+                .source_intent
+                .validate_ports(
+                    choice
+                        .inputs
+                        .iter()
+                        .map(|port| (port.name.as_str(), &port.port_type)),
+                    choice
+                        .outputs
+                        .iter()
+                        .map(|port| (port.name.as_str(), &port.port_type)),
+                )
+                .map_err(
+                    |message| PlanningProblemValidationError::SourcePortMismatch {
+                        choice: choice.id.clone(),
+                        message,
+                    },
+                )?;
             if let Some(output) = choice.outputs.iter().find(|output| output.source.is_some()) {
                 return Err(PlanningProblemValidationError::InvalidPortSource {
                     choice: choice.id.clone(),
@@ -233,6 +284,7 @@ impl PlanningProblem {
                 validate_candidate(
                     choice,
                     candidate,
+                    contracts,
                     &mut task_ids,
                     &mut requirement_ids,
                     &mut parameter_ids,
@@ -374,6 +426,7 @@ fn validate_ports(
 fn validate_candidate(
     choice: &PlanningMethodChoice,
     candidate: &PlanningMethodCandidate,
+    contracts: &ProcedureContractRegistry,
     global_tasks: &mut BTreeSet<LocalId>,
     global_requirements: &mut BTreeSet<LocalId>,
     global_parameters: &mut BTreeSet<LocalId>,
@@ -452,23 +505,7 @@ fn validate_candidate(
                 });
             }
         }
-        let validated = validate_task_program(
-            &task.id,
-            &task.operation,
-            task.inputs.len(),
-            &task
-                .outputs
-                .iter()
-                .map(|output| output.name.clone())
-                .collect::<Vec<_>>(),
-            task.parameters
-                .iter()
-                .map(|parameter| (&parameter.id, &parameter.value)),
-            task.materials
-                .iter()
-                .map(|material| (&material.id, material.symbol.as_str())),
-            task.program.as_ref(),
-        )?;
+        let validated = validate_task_program(&task.id, task.program.as_ref(), contracts)?;
         if let Some(validated) = validated {
             validate_program_contract(task, &validated)?;
         } else if task.binding_scope != BindingScope::Independent {
@@ -600,6 +637,12 @@ pub enum PlanningProblemValidationError {
     EmptyProblem,
     #[error("method choice `{choice}` occurs more than once")]
     DuplicateChoice { choice: LocalId },
+    #[error("method choice `{choice}` has invalid source Intent: {message}")]
+    InvalidSourceIntent { choice: LocalId, message: String },
+    #[error("method choice `{choice}` source operation does not match its source Intent")]
+    SourceOperationMismatch { choice: LocalId },
+    #[error("method choice `{choice}` ports do not match its source Intent: {message}")]
+    SourcePortMismatch { choice: LocalId, message: String },
     #[error("method choice `{choice}` has no candidates")]
     EmptyChoice { choice: LocalId },
     #[error("method choice `{choice}` {kind} port `{port}` occurs more than once")]
@@ -700,12 +743,17 @@ pub enum PlanningProblemValidationError {
 mod tests {
     use super::*;
 
+    fn contracts() -> &'static ProcedureContractRegistry {
+        crate::procedure::builtin_procedure_contracts()
+    }
+
     fn external_problem() -> PlanningProblem {
         PlanningProblem {
             schema_version: PLANNING_PROBLEM_SCHEMA_VERSION.to_owned(),
             choices: vec![PlanningMethodChoice {
                 id: LocalId::new("choice").unwrap(),
                 source_operation: IntentOperationId::new("example.operation").unwrap(),
+                source_intent: crate::workflow::ir::synthetic_intent("example.operation"),
                 after: Vec::new(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
@@ -746,24 +794,79 @@ mod tests {
         let decoded: PlanningProblem = serde_json::from_str(&json).unwrap();
 
         assert_eq!(
-            decoded.validate().unwrap_err(),
+            decoded.validate(contracts()).unwrap_err(),
             PlanningProblemValidationError::EmptyProblem
         );
         assert_eq!(decoded.sha256().len(), 64);
     }
 
     #[test]
-    fn planning_revalidates_registered_task_program_provenance() {
+    fn persisted_planning_records_reject_unknown_fields() {
+        let mut document = serde_json::to_value(external_problem()).unwrap();
+        document
+            .as_object_mut()
+            .unwrap()
+            .insert("legacy_target".to_owned(), serde_json::json!("robot"));
+
+        let error = serde_json::from_value::<PlanningProblem>(document).unwrap_err();
+        assert!(error.to_string().contains("legacy_target"), "{error}");
+    }
+
+    #[test]
+    fn planning_rejects_ports_and_results_that_disagree_with_source_intent() {
+        let evidence = PortType::Data {
+            data_kind: lab_capability::AbsoluteIri::new(format!(
+                "{}Evidence",
+                crate::workflow::ir::DATA_NS
+            ))
+            .unwrap(),
+        };
+        let mut port_tamper = external_problem();
+        port_tamper.choices[0].source_intent = crate::workflow::ir::synthetic_intent_with_ports(
+            "example.operation",
+            &[],
+            &[("evidence".to_owned(), evidence.clone())],
+        );
+        port_tamper.choices[0].outputs = vec![PlanningPort {
+            name: LocalId::new("other").unwrap(),
+            port_type: evidence,
+            source: None,
+        }];
+        assert!(matches!(
+            port_tamper.validate(contracts()),
+            Err(PlanningProblemValidationError::SourcePortMismatch { .. })
+        ));
+
+        let mut result_tamper = external_problem();
+        result_tamper.choices[0].source_intent = crate::workflow::ir::synthetic_intent_with_ports(
+            "example.operation",
+            &[],
+            &[(
+                "evidence".to_owned(),
+                PortType::Data {
+                    data_kind: lab_capability::AbsoluteIri::new(format!(
+                        "{}Evidence",
+                        crate::workflow::ir::DATA_NS
+                    ))
+                    .unwrap(),
+                },
+            )],
+        );
+        result_tamper.choices[0].source_intent.result_bindings[0].r#type =
+            lab_language::CheckedType::String;
+        assert!(matches!(
+            result_tamper.validate(contracts()),
+            Err(PlanningProblemValidationError::InvalidSourceIntent { .. })
+        ));
+    }
+
+    #[test]
+    fn task_operations_are_descriptive_and_do_not_select_program_builders() {
         let mut problem = external_problem();
-        problem.validate().unwrap();
+        problem.validate(contracts()).unwrap();
 
         problem.choices[0].candidates[0].tasks[0].operation =
             OperationId::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
-        assert!(matches!(
-            problem.validate(),
-            Err(PlanningProblemValidationError::InvalidProcedureTaskProgram(
-                ProcedureTaskProgramValidationError::CannotNormalize(_)
-            ))
-        ));
+        problem.validate(contracts()).unwrap();
     }
 }

@@ -5,6 +5,7 @@
 //! planner, selection is a pure query over physical applicability, and every
 //! selected definition receives a content digest that can be frozen into the
 //! reviewed plan.
+#![doc = include_str!("README.md")]
 
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter, Write};
@@ -24,7 +25,40 @@ const DEFAULT_LIBRARY: &str = include_str!("liquid_classes.v1.toml");
 #[serde(deny_unknown_fields)]
 pub struct LiquidClassLibraryDocument {
     pub schema_version: String,
+    pub id: String,
+    pub version: String,
     pub classes: Vec<LiquidClassDefinition>,
+}
+
+/// Exact library version selected by an Asset profile.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiquidClassLibraryReference {
+    pub id: String,
+    pub version: String,
+}
+
+/// The package-carried registry available to one exact STAR Asset profile.
+/// Selection is explicit and exact; registration order is never policy.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiquidClassLibraryRegistry {
+    pub selected_library: LiquidClassLibraryReference,
+    pub libraries: Vec<LiquidClassLibraryDocument>,
+}
+
+impl Default for LiquidClassLibraryRegistry {
+    fn default() -> Self {
+        let document: LiquidClassLibraryDocument = toml::from_str(DEFAULT_LIBRARY)
+            .expect("the built-in Hamilton liquid-class document is valid TOML");
+        Self {
+            selected_library: LiquidClassLibraryReference {
+                id: document.id.clone(),
+                version: document.version.clone(),
+            },
+            libraries: vec![document],
+        }
+    }
 }
 
 /// One versioned Hamilton liquid class. The SHA-256 is deliberately not an
@@ -136,6 +170,16 @@ pub struct LiquidClassIdentity {
     pub content_sha256: String,
 }
 
+/// Stable identity of the complete selected library, independently of the
+/// profile file that registered it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LiquidClassLibraryIdentity {
+    pub id: String,
+    pub version: String,
+    pub content_sha256: String,
+}
+
 /// The complete class snapshot attached to a reviewed plan. The identity pins
 /// the normalized settings and the settings make the evidence inspectable
 /// without finding the source library.
@@ -205,6 +249,7 @@ impl LiquidClass {
 /// A validated, deterministically ordered liquid-class library.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LiquidClassLibrary {
+    identity: LiquidClassLibraryIdentity,
     classes: Vec<LiquidClass>,
 }
 
@@ -242,6 +287,13 @@ impl LiquidClassLibrary {
                 found: document.schema_version,
             });
         }
+        validate_library_reference(
+            &LiquidClassLibraryReference {
+                id: document.id.clone(),
+                version: document.version.clone(),
+            },
+            "liquid-class library",
+        )?;
         if document.classes.is_empty() {
             return Err(LiquidClassError::Invalid(
                 "the liquid-class library contains no classes".to_owned(),
@@ -280,7 +332,24 @@ impl LiquidClassLibrary {
                 version_key(&right.identity.version).cmp(&version_key(&left.identity.version))
             })
         });
-        Ok(Self { classes })
+        document.classes = classes
+            .iter()
+            .map(|class| class.definition.clone())
+            .collect();
+        let canonical = serde_json::to_vec(&document)
+            .expect("validated liquid-class documents serialize infallibly");
+        Ok(Self {
+            identity: LiquidClassLibraryIdentity {
+                id: document.id,
+                version: document.version,
+                content_sha256: hex_sha256(&canonical),
+            },
+            classes,
+        })
+    }
+
+    pub fn identity(&self) -> &LiquidClassLibraryIdentity {
+        &self.identity
     }
 
     pub fn classes(&self) -> &[LiquidClass] {
@@ -357,6 +426,43 @@ impl LiquidClassLibrary {
     pub fn json_schema() -> serde_json::Value {
         serde_json::to_value(schemars::schema_for!(LiquidClassLibraryDocument))
             .expect("the derived liquid-class schema serializes")
+    }
+}
+
+impl LiquidClassLibraryRegistry {
+    /// Validates the complete registry and resolves its exact selection.
+    /// Malformed unselected registrations also fail so package composition
+    /// cannot hide unusable contributed data until a later profile edit.
+    pub fn resolve_selected(&self) -> Result<LiquidClassLibrary, LiquidClassError> {
+        if self.libraries.is_empty() {
+            return Err(LiquidClassError::Invalid(
+                "the liquid-class registry contains no libraries".to_owned(),
+            ));
+        }
+        validate_library_reference(&self.selected_library, "selected liquid-class library")?;
+        let mut identities = BTreeSet::new();
+        let mut selected = None;
+        for document in &self.libraries {
+            let reference = LiquidClassLibraryReference {
+                id: document.id.clone(),
+                version: document.version.clone(),
+            };
+            validate_library_reference(&reference, "registered liquid-class library")?;
+            if !identities.insert((reference.id.clone(), reference.version.clone())) {
+                return Err(LiquidClassError::DuplicateLibrary {
+                    id: reference.id,
+                    version: reference.version,
+                });
+            }
+            let library = LiquidClassLibrary::from_document(document.clone())?;
+            if reference == self.selected_library {
+                selected = Some(library);
+            }
+        }
+        selected.ok_or_else(|| LiquidClassError::UnknownSelectedLibrary {
+            id: self.selected_library.id.clone(),
+            version: self.selected_library.version.clone(),
+        })
     }
 }
 
@@ -466,8 +572,30 @@ pub enum LiquidClassError {
         "Hamilton liquid-class selection is ambiguous among equally applicable classes: {candidates}; set an explicit priority or narrow applicability"
     )]
     Ambiguous { candidates: String },
+    #[error("liquid-class library '{id}@{version}' is registered more than once")]
+    DuplicateLibrary { id: String, version: String },
+    #[error("selected liquid-class library '{id}@{version}' is not registered in this profile")]
+    UnknownSelectedLibrary { id: String, version: String },
     #[error("failed to parse VENUS liquid-class interchange JSON: {0}")]
     VenusImport(String),
+}
+
+fn validate_library_reference(
+    reference: &LiquidClassLibraryReference,
+    label: &str,
+) -> Result<(), LiquidClassError> {
+    if !valid_stable_id(&reference.id) {
+        return Err(LiquidClassError::Invalid(format!(
+            "{label} id must be a non-empty stable ASCII identifier"
+        )));
+    }
+    if version_key(&reference.version).is_none() {
+        return Err(LiquidClassError::Invalid(format!(
+            "{label} '{}' version must be numeric MAJOR.MINOR.PATCH",
+            reference.id
+        )));
+    }
+    Ok(())
 }
 
 /// Owned query details retained by a failed selection without making every
@@ -516,11 +644,7 @@ fn normalize_definition(definition: &mut LiquidClassDefinition) {
 
 fn validate_definition(definition: &LiquidClassDefinition) -> Result<(), LiquidClassError> {
     let label = format!("{}@{}", definition.id, definition.version);
-    if definition.id.is_empty()
-        || !definition.id.chars().all(|character| {
-            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_' | '/')
-        })
-    {
+    if !valid_stable_id(&definition.id) {
         return invalid(&label, "id must be a non-empty stable ASCII identifier");
     }
     if version_key(&definition.version).is_none() {
@@ -636,6 +760,13 @@ fn validate_definition(definition: &LiquidClassDefinition) -> Result<(), LiquidC
     Ok(())
 }
 
+fn valid_stable_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_' | '/')
+        })
+}
+
 fn invalid<T>(label: &str, message: &str) -> Result<T, LiquidClassError> {
     Err(LiquidClassError::Invalid(format!(
         "liquid class '{label}' {message}"
@@ -703,6 +834,8 @@ mod tests {
         format!(
             r#"
 schema_version = "{LIQUID_CLASS_LIBRARY_SCHEMA}"
+id = "{id}.library"
+version = "{version}"
 
 [[classes]]
 id = "{id}"
@@ -778,6 +911,55 @@ notes = "Imported independently of the compiler."
     }
 
     #[test]
+    fn a_profile_registry_selects_one_exact_contributed_library() {
+        let document: LiquidClassLibraryDocument =
+            toml::from_str(&custom_class_toml("org.example.glycerol", "2.1.0", 25.0)).unwrap();
+        let mut document = document;
+        document.id = "org.example.hamilton.methods".to_owned();
+        document.version = "4.3.0".to_owned();
+        let registry = LiquidClassLibraryRegistry {
+            selected_library: LiquidClassLibraryReference {
+                id: "org.example.hamilton.methods".to_owned(),
+                version: "4.3.0".to_owned(),
+            },
+            libraries: vec![document],
+        };
+
+        let selected = registry
+            .resolve_selected()
+            .expect("the exact registration resolves");
+        assert_eq!(selected.identity().id, "org.example.hamilton.methods");
+        assert_eq!(selected.identity().version, "4.3.0");
+        assert_eq!(selected.identity().content_sha256.len(), 64);
+        assert_eq!(selected.classes()[0].identity().id, "org.example.glycerol");
+    }
+
+    #[test]
+    fn every_profile_registry_entry_is_validated_before_selection() {
+        let mut registry = LiquidClassLibraryRegistry::default();
+        let mut broken = registry.libraries[0].clone();
+        broken.id = "org.example.broken".to_owned();
+        broken.schema_version = "lab.hamilton-star-liquid-classes.v99".to_owned();
+        registry.libraries.push(broken);
+
+        assert!(matches!(
+            registry.resolve_selected(),
+            Err(LiquidClassError::SchemaVersion { .. })
+        ));
+    }
+
+    #[test]
+    fn a_profile_registry_selection_must_name_a_registered_version() {
+        let mut registry = LiquidClassLibraryRegistry::default();
+        registry.selected_library.version = "2.0.0".to_owned();
+
+        assert!(matches!(
+            registry.resolve_selected(),
+            Err(LiquidClassError::UnknownSelectedLibrary { version, .. }) if version == "2.0.0"
+        ));
+    }
+
+    #[test]
     fn incompatible_library_schema_is_rejected() {
         let text = custom_class_toml("org.example.future", "1.0.0", 25.0).replace(
             LIQUID_CLASS_LIBRARY_SCHEMA,
@@ -807,20 +989,23 @@ notes = "Imported independently of the compiler."
             second.classes()[0].identity().content_sha256,
             "selector order is normalized before hashing"
         );
+        assert_eq!(
+            first.identity().content_sha256,
+            second.identity().content_sha256,
+            "the complete library digest uses the same normalized content"
+        );
     }
 
     #[test]
     fn exact_applicability_beats_a_wildcard_deterministically() {
-        let specific = custom_class_toml("org.example.specific", "1.0.0", 24.0);
-        let fallback = custom_class_toml("org.example.fallback", "1.0.0", 22.0)
-            .replace("liquids = [\"glycerol\"]", "liquids = [\"*\"]")
-            .replacen(
-                &format!("schema_version = \"{LIQUID_CLASS_LIBRARY_SCHEMA}\""),
-                "",
-                1,
-            );
-        let library = LiquidClassLibrary::parse_toml(&format!("{specific}\n{fallback}"))
-            .expect("both overlapping classes validate");
+        let mut document: LiquidClassLibraryDocument =
+            toml::from_str(&custom_class_toml("org.example.specific", "1.0.0", 24.0)).unwrap();
+        let mut fallback: LiquidClassLibraryDocument =
+            toml::from_str(&custom_class_toml("org.example.fallback", "1.0.0", 22.0)).unwrap();
+        fallback.classes[0].applicability.liquids = vec!["*".to_owned()];
+        document.classes.extend(fallback.classes);
+        let library =
+            LiquidClassLibrary::from_document(document).expect("both overlapping classes validate");
         let selected = library
             .select(LiquidClassQuery {
                 liquid: "glycerol",
@@ -835,15 +1020,29 @@ notes = "Imported independently of the compiler."
     }
 
     #[test]
+    fn the_bundled_reference_library_fails_closed_for_unlisted_liquids() {
+        let library = LiquidClassLibrary::embedded_v1().unwrap();
+        let error = library
+            .select(LiquidClassQuery {
+                liquid: "serum",
+                technique: "surface",
+                tip: "tip_rack_50ul_filter",
+                source_labware: "sample_tubes_24",
+                destination_labware: "pcr_plate_96",
+                volume_ul: 10.0,
+            })
+            .expect_err("unqualified water reference data must not match an arbitrary liquid");
+        assert!(matches!(error, LiquidClassError::NoMatch(_)));
+    }
+
+    #[test]
     fn equally_applicable_distinct_classes_fail_closed() {
-        let first = custom_class_toml("org.example.a", "1.0.0", 24.0);
-        let second = custom_class_toml("org.example.b", "1.0.0", 25.0).replacen(
-            &format!("schema_version = \"{LIQUID_CLASS_LIBRARY_SCHEMA}\""),
-            "",
-            1,
-        );
-        let library = LiquidClassLibrary::parse_toml(&format!("{first}\n{second}"))
-            .expect("both classes validate");
+        let mut document: LiquidClassLibraryDocument =
+            toml::from_str(&custom_class_toml("org.example.a", "1.0.0", 24.0)).unwrap();
+        let second: LiquidClassLibraryDocument =
+            toml::from_str(&custom_class_toml("org.example.b", "1.0.0", 25.0)).unwrap();
+        document.classes.extend(second.classes);
+        let library = LiquidClassLibrary::from_document(document).expect("both classes validate");
         let error = library
             .select(LiquidClassQuery {
                 liquid: "glycerol",
@@ -894,6 +1093,8 @@ notes = "Imported independently of the compiler."
         let definition = import_venus_record_json(json).expect("the interchange record parses");
         let library = LiquidClassLibrary::from_document(LiquidClassLibraryDocument {
             schema_version: LIQUID_CLASS_LIBRARY_SCHEMA.to_owned(),
+            id: "org.example.venus-imports".to_owned(),
+            version: "1.0.0".to_owned(),
             classes: vec![definition],
         })
         .expect("the imported class passes the ordinary schema and semantic validation");

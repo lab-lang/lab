@@ -9,11 +9,13 @@
 //! consumer of this manifest is presenting names to a person, and the structure
 //! it would need to do more than that is the checker's own.
 
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 use super::catalog::StandardLibrary;
 use crate::checked::CheckedType;
-use crate::semantics::{ExportKind, ModuleExport, ModuleInterface};
+use crate::semantics::{DefinitionId, ExportKind, ModuleExport, ModuleInterface};
 
 /// Every bundled standard module, in path order.
 #[derive(Clone, Debug, Serialize)]
@@ -43,42 +45,54 @@ pub enum Export {
     /// `produces` is the type those instances have, which is the name a
     /// workflow writes and the name a schema's rules read fields from.
     ArtifactKind {
+        definition: DefinitionId,
         name: String,
         documentation: String,
         produces: String,
+        roles: Vec<String>,
         fields: Vec<Field>,
         /// Which combinations of stated properties are complete, as prose.
         declares: Option<String>,
     },
     Type {
+        definition: DefinitionId,
         name: String,
         documentation: String,
-        parameters: usize,
+        parameters: Vec<TypeParameter>,
         roles: Vec<String>,
         fields: Vec<Field>,
     },
     /// A part types can play. It has no values, so it may bound a type
     /// parameter and may never be the type of anything.
-    Role { name: String, documentation: String },
+    Role {
+        definition: DefinitionId,
+        name: String,
+        documentation: String,
+    },
     /// How a kind's materials are classified by the state they are in.
     Facet {
+        definition: DefinitionId,
         name: String,
         documentation: String,
         subject: String,
         states: Vec<String>,
     },
     Value {
+        definition: DefinitionId,
         name: String,
         documentation: String,
         r#type: String,
     },
     Function {
+        definition: DefinitionId,
         name: String,
         documentation: String,
-        parameters: Vec<String>,
+        parameters: Vec<TypeParameter>,
+        inputs: Vec<String>,
         result: String,
     },
     Constructor {
+        definition: DefinitionId,
         name: String,
         documentation: String,
         fields: Vec<Field>,
@@ -92,13 +106,37 @@ pub enum Export {
     /// cannot tell that `realize <design> from <dependencies>` performs
     /// without the `from`.
     Action {
+        definition: DefinitionId,
         name: String,
         documentation: String,
+        parameters: Vec<TypeParameter>,
+        operation: String,
         phrase: Vec<String>,
+        operands: Vec<Field>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         optional: Vec<Vec<String>>,
         results: Vec<Field>,
     },
+    /// A durable workflow exported by a Lab-authored module. Unlike a pure
+    /// function, a workflow has named inputs and may return several named
+    /// results, all of which a generated SDK signature must preserve.
+    Workflow {
+        definition: DefinitionId,
+        name: String,
+        documentation: String,
+        parameters: Vec<TypeParameter>,
+        inputs: Vec<Field>,
+        results: Vec<Field>,
+    },
+}
+
+/// One generic parameter in declaration order, including its optional role or
+/// type bound exactly as the checked public interface exposes it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TypeParameter {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bound: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -126,14 +164,23 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
     for spec in &module.types {
         exports.push(if spec.role {
             Export::Role {
+                definition: DefinitionId::exported(module.path, spec.name),
                 name: spec.name.to_owned(),
                 documentation: spec.documentation.to_owned(),
             }
         } else {
             Export::Type {
+                definition: DefinitionId::exported(module.path, spec.name),
                 name: spec.name.to_owned(),
                 documentation: spec.documentation.to_owned(),
-                parameters: spec.parameters,
+                parameters: spec
+                    .parameters
+                    .iter()
+                    .map(|parameter| TypeParameter {
+                        name: parameter.name.to_owned(),
+                        bound: parameter.bound.as_ref().map(ToString::to_string),
+                    })
+                    .collect(),
                 roles: spec
                     .implements
                     .iter()
@@ -153,6 +200,7 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
     }
     for (name, ty) in &module.values {
         exports.push(Export::Value {
+            definition: DefinitionId::exported(module.path, *name),
             name: (*name).to_owned(),
             documentation: String::new(),
             r#type: ty.to_string(),
@@ -160,9 +208,11 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
     }
     for function in &module.functions {
         exports.push(Export::Function {
+            definition: DefinitionId::exported(module.path, function.name),
             name: function.name.to_owned(),
             documentation: function.documentation.to_owned(),
-            parameters: function
+            parameters: Vec::new(),
+            inputs: function
                 .parameters
                 .iter()
                 .map(ToString::to_string)
@@ -172,6 +222,7 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
     }
     for constructor in &module.constructors {
         exports.push(Export::Constructor {
+            definition: DefinitionId::exported(module.path, constructor.name),
             name: constructor.name.to_owned(),
             documentation: constructor.documentation.to_owned(),
             fields: constructor
@@ -187,18 +238,38 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
         });
     }
     for action in &module.actions {
+        let mut parameters = Vec::new();
+        let operands = action
+            .phrase
+            .iter()
+            .flat_map(super::contract::PhrasePart::parts)
+            .filter_map(|part| action_operand(part, &mut parameters))
+            .collect::<Vec<_>>();
+        let operand_types = operands
+            .iter()
+            .map(|operand| (operand.name.clone(), operand.r#type.clone()))
+            .collect::<BTreeMap<_, _>>();
         exports.push(Export::Action {
+            definition: DefinitionId::exported(
+                module.path,
+                action
+                    .source_name()
+                    .expect("catalog validation guarantees an action source name"),
+            ),
             name: action
                 .source_name()
                 .expect("catalog validation guarantees an action source name")
                 .to_owned(),
             documentation: String::new(),
+            parameters,
+            operation: action.operation.clone(),
             phrase: action
                 .phrase
                 .iter()
                 .flat_map(super::contract::PhrasePart::parts)
                 .map(phrase_word)
                 .collect(),
+            operands,
             optional: action
                 .phrase
                 .iter()
@@ -218,7 +289,7 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
                 .iter()
                 .map(|result| Field {
                     name: result.name.to_owned(),
-                    r#type: format!("{:?}", result.r#type),
+                    r#type: resolved_contract_type_name(&result.r#type, &operand_types),
                     optional: false,
                 })
                 .collect(),
@@ -230,6 +301,95 @@ fn native_module(module: &super::catalog::StandardModule) -> Module {
         documentation: module.documentation.to_owned(),
         imports: Vec::new(),
         exports,
+    }
+}
+
+fn resolved_contract_type_name(
+    r#type: &super::contract::ContractType,
+    operands: &BTreeMap<String, String>,
+) -> String {
+    use super::contract::ContractType;
+
+    match r#type {
+        ContractType::SameAs(name) => operands
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_else(|| "object".to_owned()),
+        ContractType::MaterialOf(name) => operands
+            .get(name.as_str())
+            .map(|operand| {
+                operand
+                    .strip_prefix("Material<")
+                    .and_then(|operand| operand.strip_suffix('>'))
+                    .map_or_else(
+                        || format!("Material<{operand}>"),
+                        |subject| format!("Material<{subject}>"),
+                    )
+            })
+            .unwrap_or_else(|| "Material<object>".to_owned()),
+        other => contract_type_name(other),
+    }
+}
+
+fn action_operand(
+    part: &super::contract::PhrasePart,
+    parameters: &mut Vec<TypeParameter>,
+) -> Option<Field> {
+    use super::contract::PhrasePart;
+
+    let (name, r#type) = match part {
+        PhrasePart::Word(_) | PhrasePart::Optional(_) => return None,
+        PhrasePart::Operand { name, r#type, .. } => {
+            let r#type = match r#type {
+                super::contract::ContractType::AnyValue => {
+                    fresh_contract_type_parameter(parameters)
+                }
+                super::contract::ContractType::AnyMaterial => {
+                    format!("Material<{}>", fresh_contract_type_parameter(parameters))
+                }
+                other => contract_type_name(other),
+            };
+            (name, r#type)
+        }
+        PhrasePart::Integer { name, .. } => (name, "Integer".to_owned()),
+        PhrasePart::Quantity { name, units, .. } => {
+            let unit = if units.len() == 1 {
+                units[0].clone()
+            } else {
+                units.join(" | ")
+            };
+            (name, format!("Quantity<{unit}>"))
+        }
+    };
+    Some(Field {
+        name: name.clone(),
+        r#type,
+        optional: false,
+    })
+}
+
+fn fresh_contract_type_parameter(parameters: &mut Vec<TypeParameter>) -> String {
+    let name = if parameters.is_empty() {
+        "T".to_owned()
+    } else {
+        format!("T{}", parameters.len() + 1)
+    };
+    parameters.push(TypeParameter {
+        name: name.clone(),
+        bound: None,
+    });
+    name
+}
+
+fn contract_type_name(r#type: &super::contract::ContractType) -> String {
+    use super::contract::ContractType;
+
+    match r#type {
+        ContractType::Concrete(ty) => ty.to_string(),
+        ContractType::SameAs(name) => format!("same as {name}"),
+        ContractType::AnyMaterial => "Material<any Value>".to_owned(),
+        ContractType::AnyValue => "any Value".to_owned(),
+        ContractType::MaterialOf(name) => format!("Material<same as {name}>"),
     }
 }
 
@@ -263,9 +423,11 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
         ExportKind::ArtifactKind => {
             let schema = export.schema.as_ref()?;
             Some(Export::ArtifactKind {
+                definition: export.definition.clone(),
                 name: name.to_owned(),
                 documentation,
                 produces: schema.produces.display_name(),
+                roles: export.roles.clone(),
                 fields: schema
                     .fields
                     .iter()
@@ -279,13 +441,15 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
             })
         }
         ExportKind::Role => Some(Export::Role {
+            definition: export.definition.clone(),
             name: name.to_owned(),
             documentation,
         }),
         ExportKind::Type => Some(Export::Type {
+            definition: export.definition.clone(),
             name: name.to_owned(),
             documentation,
-            parameters: export.parameters.names.len(),
+            parameters: interface_type_parameters(&export.parameters),
             roles: export.roles.clone(),
             fields: export
                 .fields
@@ -298,6 +462,7 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                 .collect(),
         }),
         ExportKind::Value | ExportKind::Constructor => Some(Export::Value {
+            definition: export.definition.clone(),
             name: name.to_owned(),
             documentation,
             r#type: export
@@ -305,15 +470,17 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                 .as_ref()
                 .map_or_else(String::new, CheckedType::display_name),
         }),
-        ExportKind::Function | ExportKind::Workflow => {
+        ExportKind::Function => {
             let callable = export.callable.as_ref()?;
             Some(Export::Function {
+                definition: export.definition.clone(),
                 name: name.to_owned(),
                 documentation,
-                parameters: callable
+                parameters: interface_type_parameters(&export.parameters),
+                inputs: callable
                     .inputs
                     .iter()
-                    .map(CheckedType::display_name)
+                    .map(|field| field.r#type.display_name())
                     .collect(),
                 result: callable
                     .outputs
@@ -324,6 +491,7 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
         ExportKind::Facet => {
             let surface = export.facet.as_ref()?;
             Some(Export::Facet {
+                definition: export.definition.clone(),
                 name: name.to_owned(),
                 documentation,
                 subject: surface.subject.display_name(),
@@ -337,8 +505,11 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
         ExportKind::Action => {
             let surface = export.action.as_ref()?;
             Some(Export::Action {
+                definition: export.definition.clone(),
                 name: name.to_owned(),
                 documentation,
+                parameters: interface_type_parameters(&export.parameters),
+                operation: surface.operation.clone(),
                 phrase: surface
                     .phrase
                     .iter()
@@ -347,6 +518,15 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                         crate::checked::CheckedPhraseToken::Hole(operand) => {
                             format!("<{operand}>")
                         }
+                    })
+                    .collect(),
+                operands: surface
+                    .operands
+                    .iter()
+                    .map(|operand| Field {
+                        name: operand.name.clone(),
+                        r#type: operand.r#type.display_name(),
+                        optional: false,
                     })
                     .collect(),
                 optional: Vec::new(),
@@ -360,6 +540,91 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                     })
                     .collect(),
             })
+        }
+        ExportKind::Workflow => {
+            let callable = export.callable.as_ref()?;
+            Some(Export::Workflow {
+                definition: export.definition.clone(),
+                name: name.to_owned(),
+                documentation,
+                parameters: interface_type_parameters(&export.parameters),
+                inputs: callable
+                    .inputs
+                    .iter()
+                    .map(|field| Field {
+                        name: field.name.clone(),
+                        r#type: field.r#type.display_name(),
+                        optional: false,
+                    })
+                    .collect(),
+                results: callable
+                    .outputs
+                    .iter()
+                    .map(|field| Field {
+                        name: field.name.clone(),
+                        r#type: field.r#type.display_name(),
+                        optional: false,
+                    })
+                    .collect(),
+            })
+        }
+    }
+}
+
+fn interface_type_parameters(parameters: &crate::semantics::TypeParameters) -> Vec<TypeParameter> {
+    parameters
+        .names
+        .iter()
+        .map(|name| TypeParameter {
+            name: name.clone(),
+            bound: parameters.bounds.get(name).map(CheckedType::display_name),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{ModuleId, compile_module_with_id};
+
+    fn parameters(export: Export) -> Vec<TypeParameter> {
+        match export {
+            Export::Type { parameters, .. } | Export::Workflow { parameters, .. } => parameters,
+            _ => panic!("expected a generic type or workflow export"),
+        }
+    }
+
+    #[test]
+    fn authored_type_and_workflow_parameters_keep_declaration_order_and_bounds() {
+        let compiled = compile_module_with_id(
+            ModuleId::new("generic.manifest"),
+            r#"
+role FirstRole
+role SecondRole
+
+record Pair<Right: SecondRole, Left: FirstRole>
+
+workflow preserve(
+  value: Circuit<Right: SecondRole, Left: FirstRole>,
+) -> Circuit<Right, Left>:
+  return value
+"#,
+        )
+        .unwrap();
+        let expected = vec![
+            TypeParameter {
+                name: "Right".to_owned(),
+                bound: Some("SecondRole".to_owned()),
+            },
+            TypeParameter {
+                name: "Left".to_owned(),
+                bound: Some("FirstRole".to_owned()),
+            },
+        ];
+
+        for name in ["Pair", "preserve"] {
+            let export = compiled.interface.exports.get(name).unwrap();
+            assert_eq!(parameters(authored_export(name, export).unwrap()), expected);
         }
     }
 }

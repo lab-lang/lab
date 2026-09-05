@@ -5,19 +5,21 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::{
-    ActionDecl, ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr, FacetDecl, FieldDecl,
-    Item, Module, Path, PhraseToken, Provenance, TypeArgument, TypeExpr, Unit, WorkflowOutputs,
-    instance_word,
+    ActionDecl, ActionResultLineage, ArtifactDecl, ArtifactMember, CircuitDecl, DataDecl, Expr,
+    FacetDecl, FieldDecl, Item, Module, Path, PhraseToken, Provenance, TypeArgument, TypeExpr,
+    Unit, WorkflowOutputs, instance_word,
 };
 use crate::checked::{
-    CheckedAcceptance, CheckedActionOperand, CheckedActionResult, CheckedCase, CheckedDeclaration,
-    CheckedPhraseToken, CheckedPresence, CheckedProperty, CheckedSection, OwnershipMode,
+    CheckedAcceptance, CheckedActionOperand, CheckedActionResult, CheckedArtifactFacet,
+    CheckedCase, CheckedDeclaration, CheckedPhraseToken, CheckedPresence, CheckedProperty,
+    CheckedSection, OwnershipMode, ResultLineage,
 };
 use crate::is_absolute_iri;
 use crate::semantic_error::SemanticError;
+use crate::semantics::DefinitionId;
 use crate::source::{Identifier, Span};
 use crate::standard_library::{
-    ActionContractSpec, ContractType, Lineage as ContractLineage, PhrasePart as ContractPhrasePart,
+    ActionContractSpec, ContractType, PhrasePart as ContractPhrasePart,
     ResultSpec as ContractResultSpec,
 };
 use crate::type_system::{Ty, to_checked_type};
@@ -328,15 +330,6 @@ impl Checker {
             }
         }
 
-        // Actions register after facets, because an operand may be narrowed to a
-        // facet state and the states must be known by then. A verb the workflow
-        // pass then reads is checked against the contract collected here.
-        for item in &module.items {
-            if let Item::Action(declaration) = item {
-                self.collect_action(declaration)?;
-            }
-        }
-
         for item in &module.items {
             match item {
                 Item::Circuit(declaration) => {
@@ -414,9 +407,12 @@ impl Checker {
                             self.check_presence_predicate(predicate, &fields, &declaration.fields)
                         })
                         .transpose()?;
+                    let definition =
+                        DefinitionId::exported(self.module_id.as_str(), &declaration.name.value);
                     self.artifact_kinds.insert(
                         declaration.name.value.clone(),
                         ArtifactKindSignature {
+                            definitions: vec![definition],
                             produces,
                             fields,
                             declares,
@@ -550,6 +546,16 @@ impl Checker {
                     self.values.insert(declaration.name.value.clone(), ty);
                 }
                 Item::Use(_) | Item::Binding(_) => {}
+            }
+        }
+
+        // Actions register after facets and type signatures. A lineage may
+        // continue from a record containing material, so ownership and lineage
+        // both need the complete shape table rather than a special-case view of
+        // direct `Material<T>` operands.
+        for item in &module.items {
+            if let Item::Action(declaration) = item {
+                self.collect_action(declaration)?;
             }
         }
 
@@ -715,6 +721,7 @@ impl Checker {
     fn collect_action(&mut self, declaration: &ActionDecl) -> Result<(), SemanticError> {
         let mut binding_types = BTreeMap::new();
         let mut binding_modes = BTreeMap::new();
+        let mut binding_lineages = BTreeMap::new();
         for binding in &declaration.bindings {
             let ty = self.lower_type(&binding.ty, &BTreeSet::new())?;
             if binding_types
@@ -727,6 +734,7 @@ impl Checker {
                 ));
             }
             binding_modes.insert(binding.name.value.clone(), binding.mode);
+            binding_lineages.insert(binding.name.value.clone(), binding.lineage.as_ref());
         }
 
         let hole = |name: &Identifier| -> Result<Ty, SemanticError> {
@@ -751,7 +759,8 @@ impl Checker {
                 }
                 PhraseToken::Hole(name) => {
                     let ty = hole(name)?;
-                    phrase.push(self.action_operand_part(name, &ty, binding_modes[&name.value])?);
+                    let mode = self.effective_action_ownership(&ty, binding_modes[&name.value]);
+                    phrase.push(self.action_operand_part(name, &ty, mode)?);
                     phrase_tokens.push(CheckedPhraseToken::Hole(name.value.clone()));
                 }
             }
@@ -761,26 +770,55 @@ impl Checker {
         for token in &declaration.phrase {
             if let PhraseToken::Hole(name) = token {
                 let ty = hole(name)?;
+                let mode = self.effective_action_ownership(&ty, binding_modes[&name.value]);
                 operands.push(CheckedActionOperand {
                     name: name.value.clone(),
                     r#type: to_checked_type(&ty),
-                    mode: binding_modes[&name.value].unwrap_or(OwnershipMode::Take),
+                    mode,
                 });
             }
         }
+
+        let operand_types = declaration
+            .phrase
+            .iter()
+            .filter_map(|token| match token {
+                PhraseToken::Word(_) => None,
+                PhraseToken::Hole(name) => Some((name.value.clone(), hole(name))),
+            })
+            .map(|(name, ty)| ty.map(|ty| (name, ty)))
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         let mut results = Vec::new();
         let mut result_specs = Vec::new();
         for name in &declaration.results {
             let ty = hole(name)?;
+            if binding_modes[&name.value].is_some() {
+                return Err(SemanticError::new(
+                    name.span,
+                    format!(
+                        "action result '{}' cannot have an ownership mode",
+                        name.value
+                    ),
+                )
+                .help("ownership describes what an action does to an input operand"));
+            }
+            let declared_lineage = binding_lineages[&name.value].ok_or_else(|| {
+                SemanticError::new(
+                    name.span,
+                    format!("action result '{}' must state its lineage", name.value),
+                )
+            })?;
+            let lineage = self.check_result_lineage(declared_lineage, &operand_types)?;
             results.push(CheckedActionResult {
                 name: name.value.clone(),
                 r#type: to_checked_type(&ty),
+                lineage: lineage.clone(),
             });
             result_specs.push(ContractResultSpec {
                 name: name.value.clone(),
                 r#type: ContractType::Concrete(ty),
-                lineage: ContractLineage::Continues,
+                lineage,
             });
         }
 
@@ -789,7 +827,6 @@ impl Checker {
             operation: operation.clone(),
             phrase,
             results: result_specs,
-            inert: Vec::new(),
         };
         contract.validate().map_err(|message| {
             SemanticError::new(
@@ -806,10 +843,74 @@ impl Checker {
                 phrase: phrase_tokens,
                 operands,
                 results,
-                capability: declaration.capability.value.clone(),
             },
         );
         Ok(())
+    }
+
+    fn check_result_lineage(
+        &self,
+        lineage: &ActionResultLineage,
+        operands: &BTreeMap<String, Ty>,
+    ) -> Result<ResultLineage, SemanticError> {
+        let check_names = |names: &[Identifier], require_material: bool| {
+            let mut seen = BTreeSet::new();
+            names
+                .iter()
+                .map(|name| {
+                    let ty = operands.get(&name.value).ok_or_else(|| {
+                        SemanticError::new(
+                            name.span,
+                            format!("unknown action operand '{}'", name.value),
+                        )
+                    })?;
+                    if !seen.insert(name.value.as_str()) {
+                        return Err(SemanticError::new(
+                            name.span,
+                            format!("lineage operand '{}' is named more than once", name.value),
+                        ));
+                    }
+                    if require_material
+                        && !self.type_contains_material(ty, &mut BTreeSet::new())
+                    {
+                        return Err(SemanticError::new(
+                            name.span,
+                            format!(
+                                "lineage can only continue from a material operand; '{}' has type {ty}",
+                                name.value
+                            ),
+                        ));
+                    }
+                    Ok(name.value.clone())
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
+
+        match lineage {
+            ActionResultLineage::Begins { .. } => Ok(ResultLineage::Begins),
+            ActionResultLineage::Continues { from, .. } => Ok(ResultLineage::Continues {
+                from: check_names(from, true)?,
+            }),
+            ActionResultLineage::IdentifiedBy { operands, .. } => Ok(ResultLineage::IdentifiedBy {
+                operands: check_names(operands, false)?,
+            }),
+        }
+    }
+
+    /// Resolve the ownership a call carries at the single point where the
+    /// frontend knows both the declared mode and the operand's complete type.
+    /// Values are freely copied. Anything containing physical material is
+    /// affine, defaults to `take`, and may explicitly choose another mode.
+    pub(super) fn effective_action_ownership(
+        &self,
+        ty: &Ty,
+        declared: Option<OwnershipMode>,
+    ) -> OwnershipMode {
+        if self.type_contains_material(ty, &mut BTreeSet::new()) {
+            declared.unwrap_or(OwnershipMode::Take)
+        } else {
+            OwnershipMode::Copy
+        }
     }
 
     /// The phrase part one operand hole becomes, chosen by its type.
@@ -817,7 +918,7 @@ impl Checker {
         &self,
         name: &Identifier,
         ty: &Ty,
-        mode: Option<OwnershipMode>,
+        mode: OwnershipMode,
     ) -> Result<ContractPhrasePart, SemanticError> {
         match ty {
             Ty::Quantity(unit) => Ok(ContractPhrasePart::quantity(&name.value, false, &[unit])),
@@ -852,7 +953,7 @@ impl Checker {
             _ => Ok(ContractPhrasePart::operand(
                 &name.value,
                 ContractType::Concrete(ty.clone()),
-                mode.unwrap_or(OwnershipMode::Take),
+                mode,
             )),
         }
     }
@@ -940,9 +1041,11 @@ impl Checker {
             .entry(subject_name.clone())
             .or_default()
             .insert(declaration.name.value.clone());
+        let definition = DefinitionId::exported(self.module_id.as_str(), &declaration.name.value);
         self.facets.insert(
             declaration.name.value.clone(),
             FacetSignature {
+                definition,
                 subject,
                 states,
                 transitions,
@@ -1265,7 +1368,7 @@ impl Checker {
             let generic = self
                 .standard_types
                 .get(&name)
-                .map(|spec| spec.parameters)
+                .map(|spec| spec.parameters.len())
                 .or_else(|| self.data.get(&name).map(|spec| spec.parameters.len()))
                 .is_some_and(|parameters| parameters > 0);
             if generic {
@@ -1444,10 +1547,7 @@ impl Checker {
                     }
                     let is_sbol_identity = property.name.value == "sbol_identity";
                     let is_supplier_identity = declaration.provenance == Provenance::Buy
-                        && matches!(
-                            property.name.value.as_str(),
-                            "identity" | "supplier_identity"
-                        );
+                        && property.name.value == "supplier_identity";
                     if is_sbol_identity || is_supplier_identity {
                         let Expr::String { value, .. } = &property.value else {
                             return Err(SemanticError::new(
@@ -1476,8 +1576,7 @@ impl Checker {
                                 return Err(SemanticError::new(
                                     property.name.span,
                                     "a bought item states its supplier identity twice",
-                                )
-                                .help("use 'supplier_identity'; 'identity' is its legacy alias"));
+                                ));
                             }
                             supplier_identity = Some(value.clone());
                         }
@@ -1665,9 +1764,29 @@ impl Checker {
         }
         Ok(CheckedDeclaration::Artifact {
             doc: declaration.doc.clone(),
+            definition: DefinitionId::exported(self.module_id.as_str(), &declaration.name.value),
             artifact: keyword.to_owned(),
+            artifact_definitions: signature.definitions.clone(),
             name: declaration.name.value.clone(),
             produces: to_checked_type(&produces),
+            type_definition: match &produces {
+                Ty::Named(name, _) => self.definition_for_name(name),
+                _ => unreachable!("an artifact kind produces a nominal type"),
+            },
+            facets: stated_states
+                .iter()
+                .map(|(facet, state)| {
+                    let signature = self
+                        .facets
+                        .get(facet)
+                        .expect("a stated facet was resolved during checking");
+                    CheckedArtifactFacet {
+                        definition: signature.definition.clone(),
+                        name: facet.clone(),
+                        state: state.clone(),
+                    }
+                })
+                .collect(),
             sbol_identity,
             properties,
             requirements,
@@ -1790,7 +1909,10 @@ Temperature, and Count",
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let expected_arity = self.standard_types.get(&name).map(|spec| spec.parameters);
+                let expected_arity = self
+                    .standard_types
+                    .get(&name)
+                    .map(|spec| spec.parameters.len());
                 if let Some(expected) = expected_arity
                     && arguments.len() != expected
                 {

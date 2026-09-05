@@ -234,7 +234,7 @@ impl<'a> Parser<'a> {
     ///
     /// The header is the phrase a workflow writes: words as they are, operands
     /// in `<>`, results after `->`. The block types every operand and result,
-    /// and states the capability the verb needs.
+    /// and states each result's lineage explicitly.
     fn parse_action(&mut self) -> Result<ActionDecl, ParseError> {
         let start = self.expect_word("action")?.span;
         let name = self.take_identifier("an action name")?;
@@ -257,20 +257,7 @@ impl<'a> Parser<'a> {
         }
         self.open_block()?;
         let mut bindings = Vec::new();
-        let mut capability = None;
         while !self.check(&TokenKind::Dedent) {
-            if self.check_word("requires") {
-                let keyword = self.next().expect("checked");
-                if capability.is_some() {
-                    return Err(syntax_span(
-                        keyword.span,
-                        "an action states the one capability it needs once",
-                    ));
-                }
-                capability = Some(self.take_identifier("a capability")?);
-                self.expect_line_end()?;
-                continue;
-            }
             let binding = self.take_identifier("an operand or result name")?;
             self.expect(TokenKind::Colon)?;
             // An ownership mode is a word before the type, and only an operand
@@ -285,30 +272,90 @@ impl<'a> Parser<'a> {
                 self.next();
             }
             let ty = self.parse_type()?;
+            let lineage = self.parse_action_result_lineage()?;
+            let is_result = results.iter().any(|result| result.value == binding.value);
+            if is_result && lineage.is_none() {
+                return Err(syntax_span(
+                    binding.span,
+                    format!(
+                        "action result '{}' must state whether it begins, continues from, or is identified by its operands",
+                        binding.value
+                    ),
+                ));
+            }
+            if !is_result && lineage.is_some() {
+                return Err(syntax_span(
+                    lineage.as_ref().expect("checked").span(),
+                    format!(
+                        "action operand '{}' cannot state result lineage",
+                        binding.value
+                    ),
+                ));
+            }
             let end = self.expect_line_end()?;
             bindings.push(ActionBinding {
                 span: binding.span.join(end),
                 name: binding,
                 mode,
                 ty,
+                lineage,
             });
         }
         let end = self.expect(TokenKind::Dedent)?.span;
-        let capability = capability.ok_or_else(|| {
-            syntax_span(
-                start,
-                "an action states the capability a facility must offer to run it, written 'requires <Capability>'",
-            )
-        })?;
         Ok(ActionDecl {
             doc: None,
             name,
             phrase,
             results,
             bindings,
-            capability,
             span: start.join(end),
         })
+    }
+
+    /// The lineage clause following an action result's type.
+    ///
+    /// ```text
+    /// culture: Material<Chassis> continues from cells
+    /// culture: Material<Chassis> begins
+    /// material: Material<Plasmid> identified by item
+    /// ```
+    fn parse_action_result_lineage(&mut self) -> Result<Option<ActionResultLineage>, ParseError> {
+        if self.check_word("begins") {
+            let keyword = self.next().expect("checked");
+            return Ok(Some(ActionResultLineage::Begins { span: keyword.span }));
+        }
+        if self.check_word("continues") {
+            let keyword = self.next().expect("checked");
+            self.expect_word("from")?;
+            let from = self.parse_action_lineage_operands("a material operand")?;
+            let end = from.last().expect("at least one operand").span;
+            return Ok(Some(ActionResultLineage::Continues {
+                from,
+                span: keyword.span.join(end),
+            }));
+        }
+        if self.check_word("identified") {
+            let keyword = self.next().expect("checked");
+            self.expect_word("by")?;
+            let operands = self.parse_action_lineage_operands("an identifying operand")?;
+            let end = operands.last().expect("at least one operand").span;
+            return Ok(Some(ActionResultLineage::IdentifiedBy {
+                operands,
+                span: keyword.span.join(end),
+            }));
+        }
+        Ok(None)
+    }
+
+    fn parse_action_lineage_operands(
+        &mut self,
+        expected: &str,
+    ) -> Result<Vec<Identifier>, ParseError> {
+        let mut operands = vec![self.take_identifier(expected)?];
+        while self.consume(&TokenKind::Comma).is_some() {
+            operands.push(self.take_identifier(expected)?);
+        }
+        Ok(operands)
     }
 
     /// The `is Signal, Reporter` clause on a declaration that plays roles.
@@ -1633,6 +1680,52 @@ mod tests {
     use crate::parser::*;
 
     #[test]
+    fn action_results_state_explicit_lineage() {
+        let module = parse_module(
+            r#"action prepare <cells> with <design> -> fresh, culture, stock:
+  cells: Material<Chassis>
+  design: Plasmid
+  fresh: Material<Chassis> begins
+  culture: Material<Chassis> continues from cells
+  stock: Material<Plasmid> identified by design
+"#,
+        )
+        .unwrap();
+        let Item::Action(action) = &module.items[0] else {
+            panic!("expected an action declaration")
+        };
+        assert!(matches!(
+            &action.bindings[2].lineage,
+            Some(ActionResultLineage::Begins { .. })
+        ));
+        assert!(matches!(
+            &action.bindings[3].lineage,
+            Some(ActionResultLineage::Continues { from, .. }) if from[0].value == "cells"
+        ));
+        assert!(matches!(
+            &action.bindings[4].lineage,
+            Some(ActionResultLineage::IdentifiedBy { operands, .. })
+                if operands[0].value == "design"
+        ));
+    }
+
+    #[test]
+    fn an_action_has_no_capability_clause() {
+        let error = parse_module(
+            r#"action prepare <cells> -> culture:
+  cells: Material<Chassis>
+  culture: Material<Chassis> continues from cells
+  requires Incubation
+"#,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("expected ':'"),
+            "a Method, not an action, owns capability requirements: {error}"
+        );
+    }
+
+    #[test]
     fn parses_reactive_workflows_without_pretending_to_lower_them() {
         let source = r#"
 use std.lab.plasmid
@@ -1856,7 +1949,7 @@ workflow await_colonies(plate: Material<Plate>) -> ColonyGrowth:
         );
 
         let module = parse_module(
-            "buy promoter pTet: Promoter<Tetracycline>:\n  identity = \"BBa_R0040\"\n",
+            "buy promoter pTet: Promoter<Tetracycline>:\n  supplier_identity = \"BBa_R0040\"\n",
         )
         .unwrap();
         let Item::Artifact(artifact) = &module.items[0] else {

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/lab-adapter-api",
     "crates/lab-adapters",
     "crates/lab-capability",
     "crates/lab-cli",
@@ -16,6 +17,7 @@ members = [
     "crates/lab-project",
     "crates/lab-sbol",
     "crates/lab-python",
+    "crates/lab-python-bindings",
     "crates/lab-runfmt",
     "crates/lab-runtime",
 ]
@@ -75,6 +77,7 @@ pliron = { git = "https://github.com/pliron-org/pliron", rev = "a4390be145f151b1
 # never links the native HID library; a runner re-enables `hid`.
 byonoy-hid = { version = "0.1.0", default-features = false }
 lab-adapters = { path = "crates/lab-adapters", version = "0.1.2" }
+lab-adapter-api = { path = "crates/lab-adapter-api", version = "0.1.2" }
 lab-facility = { path = "crates/lab-facility", version = "0.1.2" }
 lab-compiler = { path = "crates/lab-compiler", version = "0.1.2" }
 lab-capability = { path = "crates/lab-capability", version = "0.1.2" }
@@ -91,6 +94,7 @@ lab-language-server = { path = "crates/lab-language-server", version = "0.1.2" }
 opentrons-protocol = "0.1.0"
 lab-package = { path = "crates/lab-package", version = "0.1.2" }
 lab-project = { path = "crates/lab-project", version = "0.1.2" }
+lab-python-bindings = { path = "crates/lab-python-bindings", version = "0.1.2" }
 lab-runfmt = { path = "crates/lab-runfmt", version = "0.1.2" }
 lab-sbol = { path = "crates/lab-sbol", version = "0.1.2" }
 lab-runtime = { path = "crates/lab-runtime", version = "0.1.2" }

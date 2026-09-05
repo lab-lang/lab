@@ -13,9 +13,6 @@ tracked_source_volume_ul = 10000
 tracked_meniscus_offset_mm = 10.0
 tracked_usable_depth_offset_mm = 10.0
 tracked_minimum_height_mm = 3.0
-tracked_low_volume_fraction = 0.2
-tracked_chunk_size = 8
-distribution_disposal_volume_ul = 4
 above_liquid_offset_mm = 2.0
 material_surface_offset_mm = -8.0
 touch_tip_radius = 0.5
@@ -30,70 +27,26 @@ mount = "left"
 model = "p300_single_gen2"
 mount = "right"
 
-[deck.temperature_module]
+[resources.sources]
 # Opentrons' generic load name resolves to Temperature Module GEN1.
 model = "temperature module"
 slot = "1"
 labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
 capacity = 24
 
-# The Thermocycler Module GEN1 occupies slots 7, 8, 10, and 11, so it declares
-# no slot of its own and nothing else may claim those.
-[deck.thermocycler]
+# Canonical Procedure inputs, work vessels, intermediates, and products use this
+# thermocycler-backed work plate. It occupies slots 7, 8, 10, and 11.
+[resources.work]
 model = "thermocycler module"
 labware = "nest_96_wellplate_100ul_pcr_full_skirt"
 capacity = 96
 
-[stages.assembly.small_tips]
+[resources.small_tips]
 labware = "opentrons_96_tiprack_20ul"
 slots = ["2"]
 capacity = 96
 
-[stages.transformation.dna_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["2"]
-capacity = 96
-
-[stages.transformation.source_rack]
-labware = "opentrons_24_tuberack_eppendorf_1.5ml_safelock_snapcap"
-slot = "3"
-capacity = 24
-
-[stages.transformation.small_tips]
-labware = "opentrons_96_tiprack_20ul"
-slots = ["9"]
-capacity = 96
-
-[stages.transformation.large_tips]
-labware = "opentrons_96_filtertiprack_200ul"
-slots = ["6"]
-capacity = 96
-
-# The temperature module holds slot 1 for the whole run, and the Thermocycler
-# Module GEN1 holds 7, 8, 10, and 11, so plating has slots 2, 3, 4, 5, 6, and 9
-# to work with. Declaring a second slot for either plate raises the batch size
-# this bench can hold without editing a program, when a slot is free.
-[stages.plating.dilution_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["2"]
-capacity = 96
-
-[stages.plating.agar_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["5"]
-capacity = 96
-
-[stages.plating.media_rack]
-labware = "opentrons_15_tuberack_falcon_15ml_conical"
-slot = "4"
-medium_well = "A1"
-
-[stages.plating.small_tips]
-labware = "opentrons_96_filtertiprack_20ul"
-slots = ["9"]
-capacity = 96
-
-[stages.plating.large_tips]
+[resources.large_tips]
 labware = "opentrons_96_filtertiprack_200ul"
 slots = ["6"]
 capacity = 96

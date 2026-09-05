@@ -20,9 +20,8 @@ pub use crate::backend::resources::{
     PlateCapacity, UnknownPlateGeometry, supported_plate_capacities,
 };
 pub use schema::{
-    AssemblyStage, Instruments, MediaRack, Pipette, Plates, PlatingStage, ProtocolOptions,
-    SharedDeck, SourceRack, Stages, TechniqueCalibration, TemperatureModule, Thermocycler,
-    TipRacks, TransformationStage,
+    Instruments, Ot2Resources, Pipette, ProtocolOptions, TechniqueCalibration, TemperatureModule,
+    Thermocycler, TipRacks,
 };
 
 /// Deck slots an OT-2 can address. Slot 12 is the fixed trash.
@@ -45,9 +44,7 @@ pub struct Ot2AdapterProfile {
     #[serde(default)]
     pub techniques: TechniqueCalibration,
     #[serde(default)]
-    pub deck: SharedDeck,
-    #[serde(default)]
-    pub stages: Stages,
+    pub resources: Ot2Resources,
 }
 
 impl Default for Ot2AdapterProfile {
@@ -57,8 +54,7 @@ impl Default for Ot2AdapterProfile {
             protocol: ProtocolOptions::default(),
             instruments: Instruments::default(),
             techniques: TechniqueCalibration::default(),
-            deck: SharedDeck::default(),
-            stages: Stages::default(),
+            resources: Ot2Resources::default(),
         }
     }
 }
@@ -74,33 +70,26 @@ impl Ot2AdapterProfile {
 
     pub fn validate(&self) -> Result<(), Ot2ProfileError> {
         self.validate_techniques()?;
-        for (stage, claims) in [
-            ("assembly", self.assembly_claims()),
-            ("transformation", self.transformation_claims()),
-            ("plating", self.plating_claims()),
-        ] {
-            let mut seen: Vec<(String, String)> = Vec::new();
-            for (context, slots) in self.fixture_claims().into_iter().chain(claims) {
-                if slots.is_empty() {
-                    return Err(Ot2ProfileError::NoSlots { context });
+        let mut seen: Vec<(String, String)> = Vec::new();
+        for (context, slots) in self.resource_claims() {
+            if slots.is_empty() {
+                return Err(Ot2ProfileError::NoSlots { context });
+            }
+            for slot in slots {
+                if !ADDRESSABLE_SLOTS.contains(&slot.as_str()) {
+                    return Err(Ot2ProfileError::UnknownSlot { context, slot });
                 }
-                for slot in slots {
-                    if !ADDRESSABLE_SLOTS.contains(&slot.as_str()) {
-                        return Err(Ot2ProfileError::UnknownSlot { context, slot });
-                    }
-                    if THERMOCYCLER_SLOTS.contains(&slot.as_str()) {
-                        return Err(Ot2ProfileError::ThermocyclerSlot { context, slot });
-                    }
-                    if let Some((first, _)) = seen.iter().find(|(_, taken)| taken == &slot) {
-                        return Err(Ot2ProfileError::SlotConflict {
-                            stage,
-                            slot,
-                            first: first.clone(),
-                            second: context,
-                        });
-                    }
-                    seen.push((context.clone(), slot));
+                if THERMOCYCLER_SLOTS.contains(&slot.as_str()) {
+                    return Err(Ot2ProfileError::ThermocyclerSlot { context, slot });
                 }
+                if let Some((first, _)) = seen.iter().find(|(_, taken)| taken == &slot) {
+                    return Err(Ot2ProfileError::SlotConflict {
+                        slot,
+                        first: first.clone(),
+                        second: context,
+                    });
+                }
+                seen.push((context.clone(), slot));
             }
         }
         Ok(())
@@ -150,13 +139,7 @@ impl Ot2AdapterProfile {
                 });
             }
         }
-        for (parameter, value) in [
-            (
-                "tracked_low_volume_fraction",
-                calibration.tracked_low_volume_fraction,
-            ),
-            ("touch_tip_radius", calibration.touch_tip_radius),
-        ] {
+        for (parameter, value) in [("touch_tip_radius", calibration.touch_tip_radius)] {
             if !value.is_finite() || !(0.0..=1.0).contains(&value) {
                 return Err(Ot2ProfileError::InvalidTechnique {
                     parameter,
@@ -170,70 +153,23 @@ impl Ot2AdapterProfile {
                 message: "must be greater than zero",
             });
         }
-        if calibration.tracked_chunk_size == 0 {
-            return Err(Ot2ProfileError::InvalidTechnique {
-                parameter: "tracked_chunk_size",
-                message: "must be greater than zero",
-            });
-        }
         Ok(())
     }
 
-    /// Slots occupied by bolted-down hardware for the whole run, whichever stage is executing.
-    /// Every stage's claims are checked against these, so a stage cannot quietly place labware
-    /// on a module's slot.
-    fn fixture_claims(&self) -> Vec<(String, Vec<String>)> {
-        vec![(
-            "the temperature module".to_owned(),
-            vec![self.deck.temperature_module.slot.clone()],
-        )]
-    }
-
-    fn assembly_claims(&self) -> Vec<(String, Vec<String>)> {
-        vec![(
-            "assembly small tips".to_owned(),
-            self.stages.assembly.small_tips.slots.clone(),
-        )]
-    }
-
-    fn transformation_claims(&self) -> Vec<(String, Vec<String>)> {
-        let stage = &self.stages.transformation;
-        vec![
-            ("the DNA plate".to_owned(), stage.dna_plate.slots.clone()),
-            (
-                "the transformation source rack".to_owned(),
-                vec![stage.source_rack.slot.clone()],
-            ),
-            (
-                "transformation small tips".to_owned(),
-                stage.small_tips.slots.clone(),
-            ),
-            (
-                "transformation large tips".to_owned(),
-                stage.large_tips.slots.clone(),
-            ),
-        ]
-    }
-
-    fn plating_claims(&self) -> Vec<(String, Vec<String>)> {
-        let stage = &self.stages.plating;
+    /// Every addressable resource is present for the complete canonical program.
+    fn resource_claims(&self) -> Vec<(String, Vec<String>)> {
         vec![
             (
-                "the dilution plate".to_owned(),
-                stage.dilution_plate.slots.clone(),
-            ),
-            ("the agar plate".to_owned(), stage.agar_plate.slots.clone()),
-            (
-                "the media rack".to_owned(),
-                vec![stage.media_rack.slot.clone()],
+                "the source module".to_owned(),
+                vec![self.resources.sources.slot.clone()],
             ),
             (
-                "plating small tips".to_owned(),
-                stage.small_tips.slots.clone(),
+                "small tips".to_owned(),
+                self.resources.small_tips.slots.clone(),
             ),
             (
-                "plating large tips".to_owned(),
-                stage.large_tips.slots.clone(),
+                "large tips".to_owned(),
+                self.resources.large_tips.slots.clone(),
             ),
         ]
     }
@@ -241,20 +177,11 @@ impl Ot2AdapterProfile {
     /// Labware load names this profile references, for reporting what an
     /// operator must have on hand.
     pub fn labware(&self) -> BTreeSet<String> {
-        let stages = &self.stages;
         BTreeSet::from([
-            self.deck.temperature_module.labware.clone(),
-            self.deck.thermocycler.labware.clone(),
-            stages.assembly.small_tips.labware.clone(),
-            stages.transformation.dna_plate.labware.clone(),
-            stages.transformation.source_rack.labware.clone(),
-            stages.transformation.small_tips.labware.clone(),
-            stages.transformation.large_tips.labware.clone(),
-            stages.plating.dilution_plate.labware.clone(),
-            stages.plating.agar_plate.labware.clone(),
-            stages.plating.media_rack.labware.clone(),
-            stages.plating.small_tips.labware.clone(),
-            stages.plating.large_tips.labware.clone(),
+            self.resources.sources.labware.clone(),
+            self.resources.work.labware.clone(),
+            self.resources.small_tips.labware.clone(),
+            self.resources.large_tips.labware.clone(),
         ])
     }
 }
@@ -268,37 +195,32 @@ mod tests {
         let profile = Ot2AdapterProfile::parse("reference-bench", "").unwrap();
         assert_eq!(profile.name, "reference-bench");
         assert_eq!(profile.protocol.api_level, "2.21");
-        assert_eq!(profile.deck.temperature_module.slot, "1");
-        assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
-        assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 96);
-        assert_eq!(profile.techniques.tracked_chunk_size, 8);
+        assert_eq!(profile.resources.sources.slot, "1");
+        assert_eq!(profile.resources.work.capacity.get(), 96);
+        assert_eq!(profile.resources.small_tips.slots, ["2"]);
+        assert_eq!(profile.resources.large_tips.slots, ["6"]);
         assert_eq!(profile.techniques.touch_tip_vertical_offset_mm, -14.0);
     }
 
     #[test]
-    fn a_deck_fixture_holds_its_slot_during_every_stage() {
+    fn physical_resources_cannot_share_a_slot() {
         let error = Ot2AdapterProfile::parse(
             "bench-three",
             r#"
-[deck.temperature_module]
+[resources.sources]
 model = "temperature module gen2"
-slot = "4"
+slot = "2"
 labware = "opentrons_24_aluminumblock_nest_1.5ml_snapcap"
 capacity = 24
-
-[stages.plating.large_tips]
-labware = "opentrons_96_filtertiprack_200ul"
-slots = ["4"]
-capacity = 96
 "#,
         )
         .unwrap_err();
         let message = error.to_string();
         assert!(
-            message.contains("deck slot '4'")
-                && message.contains("the temperature module")
-                && message.contains("plating"),
-            "the temperature module is bolted down for the whole run, so plating cannot claim its slot: {message}"
+            message.contains("deck slot '2'")
+                && message.contains("the source module")
+                && message.contains("small tips"),
+            "all resources are present for the canonical program: {message}"
         );
     }
 
@@ -307,18 +229,18 @@ capacity = 96
         let profile = Ot2AdapterProfile::parse(
             "bench-two",
             r#"
-[stages.plating.agar_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+[resources.large_tips]
+labware = "opentrons_96_filtertiprack_200ul"
 slots = ["5"]
 capacity = 96
 "#,
         )
         .unwrap();
-        assert_eq!(profile.stages.plating.agar_plate.slots, ["5"]);
+        assert_eq!(profile.resources.large_tips.slots, ["5"]);
         assert_eq!(
-            profile.stages.plating.dilution_plate.slots,
+            profile.resources.small_tips.slots,
             ["2"],
-            "an unstated stage keeps the reference layout"
+            "an unstated resource keeps the reference layout"
         );
     }
 
@@ -343,7 +265,7 @@ capacity = 96
         let error = Ot2AdapterProfile::parse(
             "bench-two",
             r#"
-[stages.assembly.small_tips]
+[resources.small_tips]
 labware = "opentrons_96_tiprack_20ul"
 slots = ["7"]
 capacity = 96
@@ -354,34 +276,31 @@ capacity = 96
     }
 
     #[test]
-    fn rejects_two_labware_in_one_slot_during_a_stage() {
+    fn rejects_two_resources_in_one_slot() {
         let error = Ot2AdapterProfile::parse(
             "bench-two",
             r#"
-[stages.plating.agar_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
-slots = ["4"]
+[resources.large_tips]
+labware = "opentrons_96_filtertiprack_200ul"
+slots = ["2"]
 capacity = 96
 "#,
         )
-        .expect_err("slot 4 already holds the media rack");
+        .expect_err("slot 2 already holds the small tips");
         assert!(error.to_string().contains("claimed by both"), "{error}");
     }
 
     #[test]
     fn rejects_an_unknown_key_rather_than_silently_ignoring_it() {
-        let error = Ot2AdapterProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
-            .expect_err("a misspelled key must not fall back to a default");
+        let error = Ot2AdapterProfile::parse("bench-two", "[stages.assembly]\nsmall_tips = 2\n")
+            .expect_err("the removed scientific stage schema must not be accepted");
         assert!(error.to_string().contains("parse"), "{error}");
     }
 
     #[test]
     fn rejects_unsafe_technique_calibration() {
-        let error = Ot2AdapterProfile::parse(
-            "bench-two",
-            "[techniques]\ntracked_low_volume_fraction = 1.5\n",
-        )
-        .expect_err("fractions outside the unit interval are unsafe");
-        assert!(error.to_string().contains("tracked_low_volume_fraction"));
+        let error = Ot2AdapterProfile::parse("bench-two", "[techniques]\ntouch_tip_radius = 1.5\n")
+            .expect_err("fractions outside the unit interval are unsafe");
+        assert!(error.to_string().contains("touch_tip_radius"));
     }
 }

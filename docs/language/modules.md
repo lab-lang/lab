@@ -39,7 +39,7 @@ The bundled catalog validates module paths, export uniqueness, stable operation 
 
 A bundled module whose whole surface is expressible in Lab is written in Lab rather than in Rust, and resolves through the same checked `ModuleInterface` a package module does. `std.bio.designs`, `std.bio.golden_gate`, `std.bio.parts`, `std.bio.backbones`, and `std.bio.reporters` all are. Nothing in the checker distinguishes them from a Rust-defined module or from a package, and their own documentation comments become their reference entries, so the reference cannot drift from a second description of the same exports.
 
-A module needing pure functions or durable action contracts stays in Rust, because neither has a source declaration form yet. [`open-questions.md`](open-questions.md) records what that blocks.
+A module needing a compiler-implemented pure function stays in Rust because pure functions have no source declaration form yet. The same is true for an action whose contract needs an open or dependent type relationship that source declarations cannot yet express. Concrete durable actions, roles, types, artifacts, workflows, and catalogued items are ordinary Lab declarations. [`open-questions.md`](open-questions.md) records the remaining declaration boundaries.
 
 ### Declaring kinds other packages use
 
@@ -167,7 +167,7 @@ parts = "1.2"
 local-policies = { path = "../policies" }
 ```
 
-`[methods] documents` names versioned `lab.method-catalog.v1` JSON files inside the package. Lab composes those definitions with catalogs contributed by reachable path dependencies and the standard Method set, then validates the complete registry before compiling. Method documents describe facility-independent Procedure and Capability alternatives; exact selection remains in `[[planning.methods]]`, facility facts remain in SBOLInventory, and adapter implementation remains under `[[execution.adapters]]`.
+`[methods] documents` names versioned `lab.method-catalog.v2` JSON files inside the package. Lab composes those definitions with catalogs contributed by reachable path dependencies and the standard Method set, then validates the complete registry before compiling. Method documents describe facility-independent Procedure and Capability alternatives; exact selection remains in `[[planning.methods]]`, facility facts remain in SBOLInventory, and adapter implementation remains under `[[execution.adapters]]`.
 
 `[[planning.methods]]` selects one Method for a source operation or for one exact choice when several are scientifically valid. `[[planning.assets]]` names which Asset satisfies a requirement when a facility offers more than one that could; on its own it binds every requirement that Asset can serve, and adding `capability-kind` or `requirement` narrows it to those. A `requirement` pin is exact and makes its Method infeasible when that Asset cannot serve it; broader pins apply only where the named Asset is eligible. Two active MaterialLots of the same component need no pin: they satisfy an input identically, so the compiler takes one and records the others on the binding as `interchangeable_alternatives`. Two instruments are not interchangeable, because each carries its own calibration and location, so those require a pin. `adapter-requirement = "non-manual"` turns an unlowered non-manual offering into an error rather than a plan with nothing to execute.
 

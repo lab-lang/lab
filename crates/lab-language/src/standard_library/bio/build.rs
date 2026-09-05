@@ -1,10 +1,8 @@
 //! Artifact-realization operations in `std.bio.build`.
 
-use crate::checked::OwnershipMode;
+use crate::checked::{OwnershipMode, ResultLineage};
 use crate::standard_library::catalog::StandardModule;
-use crate::standard_library::contract::{
-    ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec,
-};
+use crate::standard_library::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 use crate::type_system::Ty;
 
 pub(in crate::standard_library::bio) fn module() -> StandardModule {
@@ -31,13 +29,12 @@ pub(in crate::standard_library::bio) fn module() -> StandardModule {
                 ),
             ]),
         ],
-        // Realizing a design assembles DNA rather than establishing an
-        // organism, so the product carries the lineage of what went into it.
-        inert: Vec::new(),
+        // Each realization is a separate physical build event, even where two
+        // events implement the same design.
         results: vec![ResultSpec {
             name: "product".to_owned(),
             r#type: ContractType::MaterialOf("design".to_owned()),
-            lineage: Lineage::Continues,
+            lineage: ResultLineage::Begins,
         }],
     };
     StandardModule::new("std.bio.build").with_actions([action])

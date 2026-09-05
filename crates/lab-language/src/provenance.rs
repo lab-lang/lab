@@ -16,9 +16,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::checked::{
     CheckedDeclaration, CheckedExpression, CheckedField, CheckedModule, CheckedStatement,
-    CheckedType, ResolvedAction, TypedExpression,
+    CheckedType, ResolvedAction, ResultLineage, TypedExpression,
 };
-use crate::standard_library::{Lineage, StandardLibrary};
+use crate::semantics::DefinitionId;
 
 /// One lineage beginning: a particular transformation, a particular colony
 /// pick. Materials sharing an origin are the same biological entity.
@@ -96,73 +96,38 @@ impl LineageMap {
     }
 }
 
-/// What each of an operation's results does to a lineage, in declaration order.
-///
-/// Positional rather than keyed by name, because a binding renames a result:
-/// `evidence <- quantify sample` and `first <- quantify sample` bind the same
-/// contract result to different names.
-type LineageTable = BTreeMap<String, ActionLineage>;
-
-/// What one action does to the lineages passing through it.
-pub(crate) struct ActionLineage {
-    results: Vec<Lineage>,
-    /// Operands whose lineage no result carries on.
-    inert: Vec<String>,
-}
-
 /// What every workflow in a module knows about where its materials came from,
 /// keyed by workflow name.
 ///
 /// Method selection and adapter planning read this to decide what may be
 /// pooled, and the language server reads it to explain a sample's history.
 pub fn lineage(module: &CheckedModule) -> BTreeMap<String, LineageMap> {
-    let table = lineage_table(&StandardLibrary::bundled());
     module
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {
-            CheckedDeclaration::Workflow { name, body, .. } => {
-                Some((name.clone(), analyze(body, &table)))
-            }
+            CheckedDeclaration::Workflow { name, body, .. } => Some((name.clone(), analyze(body))),
             _ => None,
         })
         .collect()
 }
 
-/// Read the lineage each standard action declares for its results.
-pub(crate) fn lineage_table(library: &StandardLibrary) -> LineageTable {
-    library
-        .action_specs()
-        .map(|action| {
-            let results = action.results.iter().map(|result| result.lineage).collect();
-            (
-                action.operation.to_owned(),
-                ActionLineage {
-                    results,
-                    inert: action.inert.clone(),
-                },
-            )
-        })
-        .collect()
-}
-
 /// Walk a workflow body, recording what each bound material descends from.
-pub(crate) fn analyze(body: &[CheckedStatement], table: &LineageTable) -> LineageMap {
+pub(crate) fn analyze(body: &[CheckedStatement]) -> LineageMap {
     let mut analyzer = Analyzer {
-        table,
         next: 0,
         map: LineageMap::default(),
-        shelf: BTreeMap::new(),
+        identified: BTreeMap::new(),
     };
     analyzer.block(body);
     analyzer.map
 }
 
-struct Analyzer<'a> {
-    table: &'a LineageTable,
+struct Analyzer {
     next: usize,
     map: LineageMap,
-    /// The origin already minted for each thing fetched off a shelf.
+    /// The origin already minted for each thing explicitly identified by an
+    /// action contract.
     ///
     /// Naming the same catalogued item twice fetches the same thing, so two
     /// such materials are one entity. Minting an origin per fetch would let a
@@ -170,10 +135,22 @@ struct Analyzer<'a> {
     /// which is the pseudo-replication this analysis exists to refuse. Whether
     /// a facility holds one lot or two is its own question, and one a program
     /// cannot see.
-    shelf: BTreeMap<Vec<String>, Origin>,
+    identified: BTreeMap<IdentityKey, Origin>,
 }
 
-impl Analyzer<'_> {
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct IdentityKey {
+    action: DefinitionId,
+    operands: Vec<IdentityReference>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct IdentityReference {
+    definition: DefinitionId,
+    path: Vec<String>,
+}
+
+impl Analyzer {
     fn block(&mut self, statements: &[CheckedStatement]) {
         for statement in statements {
             self.statement(statement);
@@ -223,41 +200,13 @@ impl Analyzer<'_> {
     }
 
     fn effect(&mut self, results: &[CheckedField], action: &ResolvedAction) {
-        let declared = self.table.get(&action.operation);
-        // What a continuing result carries on: the origins of every material
-        // that went into the action.
-        let mut inherited = BTreeSet::new();
-        let mut any_unknown = false;
-        for argument in &action.arguments {
-            if !mentions_material(&argument.value.r#type) {
-                continue;
-            }
-            // What an organism sits on is not part of the organism.
-            if declared.is_some_and(|action| action.inert.iter().any(|name| name == &argument.name))
-            {
-                continue;
-            }
-            match self.map.of(&argument.value) {
-                Provenance::From(origins) => inherited.extend(origins),
-                // A family's size is a runtime value, so what continues from
-                // one spans an unknown number of entities — not one. Counting
-                // it as one would refuse a program that measured genuinely
-                // independent colonies.
-                Provenance::EachFrom(_) | Provenance::Unknown => any_unknown = true,
-            }
-        }
-
         // One event begins one lineage, however many handles onto it the action
         // hands back. A transformation yields both a strain and its culture,
         // and those are one organism, not two.
         let mut event = None;
         for (position, result) in results.iter().enumerate() {
-            let lineage = declared
-                .and_then(|action| action.results.get(position))
-                .copied()
-                .unwrap_or_default();
-            let provenance = match lineage {
-                Lineage::Begins => {
+            let provenance = match action.results.get(position).map(|result| &result.lineage) {
+                Some(ResultLineage::Begins) => {
                     let origin = *event.get_or_insert_with(|| {
                         let origin = Origin(self.next);
                         self.next += 1;
@@ -271,70 +220,92 @@ impl Analyzer<'_> {
                         Provenance::From(BTreeSet::from([origin]))
                     }
                 }
-                Lineage::Continues if any_unknown => Provenance::Unknown,
-                // A result that continues nothing must start something: no
-                // material flowed in, so two of these are as independent as two
-                // separate assemblies. Fetching a named thing off a shelf is
-                // the exception, because naming it twice fetches one thing.
-                Lineage::Continues if inherited.is_empty() => {
-                    let origin = match fetched(action) {
-                        Some(key) => match self.shelf.get(&key) {
-                            Some(origin) => *origin,
-                            None => {
-                                let origin = *event.get_or_insert_with(|| {
-                                    let origin = Origin(self.next);
-                                    self.next += 1;
-                                    origin
-                                });
-                                self.shelf.insert(key, origin);
-                                origin
-                            }
-                        },
-                        None => *event.get_or_insert_with(|| {
-                            let origin = Origin(self.next);
-                            self.next += 1;
-                            origin
-                        }),
-                    };
-                    Provenance::From(BTreeSet::from([origin]))
-                }
-                Lineage::Continues => Provenance::From(inherited.clone()),
+                Some(ResultLineage::Continues { from }) => self.continued(action, from),
+                Some(ResultLineage::IdentifiedBy { operands }) => self.identified(action, operands),
+                // Checked construction guarantees positional agreement. Stay
+                // conservative if an externally deserialized module violates
+                // it rather than inventing provenance.
+                None => Provenance::Unknown,
             };
             self.map.bindings.insert(result.name.clone(), provenance);
         }
     }
+
+    fn continued(&self, action: &ResolvedAction, sources: &[String]) -> Provenance {
+        let mut inherited = BTreeSet::new();
+        for source in sources {
+            let Some(argument) = action
+                .arguments
+                .iter()
+                .find(|argument| argument.name == *source)
+            else {
+                return Provenance::Unknown;
+            };
+            match self.map.of(&argument.value) {
+                Provenance::From(origins) => inherited.extend(origins),
+                // A family's size is a runtime value, so what continues from
+                // one spans an unknown number of entities — not one. Counting
+                // it as one would refuse a program that measured genuinely
+                // independent colonies.
+                Provenance::EachFrom(_) | Provenance::Unknown => {
+                    return Provenance::Unknown;
+                }
+            }
+        }
+        Provenance::From(inherited)
+    }
+
+    fn identified(&mut self, action: &ResolvedAction, operands: &[String]) -> Provenance {
+        let Some(key) = identity_key(action, operands) else {
+            return Provenance::Unknown;
+        };
+        let origin = match self.identified.get(&key) {
+            Some(origin) => *origin,
+            None => {
+                let origin = Origin(self.next);
+                self.next += 1;
+                self.identified.insert(key, origin);
+                origin
+            }
+        };
+        Provenance::From(BTreeSet::from([origin]))
+    }
 }
 
-/// What this action names, when it establishes material by naming a thing
-/// rather than by working on one.
-///
-/// The operation and every name it refers to identify the thing fetched, so two
-/// fetches of one item share a key and two fetches of different items do not.
-/// An action that refers to nothing has nothing to be the same as.
-fn fetched(action: &ResolvedAction) -> Option<Vec<String>> {
-    let mut key = vec![action.operation.clone()];
-    for argument in &action.arguments {
-        let CheckedExpression::Reference { path, .. } = &argument.value.value else {
-            return None;
-        };
-        key.extend(path.iter().cloned());
+fn identity_key(action: &ResolvedAction, operands: &[String]) -> Option<IdentityKey> {
+    let references = operands
+        .iter()
+        .map(|name| {
+            let argument = action
+                .arguments
+                .iter()
+                .find(|argument| argument.name == *name)?;
+            identity_reference(&argument.value)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(IdentityKey {
+        action: action.callee.definition().clone(),
+        operands: references,
+    })
+}
+
+fn identity_reference(expression: &TypedExpression) -> Option<IdentityReference> {
+    match &expression.value {
+        CheckedExpression::Reference { definition, path } => Some(IdentityReference {
+            definition: definition.clone(),
+            path: path.clone(),
+        }),
+        CheckedExpression::Field { subject, field } => {
+            let mut reference = identity_reference(subject)?;
+            reference.path.push(field.clone());
+            Some(reference)
+        }
+        _ => None,
     }
-    (key.len() > 1).then_some(key)
 }
 
 fn is_collection(r#type: &CheckedType) -> bool {
     matches!(r#type, CheckedType::List { .. })
-}
-
-fn mentions_material(r#type: &CheckedType) -> bool {
-    match r#type {
-        CheckedType::Named { name, arguments } => {
-            name == "Material" || arguments.iter().any(mentions_material)
-        }
-        CheckedType::List { element } => mentions_material(element),
-        CheckedType::Union { alternatives } => alternatives.iter().any(mentions_material),
-        _ => false,
-    }
 }
 
 /// Whether two materials are the same biological entity, which is what makes
@@ -351,11 +322,9 @@ mod tests {
     use super::*;
 
     use crate::compile_module;
-    use crate::standard_library::StandardLibrary;
 
     fn lineage_of(source: &str, workflow: &str) -> LineageMap {
         let module = compile_module(source).expect("the module checks");
-        let table = lineage_table(&StandardLibrary::bundled());
         let body = module
             .declarations
             .iter()
@@ -368,7 +337,7 @@ mod tests {
                 _ => None,
             })
             .expect("the workflow is declared");
-        analyze(body, &table)
+        analyze(body)
     }
 
     const SETUP: &str = r#"use std.lab.plasmid
@@ -536,6 +505,98 @@ plasmid p_reporter:
             Some(&Provenance::Unknown),
             "what continues from a family spans as many entities as the family holds, which is a runtime value"
         );
+    }
+
+    #[test]
+    fn a_source_action_continues_only_the_materials_it_names() {
+        let map = lineage_of(
+            &format!(
+                "{SETUP}{}",
+                r#"plasmid p_other:
+  sequence = dna("TGCA")
+
+action carry <sample> over <carrier> -> outcome:
+  sample: Material<Plasmid>
+  carrier: Material<Plasmid>
+  outcome: Material<Plasmid> continues from sample
+
+workflow carry_one() -> Material<Plasmid>:
+  sample <- provision p_reporter
+  carrier <- provision p_other
+  outcome <- carry sample over carrier
+  return outcome
+"#
+            ),
+            "carry_one",
+        );
+        let outcome = map.get("outcome").expect("outcome is bound");
+        assert!(same_entity(
+            outcome,
+            map.get("sample").expect("sample is bound")
+        ));
+        assert!(
+            !same_entity(outcome, map.get("carrier").expect("carrier is bound")),
+            "an explicitly omitted carrier does not enter the result lineage"
+        );
+    }
+
+    #[test]
+    fn one_source_action_event_shares_its_beginning_across_results() {
+        let map = lineage_of(
+            &format!(
+                "{SETUP}{}",
+                r#"action branch <input> -> first, second:
+  input: Material<Plasmid>
+  first: Material<Plasmid> begins
+  second: Material<Plasmid> begins
+
+workflow branch_one() -> (
+  first: Material<Plasmid>,
+  second: Material<Plasmid>,
+):
+  input <- provision p_reporter
+  first, second <- branch input
+  return first, second
+"#
+            ),
+            "branch_one",
+        );
+        let first = map.get("first").expect("first is bound");
+        let second = map.get("second").expect("second is bound");
+        assert!(
+            same_entity(first, second),
+            "one event creates one origin even when it returns two handles"
+        );
+        assert!(
+            !same_entity(first, map.get("input").expect("input is bound")),
+            "a beginning does not inherit its input"
+        );
+    }
+
+    #[test]
+    fn a_source_action_can_identify_repeated_results_by_named_operands() {
+        let map = lineage_of(
+            &format!(
+                "{SETUP}{}",
+                r#"action retrieve <design> -> material:
+  design: Plasmid
+  material: Material<Plasmid> identified by design
+
+workflow retrieve_twice() -> (
+  first: Material<Plasmid>,
+  second: Material<Plasmid>,
+):
+  first <- retrieve p_reporter
+  second <- retrieve p_reporter
+  return first, second
+"#
+            ),
+            "retrieve_twice",
+        );
+        assert!(same_entity(
+            map.get("first").expect("first is bound"),
+            map.get("second").expect("second is bound")
+        ));
     }
 
     /// A workflow parameter comes from a caller this analysis cannot see, so

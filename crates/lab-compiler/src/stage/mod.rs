@@ -21,7 +21,7 @@ use crate::capability::ir::{ConstraintOp, RequirementOp};
 use crate::method::ir::{ChoiceOp, YieldOp};
 use crate::procedure::binding::{ProcedureCapabilityRequirement, ProcedureTaskInterface};
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp};
-use crate::procedure::validate_task_program;
+use crate::procedure::{ProcedureContractRegistry, validate_task_program};
 use crate::stage::ir::StageOp;
 
 /// A verifier-valid boundary in the current Lab Compiler lowering pipeline.
@@ -54,7 +54,7 @@ impl FromStr for IrStage {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "design" => Ok(Self::Design),
-            "design-intent" | "design-workflow" => Ok(Self::DesignIntent),
+            "design-intent" => Ok(Self::DesignIntent),
             "refined-alternatives" => Ok(Self::RefinedAlternatives),
             "allocated-procedure" => Ok(Self::AllocatedProcedure),
             other => Err(format!(
@@ -103,10 +103,8 @@ pub(crate) fn detect_stage(context: &Context, module: ModuleOp) -> Result<IrStag
     let (design_operations, workflow_operations) = operation_counts(context, module)?;
     let structural = match (design_operations, workflow_operations) {
         (1.., 0) => IrStage::Design,
-        (1.., 1..) => IrStage::DesignIntent,
-        (0, _) => {
-            return Err("a Lab Compiler module must contain at least one design operation".into());
-        }
+        (_, 1..) => IrStage::DesignIntent,
+        (0, 0) => return Err("a Lab Compiler module must contain an executable operation".into()),
     };
     if declared != structural {
         return Err(format!(
@@ -124,7 +122,6 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         .ok_or_else(|| "builtin.module has no entry block".to_owned())?;
     let mut allocation_contexts = 0;
     let mut methods = Vec::new();
-    let mut design_operations = 0;
 
     for operation in block.deref(context).iter(context) {
         let id = Operation::get_opid(operation, context);
@@ -132,7 +129,6 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
             continue;
         }
         if id.dialect.as_ref() == "design" {
-            design_operations += 1;
             continue;
         }
         if Operation::get_op::<AllocationContextOp>(operation, context).is_some() {
@@ -146,9 +142,6 @@ fn verify_allocated_procedure(context: &Context, module: ModuleOp) -> Result<(),
         return Err(format!(
             "operation '{id}' is not legal at the allocated-procedure module boundary"
         ));
-    }
-    if design_operations == 0 {
-        return Err("allocated-procedure requires at least one Design operation".to_owned());
     }
     if allocation_contexts != 1 {
         return Err(format!(
@@ -397,14 +390,6 @@ fn verify_allocated_method(
             ));
         }
     }
-    verify_task_program_contracts(
-        context,
-        &task_operations,
-        &requirements,
-        &parameters,
-        &materials,
-        &constraints,
-    )?;
     for requirement in parameter_matches.keys() {
         if !requirements.contains_key(requirement.as_str()) {
             return Err(format!(
@@ -691,9 +676,9 @@ fn verify_task_program_contracts(
     context: &Context,
     task_operations: &[pliron::context::Ptr<Operation>],
     requirements: &BTreeMap<String, RequirementOp>,
-    parameters: &[ParameterOp],
     materials: &BTreeMap<String, MaterialInputOp>,
     constraints: &[ConstraintOp],
+    contracts: &ProcedureContractRegistry,
 ) -> Result<(), String> {
     let mut constraints_by_requirement =
         BTreeMap::<String, Vec<lab_capability::PropertyConstraint>>::new();
@@ -727,19 +712,8 @@ fn verify_task_program_contracts(
     }
     debug_assert!(
         constraints_by_requirement.is_empty(),
-        "stage verification rejects constraints that reference absent Requirements"
+        "structural stage verification rejects constraints for absent Requirements"
     );
-
-    let mut parameters_by_node =
-        BTreeMap::<String, Vec<(crate::method::LocalId, crate::method::ProcedureValue)>>::new();
-    for parameter in parameters {
-        let node = parameter.procedure_node(context);
-        let (id, _, value) = parameter.semantic_parameter(context);
-        parameters_by_node
-            .entry(node)
-            .or_default()
-            .push((id, value));
-    }
 
     let mut materials_by_node = BTreeMap::<String, Vec<(crate::method::LocalId, String)>>::new();
     for (material_id, material) in materials {
@@ -757,23 +731,11 @@ fn verify_task_program_contracts(
         let task = Operation::get_op::<TaskOp>(*operation, context)
             .expect("Procedure task list contains only procedure.task operations");
         let node = task.semantic_node_id(context);
-        let operation_id = task.semantic_operation(context);
         let outputs = task.output_names(context);
-        let task_parameters = parameters_by_node.remove(node.as_str()).unwrap_or_default();
         let task_materials = materials_by_node.remove(node.as_str()).unwrap_or_default();
         let program = task.semantic_program(context);
-        let Some(validated) = validate_task_program(
-            &node,
-            &operation_id,
-            operation.deref(context).operands().count(),
-            &outputs,
-            task_parameters.iter().map(|(id, value)| (id, value)),
-            task_materials
-                .iter()
-                .map(|(id, symbol)| (id, symbol.as_str())),
-            program.as_ref(),
-        )
-        .map_err(|error| error.to_string())?
+        let Some(validated) = validate_task_program(&node, program.as_ref(), contracts)
+            .map_err(|error| error.to_string())?
         else {
             continue;
         };
@@ -788,27 +750,42 @@ fn verify_task_program_contracts(
         validated
             .validate_task_contract(&node, &interface, None, &declared_requirements)
             .map_err(|error| {
-                format!(
-                    "Procedure node '{node}' does not satisfy its normalized program contract: {error}"
-                )
+                format!("Procedure node '{node}' does not satisfy its program contract: {error}")
             })?;
     }
     Ok(())
 }
 
 fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<(), String> {
+    verify_refined_alternatives_impl(context, module, None)
+}
+
+/// Revalidate every Procedure program and its derived requirements against one explicit compiler
+/// composition after Method refinement has populated candidate regions.
+pub(crate) fn verify_refined_procedure_programs(
+    context: &Context,
+    module: ModuleOp,
+    contracts: &ProcedureContractRegistry,
+) -> Result<(), String> {
+    verify_refined_alternatives_impl(context, module, Some(contracts))
+}
+
+fn verify_refined_alternatives_impl(
+    context: &Context,
+    module: ModuleOp,
+    contracts: Option<&ProcedureContractRegistry>,
+) -> Result<(), String> {
     let block = module
         .get_region(context)
         .deref(context)
         .get_head()
         .ok_or_else(|| "builtin.module has no entry block".to_owned())?;
-    let mut design_operations = 0;
     let mut choices = Vec::new();
     for operation in block.deref(context).iter(context) {
         let id = Operation::get_opid(operation, context);
         match id.dialect.as_ref() {
             "lair" if Operation::get_op::<StageOp>(operation, context).is_some() => {}
-            "design" => design_operations += 1,
+            "design" => {}
             "method" if Operation::get_op::<ChoiceOp>(operation, context).is_some() => {
                 choices.push(Operation::get_op::<ChoiceOp>(operation, context).unwrap());
             }
@@ -818,9 +795,6 @@ fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<()
                 ));
             }
         }
-    }
-    if design_operations == 0 {
-        return Err("refined-alternatives requires at least one Design operation".to_owned());
     }
     if choices.is_empty() {
         return Err("refined-alternatives requires at least one method.choice".to_owned());
@@ -846,6 +820,7 @@ fn verify_refined_alternatives(context: &Context, module: ModuleOp) -> Result<()
                 &mut requirement_ids,
                 &mut parameter_ids,
                 &mut material_input_ids,
+                contracts,
             )?;
         }
     }
@@ -860,6 +835,7 @@ fn verify_candidate(
     global_requirement_ids: &mut BTreeSet<String>,
     global_parameter_ids: &mut BTreeSet<String>,
     global_material_input_ids: &mut BTreeSet<String>,
+    contracts: Option<&ProcedureContractRegistry>,
 ) -> Result<(), String> {
     let choice_id = choice.choice_id(context);
     let block = choice
@@ -988,14 +964,16 @@ fn verify_candidate(
             ));
         }
     }
-    verify_task_program_contracts(
-        context,
-        &task_operations,
-        &requirements,
-        &parameters,
-        &material_inputs,
-        &constraints,
-    )?;
+    if let Some(contracts) = contracts {
+        verify_task_program_contracts(
+            context,
+            &task_operations,
+            &requirements,
+            &material_inputs,
+            &constraints,
+            contracts,
+        )?;
+    }
     verify_candidate_dataflow(context, choice, candidate, &task_operations, tail)?;
     Ok(())
 }
@@ -1163,7 +1141,8 @@ mod tests {
     use pliron::printable::Printable;
 
     use crate::capability::ir::{ConstraintOp, RequirementOp};
-    use crate::design::ir::DesignDnaSequenceOp;
+    use crate::design::ir::DesignArtifactOp;
+    use crate::design::synthetic_artifact_design;
     use crate::method::ir::{ChoiceOp, ChoicePorts, YieldOp};
     use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
     use crate::procedure::{
@@ -1174,15 +1153,6 @@ mod tests {
     use crate::session::CompilerSession;
 
     use super::*;
-
-    #[test]
-    fn the_transitional_design_workflow_spelling_parses_as_design_intent() {
-        assert_eq!(
-            "design-workflow".parse::<IrStage>().unwrap(),
-            IrStage::DesignIntent
-        );
-        assert_eq!(IrStage::DesignIntent.to_string(), "design-intent");
-    }
 
     #[test]
     fn refined_alternatives_round_trip_with_typed_capability_constraints() {
@@ -1213,7 +1183,12 @@ mod tests {
         let (context, module) = refined_program(true);
 
         verify_operation(module.get_operation(), &context).unwrap();
-        let error = detect_stage(&context, module).unwrap_err();
+        let error = verify_refined_procedure_programs(
+            &context,
+            module,
+            crate::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap_err();
         assert!(
             error.contains(
                 "Procedure node 'incubation::candidate-0::uncovered' has no Capability requirement"
@@ -1258,7 +1233,12 @@ mod tests {
             .unwrap();
         Operation::replace_operand(second_yield, &context, 0, first_result);
 
-        let error = detect_stage(&context, module).unwrap_err();
+        let error = verify_refined_procedure_programs(
+            &context,
+            module,
+            crate::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap_err();
         assert!(
             error.contains("value is defined outside this candidate"),
             "{error}"
@@ -1277,7 +1257,12 @@ mod tests {
         let corrupted = pipetting_program("unbound-material", "sample", "1");
         task.set_semantic_program(&mut context, &corrupted);
         verify_operation(module.get_operation(), &context).unwrap();
-        let error = detect_stage(&context, module).unwrap_err();
+        let error = verify_refined_procedure_programs(
+            &context,
+            module,
+            crate::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap_err();
         assert!(
             error.contains("program material `unbound-material` is not declared by the task"),
             "{error}"
@@ -1298,7 +1283,12 @@ mod tests {
         let corrupted = pipetting_program(&material, "sample", "2");
         task.set_semantic_program(&mut context, &corrupted);
         verify_operation(module.get_operation(), &context).unwrap();
-        let error = detect_stage(&context, module).unwrap_err();
+        let error = verify_refined_procedure_programs(
+            &context,
+            module,
+            crate::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap_err();
         assert!(
             error.contains("does not carry the program-derived constraints"),
             "{error}"
@@ -1306,7 +1296,7 @@ mod tests {
     }
 
     #[test]
-    fn refined_alternatives_revalidate_registered_task_program_provenance() {
+    fn a_task_operation_is_descriptive_at_the_semantic_stage_boundary() {
         let (context, module, task) = refined_program_with_bound_task();
         assert_eq!(
             detect_stage(&context, module).unwrap(),
@@ -1318,8 +1308,12 @@ mod tests {
             StringAttr::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE.to_owned()),
         );
         verify_operation(module.get_operation(), &context).unwrap();
-        let error = detect_stage(&context, module).unwrap_err();
-        assert!(error.contains("cannot be normalized"), "{error}");
+        verify_refined_procedure_programs(
+            &context,
+            module,
+            crate::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap();
     }
 
     fn refined_program_with_bound_task() -> (Context, ModuleOp, TaskOp) {
@@ -1329,7 +1323,8 @@ mod tests {
             Identifier::try_from("bound_refined_demo").unwrap(),
         );
         initialize_stage(&mut context, module, IrStage::RefinedAlternatives);
-        let design = DesignDnaSequenceOp::new(&mut context, "sample_sequence", "ACGT");
+        let design =
+            DesignArtifactOp::new(&mut context, &synthetic_artifact_design("sample_design"));
         module.append_operation(&mut context, design.get_operation(), 0);
 
         let method = MethodId::new("https://example.org/method/liquid-transfer").unwrap();
@@ -1368,7 +1363,9 @@ mod tests {
         let material = MaterialInputOp::new(&mut context, &material_id, node, "recovery_medium");
         choice.append_candidate_operation(&mut context, 0, material.get_operation());
 
-        let validated = program.validate().unwrap();
+        let validated = program
+            .validate(crate::procedure::builtin_procedure_contracts())
+            .unwrap();
         for clause in validated.capability_formula().all_of {
             let requirement_id = format!("{node}::requirement::{}", clause.role);
             let requirement = RequirementOp::new(
@@ -1445,7 +1442,8 @@ mod tests {
         let mut context = Context::new();
         let module = ModuleOp::new(&mut context, Identifier::try_from("refined_demo").unwrap());
         initialize_stage(&mut context, module, IrStage::RefinedAlternatives);
-        let design = DesignDnaSequenceOp::new(&mut context, "sample_sequence", "ACGT");
+        let design =
+            DesignArtifactOp::new(&mut context, &synthetic_artifact_design("sample_design"));
         module.append_operation(&mut context, design.get_operation(), 0);
 
         let candidates = [

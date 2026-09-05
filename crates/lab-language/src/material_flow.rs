@@ -322,7 +322,8 @@ impl<'a> MaterialFlowAnalyzer<'a> {
                                 &statement_location,
                                 format!(
                                     "action '{}' attempts to copy physical operand '{}'",
-                                    action.operation, argument.name
+                                    action.display_name(),
+                                    argument.name
                                 ),
                             ));
                         }

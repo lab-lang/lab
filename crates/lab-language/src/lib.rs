@@ -19,11 +19,12 @@ mod type_system;
 mod units;
 
 pub use checked::{
-    CheckedActionArgument, CheckedArgument, CheckedBinding, CheckedCase, CheckedDeclaration,
+    CheckedAcceptance, CheckedActionArgument, CheckedActionOperand, CheckedActionResult,
+    CheckedArgument, CheckedArtifactFacet, CheckedBinding, CheckedCase, CheckedDeclaration,
     CheckedExpression, CheckedField, CheckedFieldValue, CheckedMatchCase, CheckedModule,
-    CheckedPattern, CheckedPatternField, CheckedPresence, CheckedProperty, CheckedSection,
-    CheckedState, CheckedStatement, CheckedTrigger, CheckedType, OwnershipMode, ResolvedAction,
-    ResolvedImport, TypedExpression,
+    CheckedPattern, CheckedPatternField, CheckedPhraseToken, CheckedPresence, CheckedProperty,
+    CheckedSection, CheckedState, CheckedStatement, CheckedTrigger, CheckedType, OwnershipMode,
+    ResolvedAction, ResolvedActionCallee, ResolvedImport, ResultLineage, TypedExpression,
 };
 pub use diagnostics::{
     Analysis, Diagnostic, DiagnosticCode, DiagnosticRelatedInformation, DiagnosticSeverity,
@@ -36,8 +37,8 @@ pub use parser::parse_module;
 pub use render::render_checked_module;
 pub use semantic_error::{ModuleError, RelatedSpan, SemanticError};
 pub use semantics::{
-    ArtifactSchema, CallableSignature, DefinitionId, ExportKind, Grounding, ModuleExport, ModuleId,
-    ModuleInterface, SemanticEnvironment, TypeParameters,
+    ActionInterface, ActionSurface, ArtifactSchema, CallableSignature, DefinitionId, ExportKind,
+    Grounding, ModuleExport, ModuleId, ModuleInterface, SemanticEnvironment, TypeParameters,
 };
 pub use source::{Identifier, LineIndex, Span, Spanned};
 pub use standard_library::manifest;
@@ -55,6 +56,14 @@ pub fn standard_library_markdown() -> String {
 /// from the catalog rather than maintained beside it.
 pub fn standard_library_manifest() -> standard_library::manifest::Library {
     standard_library::manifest()
+}
+
+/// Exact typed action contracts exported by the bundled standard library.
+///
+/// Method-pack conformance uses the same declaration identities, operands, and
+/// results as source checking rather than maintaining a second operation list.
+pub fn standard_library_action_interfaces() -> Vec<ActionInterface> {
+    standard_library::action_interfaces()
 }
 /// Parse, resolve, type-check, and lower a complete source module into the
 /// backend-neutral frontend IR.

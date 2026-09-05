@@ -127,7 +127,6 @@ impl Checker {
                         phrase: contract.phrase.clone(),
                         operands: contract.operands.clone(),
                         results: contract.results.clone(),
-                        capability: contract.capability.clone(),
                     });
                 }
                 Item::ArtifactKind(declaration) => {
@@ -231,12 +230,11 @@ impl Checker {
             return Ok(());
         }
 
-        let table = crate::provenance::lineage_table(&self.standard_library);
         for declaration in declarations {
             let CheckedDeclaration::Workflow { name, body, .. } = declaration else {
                 continue;
             };
-            let lineage = crate::provenance::analyze(body, &table);
+            let lineage = crate::provenance::analyze(body);
             let mut designs = std::collections::HashMap::new();
             let mut found = None;
             collect_acceptance_calls(body, &mut designs, &required, &lineage, &mut found);
@@ -819,7 +817,11 @@ workflow delegate(
         let CheckedStatement::Effect { action, .. } = &body[0] else {
             panic!("expected workflow call")
         };
-        assert_eq!(action.operation, "workflow.preserve");
+        assert!(matches!(
+            &action.callee,
+            ResolvedActionCallee::Workflow { definition }
+                if definition == &DefinitionId::exported("standalone", "preserve")
+        ));
         assert_eq!(action.results[0].name, "product");
         assert_eq!(action.results[1].name, "plate");
     }
@@ -1773,22 +1775,14 @@ workflow read_out(
     }
 
     #[test]
-    fn legacy_identity_remains_a_supplier_identity_alias() {
-        let module =
+    fn legacy_identity_is_not_a_supplier_identity_alias() {
+        let error =
             compile_module("use std.bio.designs\n\nbuy part legacy:\n  identity = \"SKU-17\"\n")
-                .unwrap();
-        let CheckedDeclaration::Catalog {
-            sbol_identity,
-            supplier_identity,
-            properties,
-            ..
-        } = &module.declarations[0]
-        else {
-            panic!("the declaration is bought");
-        };
-        assert_eq!(sbol_identity, &None);
-        assert_eq!(supplier_identity, "SKU-17");
-        assert!(properties.is_empty());
+                .unwrap_err();
+        assert!(
+            error.to_string().contains("has no property 'identity'"),
+            "supplier identities have one unambiguous spelling: {error}"
+        );
     }
 
     #[test]
@@ -2023,8 +2017,8 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         let CheckedStatement::Effect { action, .. } = &body[0] else {
             panic!("expected effect")
         };
-        assert_eq!(module.schema_version, "lab.portable-module.v11");
-        assert_eq!(action.operation, "std.lab.plasmid.store");
+        assert_eq!(module.schema_version, "lab.portable-module.v13");
+        assert_eq!(action.operation(), Some("std.lab.plasmid.store"));
         assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
         assert_eq!(action.results[0].name, "material");
         assert_eq!(action.results[0].r#type.display_name(), "Material<Plasmid>");
@@ -2751,8 +2745,7 @@ action centrifuge <culture> at <force> for <duration> -> pellet:
   culture: take Material<Strain is recovered>
   force: Quantity<rcf>
   duration: Quantity<min>
-  pellet: Material<Strain is recovered>
-  requires Centrifugation
+  pellet: Material<Strain is recovered> continues from culture
 
 buy chassis DH5alpha:
   competence = competent
@@ -2785,15 +2778,41 @@ workflow spin(dna: List<Material<Plasmid>>) -> Material<Strain is recovered>:
                     CheckedDeclaration::Action {
                         name,
                         operation,
-                        capability,
+                        results,
                         ..
-                    } => Some((name.clone(), operation.clone(), capability.clone())),
+                    } => Some((name.clone(), operation.clone(), results.clone())),
                     _ => None,
                 });
-            let (name, operation, capability) = action.expect("the action was checked");
+            let (name, operation, results) = action.expect("the action was checked");
             assert_eq!(name, "centrifuge");
             assert_eq!(operation, "standalone.centrifuge");
-            assert_eq!(capability, "Centrifugation");
+            assert_eq!(
+                results[0].lineage,
+                ResultLineage::Continues {
+                    from: vec!["culture".to_owned()]
+                }
+            );
+            let action = module
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    CheckedDeclaration::Workflow { body, .. } => {
+                        body.iter().find_map(|statement| {
+                            let CheckedStatement::Effect { action, .. } = statement else {
+                                return None;
+                            };
+                            (action.operation() == Some("standalone.centrifuge")).then_some(action)
+                        })
+                    }
+                    _ => None,
+                })
+                .expect("expected the declared action call");
+            assert!(matches!(
+                &action.callee,
+                ResolvedActionCallee::Action { definition, operation }
+                    if definition == &DefinitionId::exported("standalone", "centrifuge")
+                        && operation == "standalone.centrifuge"
+            ));
         }
 
         /// The phrase is checked as written: a wrong word or a missing operand
@@ -2832,14 +2851,13 @@ workflow spin(dna: List<Material<Plasmid>>) -> Material<Strain is recovered>:
 action chill <culture> for <duration> -> chilled:
   culture: take Material<Strain is recovered>
   duration: Quantity<min>
-  chilled: Material<Strain is recovered>
-  requires StaticIncubation
+  chilled: Material<Strain is recovered> continues from culture
 ";
             let designs =
                 compile_module_with_id(ModuleId::new("pkg.verbs"), verbs).expect("verbs compile");
             let mut environment = SemanticEnvironment::default();
             environment.insert("pkg.verbs", designs.interface.clone());
-            compile_module_in_environment(
+            let checked = compile_module_in_environment(
                 ModuleId::new("pkg.work"),
                 "use std.bio.designs
 use std.lab.plasmid
@@ -2852,20 +2870,73 @@ workflow w(c: Material<Strain is recovered>) -> Material<Strain is recovered>:
                 &environment,
             )
             .expect("an imported verb checks a workflow");
+            let CheckedDeclaration::Workflow { body, .. } = &checked.declarations[0] else {
+                panic!("expected the workflow declaration")
+            };
+            let CheckedStatement::Effect { action, .. } = &body[0] else {
+                panic!("expected the imported action call")
+            };
+            assert_eq!(
+                action.callee.definition(),
+                &DefinitionId::exported("pkg.verbs", "chill")
+            );
         }
 
         #[test]
-        fn an_action_states_the_capability_it_needs() {
+        fn ownership_is_derived_once_from_the_complete_operand_type() {
+            let module = compile_module(
+                r#"use std.bio.designs
+
+action inspect <sample> at <replicate> -> evidence:
+  sample: Material<Plasmid>
+  replicate: take Integer
+  evidence: Evidence continues from sample
+"#,
+            )
+            .expect("the action contract checks");
+            let CheckedDeclaration::Action { operands, .. } = &module.declarations[0] else {
+                panic!("expected an action declaration")
+            };
+            assert_eq!(operands[0].mode, OwnershipMode::Take);
+            assert_eq!(
+                operands[1].mode,
+                OwnershipMode::Copy,
+                "a scalar stays copyable even if source redundantly spells 'take'"
+            );
+        }
+
+        #[test]
+        fn a_continuing_result_names_only_material_operands() {
             let error = compile_module(
-                "action spin <c> -> c:
+                r#"use std.bio.designs
+
+action inspect <sample> -> evidence:
+  sample: Plasmid
+  evidence: Evidence continues from sample
+"#,
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("can only continue from a material operand"),
+                "lineage dataflow cannot be inferred through an ordinary value: {error}"
+            );
+        }
+
+        #[test]
+        fn an_action_result_states_its_lineage() {
+            let error = compile_module(
+                "action spin <c> -> spun:
   c: take Material<Plasmid>
+  spun: Material<Plasmid>
 ",
             )
             .unwrap_err()
             .to_string();
             assert!(
-                error.contains("capability"),
-                "a verb without a capability cannot be allocated: {error}"
+                error.contains("must state whether it begins"),
+                "result lineage is part of the action contract: {error}"
             );
         }
     }

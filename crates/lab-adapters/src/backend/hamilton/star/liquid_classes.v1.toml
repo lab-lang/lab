@@ -1,4 +1,6 @@
 schema_version = "lab.hamilton-star-liquid-classes.v1"
+id = "org.lab-lang.hamilton.liquid-classes"
+version = "1.0.0"
 
 # The initial tables reproduce the correction curves and command defaults
 # previously embedded in choreograph.rs and hamilton-star 0.1.0. Their
@@ -11,11 +13,11 @@ version = "1.0.0"
 priority = 0
 
 [classes.applicability]
-liquids = ["*", "aqueous", "cell_suspension", "dna", "enzyme", "water"]
-techniques = ["*", "distribution", "mix", "serial_dilution", "surface"]
+liquids = ["aqueous"]
+techniques = ["distribution", "mix", "surface"]
 tips = ["tip_rack_50ul_filter"]
-source_labware = ["*", "pcr_plate_96", "sample_tubes_24"]
-destination_labware = ["*", "pcr_plate_96"]
+source_labware = ["pcr_plate_96", "sample_tubes_24"]
+destination_labware = ["pcr_plate_96"]
 min_volume_ul = 0.0
 max_volume_ul = 50.0
 
@@ -65,11 +67,11 @@ version = "1.0.0"
 priority = 0
 
 [classes.applicability]
-liquids = ["*", "aqueous", "culture_medium", "water"]
-techniques = ["*", "distribution", "serial_dilution", "surface"]
+liquids = ["aqueous"]
+techniques = ["distribution", "surface"]
 tips = ["tip_rack_1000ul_filter"]
-source_labware = ["*", "pcr_plate_96", "trough_60ml"]
-destination_labware = ["*", "pcr_plate_96"]
+source_labware = ["pcr_plate_96", "trough_60ml"]
+destination_labware = ["pcr_plate_96"]
 min_volume_ul = 0.0
 max_volume_ul = 1000.0
 

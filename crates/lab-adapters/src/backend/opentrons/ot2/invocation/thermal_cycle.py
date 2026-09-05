@@ -19,11 +19,11 @@ PLAN = json.loads(PLAN_JSON)
 
 def run(protocol: protocol_api.ProtocolContext) -> None:
     profile = PLAN["deck"]
-    deck = profile["deck"]
     execution = PLAN["execution"]
 
-    thermocycler = protocol.load_module(deck["thermocycler"]["model"])
-    thermocycler.load_labware(deck["thermocycler"]["labware"])
+    work = profile["resources"]["work"]
+    thermocycler = protocol.load_module(work["model"])
+    thermocycler.load_labware(work["labware"])
     protocol.comment(execution["title"])
     protocol.comment(
         "Process only the staged samples in wells "

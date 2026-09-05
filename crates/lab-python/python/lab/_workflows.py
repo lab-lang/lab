@@ -29,7 +29,7 @@ import ast
 import inspect
 import textwrap
 from collections.abc import Callable, Iterator, Sequence
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from . import _naming
 from ._declarations import Module, WorkflowDeclaration, declaring_module
@@ -54,7 +54,7 @@ class Workflow:
         self.name = declaration.name
         self.results = tuple(name for name, _ in declaration.results)
 
-    def __call__(self, *arguments: object) -> WorkflowCall:
+    def __call__(self, *arguments: object) -> WorkflowCall[object]:
         expected = len(self.declaration.inputs)
         if len(arguments) != expected:
             raise TypeError(
@@ -65,13 +65,78 @@ class Workflow:
     def __repr__(self) -> str:
         return f"<lab workflow {self.name}>"
 
+    @property
+    def uses(self) -> tuple[str, ...]:
+        return (self.declaration.module.name,)
 
-class WorkflowCall:
+
+class ImportedWorkflow:
+    """A checked workflow exported by another Lab module.
+
+    Generated bindings need the stable identity and public signature, not the
+    body already checked in the defining package.
+    """
+
+    __slots__ = ("definition", "inputs", "name", "python_to_input", "results", "uses")
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        definition: tuple[str, str],
+        inputs: Sequence[str],
+        python_inputs: Sequence[str] = (),
+        results: Sequence[str],
+        uses: Sequence[str],
+    ) -> None:
+        self.name = name
+        self.definition = definition
+        self.inputs = tuple(inputs)
+        python_inputs = tuple(python_inputs) or self.inputs
+        if len(python_inputs) != len(self.inputs) or len(set(python_inputs)) != len(python_inputs):
+            raise ValueError(
+                f"{self.name} needs one unique Python name for each Lab input"
+            )
+        self.python_to_input = dict(zip(python_inputs, self.inputs, strict=True))
+        self.results = tuple(results)
+        self.uses = tuple(uses)
+
+    def __call__(self, *arguments: object, **named: object) -> WorkflowCall[Any]:
+        if len(arguments) > len(self.inputs):
+            raise TypeError(
+                f"{self.name} takes {len(self.inputs)} argument(s), "
+                f"{len(arguments)} were given positionally"
+            )
+        bound = dict(zip(self.inputs, arguments, strict=False))
+        for python_name, value in named.items():
+            input_name = self.python_to_input.get(python_name)
+            if input_name is None:
+                raise TypeError(f"{self.name} has no Python input '{python_name}'")
+            if input_name in bound:
+                raise TypeError(f"{self.name} got input '{python_name}' twice")
+            bound[input_name] = value
+        missing = [input_name for input_name in self.inputs if input_name not in bound]
+        if missing:
+            raise TypeError(f"{self.name} is missing input(s) {', '.join(missing)}")
+        return WorkflowCall(
+            self, [expression(bound[input_name]) for input_name in self.inputs]
+        )
+
+    def __repr__(self) -> str:
+        return f"<imported Lab workflow {self.definition[0]}.{self.name}>"
+
+
+_ResultT = TypeVar("_ResultT")
+
+
+class WorkflowCall(Generic[_ResultT]):
     """One workflow performed by another, which is a durable step like any other."""
 
     __slots__ = ("arguments", "workflow")
 
-    def __init__(self, workflow: Workflow, arguments: Sequence[Expression]) -> None:
+    def __init__(
+        self, workflow: Workflow | ImportedWorkflow, arguments: Sequence[Expression]
+    ) -> None:
         self.workflow = workflow
         self.arguments = list(arguments)
 
@@ -80,7 +145,7 @@ class WorkflowCall:
         return " ".join(words)
 
     def lab_modules(self) -> Iterator[str]:
-        yield self.workflow.declaration.module.name
+        yield from self.workflow.uses
         for argument in self.arguments:
             yield from argument.lab_modules()
 
@@ -374,7 +439,7 @@ class _Body:
         writer.line(f"{', '.join(names)} <- {phrase}" if names else f"<- {phrase}")
         self.bound.update(names)
 
-    def hoisted(self, step: Effect | WorkflowCall, writer: SourceWriter) -> str:
+    def hoisted(self, step: Effect[object] | WorkflowCall[object], writer: SourceWriter) -> str:
         """The step's phrase, with every operand reduced to a single word.
 
         An action's operand is one word in Lab, so anything built in place,

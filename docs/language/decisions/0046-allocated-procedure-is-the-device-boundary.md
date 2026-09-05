@@ -28,7 +28,7 @@ Invocations group tasks and requirements only by one exact Asset and one exact a
 
 Each independently executable child document realizes one or more complete allocated Procedure tasks and names every requirement it implements. A task with a canonical Procedure program may carry a derived multi-capability formula whose clauses are bound atomically to one Asset, adapter, and Procedure implementation. A validated allocated Procedure schedule may fuse complete tasks already owned by the same invocation while preserving their exact value edges, locations, requirements, and provenance identities; this explicit device scheduling does not permit whole-program visibility or facility reallocation.
 
-Shared Procedure views validate semantic operation IRIs, capability kinds, parameter identities and types, canonical units, material roles, selected material sources, and exact allocation ownership before a concrete adapter performs device-specific resource planning. An adapter rejects any semantic value it cannot preserve.
+Shared Procedure views preserve the descriptive operation IRI for evidence and validate the canonical contract and program, capability kinds, parameter identities and types, canonical units, material roles, selected material sources, and exact allocation ownership before a concrete adapter performs device-specific resource planning. Operation identity is not an adapter dispatch key. An adapter rejects any semantic value it cannot preserve.
 
 Manual tasks and requirements assigned to offerings without a lowering service remain in the selected Method graph and reviewed execution plan. The absence of a device artifact does not erase the work, and the presence of a lowerer does not promote the offering's SBOLInventory qualification.
 

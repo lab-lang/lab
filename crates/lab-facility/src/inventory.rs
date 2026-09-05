@@ -6,6 +6,7 @@ use lab_capability::AbsoluteIri;
 use lab_compiler::allocation::{AllocatedProgram, AllocatedProgramValidationError};
 use lab_compiler::method::LocalId;
 use lab_compiler::planning::{SelectedMaterialBinding, SelectedMaterialSource};
+use lab_compiler::procedure::ProcedureContractRegistry;
 use lab_language::{CheckedDeclaration, CheckedModule};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -111,6 +112,7 @@ pub enum MaterialLotInventoryValidationError {
 pub fn validate_allocated_material_inventory(
     allocated: &AllocatedProgram,
     material_inventory: &MaterialLotInventory,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<(), AllocatedMaterialInventoryValidationError> {
     material_inventory.validate()?;
     if material_inventory.source_sha256() != allocated.inventory_sha256
@@ -118,7 +120,7 @@ pub fn validate_allocated_material_inventory(
     {
         return Err(AllocatedMaterialInventoryValidationError::EvidenceMismatch);
     }
-    allocated.validate()?;
+    allocated.validate(contracts)?;
     for material in allocated
         .methods
         .iter()
@@ -366,6 +368,10 @@ mod tests {
 
     use super::*;
 
+    fn contracts() -> &'static ProcedureContractRegistry {
+        lab_compiler::procedure::builtin_procedure_contracts()
+    }
+
     fn lots() -> BTreeMap<String, Vec<String>> {
         BTreeMap::from([(
             "https://example.org/inventory/input".to_owned(),
@@ -393,6 +399,7 @@ mod tests {
             methods: vec![AllocatedMethod {
                 choice: LocalId::new("choice").unwrap(),
                 source_operation: IntentOperationId::new("example.operation").unwrap(),
+                source_intent: crate::test_source_intent("example.operation"),
                 method: MethodId::new("https://example.org/method").unwrap(),
                 after: Vec::new(),
                 inputs: Vec::new(),
@@ -497,14 +504,14 @@ mod tests {
             interchangeable_alternatives: vec![alternative],
         };
         let mut allocated = allocated_program(vec![binding]);
-        validate_allocated_material_inventory(&allocated, &inventory).unwrap();
+        validate_allocated_material_inventory(&allocated, &inventory, contracts()).unwrap();
 
         allocated.methods[0].tasks[0].materials[0]
             .interchangeable_alternatives
             .clear();
-        allocated.validate().unwrap();
+        allocated.validate(contracts()).unwrap();
         assert!(matches!(
-            validate_allocated_material_inventory(&allocated, &inventory),
+            validate_allocated_material_inventory(&allocated, &inventory, contracts()),
             Err(AllocatedMaterialInventoryValidationError::MaterialBindingMismatch { .. })
         ));
     }
@@ -519,12 +526,13 @@ mod tests {
             BTreeMap::new(),
         );
         assert_eq!(
-            validate_allocated_material_inventory(&allocated, &wrong_inventory),
+            validate_allocated_material_inventory(&allocated, &wrong_inventory, contracts()),
             Err(AllocatedMaterialInventoryValidationError::EvidenceMismatch)
         );
         validate_allocated_material_inventory(
             &allocated,
             &evidence(BTreeMap::new(), BTreeMap::new()),
+            contracts(),
         )
         .unwrap();
     }

@@ -14,8 +14,8 @@ use crate::semantics::{
 };
 use crate::source::Span;
 use crate::standard_library::{
-    ActionContractSpec, ConstructorSpec, ContractType, Lineage, PhrasePart, PureFunctionSpec,
-    ResultSpec, StandardLibrary, StandardModule, TypeSpec,
+    ActionContractSpec, ConstructorSpec, ContractType, PhrasePart, PureFunctionSpec, ResultSpec,
+    StandardLibrary, StandardModule, TypeSpec,
 };
 use crate::type_system::{Ty, from_checked_type};
 
@@ -62,6 +62,8 @@ pub(super) struct SchemaField {
 /// properties they may state, and which combinations are complete.
 #[derive(Clone)]
 pub(super) struct ArtifactKindSignature {
+    /// Every exact declaration contributing to this merged schema.
+    pub definitions: Vec<DefinitionId>,
     pub produces: Ty,
     pub fields: BTreeMap<String, SchemaField>,
     pub declares: Option<crate::checked::CheckedPresence>,
@@ -121,14 +123,13 @@ fn action_contract_from_surface(surface: &ActionSurface) -> ActionContractSpec {
         .map(|result| ResultSpec {
             name: result.name.clone(),
             r#type: ContractType::Concrete(from_checked_type(&result.r#type)),
-            lineage: Lineage::Continues,
+            lineage: result.lineage.clone(),
         })
         .collect();
     ActionContractSpec {
         operation: surface.operation.clone(),
         phrase,
         results,
-        inert: Vec::new(),
     }
 }
 
@@ -139,13 +140,13 @@ pub(super) struct CheckedActionContract {
     pub phrase: Vec<CheckedPhraseToken>,
     pub operands: Vec<CheckedActionOperand>,
     pub results: Vec<CheckedActionResult>,
-    pub capability: String,
 }
 
 /// A facet in scope: the type it classifies, its states, and the state changes
 /// it admits.
 #[derive(Clone)]
 pub(super) struct FacetSignature {
+    pub definition: DefinitionId,
     pub subject: Ty,
     /// The states in declaration order, so the first stays identifiable as the
     /// state a newly established material is in.
@@ -183,6 +184,9 @@ pub(super) struct SemanticContext {
     pub imports: BTreeSet<String>,
     pub import_providers: HashMap<String, String>,
     pub imported_names: HashMap<String, String>,
+    /// Exact identities supplied by imported module interfaces and native
+    /// standard modules, keyed by the unqualified name visible here.
+    pub definitions: HashMap<String, DefinitionId>,
     pub values: HashMap<String, Ty>,
     pub pure_functions: HashMap<String, PureFunctionSpec>,
     pub constructors: HashMap<String, ConstructorSpec>,
@@ -192,7 +196,7 @@ pub(super) struct SemanticContext {
     /// The action map above is what a workflow checks against, shared with the
     /// standard library. This carries the extra a source declaration states and
     /// exports: the phrase, the operands and results with their types, and the
-    /// capability, so the compiler can derive a method to run the verb.
+    /// result lineage, so every call carries the same semantics.
     pub action_contracts: HashMap<String, CheckedActionContract>,
     pub circuits: HashMap<String, CircuitSignature>,
     pub data: HashMap<String, DataSignature>,
@@ -245,6 +249,7 @@ impl SemanticContext {
             imports: BTreeSet::new(),
             import_providers: HashMap::new(),
             imported_names: HashMap::new(),
+            definitions: HashMap::new(),
             values: HashMap::new(),
             pure_functions: HashMap::new(),
             constructors: HashMap::new(),
@@ -330,7 +335,10 @@ impl SemanticContext {
         self.definition_for_name(word.split('.').next().unwrap_or(word))
     }
 
-    fn definition_for_name(&self, name: &str) -> DefinitionId {
+    pub(super) fn definition_for_name(&self, name: &str) -> DefinitionId {
+        if let Some(definition) = self.definitions.get(name) {
+            return definition.clone();
+        }
         let module = self
             .imported_names
             .get(name)
@@ -352,6 +360,8 @@ impl SemanticContext {
                     format!("imported type '{name}' is ambiguous"),
                 ));
             }
+            self.definitions
+                .insert(name.to_owned(), DefinitionId::exported(module.path, name));
             if spec.role {
                 self.roles.insert(name.to_owned());
             }
@@ -371,6 +381,12 @@ impl SemanticContext {
         }
         for constructor in module.constructors {
             self.insert_imported_name(module.path, constructor.name, span)?;
+            if let Ty::Named(parent, _) = &constructor.result
+                && constructor.name != parent
+            {
+                self.cases
+                    .insert(constructor.name.to_owned(), parent.to_owned());
+            }
             self.constructors
                 .insert(constructor.name.to_owned(), constructor);
         }
@@ -379,6 +395,8 @@ impl SemanticContext {
                 .source_name()
                 .expect("catalog validation guarantees an action source name");
             self.insert_imported_name(module.path, name, span)?;
+            self.definitions
+                .insert(name.to_owned(), DefinitionId::exported(module.path, name));
             self.actions.insert(name.to_owned(), action);
         }
         Ok(())
@@ -390,6 +408,8 @@ impl SemanticContext {
         span: Span,
     ) -> Result<(), SemanticError> {
         for (name, export) in &interface.exports {
+            self.definitions
+                .insert(name.clone(), export.definition.clone());
             if !matches!(export.kind, ExportKind::Type | ExportKind::Role) {
                 continue;
             }
@@ -448,6 +468,7 @@ impl SemanticContext {
                         self.facets.insert(
                             name.clone(),
                             FacetSignature {
+                                definition: export.definition.clone(),
                                 subject,
                                 states: surface
                                     .states
@@ -509,6 +530,9 @@ impl SemanticContext {
                         // states it.
                         match self.artifact_kinds.get_mut(name) {
                             Some(existing) => {
+                                if !existing.definitions.contains(&export.definition) {
+                                    existing.definitions.push(export.definition.clone());
+                                }
                                 existing.fields.extend(fields);
                                 existing.declares = existing
                                     .declares
@@ -519,6 +543,7 @@ impl SemanticContext {
                                 self.artifact_kinds.insert(
                                     name.clone(),
                                     ArtifactKindSignature {
+                                        definitions: vec![export.definition.clone()],
                                         produces: from_checked_type(&schema.produces),
                                         fields: fields.collect(),
                                         declares: schema.declares.clone(),
@@ -557,7 +582,11 @@ impl SemanticContext {
                                         })
                                         .collect(),
                                 },
-                                inputs: signature.inputs.iter().map(from_checked_type).collect(),
+                                inputs: signature
+                                    .inputs
+                                    .iter()
+                                    .map(|field| from_checked_type(&field.r#type))
+                                    .collect(),
                                 output: from_checked_type(&output.r#type),
                             },
                         );
@@ -568,9 +597,6 @@ impl SemanticContext {
                     if let Some(surface) = &export.action {
                         self.actions
                             .insert(name.clone(), action_contract_from_surface(surface));
-                        // The capability an imported verb needs travels with its
-                        // surface, so a workflow that performs it can carry the
-                        // capability to the method the compiler derives.
                         self.action_contracts.insert(
                             name.clone(),
                             CheckedActionContract {
@@ -578,7 +604,6 @@ impl SemanticContext {
                                 phrase: surface.phrase.clone(),
                                 operands: surface.operands.clone(),
                                 results: surface.results.clone(),
-                                capability: surface.capability.clone(),
                             },
                         );
                     }
@@ -600,7 +625,11 @@ impl SemanticContext {
                                         })
                                         .collect(),
                                 },
-                                inputs: signature.inputs.iter().map(from_checked_type).collect(),
+                                inputs: signature
+                                    .inputs
+                                    .iter()
+                                    .map(|field| from_checked_type(&field.r#type))
+                                    .collect(),
                                 outputs: signature
                                     .outputs
                                     .iter()

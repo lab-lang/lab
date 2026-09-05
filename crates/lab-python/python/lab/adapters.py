@@ -47,7 +47,7 @@ class ValidatedAdapterProfile:
 
     format: str
     schema_version: str
-    compiler_version: str
+    api_version: str
     name: str
     driver: str
     canonical_toml: str
@@ -76,7 +76,7 @@ class AdapterDescriptor:
 @dataclass(frozen=True, slots=True)
 class AdapterCatalog:
     format: str
-    compiler_version: str
+    api_version: str
     profile_schema_version: str
     adapters: tuple[AdapterDescriptor, ...]
 
@@ -93,7 +93,7 @@ def _profile(raw: dict[str, Any]) -> ValidatedAdapterProfile:
     return ValidatedAdapterProfile(
         format=cast(str, raw["format"]),
         schema_version=cast(str, raw["schema_version"]),
-        compiler_version=cast(str, raw["compiler_version"]),
+        api_version=cast(str, raw["api_version"]),
         name=cast(str, raw["name"]),
         driver=cast(str, raw["driver"]),
         canonical_toml=cast(str, raw["canonical_toml"]),
@@ -165,7 +165,7 @@ def catalog() -> AdapterCatalog:
         )
     return AdapterCatalog(
         format=cast(str, raw["format"]),
-        compiler_version=cast(str, raw["compiler_version"]),
+        api_version=cast(str, raw["api_version"]),
         profile_schema_version=cast(str, raw["profile_schema_version"]),
         adapters=tuple(descriptors),
     )

@@ -4,8 +4,8 @@ use crate::procedure::{
     ProcedureProgram, Temperature, TemperatureRange, TransferTechnique, Vessel, VesselRole, Volume,
 };
 
-use super::ProcedureTaskInstance;
 use super::view::{TaskView, material_symbols, procedure_id};
+use crate::procedure::ProcedureProgramBuildContext;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const MILLIMETRE: &str = "http://qudt.org/vocab/unit/MilliM";
@@ -25,7 +25,9 @@ enum SetupStrategy {
     },
 }
 
-pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedureProgram, String> {
+pub(super) fn normalize(
+    task: &ProcedureProgramBuildContext<'_>,
+) -> Result<ProcedureProgram, String> {
     let view = TaskView::new(task);
     view.require_material_roles(&[
         "backbone",

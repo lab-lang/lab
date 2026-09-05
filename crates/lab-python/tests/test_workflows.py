@@ -12,6 +12,9 @@ import unittest
 from typing import Any
 
 import lab
+from lab._effects import Action
+from lab._vocabulary import Function
+from lab._workflows import ImportedWorkflow
 from programs.reporter import main as reporter_main
 from programs.reporter import observe as reporter_observe
 from programs.reporter import plasmid as reporter_plasmid
@@ -199,6 +202,49 @@ class TranslationTests(unittest.TestCase):
         self.assertIn("use std.lab.plasmid", self.observe)
         self.assertIn("use reporter.workflow", self.main)
         self.assertIn("use reporter.observe", self.main)
+
+
+class GeneratedCallSignatureTests(unittest.TestCase):
+    """Generated Python spellings bind to the exact underlying Lab names."""
+
+    def test_action_keyword_aliases_bind_the_original_lab_slot(self) -> None:
+        action = Action(
+            name="label",
+            phrase=("label", "<from>"),
+            python_slots=("from_",),
+            results=("labeled",),
+        )
+
+        effect = action(from_="sample")
+
+        self.assertEqual(effect.render(), 'label "sample"')
+        with self.assertRaisesRegex(TypeError, "no Python operand 'from'"):
+            action(**{"from": "sample"})
+
+    def test_imported_workflow_accepts_generated_named_arguments(self) -> None:
+        workflow = ImportedWorkflow(
+            name="repeat",
+            definition=("thermals.protocols", "repeat"),
+            inputs=("from", "cycles"),
+            python_inputs=("from_", "cycles"),
+            results=("heated",),
+            uses=("thermals.protocols",),
+        )
+
+        call = workflow(cycles=2, from_="sample")
+
+        self.assertEqual(call.render(), 'repeat "sample" 2')
+
+    def test_function_keyword_aliases_emit_arguments_in_checked_lab_order(self) -> None:
+        function = Function(
+            name="combine",
+            inputs=("from", "with"),
+            python_inputs=("from_", "with_"),
+        )
+
+        call = function(with_="right", from_="left")
+
+        self.assertEqual(call.render(), 'combine("left", "right")')
 
 
 class RefusalTests(unittest.TestCase):

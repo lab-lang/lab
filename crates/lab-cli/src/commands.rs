@@ -2,24 +2,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_compiler::program::PortableLairProgram;
-use lab_facility::{ExecutionPlanOptions, build_execution_plan_from_invocations};
-use lab_inventory::InventorySnapshot;
-use lab_language::{
-    CheckedDeclaration, CheckedModule, DiagnosticSeverity, SourceId, analyze_module,
-    render_diagnostic,
-};
+use lab_language::{DiagnosticSeverity, SourceId, analyze_module, render_diagnostic};
 use lab_package::{LabPackage, PackageManifest};
 use lab_project::{
-    CompiledModule, CompiledProject, LOCK_FILE, LabProject, load_package_inventory,
-    resolve_package_adapter_bindings,
+    FacilityArtifactBuild, FacilityDocumentRenderer, ProjectArtifactRequest, ProjectBuildRequest,
+    ProjectCompilation, ProjectProgram,
 };
-use lab_runfmt::{
-    EXECUTION_PLAN_FILE, ExecutionMethodSelection, ExecutionPlanDocument,
-    ExecutionPlanningArtifact, ExecutionPlanningReference,
-};
+use lab_python_bindings::PackageModule;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::Output;
 
@@ -74,30 +64,296 @@ workflow main() -> Material<Plasmid>:
     )
 }
 
-/// Run the package's source generator, where its manifest declares one.
-///
-/// A workspace whose Lab another frontend emits stays compiled from its source
-/// of truth: the generator runs from the package root before every check,
-/// plan, and build, the way a build script would. Its output surfaces only on
-/// failure.
-fn generate_sources(path: &Path) -> Result<()> {
-    let Some((root, command)) = lab_package::source_generator(path)? else {
-        return Ok(());
-    };
-    let generated = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&command)
-        .current_dir(&root)
-        .output()
-        .with_context(|| format!("failed to run build.generate command `{command}`"))?;
-    if !generated.status.success() {
-        bail!(
-            "build.generate command `{command}` failed:\n{}{}",
-            String::from_utf8_lossy(&generated.stdout),
-            String::from_utf8_lossy(&generated.stderr),
+pub(crate) fn new_method_pack(path: PathBuf, name: Option<String>, output: &Output) -> Result<()> {
+    let package_name = contribution_name(&path, name)?;
+    let module_namespace = package_name.replace('-', "_");
+    prepare_empty_directory(&path)?;
+    fs::create_dir_all(path.join("src"))?;
+    fs::create_dir_all(path.join("methods"))?;
+    write_new(
+        &path.join("lab.toml"),
+        &format!(
+            "[package]\nname = \"{package_name}\"\nversion = \"0.1.0\"\nedition = \"2026\"\n\n[methods]\ndocuments = [\"methods/methods.json\"]\n"
+        ),
+    )?;
+    write_new(
+        &path.join("src/vocabulary.lab"),
+        &format!(
+            "/*!\n * Scientific vocabulary refined by the `{package_name}` Method pack.\n */\n\nrecord ExampleSample\n\n/** A concrete action whose implementation is supplied by this Method pack. */\naction prepare <sample> -> prepared:\n  sample: take Material<ExampleSample>\n  prepared: Material<ExampleSample> continues from sample\n"
+        ),
+    )?;
+    let method_catalog = serde_json::json!({
+        "schema_version": "lab.method-catalog.v2",
+        "methods": [
+            {
+                "id": "https://example.org/lab-method#prepare-example-sample",
+                "refines": format!("{module_namespace}.vocabulary.prepare"),
+                "inputs": [
+                    {
+                        "name": "sample",
+                        "port_type": {"kind": "material_as_supplied"}
+                    }
+                ],
+                "tasks": [
+                    {
+                        "id": "prepare",
+                        "operation": "https://example.org/lab-procedure#PrepareExampleSample",
+                        "inputs": [{"kind": "input", "input": "sample"}],
+                        "outputs": [
+                            {
+                                "name": "prepared",
+                                "port_type": {"kind": "material_as_requested"}
+                            }
+                        ],
+                        "execution": {
+                            "kind": "primitive",
+                            "requirements": [
+                                {
+                                    "id": "sample-preparation",
+                                    "capability_kind": "https://example.org/lab-capability#SamplePreparation",
+                                    "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                                    "accepted_control_modes": [
+                                        "https://sbol.io/ns/facility#ManualControl"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "outputs": [
+                    {
+                        "name": "prepared",
+                        "source": {
+                            "kind": "task_output",
+                            "task": "prepare",
+                            "output": "prepared"
+                        }
+                    }
+                ]
+            }
+        ]
+    });
+    let mut method_catalog = serde_json::to_string_pretty(&method_catalog)?;
+    method_catalog.push('\n');
+    write_new(&path.join("methods/methods.json"), &method_catalog)?;
+    write_new(
+        &path.join("README.md"),
+        &format!(
+            "# {package_name}\n\nThis package contributes portable Methods without changing the compiler. `src/vocabulary.lab` declares a small example action and `methods/methods.json` refines its exact operation ID into a complete manual Procedure task. Replace those two matching definitions with your own vocabulary and implementation.\n\nEvery Procedure task chooses one execution form: a declarative `template`, a registered `builder`, or direct `primitive` requirements. Templates substitute only explicit `$lab` slots such as `{{\"$lab\": {{\"kind\": \"integer\", \"id\": \"cycles\"}}}}` and are validated against their named Procedure contract.\n\nRun `lab check .` as the conformance test. It validates the Lab interfaces, the `lab.method-catalog.v2` envelope, every Method graph, and the composed registry.\n"
+        ),
+    )?;
+    write_new(&path.join(".gitignore"), ".lab/\n")?;
+    output.success(
+        "created",
+        ContributionCreated {
+            kind: "method-pack",
+            name: package_name.clone(),
+            root: path.clone(),
+            conformance: "lab check .",
+        },
+        format!(
+            "Created Method pack {package_name} in {}\n  Conformance: cd {} && lab check .",
+            path.display(),
+            path.display()
+        ),
+    )
+}
+
+pub(crate) fn new_adapter(
+    path: PathBuf,
+    name: Option<String>,
+    driver: Option<String>,
+    output: &Output,
+) -> Result<()> {
+    let crate_name = contribution_name(&path, name)?;
+    let driver = driver.unwrap_or_else(|| crate_name.replace('-', "."));
+    if driver.is_empty()
+        || driver
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        bail!("adapter driver ID must be non-empty and contain no whitespace or controls");
+    }
+    let adapter_api_version = env!("CARGO_PKG_VERSION");
+    prepare_empty_directory(&path)?;
+    fs::create_dir_all(path.join("src"))?;
+    write_new(
+        &path.join("Cargo.toml"),
+        &format!(
+            "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nlab-adapter-api = \"{adapter_api_version}\"\nserde_json = \"1\"\n"
+        ),
+    )?;
+    let rust_driver = format!("{driver:?}");
+    write_new(
+        &path.join("src/lib.rs"),
+        &format!(
+            r#"//! Adapter registration for `{driver}`.
+
+use std::collections::BTreeSet;
+
+use lab_adapter_api::{{
+    AdapterDescriptor, AdapterInvocation, AdapterInvocationLowering, AdapterInvocationPlan,
+    AdapterLoweringError, AdapterProfileContractError, AdapterRegistration,
+    PlanningProcedureTask, ProcedureContractRegistry, ProcedureImplementationDescriptor,
+    ValidatedAdapterProfile,
+}};
+
+pub const DRIVER: &str = {rust_driver};
+
+fn validate_profile(
+    name: &str,
+    contents: &str,
+) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {{
+    if !contents.trim().is_empty() {{
+        return Err(AdapterProfileContractError::Invalid {{
+            driver: DRIVER.to_owned(),
+            message: "the scaffold accepts only an empty profile; replace validate_profile"
+                .to_owned(),
+        }});
+    }}
+    lab_adapter_api::canonical_adapter_profile(DRIVER, name, &serde_json::json!({{}}))
+}}
+
+/// All immutable facts this adapter contributes to application composition.
+pub fn descriptor() -> AdapterDescriptor {{
+    AdapterDescriptor {{
+        id: DRIVER.to_owned(),
+        display_name: "Describe this instrument".to_owned(),
+        manufacturer: None,
+        features: BTreeSet::new(),
+        procedure_implementations: Vec::new(),
+        profile_schema: serde_json::json!({{"type": "object"}}),
+        default_profile: validate_profile("default", "")
+            .expect("the built-in scaffold profile is valid"),
+    }}
+}}
+
+/// Reject programs this profile cannot realize before the facility solver selects this adapter.
+fn check_program_feasibility(
+    _profile: &ValidatedAdapterProfile,
+    _implementation: &ProcedureImplementationDescriptor,
+    _task: &PlanningProcedureTask,
+    _contracts: &ProcedureContractRegistry,
+) -> Result<(), String> {{
+    Err("replace the scaffold's Procedure feasibility callback".to_owned())
+}}
+
+/// Lower one exact invocation from its immutable allocated Procedure plan.
+fn lower_invocation(
+    profile: &ValidatedAdapterProfile,
+    _plan: &AdapterInvocationPlan,
+    _invocation: &AdapterInvocation,
+    _contracts: &ProcedureContractRegistry,
+) -> Result<AdapterInvocationLowering, AdapterLoweringError> {{
+    Err(AdapterLoweringError::UnsupportedInvocation {{
+        driver: profile.driver.clone(),
+    }})
+}}
+
+/// The complete executable registration an application composes in one line.
+pub fn registration() -> AdapterRegistration {{
+    AdapterRegistration::new(
+        descriptor(),
+        validate_profile,
+        check_program_feasibility,
+        lower_invocation,
+    )
+}}
+
+#[cfg(test)]
+mod tests {{
+    #[test]
+    fn registration_conforms_to_the_adapter_api() {{
+        let registry = lab_adapter_api::AdapterRegistry::new([super::registration()]).unwrap();
+        assert!(registry.descriptors().descriptor(super::DRIVER).is_some());
+        registry.validate_profile(super::DRIVER, "test", "").unwrap();
+    }}
+}}
+"#
+        ),
+    )?;
+    write_new(
+        &path.join("README.md"),
+        &format!(
+            "# {crate_name}\n\nThis crate contributes the `{driver}` adapter through `lab_adapter_api::AdapterRegistration`. Its only Lab dependency is `lab-adapter-api`: that crate re-exports the canonical Procedure, planning-task, and allocated-task types used by named callbacks. Extend `descriptor()`, `validate_profile`, `check_program_feasibility`, and `lower_invocation`, and keep device-specific code inside this crate. A host application composes it with its `AdapterRegistry::with_registration({crate_name}::registration())`; no biological operation allowlist or compiler match is required. Runtime document loading and hardware execution are a separate optional integration layer.\n\nRun `cargo test` as the registration conformance test. The generated callbacks fail closed until you declare and implement an exact Procedure contract.\n"
+        ),
+    )?;
+    output.success(
+        "created",
+        ContributionCreated {
+            kind: "adapter",
+            name: crate_name.clone(),
+            root: path.clone(),
+            conformance: "cargo test",
+        },
+        format!(
+            "Created adapter {crate_name} ({driver}) in {}\n  Conformance: cd {} && cargo test",
+            path.display(),
+            path.display()
+        ),
+    )
+}
+
+pub(crate) fn python_bindings(
+    path: PathBuf,
+    out_dir: Option<PathBuf>,
+    output: &Output,
+) -> Result<()> {
+    if path == Path::new("std") {
+        let generated = lab_python_bindings::generate_standard_library(
+            &lab_language::standard_library_manifest(),
+        )?;
+        let output_root = out_dir.unwrap_or_else(|| PathBuf::from("bindings/python/lab"));
+        lab_python_bindings::write_generated_files(&output_root, &generated)?;
+        return output.success(
+            "generated",
+            BindingsGenerated {
+                package: "std".to_owned(),
+                language: "python",
+                output: output_root.clone(),
+                files: generated.len(),
+            },
+            format!(
+                "Generated {} Python binding files for std in {}",
+                generated.len(),
+                output_root.display()
+            ),
         );
     }
-    Ok(())
+    let application = ProjectCompilation::load(&path)?;
+    let package = application.project().default_package();
+    let package_name = package.manifest.package.name.clone();
+    let modules = application
+        .compiled()
+        .modules
+        .iter()
+        .map(|module| PackageModule {
+            package: module.package.clone(),
+            interface: module.module.interface.clone(),
+            imports: module.module.imports.clone(),
+        })
+        .collect::<Vec<_>>();
+    let generated = lab_python_bindings::generate_package(&package_name, &modules)?;
+    let output_root = match out_dir {
+        Some(path) if path.is_absolute() => path,
+        Some(path) => package.root.join(path),
+        None => package.root.join("bindings/python"),
+    };
+    lab_python_bindings::write_generated_files(&output_root, &generated)?;
+    output.success(
+        "generated",
+        BindingsGenerated {
+            package: package_name.clone(),
+            language: "python",
+            output: output_root.clone(),
+            files: generated.len(),
+        },
+        format!(
+            "Generated {} Python binding files for {package_name} in {}",
+            generated.len(),
+            output_root.display()
+        ),
+    )
 }
 
 pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
@@ -133,11 +389,9 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
         );
     }
 
-    generate_sources(&path)?;
-    let project = LabProject::discover(&path)
-        .with_context(|| format!("failed to load project from {}", path.display()))?;
-    validate_project_inventories(&project)?;
-    let compiled = project.compile()?;
+    let application = ProjectCompilation::load(&path)?;
+    let project = application.project();
+    let compiled = application.compiled();
     let package = project.default_package();
     output.success(
         "checked",
@@ -162,134 +416,31 @@ pub(crate) fn build(
     program: Option<String>,
     output: &Output,
 ) -> Result<()> {
-    generate_sources(&path)?;
-    let project = LabProject::discover(&path)
-        .with_context(|| format!("failed to load project from {}", path.display()))?;
-    validate_project_inventories(&project)?;
-    let compiled = project.compile()?;
-    let package = project.default_package();
-    let project_root = project.root().to_path_buf();
+    let application = ProjectCompilation::load(&path)?;
+    let project_root = application.project().root().to_path_buf();
     let output_root = match out_dir {
         Some(path) if path.is_absolute() => path,
         Some(path) => project_root.join(path),
         None => project_root.join(".lab").join("build"),
     };
-    fs::create_dir_all(&output_root)
-        .with_context(|| format!("failed to create {}", output_root.display()))?;
-
-    let program_packages = project.program_packages();
-    let products = build_products(&compiled.modules, &program_packages);
-    let program_modules = compiled
-        .modules
-        .iter()
-        .filter(|module| program_packages.contains(&module.package))
-        .map(|module| &module.module)
-        .collect::<Vec<_>>();
-
-    let adapter_bindings_artifact = if let Some(snapshot) = load_package_inventory(package)? {
-        if let Some(bindings) = resolve_package_adapter_bindings(package, &snapshot)? {
-            let artifact = PathBuf::from("adapter_bindings.json");
-            let path = output_root.join(&artifact);
-            let mut json = serde_json::to_string_pretty(&bindings)?;
-            json.push('\n');
-            fs::write(&path, json)
-                .with_context(|| format!("failed to write {}", path.display()))?;
-            Some(artifact)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let mut artifacts = Vec::new();
-    for compiled_module in &compiled.modules {
-        let source = &compiled_module.source;
-        let module = &compiled_module.module;
-        let relative_artifact = PathBuf::from("modules")
-            .join(source.module.replace('.', "/"))
-            .with_extension("module.json");
-        let artifact_path = output_root.join(&relative_artifact);
-        if let Some(parent) = artifact_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        let mut json = serde_json::to_string_pretty(module)?;
-        json.push('\n');
-        fs::write(&artifact_path, json)
-            .with_context(|| format!("failed to write {}", artifact_path.display()))?;
-        artifacts.push(BuildModule {
-            package: compiled_module.package.clone(),
-            module: source.module.clone(),
-            source: source.relative_path.clone(),
-            artifact: relative_artifact,
-        });
-    }
-
-    let entry = program
-        .as_deref()
-        .map(|program| resolve_program(package, &compiled, program))
-        .transpose()?;
-    let facility = if package.manifest.inventory.document.is_some()
-        && (entry.is_some() || package.entry_source().is_some())
-    {
-        Some(write_facility_plan(
-            &project,
-            &compiled,
-            &output_root,
-            entry.as_deref(),
-        )?)
-    } else {
-        None
-    };
-    let facility_index = facility
-        .as_ref()
-        .map(|planned| build_facility_index(planned, &output_root))
-        .transpose()?;
-    let compiler = if let Some(planned) = &facility {
-        Some(build_compiler_index(planned, &output_root)?)
-    } else if package.entry_source().is_some() {
-        Some(write_unallocated_compiler_frontier(
-            &program_modules,
-            &compiled.methods,
-            &output_root,
-        )?)
-    } else {
-        None
-    };
-    let index = BuildIndex {
-        schema_version: 7,
-        package: package.manifest.package.name.clone(),
-        version: package.manifest.package.version.clone(),
-        edition: package.manifest.package.edition.clone(),
-        entry: package.manifest.build.entry.clone(),
-        members: compiled.members.clone(),
-        modules: artifacts,
-        compiler,
-        adapter_bindings: adapter_bindings_artifact,
-        facility: facility_index,
-    };
-    let index_path = output_root.join("package.json");
-    let mut json = serde_json::to_string_pretty(&index)?;
-    json.push('\n');
-    fs::write(&index_path, json)
-        .with_context(|| format!("failed to write {}", index_path.display()))?;
-    let lock_path = project_root.join(LOCK_FILE);
-    let lock = compiled.lock.to_toml()?;
-    fs::write(&lock_path, lock)
-        .with_context(|| format!("failed to write {}", lock_path.display()))?;
+    let built = application.write_build_artifacts(ProjectBuildRequest {
+        program: program
+            .as_deref()
+            .map_or(ProjectProgram::Default, ProjectProgram::Named),
+        methods: None,
+        output_root: &output_root,
+        renderer: Some(&CliDocumentRenderer),
+    })?;
 
     let mut human = format!(
         "Built {} {} ({} modules)",
-        index.package,
-        index.version,
-        index.modules.len()
+        built.package, built.version, built.modules
     );
-    if products.is_empty() {
+    if built.products.is_empty() {
         human.push_str("\n\nBuild products: none");
     } else {
         human.push_str("\n\nBuild products:");
-        for product in &products {
+        for product in &built.products {
             human.push_str(&format!("\n  {} {}", product.kind, product.name));
         }
     }
@@ -297,7 +448,7 @@ pub(crate) fn build(
         "\n\nCompiler output: {}",
         human_path(&output_root)
     ));
-    if let Some(facility) = &facility {
+    if let Some(facility) = &built.facility {
         human.push_str(&format!(
             "\n\nFacility outputs:\n  Facility: {}\n  Methods selected: {}\n  Requirements allocated: {}\n  Adapter invocations lowered: {}\n  Planning problem: {}\n  Facility solution: {}\n  Allocated LAIR: {}\n  Adapter invocations: {}\n  Lowering manifest: {}\n  Reviewed plan: {}",
             facility.facility,
@@ -314,18 +465,7 @@ pub(crate) fn build(
         append_facility_artifacts(&mut human, facility);
         append_unlowered_warning(&mut human, facility);
     }
-    output.success(
-        "built",
-        BuildCompleted {
-            package: index.package.clone(),
-            version: index.version.clone(),
-            modules: index.modules.len(),
-            output: output_root.clone(),
-            products,
-            facility,
-        },
-        human,
-    )
+    output.success("built", built, human)
 }
 
 /// Says plainly when a plan allocated work to instruments but emitted nothing to run on them.
@@ -333,7 +473,7 @@ pub(crate) fn build(
 /// A build that reports success while lowering zero invocations looks finished. The requirements
 /// are still bound to Assets, so the plan claims the work happens on a robot, and only `lab run`
 /// would discover that no document exists.
-fn append_unlowered_warning(human: &mut String, facility: &PlanCompleted) {
+fn append_unlowered_warning(human: &mut String, facility: &FacilityArtifactBuild) {
     if facility.adapter_lowerings > 0 || facility.allocated_requirements == 0 {
         return;
     }
@@ -345,61 +485,14 @@ under `[planning]` to make this an error instead of a warning.",
     );
 }
 
-/// Every biological artifact that the compiled program declares with `build`.
-/// Bought declarations lower to catalog entries instead and therefore never
-/// appear in this summary.
-fn build_products(modules: &[CompiledModule], program_packages: &[String]) -> Vec<BuildProduct> {
-    modules
-        .iter()
-        .filter(|module| program_packages.contains(&module.package))
-        .flat_map(|module| {
-            module.module.declarations.iter().filter_map(|declaration| {
-                let CheckedDeclaration::Artifact { artifact, name, .. } = declaration else {
-                    return None;
-                };
-                Some(BuildProduct {
-                    package: module.package.clone(),
-                    module: module.source.module.clone(),
-                    kind: artifact.clone(),
-                    name: name.clone(),
-                })
-            })
-        })
-        .collect()
-}
-
 pub(crate) fn plan(
     path: PathBuf,
     out_dir: Option<PathBuf>,
     program: Option<String>,
     output: &Output,
 ) -> Result<()> {
-    generate_sources(&path)?;
-    let project = LabProject::discover(&path)
-        .with_context(|| format!("failed to load project from {}", path.display()))?;
-    let compiled = project.compile()?;
-    let entry = program
-        .as_deref()
-        .map(|program| resolve_program(project.default_package(), &compiled, program))
-        .transpose()?;
-    if entry.is_none() && project.default_package().entry_source().is_none() {
-        let programs = project
-            .default_package()
-            .program_sources()
-            .filter_map(|source| {
-                source
-                    .relative_path
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-            })
-            .collect::<Vec<_>>();
-        if !programs.is_empty() {
-            bail!(
-                "package declares no build.entry; pick a program with --program <name>: {}",
-                programs.join(", ")
-            );
-        }
-    }
+    let application = ProjectCompilation::load(&path)?;
+    let project = application.project();
     let project_root = project.root();
     let output_root = match out_dir {
         Some(path) if path.is_absolute() => path,
@@ -411,7 +504,7 @@ pub(crate) fn plan(
             None => project_root.join(".lab").join("plan"),
         },
     };
-    let planned = write_facility_plan(&project, &compiled, &output_root, entry.as_deref())?;
+    let planned = write_facility_plan(&application, &output_root, program.as_deref())?;
     let mut human = format!(
         "Planned {} {} against {}\n  Methods selected: {}\n  Requirements allocated: {}\n  Adapter invocations lowered: {}\n  Plan output: {}\n  Planning problem: {}\n  Facility solution: {}\n  Allocated LAIR: {}\n  Adapter invocations: {}\n  Reviewed plan: {}",
         planned.package,
@@ -431,254 +524,32 @@ pub(crate) fn plan(
     output.success("planned", planned, human)
 }
 
-/// The entry module of one named program under `src/programs/`.
-fn resolve_program(
-    package: &LabPackage,
-    compiled: &CompiledProject,
-    program: &str,
-) -> Result<String> {
-    let stem = program.replace('-', "_");
-    let source = package
-        .program_sources()
-        .find(|source| {
-            source
-                .relative_path
-                .file_stem()
-                .and_then(|name| name.to_str())
-                .map(|name| name.replace('-', "_"))
-                .as_deref()
-                == Some(stem.as_str())
-        })
-        .with_context(|| {
-            let programs = package
-                .program_sources()
-                .filter_map(|source| {
-                    source
-                        .relative_path
-                        .file_stem()
-                        .and_then(|name| name.to_str())
-                })
-                .collect::<Vec<_>>();
-            if programs.is_empty() {
-                format!(
-                    "package '{}' has no programs under src/programs/",
-                    package.manifest.package.name
-                )
-            } else {
-                format!(
-                    "no program '{program}' under src/programs/; available: {}",
-                    programs.join(", ")
-                )
-            }
-        })?;
-    let declares_main = compiled
-        .modules
-        .iter()
-        .find(|module| module.source.module == source.module)
-        .is_some_and(|module| {
-            module.module.declarations.iter().any(|declaration| {
-                matches!(declaration, CheckedDeclaration::Workflow { name, .. } if name == "main")
-            })
-        });
-    if !declares_main {
-        bail!(
-            "program '{program}' ({}) declares no `main` workflow",
-            source.module
-        );
+struct CliDocumentRenderer;
+
+impl FacilityDocumentRenderer for CliDocumentRenderer {
+    fn render_typst(&self, root: &Path, document: &str) -> std::result::Result<Vec<u8>, String> {
+        crate::typeset::Typesetter::new()
+            .compile_pdf(root, document)
+            .map_err(|error| format!("{error:#}"))
     }
-    Ok(source.module.clone())
 }
 
 fn write_facility_plan(
-    project: &LabProject,
-    compiled: &CompiledProject,
+    application: &ProjectCompilation,
     output_root: &Path,
-    entry: Option<&str>,
-) -> Result<PlanCompleted> {
-    let package = project.default_package();
-    let facility = match entry {
-        Some(entry) => project.plan_facility_program(compiled, entry)?,
-        None => project.plan_facility_with_package_methods(compiled)?,
-    };
-    let inventory = &facility.inventory;
-    let adapter_bindings = facility.adapter_bindings.as_ref();
-    let allocated = &facility.allocated;
-    let invocations = &facility.adapter_invocations;
-    let problem = facility.problem();
-    let solution = facility.solution();
-    let refined_ir = &facility.refined_lair;
-    let allocated_ir = allocated.ir();
-    fs::create_dir_all(output_root)
-        .with_context(|| format!("failed to create {}", output_root.display()))?;
-    reset_facility_bundle_directories(output_root)?;
-
-    let refined_lair_artifact = PathBuf::from("compiler/refined.lair");
-    let planning_problem_artifact = PathBuf::from("compiler/planning-problem.json");
-    let facility_solution_artifact = PathBuf::from("compiler/facility-solution.json");
-    let allocated_lair_artifact = PathBuf::from("compiler/allocated.lair");
-    let adapter_invocations_artifact = PathBuf::from("compiler/adapter-invocations.json");
-    write_frozen_artifact(output_root, &refined_lair_artifact, refined_ir.as_bytes())?;
-    let planning_problem_reference = write_frozen_artifact(
-        output_root,
-        &planning_problem_artifact,
-        &pretty_json_bytes(problem)?,
-    )?;
-    let facility_solution_reference = write_frozen_artifact(
-        output_root,
-        &facility_solution_artifact,
-        &pretty_json_bytes(solution)?,
-    )?;
-    let allocated_lair_reference = write_frozen_artifact(
-        output_root,
-        &allocated_lair_artifact,
-        allocated_ir.as_bytes(),
-    )?;
-    if allocated_lair_reference.sha256 != invocations.allocated_lair_sha256 {
-        bail!("allocated LAIR changed while projecting adapter invocations");
-    }
-    let adapter_invocations_reference = write_frozen_artifact(
-        output_root,
-        &adapter_invocations_artifact,
-        &pretty_json_bytes(&invocations)?,
-    )?;
-
-    let lowered = crate::facility_lowering::lower_adapter_invocations(
-        package,
-        inventory,
-        invocations,
-        output_root,
-    )?;
-    let inventory_document = staged_inventory_name(inventory)?;
-    let planning_reference = ExecutionPlanningReference {
-        problem_sha256: problem.sha256(),
-        allocated_lair_sha256: invocations.allocated_lair_sha256.clone(),
-        planning_problem: planning_problem_reference,
-        facility_solution: facility_solution_reference,
-        allocated_lair: allocated_lair_reference,
-        adapter_invocations: adapter_invocations_reference,
-        methods: invocations
-            .allocated
-            .methods
-            .iter()
-            .map(|method| ExecutionMethodSelection {
-                choice: method.choice.to_string(),
-                source_operation: method.source_operation.to_string(),
-                method: method.method.to_string(),
-                tasks: method
-                    .tasks
-                    .iter()
-                    .map(|task| task.id.to_string())
-                    .collect(),
-            })
-            .collect(),
-    };
-    let mut execution_plan = build_execution_plan_from_invocations(
-        invocations,
-        ExecutionPlanOptions {
-            inventory_document: inventory_document.clone(),
-            planning: Some(planning_reference),
-            reviewed_documents: lowered.reviewed_documents.clone(),
-            ..ExecutionPlanOptions::default()
-        },
-    )
-    .context("failed to construct the reviewed execution plan")?;
-    stage_execution_inputs(package, inventory, &mut execution_plan, output_root)?;
-    execution_plan
-        .validate()
-        .map_err(|message| anyhow::anyhow!("reviewed execution plan is invalid: {message}"))?;
-    let lowering_path = output_root.join("facility_lowering.json");
-    let execution_plan_path = output_root.join(EXECUTION_PLAN_FILE);
-    write_pretty_json(&lowering_path, &lowered.manifest)?;
-    write_pretty_json(&execution_plan_path, &execution_plan)?;
-    let adapter_bindings_path = if let Some(bindings) = adapter_bindings {
-        let path = output_root.join("adapter_bindings.json");
-        write_pretty_json(&path, bindings)?;
-        Some(path)
-    } else {
-        None
-    };
-
-    let mut documents = lowered.documents;
-    if let Some(run_sheet) = write_manual_run_sheet(package, invocations, output_root)? {
-        documents.push(run_sheet);
-    }
-
-    let bundles = lowered
-        .manifest
-        .routes
-        .iter()
-        .map(|route| output_root.join(&route.output))
-        .collect();
-    Ok(PlanCompleted {
-        package: package.manifest.package.name.clone(),
-        version: package.manifest.package.version.clone(),
-        output: output_root.to_path_buf(),
-        facility: invocations.allocated.facility.clone(),
-        selected_methods: invocations.allocated.methods.len(),
-        allocated_requirements: invocations
-            .allocated
-            .methods
-            .iter()
-            .flat_map(|method| &method.tasks)
-            .map(|task| task.requirements.len())
-            .sum(),
-        adapter_lowerings: lowered.manifest.routes.len(),
-        refined_lair: output_root.join(refined_lair_artifact),
-        planning_problem: output_root.join(planning_problem_artifact),
-        facility_solution: output_root.join(facility_solution_artifact),
-        allocated_lair: output_root.join(allocated_lair_artifact),
-        adapter_invocations: output_root.join(adapter_invocations_artifact),
-        adapter_bindings: adapter_bindings_path,
-        lowering: lowering_path,
-        execution_plan: execution_plan_path,
-        bundles,
-        protocols: lowered.protocols,
-        documents,
-    })
+    program: Option<&str>,
+) -> Result<FacilityArtifactBuild> {
+    application
+        .write_facility_artifacts(ProjectArtifactRequest {
+            program: program.map_or(ProjectProgram::Default, ProjectProgram::Named),
+            methods: None,
+            output_root,
+            renderer: Some(&CliDocumentRenderer),
+        })
+        .map_err(Into::into)
 }
 
-/// Typeset the operator run sheet for the plan's manual steps.
-///
-/// An instrument's steps arrive with their own operator manual from the
-/// adapter that lowered them; the manual steps have no adapter, so the run
-/// sheet is where a person reads them. A plan with no manual step writes
-/// nothing.
-fn write_manual_run_sheet(
-    package: &lab_package::LabPackage,
-    invocations: &lab_adapters::AdapterInvocationPlan,
-    output_root: &Path,
-) -> Result<Option<PathBuf>> {
-    let steps = lab_facility::manual_run_steps(invocations);
-    if steps.is_empty() {
-        return Ok(None);
-    }
-    let source = lab_adapters::run_sheet::render_run_sheet(&lab_adapters::run_sheet::RunSheet {
-        package: package.manifest.package.name.clone(),
-        version: package.manifest.package.version.clone(),
-        facility: invocations.allocated.facility.clone(),
-        steps,
-    });
-    let directory = output_root.join("documents");
-    fs::create_dir_all(&directory)
-        .with_context(|| format!("failed to create {}", directory.display()))?;
-    fs::write(
-        directory.join(lab_adapters::run_sheet::RUN_SHEET_STYLE_PATH),
-        lab_adapters::run_sheet::RUN_SHEET_STYLE,
-    )
-    .context("failed to write the run-sheet style sheet")?;
-    let source_path = directory.join("manual_protocol.typ");
-    fs::write(&source_path, &source)
-        .with_context(|| format!("failed to write {}", source_path.display()))?;
-    let pdf = crate::typeset::Typesetter::new()
-        .compile_pdf(&directory, "manual_protocol.typ")
-        .context("failed to typeset the manual run sheet")?;
-    let pdf_path = directory.join("manual_protocol.pdf");
-    fs::write(&pdf_path, &pdf)
-        .with_context(|| format!("failed to write {}", pdf_path.display()))?;
-    Ok(Some(pdf_path))
-}
-
-fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {
+fn append_facility_artifacts(human: &mut String, planned: &FacilityArtifactBuild) {
     if !planned.bundles.is_empty() {
         human.push_str("\n\nAsset bundles:");
         for bundle in &planned.bundles {
@@ -709,126 +580,6 @@ fn human_path(path: &Path) -> String {
     } else {
         displayed.display().to_string()
     }
-}
-
-/// Replace only compiler-owned adapter bundle directories. The legacy
-/// `lowerings/` path is removed during migration so a successful rebuild never
-/// leaves an obsolete protocol beside the reviewed `assets/` bundle.
-fn reset_facility_bundle_directories(output_root: &Path) -> Result<()> {
-    for name in ["assets", "lowerings", "adapters", "compiler"] {
-        let path = output_root.join(name);
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to inspect {}", path.display()));
-            }
-        };
-        if !metadata.is_dir() {
-            bail!(
-                "refusing to replace managed facility output {} because it is not a directory",
-                path.display()
-            );
-        }
-        fs::remove_dir_all(&path)
-            .with_context(|| format!("failed to replace {}", path.display()))?;
-    }
-    Ok(())
-}
-
-fn write_unallocated_compiler_frontier(
-    modules: &[&CheckedModule],
-    methods: &lab_compiler::method::MethodRegistry,
-    output_root: &Path,
-) -> Result<BuildCompilerIndex> {
-    let compiler = output_root.join("compiler");
-    if compiler.exists() {
-        let metadata = fs::symlink_metadata(&compiler)
-            .with_context(|| format!("failed to inspect {}", compiler.display()))?;
-        if !metadata.is_dir() {
-            bail!(
-                "refusing to replace managed compiler output {} because it is not a directory",
-                compiler.display()
-            );
-        }
-        fs::remove_dir_all(&compiler)
-            .with_context(|| format!("failed to replace {}", compiler.display()))?;
-    }
-    let refined = PortableLairProgram::lower_program(modules)
-        .context("failed to lower the checked program into Design and Intent LAIR")?
-        .refine_methods(methods)
-        .context("failed to refine workflow intent into Method alternatives")?;
-    let problem = refined
-        .planning_problem()
-        .context("failed to project the verified Method graph into a planning problem")?;
-    let refined_path = PathBuf::from("compiler/refined.lair");
-    let problem_path = PathBuf::from("compiler/planning-problem.json");
-    write_frozen_artifact(output_root, &refined_path, refined.ir().as_bytes())?;
-    write_frozen_artifact(output_root, &problem_path, &pretty_json_bytes(&problem)?)?;
-    Ok(BuildCompilerIndex {
-        refined_lair: refined_path,
-        planning_problem: problem_path,
-        facility_solution: None,
-        allocated_lair: None,
-        adapter_invocations: None,
-    })
-}
-
-fn build_facility_index(planned: &PlanCompleted, output_root: &Path) -> Result<BuildFacilityIndex> {
-    let relative = |path: &Path| {
-        path.strip_prefix(output_root)
-            .map(Path::to_path_buf)
-            .with_context(|| {
-                format!(
-                    "facility artifact {} is outside build output {}",
-                    path.display(),
-                    output_root.display()
-                )
-            })
-    };
-    Ok(BuildFacilityIndex {
-        facility: planned.facility.clone(),
-        facility_solution: relative(&planned.facility_solution)?,
-        adapter_invocations: relative(&planned.adapter_invocations)?,
-        lowering: relative(&planned.lowering)?,
-        execution_plan: relative(&planned.execution_plan)?,
-        bundles: planned
-            .bundles
-            .iter()
-            .map(|path| relative(path))
-            .collect::<Result<Vec<_>>>()?,
-        protocols: planned
-            .protocols
-            .iter()
-            .map(|path| relative(path))
-            .collect::<Result<Vec<_>>>()?,
-        documents: planned
-            .documents
-            .iter()
-            .map(|path| relative(path))
-            .collect::<Result<Vec<_>>>()?,
-    })
-}
-
-fn build_compiler_index(planned: &PlanCompleted, output_root: &Path) -> Result<BuildCompilerIndex> {
-    let relative = |path: &Path| {
-        path.strip_prefix(output_root)
-            .map(Path::to_path_buf)
-            .with_context(|| {
-                format!(
-                    "compiler artifact {} is outside build output {}",
-                    path.display(),
-                    output_root.display()
-                )
-            })
-    };
-    Ok(BuildCompilerIndex {
-        refined_lair: relative(&planned.refined_lair)?,
-        planning_problem: relative(&planned.planning_problem)?,
-        facility_solution: Some(relative(&planned.facility_solution)?),
-        allocated_lair: Some(relative(&planned.allocated_lair)?),
-        adapter_invocations: Some(relative(&planned.adapter_invocations)?),
-    })
 }
 
 pub(crate) fn metadata(path: PathBuf, output: &Output) -> Result<()> {
@@ -864,108 +615,6 @@ fn load_package(path: &Path) -> Result<LabPackage> {
         .with_context(|| format!("failed to load package from {}", path.display()))
 }
 
-fn validate_project_inventories(project: &LabProject) -> Result<()> {
-    for package in project.member_packages() {
-        let Some(snapshot) = load_package_inventory(package)? else {
-            continue;
-        };
-        resolve_package_adapter_bindings(package, &snapshot)?;
-    }
-    Ok(())
-}
-
-fn staged_inventory_name(inventory: &InventorySnapshot) -> Result<String> {
-    let extension = inventory
-        .source_path()
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .context("the inventory document needs a UTF-8 file extension")?;
-    Ok(format!("inventory-source.{extension}"))
-}
-
-/// Copies every mutable package input named by a reviewed plan into its artifact directory.
-/// The resulting paths and digests are therefore sufficient for runtime preflight and provenance.
-fn stage_execution_inputs(
-    package: &LabPackage,
-    inventory: &InventorySnapshot,
-    plan: &mut ExecutionPlanDocument,
-    output_root: &Path,
-) -> Result<()> {
-    let inventory_bytes = fs::read(inventory.source_path()).with_context(|| {
-        format!(
-            "failed to re-read inventory source {}",
-            inventory.source_path().display()
-        )
-    })?;
-    let observed_inventory_hash = sha256_hex(&inventory_bytes);
-    if observed_inventory_hash != inventory.source_sha256() {
-        bail!(
-            "inventory source {} changed after validation; run `lab plan` again from a stable source",
-            inventory.source_path().display()
-        );
-    }
-    let inventory_path = output_root.join(&plan.inventory.document);
-    fs::write(&inventory_path, inventory_bytes)
-        .with_context(|| format!("failed to stage {}", inventory_path.display()))?;
-
-    let canonical_root = fs::canonicalize(&package.root)
-        .with_context(|| format!("failed to resolve package root {}", package.root.display()))?;
-    let adapters_directory = output_root.join("adapters");
-    for requirement in &mut plan.requirements {
-        let Some(adapter) = requirement.adapter.as_mut() else {
-            continue;
-        };
-        let source =
-            fs::canonicalize(canonical_root.join(&adapter.profile_path)).with_context(|| {
-                format!(
-                    "failed to resolve adapter profile {} for '{}'",
-                    adapter.profile_path, requirement.requirement_instance
-                )
-            })?;
-        if !source.starts_with(&canonical_root) {
-            bail!(
-                "adapter profile '{}' for '{}' resolves outside package '{}'",
-                adapter.profile_path,
-                requirement.requirement_instance,
-                package.manifest.package.name
-            );
-        }
-        let profile = crate::adapters::load_and_validate(&adapter.driver, &source)?;
-        if profile.sha256 != adapter.profile_sha256 {
-            bail!(
-                "adapter profile {} changed after allocation for '{}'",
-                source.display(),
-                requirement.requirement_instance
-            );
-        }
-        fs::create_dir_all(&adapters_directory)
-            .with_context(|| format!("failed to create {}", adapters_directory.display()))?;
-        let relative = crate::facility_lowering::staged_adapter_profile_path(
-            &adapter.driver,
-            &adapter.profile_sha256,
-        );
-        let destination = output_root.join(&relative);
-        fs::write(&destination, profile.canonical_toml.as_bytes())
-            .with_context(|| format!("failed to stage {}", destination.display()))?;
-        if sha256_hex(profile.canonical_toml.as_bytes()) != adapter.profile_sha256 {
-            bail!(
-                "canonical adapter profile for '{}' does not match its frozen digest",
-                requirement.requirement_instance
-            );
-        }
-        adapter.profile_path = relative.to_string_lossy().into_owned();
-    }
-    plan.validate()
-        .map_err(|message| anyhow::anyhow!("staged execution plan is invalid: {message}"))
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
-}
-
 fn validate_package_name(name: &str) -> Result<()> {
     let manifest = format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n");
     let parsed = PackageManifest::parse(&manifest)?;
@@ -985,6 +634,24 @@ fn validate_package_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+fn contribution_name(path: &Path, name: Option<String>) -> Result<String> {
+    let name = name.unwrap_or_else(|| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("lab-contribution")
+            .to_owned()
+    });
+    validate_package_name(&name)?;
+    Ok(name)
+}
+
+fn prepare_empty_directory(path: &Path) -> Result<()> {
+    if path.exists() && fs::read_dir(path)?.next().is_some() {
+        bail!("{} already exists and is not empty", path.display());
+    }
+    fs::create_dir_all(path).with_context(|| format!("failed to create {}", path.display()))
+}
+
 fn write_new(path: &Path, contents: &str) -> Result<()> {
     if path.exists() {
         bail!("refusing to overwrite {}", path.display());
@@ -992,42 +659,27 @@ fn write_new(path: &Path, contents: &str) -> Result<()> {
     fs::write(path, contents).with_context(|| format!("failed to write {}", path.display()))
 }
 
-fn write_pretty_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    fs::write(path, pretty_json_bytes(value)?)
-        .with_context(|| format!("failed to write {}", path.display()))
-}
-
-fn pretty_json_bytes(value: &impl Serialize) -> Result<Vec<u8>> {
-    let mut json = serde_json::to_vec_pretty(value)?;
-    json.push(b'\n');
-    Ok(json)
-}
-
-fn write_frozen_artifact(
-    output_root: &Path,
-    relative_path: &Path,
-    bytes: &[u8],
-) -> Result<ExecutionPlanningArtifact> {
-    let path = output_root.join(relative_path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    fs::write(&path, bytes).with_context(|| format!("failed to write {}", path.display()))?;
-    Ok(ExecutionPlanningArtifact {
-        path: relative_path
-            .to_str()
-            .context("compiler artifact paths must be UTF-8")?
-            .to_owned(),
-        sha256: sha256_hex(bytes),
-    })
-}
-
 #[derive(Serialize)]
 struct ProjectCreated {
     package: String,
     root: PathBuf,
     entry: PathBuf,
+}
+
+#[derive(Serialize)]
+struct ContributionCreated {
+    kind: &'static str,
+    name: String,
+    root: PathBuf,
+    conformance: &'static str,
+}
+
+#[derive(Serialize)]
+struct BindingsGenerated {
+    package: String,
+    language: &'static str,
+    output: PathBuf,
+    files: usize,
 }
 
 #[derive(Serialize)]
@@ -1044,48 +696,6 @@ struct PackageChecked {
 }
 
 #[derive(Serialize)]
-struct BuildCompleted {
-    package: String,
-    version: String,
-    modules: usize,
-    output: PathBuf,
-    products: Vec<BuildProduct>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    facility: Option<PlanCompleted>,
-}
-
-#[derive(Serialize)]
-struct BuildProduct {
-    package: String,
-    module: String,
-    kind: String,
-    name: String,
-}
-
-#[derive(Serialize)]
-struct PlanCompleted {
-    package: String,
-    version: String,
-    output: PathBuf,
-    facility: String,
-    selected_methods: usize,
-    allocated_requirements: usize,
-    adapter_lowerings: usize,
-    refined_lair: PathBuf,
-    planning_problem: PathBuf,
-    facility_solution: PathBuf,
-    allocated_lair: PathBuf,
-    adapter_invocations: PathBuf,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    adapter_bindings: Option<PathBuf>,
-    lowering: PathBuf,
-    execution_plan: PathBuf,
-    bundles: Vec<PathBuf>,
-    protocols: Vec<PathBuf>,
-    documents: Vec<PathBuf>,
-}
-
-#[derive(Serialize)]
 struct PackageMetadataOutput {
     root: PathBuf,
     manifest: PackageManifest,
@@ -1096,53 +706,4 @@ struct PackageMetadataOutput {
 struct SourceMetadata {
     module: String,
     source: PathBuf,
-}
-
-#[derive(Serialize)]
-struct BuildIndex {
-    schema_version: u32,
-    package: String,
-    version: String,
-    edition: String,
-    entry: Option<PathBuf>,
-    members: Vec<String>,
-    modules: Vec<BuildModule>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    compiler: Option<BuildCompilerIndex>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    adapter_bindings: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    facility: Option<BuildFacilityIndex>,
-}
-
-#[derive(Serialize)]
-struct BuildCompilerIndex {
-    refined_lair: PathBuf,
-    planning_problem: PathBuf,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    facility_solution: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    allocated_lair: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    adapter_invocations: Option<PathBuf>,
-}
-
-#[derive(Serialize)]
-struct BuildFacilityIndex {
-    facility: String,
-    facility_solution: PathBuf,
-    adapter_invocations: PathBuf,
-    lowering: PathBuf,
-    execution_plan: PathBuf,
-    bundles: Vec<PathBuf>,
-    protocols: Vec<PathBuf>,
-    documents: Vec<PathBuf>,
-}
-
-#[derive(Serialize)]
-struct BuildModule {
-    package: String,
-    module: String,
-    source: PathBuf,
-    artifact: PathBuf,
 }

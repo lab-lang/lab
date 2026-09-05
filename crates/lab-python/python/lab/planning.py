@@ -660,16 +660,21 @@ def plan_project(
 def plan(
     program: Program,
     *,
+    entry_module: str,
     project: str | Path,
     methods: tuple[Method, ...] = (),
     include_standard: bool = True,
 ) -> FacilityPlan:
-    """Plan a checked Python program using a Lab package's inventory and adapter context."""
+    """Plan ``entry_module.main`` using a Lab package's operational context."""
 
     catalog = MethodCatalog(methods=methods, include_standard=include_standard)
     return _facility_plan(
         _plan_lab_modules(
-            list(program.sources.items()), str(project), catalog.to_json(), include_standard
+            list(program.sources.items()),
+            entry_module,
+            str(project),
+            catalog.to_json(),
+            include_standard,
         )
     )
 

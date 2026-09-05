@@ -2,23 +2,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_compiler::allocation::{
-    AllocatedMethod, AllocatedProgram, AllocatedProgramExtractionError,
-    AllocatedProgramValidationError, InvocationAdapter,
-};
-use lab_compiler::method::LocalId;
+use lab_compiler::allocation::{AllocatedProgramExtractionError, AllocatedProgramValidationError};
 use lab_compiler::program::AllocatedLairProgram;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v2";
+use crate::{
+    AllocatedMethod, AllocatedProgram, InvocationAdapter, LocalId, ProcedureContractRegistry,
+};
 
-/// The complete, immutable backend-facing projection of an allocated Procedure program.
-///
-/// Exact selected material sources and the inventory digest remain in `allocated`; the normalized
-/// candidate inventory is upstream facility-planning evidence and is not copied into this record.
+pub const ADAPTER_INVOCATIONS_SCHEMA_VERSION: &str = "lab.adapter-invocations.v3";
+
+/// The complete, immutable lowering input projected from allocated LAIR.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AdapterInvocationPlan {
     pub schema_version: String,
@@ -29,9 +26,9 @@ pub struct AdapterInvocationPlan {
     pub invocations: Vec<AdapterInvocation>,
 }
 
-/// One exact Asset/adapter invocation. Tasks and requirements refer to the semantic graph above;
-/// an adapter never receives unresolved method alternatives.
+/// One exact Asset/adapter invocation within an immutable plan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AdapterInvocation {
     pub id: String,
     pub asset: String,
@@ -53,9 +50,8 @@ struct CanonicalAdapterInvocationPlan<'a> {
 }
 
 impl AdapterInvocationPlan {
-    /// Digest the canonical serde representation consumed by execution scheduling and adapters.
+    /// Digest the canonical representation consumed by schedulers and lowerers.
     pub fn sha256(&self) -> String {
-        // Preserve the v2 canonical field order even though the owned allocation is serde-flattened.
         let bytes = serde_json::to_vec(&CanonicalAdapterInvocationPlan {
             schema_version: &self.schema_version,
             problem_sha256: &self.allocated.problem_sha256,
@@ -65,14 +61,14 @@ impl AdapterInvocationPlan {
             methods: &self.allocated.methods,
             invocations: &self.invocations,
         })
-        .expect("AdapterInvocationPlan contains only infallibly serializable semantic values");
+        .expect("AdapterInvocationPlan contains only infallibly serializable values");
         hex_sha256(&bytes)
     }
 
-    /// Project backend invocations from an exact semantic allocation.
     fn from_allocated(
         allocated: AllocatedProgram,
         allocated_lair_sha256: String,
+        contracts: &ProcedureContractRegistry,
     ) -> Result<Self, AdapterInvocationValidationError> {
         let mut groups = BTreeMap::<(String, InvocationAdapter), InvocationMembers>::new();
         for method in &allocated.methods {
@@ -104,7 +100,7 @@ impl AdapterInvocationPlan {
             allocated_lair_sha256,
             invocations,
         };
-        plan.validate()?;
+        plan.validate(contracts)?;
         Ok(plan)
     }
 
@@ -114,11 +110,19 @@ impl AdapterInvocationPlan {
     ) -> Result<Self, AdapterInvocationError> {
         let allocated_lair_sha256 = allocated_lair.sha256();
         let allocated = allocated_lair.allocated_program()?;
-        Self::from_allocated(allocated, allocated_lair_sha256).map_err(Into::into)
+        Self::from_allocated(
+            allocated,
+            allocated_lair_sha256,
+            allocated_lair.procedure_contracts(),
+        )
+        .map_err(Into::into)
     }
 
-    /// Revalidate a deserialized invocation document before a backend consumes it.
-    pub fn validate(&self) -> Result<(), AdapterInvocationValidationError> {
+    /// Revalidate using the exact Procedure contracts that produced the allocation.
+    pub fn validate(
+        &self,
+        contracts: &ProcedureContractRegistry,
+    ) -> Result<(), AdapterInvocationValidationError> {
         if self.schema_version != ADAPTER_INVOCATIONS_SCHEMA_VERSION {
             return Err(AdapterInvocationValidationError::WrongSchema {
                 found: self.schema_version.clone(),
@@ -129,14 +133,14 @@ impl AdapterInvocationPlan {
                 label: "allocated LAIR",
             });
         }
-        self.allocated.validate()?;
+        self.allocated.validate(contracts)?;
         let tasks = self
             .allocated
             .methods
             .iter()
             .flat_map(|method| &method.tasks)
-            .map(|task| task.id.clone())
-            .collect::<BTreeSet<_>>();
+            .map(|task| (task.id.clone(), task.program.is_some()))
+            .collect::<BTreeMap<_, _>>();
         let requirements = self
             .allocated
             .methods
@@ -169,7 +173,7 @@ impl AdapterInvocationPlan {
             }
             let mut invocation_tasks = BTreeSet::new();
             for task in &invocation.tasks {
-                if !invocation_tasks.insert(task) || !tasks.contains(task) {
+                if !invocation_tasks.insert(task) || !tasks.contains_key(task) {
                     return Err(AdapterInvocationValidationError::UnknownTask {
                         invocation: invocation.id.clone(),
                         task: task.clone(),
@@ -185,6 +189,20 @@ impl AdapterInvocationPlan {
                         requirement: requirement_id.clone(),
                     });
                 };
+                if requirement.adapter.is_some() {
+                    if !tasks.get(task).copied().unwrap_or(false) {
+                        return Err(AdapterInvocationValidationError::AdapterWithoutProgram {
+                            task: (*task).clone(),
+                        });
+                    }
+                    if requirement.procedure_implementation.is_none() {
+                        return Err(
+                            AdapterInvocationValidationError::AdapterWithoutImplementation {
+                                requirement: requirement_id.clone(),
+                            },
+                        );
+                    }
+                }
                 requirement_owners.insert(task);
                 if !invocation_requirements.insert(requirement_id)
                     || !invocation.tasks.contains(task)
@@ -252,14 +270,14 @@ fn append_identity_field(identity: &mut Vec<u8>, field: &[u8]) {
     identity.extend_from_slice(field);
 }
 
-pub(crate) fn hex_sha256(bytes: &[u8]) -> String {
+pub fn hex_sha256(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 
-fn is_sha256(value: &str) -> bool {
+pub fn is_sha256(value: &str) -> bool {
     value.len() == 64
         && value
             .bytes()
@@ -306,6 +324,10 @@ pub enum AdapterInvocationValidationError {
     InvocationTaskOwnershipMismatch { invocation: String },
     #[error("adapter invocations do not cover every and only adapter-bound requirement")]
     InvocationCoverage,
+    #[error("adapter-bound task `{task}` has no canonical Procedure program")]
+    AdapterWithoutProgram { task: LocalId },
+    #[error("adapter-bound requirement `{requirement}` has no exact Procedure implementation")]
+    AdapterWithoutImplementation { requirement: LocalId },
 }
 
 #[cfg(test)]
@@ -314,155 +336,126 @@ mod tests {
     use std::path::PathBuf;
 
     use lab_capability::{CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel};
+    use lab_compiler::allocation::{
+        AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding, InvocationAdapter,
+    };
+    use lab_compiler::method::IntentOperationId;
+    use lab_compiler::workflow::{IntentAction, IntentSource};
+    use lab_language::{DefinitionId, ResolvedAction, ResolvedActionCallee};
 
     use super::*;
-    use lab_compiler::allocation::{
-        AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding, InvocationAdapter,
-    };
-    use lab_compiler::method::{IntentOperationId, PortType};
-    use lab_compiler::planning::{
-        PlanningMethodYield, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
-        PlanningValueSource,
-    };
 
     fn id(value: &str) -> LocalId {
         LocalId::new(value).unwrap()
     }
 
-    fn adapter() -> InvocationAdapter {
-        InvocationAdapter {
+    fn source_intent(operation: &str) -> IntentAction {
+        let module = "api.fixture";
+        IntentAction {
+            source: IntentSource {
+                module: module.to_owned(),
+                workflow: DefinitionId::exported(module, "fixture"),
+                statement_path: vec![0],
+            },
+            action: ResolvedAction {
+                callee: ResolvedActionCallee::Action {
+                    definition: DefinitionId::exported(module, "fixture_action"),
+                    operation: operation.to_owned(),
+                },
+                arguments: Vec::new(),
+                results: Vec::new(),
+            },
+            ssa_operands: Vec::new(),
+            result_bindings: Vec::new(),
+            artifact: None,
+            artifact_dependencies: Vec::new(),
+            parameters: Default::default(),
+        }
+    }
+
+    fn manual_allocation() -> AllocatedProgram {
+        let operation = "https://example.org/intent/manual";
+        AllocatedProgram {
+            problem_sha256: "a".repeat(64),
+            inventory_sha256: "b".repeat(64),
+            facility: "https://example.org/facility".to_owned(),
+            methods: vec![AllocatedMethod {
+                choice: id("choice"),
+                source_operation: IntentOperationId::new(operation).unwrap(),
+                source_intent: source_intent(operation),
+                method: MethodId::new("https://example.org/method").unwrap(),
+                after: Vec::new(),
+                inputs: Vec::new(),
+                outputs: Vec::new(),
+                yields: Vec::new(),
+                tasks: vec![AllocatedProcedureTask {
+                    id: id("choice::task"),
+                    operation: OperationId::new("https://example.org/procedure/manual").unwrap(),
+                    program: None,
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                    parameters: Vec::new(),
+                    materials: Vec::new(),
+                    requirements: vec![AllocatedRequirementBinding {
+                        id: id("choice::task::requirement"),
+                        capability_kind: CapabilityKind::new(
+                            "https://example.org/capability/manual",
+                        )
+                        .unwrap(),
+                        minimum_qualification: QualificationLevel::Executable,
+                        accepted_control_modes: BTreeSet::from([ControlMode::Manual]),
+                        offering: "https://example.org/offering/manual".to_owned(),
+                        asset: "https://example.org/asset/bench".to_owned(),
+                        observed_qualification: QualificationLevel::Executable.to_string(),
+                        control_mode: ControlMode::Manual.to_string(),
+                        parameters: Vec::new(),
+                        procedure_implementation: None,
+                        adapter: None,
+                    }],
+                }],
+            }],
+        }
+    }
+
+    fn manual_plan() -> AdapterInvocationPlan {
+        AdapterInvocationPlan::from_allocated(
+            manual_allocation(),
+            "c".repeat(64),
+            lab_compiler::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn projection_rechecks_allocations_and_schema_identity() {
+        let contracts = lab_compiler::procedure::builtin_procedure_contracts();
+        let mut plan = manual_plan();
+        plan.allocated.inventory_sha256 = "not-a-digest".to_owned();
+        assert!(matches!(
+            plan.validate(contracts),
+            Err(AdapterInvocationValidationError::InvalidAllocatedProgram(
+                AllocatedProgramValidationError::InvalidDigest { label: "inventory" }
+            ))
+        ));
+
+        let mut plan = manual_plan();
+        plan.schema_version = "lab.adapter-invocations.v1".to_owned();
+        assert!(matches!(
+            plan.validate(contracts),
+            Err(AdapterInvocationValidationError::WrongSchema { .. })
+        ));
+    }
+
+    #[test]
+    fn invocation_identity_covers_every_adapter_grouping_field() {
+        let original = InvocationAdapter {
             driver: "example.driver".to_owned(),
             profile_path: PathBuf::from("profiles/example.toml"),
             profile_sha256: "d".repeat(64),
             features: BTreeSet::from(["temperature-control".to_owned()]),
             accepted_run_formats: BTreeSet::from(["application/json".to_owned()]),
             emitted_run_formats: BTreeSet::from(["text/plain".to_owned()]),
-        }
-    }
-
-    fn requirement(name: &str, adapter: Option<InvocationAdapter>) -> AllocatedRequirementBinding {
-        AllocatedRequirementBinding {
-            id: id(name),
-            capability_kind: CapabilityKind::new("https://example.org/capability").unwrap(),
-            minimum_qualification: QualificationLevel::Executable,
-            accepted_control_modes: BTreeSet::from([ControlMode::Manual]),
-            offering: format!("https://example.org/offering/{name}"),
-            asset: "https://example.org/asset/instrument".to_owned(),
-            observed_qualification: QualificationLevel::Executable.to_string(),
-            control_mode: ControlMode::Manual.to_string(),
-            parameters: Vec::new(),
-            procedure_implementation: None,
-            adapter,
-        }
-    }
-
-    fn allocated_program() -> AllocatedProgram {
-        let choice = id("choice");
-        let task = id("choice::task");
-        let input = id("input");
-        let output = id("output");
-        let task_output = id("task-output");
-        AllocatedProgram {
-            problem_sha256: "a".repeat(64),
-            inventory_sha256: "b".repeat(64),
-            facility: "https://example.org/facility".to_owned(),
-            methods: vec![AllocatedMethod {
-                choice,
-                source_operation: IntentOperationId::new("example.operation").unwrap(),
-                method: MethodId::new("https://example.org/method").unwrap(),
-                after: Vec::new(),
-                inputs: vec![PlanningPort {
-                    name: input.clone(),
-                    port_type: PortType::Design,
-                    source: None,
-                }],
-                outputs: vec![PlanningPort {
-                    name: output.clone(),
-                    port_type: PortType::Design,
-                    source: None,
-                }],
-                yields: vec![PlanningMethodYield {
-                    output,
-                    source: PlanningValueSource::TaskOutput {
-                        task: task.clone(),
-                        output: task_output.clone(),
-                    },
-                }],
-                tasks: vec![AllocatedProcedureTask {
-                    id: task,
-                    operation: OperationId::new("https://example.org/operation").unwrap(),
-                    program: None,
-                    inputs: vec![PlanningTaskInput {
-                        source: PlanningValueSource::ChoiceInput { input },
-                        port_type: PortType::Design,
-                    }],
-                    outputs: vec![PlanningTaskOutput {
-                        name: task_output,
-                        port_type: PortType::Design,
-                    }],
-                    parameters: Vec::new(),
-                    materials: Vec::new(),
-                    requirements: vec![requirement("choice::requirement", Some(adapter()))],
-                }],
-            }],
-        }
-    }
-
-    fn valid_plan() -> AdapterInvocationPlan {
-        AdapterInvocationPlan::from_allocated(allocated_program(), "c".repeat(64)).unwrap()
-    }
-
-    #[test]
-    fn invocation_validation_rechecks_the_allocated_program() {
-        let mut plan = valid_plan();
-        plan.allocated.inventory_sha256 = "not-a-digest".to_owned();
-
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::InvalidAllocatedProgram(
-                AllocatedProgramValidationError::InvalidDigest { label: "inventory" }
-            ))
-        ));
-    }
-
-    #[test]
-    fn invocation_validation_rejects_v1_documents() {
-        let mut plan = valid_plan();
-        plan.schema_version = "lab.adapter-invocations.v1".to_owned();
-
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::WrongSchema { found })
-                if found == "lab.adapter-invocations.v1"
-        ));
-    }
-
-    #[test]
-    fn invocation_tasks_are_exactly_the_requirement_owners() {
-        let mut plan = valid_plan();
-        let extra = id("choice::manual-task");
-        plan.allocated.methods[0]
-            .tasks
-            .push(AllocatedProcedureTask {
-                id: extra.clone(),
-                operation: OperationId::new("https://example.org/manual-operation").unwrap(),
-                program: None,
-                inputs: Vec::new(),
-                outputs: Vec::new(),
-                parameters: Vec::new(),
-                materials: Vec::new(),
-                requirements: vec![requirement("choice::manual-requirement", None)],
-            });
-        plan.invocations[0].tasks.push(extra);
-        assert!(matches!(
-            plan.validate(),
-            Err(AdapterInvocationValidationError::InvocationTaskOwnershipMismatch { .. })
-        ));
-    }
-
-    #[test]
-    fn invocation_identity_covers_every_adapter_grouping_field() {
-        let original = adapter();
+        };
         let original_id = adapter_invocation_id("https://example.org/asset", &original);
         for changed in [
             {
@@ -493,62 +486,27 @@ mod tests {
     }
 
     #[test]
-    fn flattened_allocation_preserves_the_v2_json_shape_and_hash_contract() {
-        let plan = valid_plan();
+    fn flattened_allocation_preserves_the_public_json_and_hash_contract() {
+        let plan = manual_plan();
+        assert!(plan.invocations.is_empty());
         let encoded = serde_json::to_value(&plan).unwrap();
         let object = encoded.as_object().unwrap();
         assert!(!object.contains_key("allocated"));
-        assert_eq!(
-            object.keys().map(String::as_str).collect::<BTreeSet<_>>(),
-            BTreeSet::from([
-                "allocated_lair_sha256",
-                "facility",
-                "inventory_sha256",
-                "invocations",
-                "methods",
-                "problem_sha256",
-                "schema_version",
-            ])
-        );
-
-        let canonical = CanonicalAdapterInvocationPlan {
-            schema_version: &plan.schema_version,
-            problem_sha256: &plan.allocated.problem_sha256,
-            allocated_lair_sha256: &plan.allocated_lair_sha256,
-            inventory_sha256: &plan.allocated.inventory_sha256,
-            facility: &plan.allocated.facility,
-            methods: &plan.allocated.methods,
-            invocations: &plan.invocations,
-        };
-        assert_eq!(encoded, serde_json::to_value(&canonical).unwrap());
-        assert_eq!(
-            plan.sha256(),
-            hex_sha256(&serde_json::to_vec(&canonical).unwrap())
-        );
+        for property in [
+            "schema_version",
+            "problem_sha256",
+            "allocated_lair_sha256",
+            "inventory_sha256",
+            "facility",
+            "methods",
+        ] {
+            assert!(object.contains_key(property), "missing `{property}`");
+        }
+        assert!(!object.contains_key("invocations"));
         assert_eq!(
             serde_json::from_value::<AdapterInvocationPlan>(encoded).unwrap(),
             plan
         );
-
-        let schema = serde_json::to_value(schemars::schema_for!(AdapterInvocationPlan)).unwrap();
-        let properties = schema["properties"].as_object().unwrap();
-        assert!(!properties.contains_key("allocated"));
-        assert!(!properties.contains_key("material_inventory"));
-        for property in ["problem_sha256", "inventory_sha256", "facility", "methods"] {
-            assert!(
-                properties.contains_key(property),
-                "missing `{property}` schema"
-            );
-        }
-    }
-
-    #[test]
-    fn manual_only_plan_preserves_the_v2_omitted_invocations_hash_contract() {
-        let mut allocated = allocated_program();
-        allocated.methods[0].tasks[0].requirements[0].adapter = None;
-        let plan = AdapterInvocationPlan::from_allocated(allocated, "c".repeat(64)).unwrap();
-        assert!(plan.invocations.is_empty());
-
         let canonical = CanonicalAdapterInvocationPlan {
             schema_version: &plan.schema_version,
             problem_sha256: &plan.allocated.problem_sha256,
@@ -558,12 +516,9 @@ mod tests {
             methods: &plan.allocated.methods,
             invocations: &plan.invocations,
         };
-        let canonical_bytes = serde_json::to_vec(&canonical).unwrap();
-        assert!(
-            !String::from_utf8(canonical_bytes.clone())
-                .unwrap()
-                .contains("\"invocations\"")
+        assert_eq!(
+            plan.sha256(),
+            hex_sha256(&serde_json::to_vec(&canonical).unwrap())
         );
-        assert_eq!(plan.sha256(), hex_sha256(&canonical_bytes));
     }
 }

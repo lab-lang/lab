@@ -35,6 +35,7 @@ const SIMULATED_EPOCH: &str = "https://example.org/ebef-acceptance/epoch_2_simul
 const ASSAY_COMPONENT: &str = "https://example.org/ebef-acceptance/assay_plate_design";
 const ASSAY_LOT: &str = "https://example.org/ebef-acceptance/assay_plate_lot";
 const SIMULATOR: &str = "lab.simulator";
+const SIMULATOR_IMPLEMENTATION: &str = "https://example.org/implementation/semantic-simulator-v1";
 
 struct FixedClock;
 
@@ -51,7 +52,12 @@ fn ebef_derived_facility_composes_three_capabilities_without_claiming_hardware_c
     let source_before = fs::read(&source_path).unwrap();
     let mut document_loaders = ReviewedDocumentLoaderRegistry::new();
     document_loaders
-        .register(SIMULATOR, SIMULATION_RUN_FORMAT, load_simulation_run)
+        .register(
+            SIMULATOR,
+            SIMULATOR_IMPLEMENTATION,
+            SIMULATION_RUN_FORMAT,
+            load_simulation_run,
+        )
         .unwrap();
     let loaded = load_execution_directory(directory.path(), &document_loaders).unwrap();
 
@@ -349,7 +355,7 @@ fn requirement(
         minimum_qualification: Qualification::Simulatable.iri().to_owned(),
         observed_qualification: Qualification::Simulatable.iri().to_owned(),
         control_mode: ControlMode::ReviewedFile.iri().to_owned(),
-        procedure_implementation: None,
+        procedure_implementation: Some(SIMULATOR_IMPLEMENTATION.to_owned()),
         parameters: Vec::new(),
         adapter: Some(ExecutionAdapterBinding {
             driver: SIMULATOR.to_owned(),
@@ -382,6 +388,7 @@ fn simulation_registry() -> ExecutorRegistry {
             .register(
                 asset,
                 SIMULATOR,
+                SIMULATOR_IMPLEMENTATION,
                 SIMULATION_RUN_FORMAT,
                 Box::<ReviewedDocumentSimulationExecutor>::default(),
             )

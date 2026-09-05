@@ -1,10 +1,11 @@
 //! Lower canonical thermal programs into reviewed Inheco ODTC run documents.
 
+use lab_compiler::procedure::ProcedureContractRegistry;
 use lab_runfmt::{THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument};
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::invocation::exact_invocation_tasks;
-use crate::backend::procedure::{CYCLE_GOLDEN_GATE, normalized_thermal_program};
+use crate::backend::procedure::normalized_thermal_program;
 use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
 use lab_compiler::planning::PlanningValueSource;
 use lab_instruments::ThermalRun;
@@ -12,18 +13,18 @@ use lab_instruments::ThermalRun;
 pub(in crate::backend) fn lower_invocation(
     invocation_plan: &AdapterInvocationPlan,
     invocation: &AdapterInvocation,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<AdapterInvocationLowering, String> {
     let tasks = exact_invocation_tasks("Inheco ODTC", invocation_plan, invocation)?;
     let mut artifacts = ArtifactBundle::new();
     let mut documents = Vec::new();
     for (ordinal, member) in tasks.into_iter().enumerate() {
-        if member.task.operation.as_str() != CYCLE_GOLDEN_GATE {
-            return Err(format!(
-                "Inheco ODTC invocation contains unsupported Procedure operation '{}' in task '{}'",
-                member.task.operation, member.task.id
-            ));
-        }
-        let program = normalized_thermal_program("Inheco ODTC", member.task, &member.requirements)?;
+        let program = normalized_thermal_program(
+            "Inheco ODTC",
+            member.task,
+            &member.requirements,
+            contracts,
+        )?;
         let limits = lab_instruments::odtc_thermal_limits();
         let sample_count = u32::try_from(program.sample_count).map_err(|_| {
             format!(

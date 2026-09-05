@@ -1,15 +1,13 @@
 use crate::method::ProcedureValue;
-use crate::procedure::ProcedureLocalId;
+use crate::procedure::{ProcedureLocalId, ProcedureProgramBuildContext, ResolvedProcedureMaterial};
 use lab_capability::{ExactDecimal, ScalarValue};
 
-use super::{ProcedureTaskInstance, ResolvedProcedureMaterial};
-
 pub(super) struct TaskView<'task, 'instance> {
-    task: &'task ProcedureTaskInstance<'instance>,
+    task: &'task ProcedureProgramBuildContext<'instance>,
 }
 
 impl<'task, 'instance> TaskView<'task, 'instance> {
-    pub(super) fn new(task: &'task ProcedureTaskInstance<'instance>) -> Self {
+    pub(super) fn new(task: &'task ProcedureProgramBuildContext<'instance>) -> Self {
         Self { task }
     }
 

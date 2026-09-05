@@ -35,7 +35,7 @@ pub const OPENTRONS_PYTHON_PROTOCOL_FORMAT: &str = "opentrons.python-protocol";
 pub const OPENTRONS_PROTOCOL_DESIGNER_FORMAT: &str = "opentrons.protocol-designer-json";
 
 /// The reviewed, facility-wide execution plan format.
-pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v3";
+pub const EXECUTION_PLAN_FORMAT: &str = "lab.execution-plan.v4";
 
 /// The well-known file name for a facility-wide reviewed plan.
 pub const EXECUTION_PLAN_FILE: &str = "plan.execution.json";
@@ -119,7 +119,7 @@ pub fn load_simulation_run(path: &Path) -> Result<SimulationRunDocument, RunDocu
     Ok(document)
 }
 
-/// Load, format-check, and structurally validate one `lab.execution-plan.v3` document.
+/// Load, format-check, and structurally validate one `lab.execution-plan.v4` document.
 pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocumentError> {
     let document: ExecutionPlanDocument = load_document(path)?;
     check_format(path, EXECUTION_PLAN_FORMAT, &document.format)?;
@@ -134,6 +134,7 @@ pub fn load_execution_plan(path: &Path) -> Result<ExecutionPlanDocument, RunDocu
 
 /// One reviewed facility-wide plan. Runtime interpretation is restricted to these frozen facts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionPlanDocument {
     /// Always [`EXECUTION_PLAN_FORMAT`].
     pub format: String,
@@ -178,11 +179,22 @@ impl ExecutionPlanDocument {
                 ));
             }
             if let Some(adapter) = &requirement.adapter {
+                if requirement.procedure_implementation.is_none() {
+                    return Err(format!(
+                        "adapter-bound requirement '{}' has no exact Procedure implementation",
+                        requirement.requirement_instance
+                    ));
+                }
                 require_sha256(
                     &format!("adapter profile for '{}'", requirement.requirement_instance),
                     &adapter.profile_sha256,
                 )?;
                 require_relative_path("adapter profile", &adapter.profile_path)?;
+            } else if requirement.procedure_implementation.is_some() {
+                return Err(format!(
+                    "requirement '{}' names a Procedure implementation without an adapter binding",
+                    requirement.requirement_instance
+                ));
             }
         }
 
@@ -290,11 +302,15 @@ impl ExecutionPlanDocument {
                                 requirement
                             ));
                         }
-                        let key = (&binding.asset, &binding.adapter);
+                        let key = (
+                            &binding.asset,
+                            &binding.adapter,
+                            &binding.procedure_implementation,
+                        );
                         if let Some(expected) = &execution_key {
                             if expected != &key {
                                 return Err(format!(
-                                    "execute node '{}' combines requirements with different Asset or adapter bindings",
+                                    "execute node '{}' combines requirements with different Asset, adapter, or Procedure implementation bindings",
                                     node.id
                                 ));
                             }
@@ -396,6 +412,7 @@ impl ExecutionPlanDocument {
 
 /// Exact compiler provenance frozen into a reviewed execution plan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionPlanningReference {
     pub problem_sha256: String,
     pub allocated_lair_sha256: String,
@@ -435,6 +452,7 @@ impl ExecutionPlanningReference {
         for method in &self.methods {
             if method.choice.is_empty()
                 || method.source_operation.is_empty()
+                || !method.source_intent.is_object()
                 || method.method.is_empty()
                 || method.tasks.is_empty()
                 || !choices.insert(method.choice.as_str())
@@ -451,6 +469,7 @@ impl ExecutionPlanningReference {
 
 /// One immutable compiler artifact staged next to the reviewed plan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionPlanningArtifact {
     pub path: String,
     pub sha256: String,
@@ -458,14 +477,18 @@ pub struct ExecutionPlanningArtifact {
 
 /// One Method decision from the global facility solution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionMethodSelection {
     pub choice: String,
     pub source_operation: String,
+    /// Complete checked source action retained as format-neutral reviewed provenance.
+    pub source_intent: serde_json::Value,
     pub method: String,
     pub tasks: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionInventoryReference {
     /// Exact source graph copied into the reviewed execution package.
     pub document: String,
@@ -474,6 +497,7 @@ pub struct ExecutionInventoryReference {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionRequirementBinding {
     pub requirement_instance: String,
     pub requirement_template: String,
@@ -507,7 +531,12 @@ pub struct ExecutionParameterBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "value_type", content = "value", rename_all = "snake_case")]
+#[serde(
+    tag = "value_type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum ExecutionParameterValue {
     Text(String),
     Integer(String),
@@ -517,6 +546,7 @@ pub enum ExecutionParameterValue {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionAdapterBinding {
     pub driver: String,
     pub profile_path: String,
@@ -524,6 +554,7 @@ pub struct ExecutionAdapterBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionMaterialBinding {
     pub id: String,
     pub component: String,
@@ -532,6 +563,7 @@ pub struct ExecutionMaterialBinding {
 
 /// One new MaterialLot whose exact identity and lineage are frozen before execution.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ExecutionMaterialOutput {
     pub id: String,
     pub material_lot: String,
@@ -557,7 +589,7 @@ pub struct ExecutionPlanNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case")]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ExecutionPlanAction {
     Execute {
         requirements: Vec<String>,
@@ -578,6 +610,7 @@ pub enum ExecutionPlanAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReviewedRunDocument {
     pub path: String,
     pub format: String,
@@ -657,6 +690,7 @@ fn validate_acyclic(nodes: &BTreeMap<&str, &ExecutionPlanNode>) -> Result<(), St
 /// for one plate. The exact Asset and adapter binding selects the executor;
 /// the document never names a vendor.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ThermocycleRunDocument {
     /// Always [`THERMOCYCLE_RUN_FORMAT`]; readers reject any other value.
     pub format: String,
@@ -672,6 +706,7 @@ pub struct ThermocycleRunDocument {
 
 /// One `lab.plate-read.v0` document: a device-neutral plate acquisition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlateReadDocument {
     /// Always [`PLATE_READ_FORMAT`]; readers reject any other value.
     pub format: String,
@@ -683,7 +718,7 @@ pub struct PlateReadDocument {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "mode", rename_all = "lowercase")]
+#[serde(tag = "mode", rename_all = "lowercase", deny_unknown_fields)]
 pub enum PlateReadMode {
     Absorbance { wavelength_nm: u16 },
     Luminescence { integration_seconds: f64 },
@@ -694,6 +729,7 @@ pub enum PlateReadMode {
 /// This document records what a simulator is asked to model. It is never a hardware protocol and
 /// never implies that a physical Asset has a compatible control path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SimulationRunDocument {
     /// Always [`SIMULATION_RUN_FORMAT`].
     pub format: String,
@@ -705,10 +741,29 @@ pub struct SimulationRunDocument {
     pub assumptions: Vec<String>,
 }
 
+/// One display-ready manual step in the operator run sheet for a facility plan.
+///
+/// This is distinct from [`RunStep`], which is a replayable Hamilton firmware
+/// frame, and from [`ManualStep`], which records an instruction attached to a
+/// STAR run document.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManualRunStep {
+    /// What the operator does, e.g. "Centrifuge".
+    pub title: String,
+    /// The exact Procedure operation the step performs.
+    pub operation: String,
+    /// The asset the operator uses, as display text.
+    pub asset: String,
+    /// Display-ready parameter names and values.
+    pub parameters: Vec<(String, String)>,
+}
+
 /// One replayable Hamilton STAR step: the id-less firmware frame and the
 /// operator's view of it. `module` and `code` repeat the frame's first four
 /// characters so a reviewer can scan the document without decoding frames.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RunStep {
     pub frame: String,
     pub module: String,
@@ -718,6 +773,7 @@ pub struct RunStep {
 
 /// A step the operator performs by hand between machine runs.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ManualStep {
     pub title: String,
     pub instructions: String,
@@ -726,6 +782,7 @@ pub struct ManualStep {
 /// One `lab.star-run.v0` document: an ordered list of reviewed firmware
 /// frames for a single machine session, with the manual steps that follow.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StarRunDocument {
     /// Always [`STAR_RUN_FORMAT`]; readers reject any other value.
     pub format: String,
@@ -763,7 +820,9 @@ mod tests {
                 minimum_qualification: "https://sbol.io/ns/facility#Plannable".to_owned(),
                 observed_qualification: "https://sbol.io/ns/facility#Executable".to_owned(),
                 control_mode: "https://sbol.io/ns/facility#ReviewedFileControl".to_owned(),
-                procedure_implementation: None,
+                procedure_implementation: Some(
+                    "https://example.org/implementation/incubator-v1".to_owned(),
+                ),
                 parameters: Vec::new(),
                 adapter: Some(ExecutionAdapterBinding {
                     driver: "example.incubator".to_owned(),
@@ -807,6 +866,9 @@ mod tests {
             methods: vec![ExecutionMethodSelection {
                 choice: "main::body[0]".to_owned(),
                 source_operation: "std.bio.build.realize".to_owned(),
+                source_intent: serde_json::json!({
+                    "operation": "std.bio.build.realize",
+                }),
                 method: "https://example.org/method#automated".to_owned(),
                 tasks: vec!["main::body[0]::setup".to_owned()],
             }],
@@ -836,6 +898,7 @@ mod tests {
         first.requirement_instance = "example::main/thermal/block".to_owned();
         first.requirement_template = "example::thermal/block".to_owned();
         first.control_mode = lab_capability::ControlMode::Manual.iri().to_owned();
+        first.procedure_implementation = None;
         first.adapter = None;
         let mut second = first.clone();
         second.requirement_instance = "example::main/thermal/lid".to_owned();
@@ -894,6 +957,7 @@ mod tests {
         manual.requirement_instance = "example::main/body[1]".to_owned();
         manual.requirement_template = "example::main::body[1]".to_owned();
         manual.control_mode = lab_capability::ControlMode::Manual.iri().to_owned();
+        manual.procedure_implementation = None;
         manual.adapter = None;
         cyclic.requirements.push(manual);
         cyclic.nodes.push(ExecutionPlanNode {
@@ -942,13 +1006,20 @@ mod tests {
 
         plan.requirements[1].procedure_implementation =
             Some("https://example.org/implementation/other".to_owned());
-        plan.validate().unwrap();
+        assert!(
+            plan.validate()
+                .unwrap_err()
+                .contains("different Asset, adapter, or Procedure implementation bindings")
+        );
+
+        plan.requirements[1].procedure_implementation =
+            plan.requirements[0].procedure_implementation.clone();
 
         plan.requirements[1].asset = "https://example.org/other-asset".to_owned();
         assert!(
             plan.validate()
                 .unwrap_err()
-                .contains("different Asset or adapter bindings")
+                .contains("different Asset, adapter, or Procedure implementation bindings")
         );
     }
 

@@ -107,8 +107,7 @@ pub(in crate::backend::hamilton::star) fn run_steps(
     Ok(steps)
 }
 
-/// The tip the run's operations of a class use, from the profile's stage
-/// racks (every rack of a class feeds one tip type).
+/// The tip the run's operations of a class use from the profile resource.
 fn run_tip(plan: &StarExecutionPlan, run: &StarRunPlan, class: TipClass) -> Option<TipType> {
     let uses_class = run.operations.iter().any(|operation| match operation {
         StarOperation::PickUpTips { tip, .. } => *tip == class,
@@ -128,11 +127,8 @@ fn run_tip(plan: &StarExecutionPlan, run: &StarRunPlan, class: TipClass) -> Opti
         })?;
     let prefix = rack_resource.split('/').next()?;
     let labware = match prefix {
-        "assembly_small_tips" => &plan.deck.stages.assembly.small_tips.labware,
-        "transformation_small_tips" => &plan.deck.stages.transformation.small_tips.labware,
-        "transformation_large_tips" => &plan.deck.stages.transformation.large_tips.labware,
-        "plating_small_tips" => &plan.deck.stages.plating.small_tips.labware,
-        "plating_large_tips" => &plan.deck.stages.plating.large_tips.labware,
+        "small_tips" => &plan.deck.resources.small_tips.labware,
+        "large_tips" => &plan.deck.resources.large_tips.labware,
         _ => return None,
     };
     crate::backend::hamilton::star::catalog::labware(labware)?.tip()
@@ -310,11 +306,8 @@ fn run_pickup_tip(
         .resource;
     let prefix = resource.split('/').next().unwrap_or(resource);
     let labware = match prefix {
-        "assembly_small_tips" => &plan.deck.stages.assembly.small_tips.labware,
-        "transformation_small_tips" => &plan.deck.stages.transformation.small_tips.labware,
-        "transformation_large_tips" => &plan.deck.stages.transformation.large_tips.labware,
-        "plating_small_tips" => &plan.deck.stages.plating.small_tips.labware,
-        "plating_large_tips" => &plan.deck.stages.plating.large_tips.labware,
+        "small_tips" => &plan.deck.resources.small_tips.labware,
+        "large_tips" => &plan.deck.resources.large_tips.labware,
         other => {
             return Err(StarEmissionError::Serialization(format!(
                 "operation references unknown tip resource '{other}'"

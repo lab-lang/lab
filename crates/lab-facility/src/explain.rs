@@ -68,6 +68,13 @@ fn describe_offering_rejection(reason: &PlanningCandidateRejectionReason) -> Str
         PlanningCandidateRejectionReason::MissingPlanningAdapter => {
             "no configured adapter can plan it".to_owned()
         }
+        PlanningCandidateRejectionReason::AdapterProgramInfeasible {
+            adapter,
+            implementation,
+            message,
+        } => format!(
+            "adapter `{adapter}` implementation `{implementation}` rejects this exact program: {message}"
+        ),
         PlanningCandidateRejectionReason::ExcludedByExactAssetPin { pinned_asset } => format!(
             "the exact policy pins this requirement to {}",
             short(pinned_asset)

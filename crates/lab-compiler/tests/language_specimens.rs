@@ -155,7 +155,9 @@ fn plasmid_build_compiles_typed_effects_and_reactive_handlers() {
         "Rejected"
     );
     let serialized = serde_json::to_string(workflow).unwrap();
-    assert!(serialized.contains("workflow.await_colonies"));
+    assert!(serialized.contains(
+        "\"callee\":{\"definition\":{\"local\":\"await_colonies\",\"module\":\"standalone\"},\"kind\":\"workflow\"}"
+    ));
     assert!(serialized.contains("std.lab.plasmid.split"));
     assert!(serialized.contains("\"mode\":\"take\""));
     assert!(serialized.contains("\"mode\":\"borrow\""));

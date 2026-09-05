@@ -79,9 +79,11 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0052: Material states are declared facets, not separate kinds](language/decisions/0052-material-states-are-declared-facets.md) | a state travels on the material as an orthogonal declared facet, keeping provenance and kind distinct |
 | [0053: Quantities carry dimensions and compose](language/decisions/0053-quantities-carry-dimensions-and-compose.md) | a field may ask for a dimension, conversion is written, and products and quotients are computed |
 | [0054: Every material carries a quantity](language/decisions/0054-every-material-carries-a-quantity.md) | a divisible material is drawn from as one take and two introductions, needing no exception to affine flow |
+| [0055: Solving and Pliron are compiler internals](language/decisions/0055-solving-and-pliron-are-compiler-internals.md) | retain bounded facility search and verified LAIR without making either a contribution seam |
 
 ## Implementation and embedding
 
+- [Focused compiler extensions](contributing/extensions.md) shows how scientific packages, Method packs, adapters, and generated Python bindings enter the system without editing central matches.
 - [LAIR overview](../crates/lab-compiler/IR.md) introduces the multi-layer intermediate representation used to lower biological intent toward laboratory execution.
 - [LAIR internals](../crates/lab-compiler/README.md) describes the current compiler pipeline and developer commands.
 - [Facility planning internals](../crates/lab-facility/README.md) describe inventory binding, global allocation, and reviewed-plan construction over LAIR contracts.

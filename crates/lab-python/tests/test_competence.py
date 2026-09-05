@@ -24,7 +24,7 @@ class CompetenceProtocolTests(unittest.TestCase):
     def test_the_protocol_checks_and_refines(self) -> None:
         program = lab.check(competence.module)
         self.assertIn("competence.protocol", program.checked)
-        refined = lab.refine(program)
+        refined = lab.refine(program, entry_module="competence.protocol")
         operations = {choice["source_operation"] for choice in refined.planning_problem["choices"]}
         self.assertIn("std.lab.competence.grow", operations)
         self.assertIn("std.lab.competence.chill", operations)

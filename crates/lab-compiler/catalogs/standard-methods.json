@@ -1,0 +1,3939 @@
+{
+  "schema_version": "lab.method-catalog.v2",
+  "methods": [
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-artifact-realization",
+      "refines": "std.bio.build.realize",
+      "inputs": [
+        {
+          "name": "design",
+          "port_type": {
+            "kind": "design"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "artifact",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "dependencies",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "realize",
+          "operation": "https://www.lab-compiler.org/ns/procedure#RealizeArtifact",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "design"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "product",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "dependencies",
+              "property_kind": "https://sbol.io/ns/capability#Dependencies",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "dependencies",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "artifact-realization",
+                "capability_kind": "https://sbol.io/ns/capability#ArtifactRealization",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "product",
+          "source": {
+            "kind": "task_output",
+            "task": "realize",
+            "output": "product"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#automated-golden-gate",
+      "refines": "std.bio.build.realize",
+      "inputs": [
+        {
+          "name": "design",
+          "port_type": {
+            "kind": "design"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "artifact",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "backbone",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "components",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "dependencies",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "restriction_enzyme",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "assembly_replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 1
+        },
+        {
+          "name": "reaction_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 20
+        },
+        {
+          "name": "part_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "enzyme_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "ligase_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        },
+        {
+          "name": "buffer_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "cycles",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "assembly_cycles",
+          "default": 75
+        },
+        {
+          "name": "digest_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 37
+        },
+        {
+          "name": "digest_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "digest_duration_min",
+          "default": 2
+        },
+        {
+          "name": "ligate_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 16
+        },
+        {
+          "name": "ligate_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "ligate_duration_min",
+          "default": 5
+        },
+        {
+          "name": "lid_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 105
+        },
+        {
+          "name": "final_digest_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 50
+        },
+        {
+          "name": "final_digest_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "final_digest_duration_min",
+          "default": 5
+        },
+        {
+          "name": "heat_inactivation_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 80
+        },
+        {
+          "name": "heat_inactivation_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "heat_inactivation_duration_min",
+          "default": 10
+        },
+        {
+          "name": "hold_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        }
+      ],
+      "tasks": [
+        {
+          "id": "setup-reaction",
+          "operation": "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "design"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "reaction",
+              "port_type": {
+                "kind": "material",
+                "state": "https://www.lab-compiler.org/ns/material-state#AssemblyReaction"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "backbone",
+              "property_kind": "https://sbol.io/ns/capability#Backbone",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "backbone"
+              }
+            },
+            {
+              "id": "components",
+              "property_kind": "https://sbol.io/ns/capability#Components",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "components"
+              }
+            },
+            {
+              "id": "dependencies",
+              "property_kind": "https://sbol.io/ns/capability#Dependencies",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            },
+            {
+              "id": "restriction_enzyme",
+              "property_kind": "https://sbol.io/ns/capability#RestrictionEnzyme",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "restriction_enzyme"
+              }
+            },
+            {
+              "id": "assembly_replicates",
+              "property_kind": "https://sbol.io/ns/capability#AssemblyReplicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "assembly_replicates"
+              }
+            },
+            {
+              "id": "reaction_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#ReactionVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "reaction_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "part_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#PartVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "part_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "enzyme_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#EnzymeVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "enzyme_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "ligase_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#LigaseVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "ligase_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "buffer_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#BufferVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "buffer_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "mix_cycles",
+              "property_kind": "https://sbol.io/ns/capability#MixCycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "3"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "mix_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MixVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "15"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "setup_strategy",
+              "property_kind": "https://sbol.io/ns/capability#SetupStrategy",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "text",
+                      "value": "basic_v1"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "backbone",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "backbone"
+              }
+            },
+            {
+              "id": "components",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "components"
+              }
+            },
+            {
+              "id": "dependencies",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            },
+            {
+              "id": "restriction-enzyme",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "restriction_enzyme"
+              }
+            },
+            {
+              "id": "ligase",
+              "source": {
+                "kind": "literal",
+                "symbol": "T4_DNA_ligase"
+              }
+            },
+            {
+              "id": "buffer",
+              "source": {
+                "kind": "literal",
+                "symbol": "T4_DNA_ligase_buffer"
+              }
+            },
+            {
+              "id": "water",
+              "source": {
+                "kind": "literal",
+                "symbol": "nuclease_free_water"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#SetupGoldenGateV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl"
+              ]
+            }
+          }
+        },
+        {
+          "id": "cycle-reaction",
+          "operation": "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction",
+          "inputs": [
+            {
+              "kind": "task_output",
+              "task": "setup-reaction",
+              "output": "reaction"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "product",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "assembly_replicates",
+              "property_kind": "https://sbol.io/ns/capability#AssemblyReplicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "assembly_replicates"
+              }
+            },
+            {
+              "id": "reaction_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#ReactionVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "reaction_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cycles",
+              "property_kind": "https://sbol.io/ns/capability#Cycles",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cycles"
+              }
+            },
+            {
+              "id": "digest_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#DigestTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "digest_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "digest_minutes",
+              "property_kind": "https://sbol.io/ns/capability#DigestMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "digest_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "ligate_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#LigateTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "ligate_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "ligate_minutes",
+              "property_kind": "https://sbol.io/ns/capability#LigateMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "ligate_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "lid_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#LidTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "lid_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "final_digest_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#FinalDigestTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "final_digest_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "final_digest_minutes",
+              "property_kind": "https://sbol.io/ns/capability#FinalDigestMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "final_digest_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "heat_inactivation_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HeatInactivationTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_inactivation_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "heat_inactivation_minutes",
+              "property_kind": "https://sbol.io/ns/capability#HeatInactivationMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_inactivation_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "hold_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HoldTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "hold_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#GoldenGateThermalCycleV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl",
+                "https://sbol.io/ns/facility#SiLA2Control"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "product",
+          "source": {
+            "kind": "task_output",
+            "task": "cycle-reaction",
+            "output": "product"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate",
+      "refines": "std.bio.build.realize",
+      "inputs": [
+        {
+          "name": "design",
+          "port_type": {
+            "kind": "design"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "artifact",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "backbone",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "components",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "dependencies",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "restriction_enzyme",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "assembly_replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 1
+        },
+        {
+          "name": "reaction_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 20
+        },
+        {
+          "name": "part_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "enzyme_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "ligase_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        },
+        {
+          "name": "buffer_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "cycles",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "assembly_cycles",
+          "default": 75
+        },
+        {
+          "name": "digest_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 37
+        },
+        {
+          "name": "digest_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "digest_duration_min",
+          "default": 2
+        },
+        {
+          "name": "ligate_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 16
+        },
+        {
+          "name": "ligate_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "ligate_duration_min",
+          "default": 5
+        },
+        {
+          "name": "lid_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 105
+        },
+        {
+          "name": "final_digest_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 50
+        },
+        {
+          "name": "final_digest_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "final_digest_duration_min",
+          "default": 5
+        },
+        {
+          "name": "heat_inactivation_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 80
+        },
+        {
+          "name": "heat_inactivation_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "heat_inactivation_duration_min",
+          "default": 10
+        },
+        {
+          "name": "hold_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        }
+      ],
+      "tasks": [
+        {
+          "id": "setup-reaction",
+          "operation": "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "design"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "reaction",
+              "port_type": {
+                "kind": "material",
+                "state": "https://www.lab-compiler.org/ns/material-state#AssemblyReaction"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "backbone",
+              "property_kind": "https://sbol.io/ns/capability#Backbone",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "backbone"
+              }
+            },
+            {
+              "id": "components",
+              "property_kind": "https://sbol.io/ns/capability#Components",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "components"
+              }
+            },
+            {
+              "id": "dependencies",
+              "property_kind": "https://sbol.io/ns/capability#Dependencies",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            },
+            {
+              "id": "restriction_enzyme",
+              "property_kind": "https://sbol.io/ns/capability#RestrictionEnzyme",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "restriction_enzyme"
+              }
+            },
+            {
+              "id": "assembly_replicates",
+              "property_kind": "https://sbol.io/ns/capability#AssemblyReplicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "assembly_replicates"
+              }
+            },
+            {
+              "id": "reaction_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#ReactionVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "reaction_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "part_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#PartVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "part_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "enzyme_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#EnzymeVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "enzyme_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "ligase_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#LigaseVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "ligase_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "buffer_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#BufferVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "buffer_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "source_mix_cycles",
+              "property_kind": "https://sbol.io/ns/capability#SourceMixCycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "3"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "source_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#SourceTemperatureC",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "4"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/DEG_C"
+                  }
+                }
+              }
+            },
+            {
+              "id": "bubble_clear_divisor_ul",
+              "property_kind": "https://sbol.io/ns/capability#BubbleClearDivisorUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "10"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "bubble_clear_max_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#BubbleClearMaxVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "20"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "bubble_clear_dispense_offset_mm",
+              "property_kind": "https://sbol.io/ns/capability#BubbleClearDispenseOffsetMm",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "8"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MilliM"
+                  }
+                }
+              }
+            },
+            {
+              "id": "setup_strategy",
+              "property_kind": "https://sbol.io/ns/capability#SetupStrategy",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "text",
+                      "value": "temperature_staged_v1"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "backbone",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "backbone"
+              }
+            },
+            {
+              "id": "components",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "components"
+              }
+            },
+            {
+              "id": "dependencies",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            },
+            {
+              "id": "restriction-enzyme",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "restriction_enzyme"
+              }
+            },
+            {
+              "id": "ligase",
+              "source": {
+                "kind": "literal",
+                "symbol": "T4_DNA_ligase"
+              }
+            },
+            {
+              "id": "buffer",
+              "source": {
+                "kind": "literal",
+                "symbol": "T4_DNA_ligase_buffer"
+              }
+            },
+            {
+              "id": "water",
+              "source": {
+                "kind": "literal",
+                "symbol": "nuclease_free_water"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#SetupGoldenGateV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl"
+              ]
+            }
+          }
+        },
+        {
+          "id": "cycle-reaction",
+          "operation": "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction",
+          "inputs": [
+            {
+              "kind": "task_output",
+              "task": "setup-reaction",
+              "output": "reaction"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "product",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "assembly_replicates",
+              "property_kind": "https://sbol.io/ns/capability#AssemblyReplicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "assembly_replicates"
+              }
+            },
+            {
+              "id": "reaction_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#ReactionVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "reaction_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cycles",
+              "property_kind": "https://sbol.io/ns/capability#Cycles",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cycles"
+              }
+            },
+            {
+              "id": "digest_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#DigestTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "digest_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "digest_minutes",
+              "property_kind": "https://sbol.io/ns/capability#DigestMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "digest_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "ligate_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#LigateTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "ligate_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "ligate_minutes",
+              "property_kind": "https://sbol.io/ns/capability#LigateMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "ligate_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "lid_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#LidTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "lid_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "final_digest_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#FinalDigestTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "final_digest_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "final_digest_minutes",
+              "property_kind": "https://sbol.io/ns/capability#FinalDigestMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "final_digest_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "heat_inactivation_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HeatInactivationTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_inactivation_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "heat_inactivation_minutes",
+              "property_kind": "https://sbol.io/ns/capability#HeatInactivationMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_inactivation_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "hold_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HoldTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "hold_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#GoldenGateThermalCycleV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl",
+                "https://sbol.io/ns/facility#SiLA2Control"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "product",
+          "source": {
+            "kind": "task_output",
+            "task": "cycle-reaction",
+            "output": "product"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-material-provisioning",
+      "refines": "std.lab.plasmid.provision",
+      "parameters": [
+        {
+          "name": "item",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "provision",
+          "operation": "https://www.lab-compiler.org/ns/procedure#ProvisionMaterial",
+          "outputs": [
+            {
+              "name": "material",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "item",
+              "property_kind": "https://sbol.io/ns/capability#Item",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "item"
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "item",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "item"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "material-provisioning",
+                "capability_kind": "https://sbol.io/ns/capability#MaterialProvisioning",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "material",
+          "source": {
+            "kind": "task_output",
+            "task": "provision",
+            "output": "material"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#automated-chemical-transformation",
+      "refines": "std.lab.plasmid.transform",
+      "inputs": [
+        {
+          "name": "design",
+          "port_type": {
+            "kind": "design"
+          }
+        },
+        {
+          "name": "cells",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#competent"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "artifact",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "chassis",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "plasmids",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "dependencies",
+          "source": "plasmids",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "transformation_replicates",
+          "default": 2
+        },
+        {
+          "name": "dna_count",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "plasmids_count"
+        },
+        {
+          "name": "cell_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 20
+        },
+        {
+          "name": "dna_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "cell_aliquot_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 100
+        },
+        {
+          "name": "recovery_aliquot_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 1200
+        },
+        {
+          "name": "recovery_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 60
+        },
+        {
+          "name": "cold_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "cold_incubation_min",
+          "default": 30
+        },
+        {
+          "name": "heat_shock_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 42
+        },
+        {
+          "name": "heat_shock_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "heat_shock_duration_min",
+          "default": 1
+        },
+        {
+          "name": "recovery_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 37
+        },
+        {
+          "name": "recovery_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "recovery_duration_min",
+          "default": 60
+        },
+        {
+          "name": "medium_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 18
+        },
+        {
+          "name": "culture_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "colony_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        }
+      ],
+      "tasks": [
+        {
+          "id": "prepare-transformation",
+          "operation": "https://www.lab-compiler.org/ns/procedure#PrepareChemicalTransformation",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "design"
+            },
+            {
+              "kind": "input",
+              "input": "cells"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mixture",
+              "port_type": {
+                "kind": "material",
+                "state": "https://www.lab-compiler.org/ns/material-state#TransformationMixture"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "chassis",
+              "property_kind": "https://sbol.io/ns/capability#Chassis",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "chassis"
+              }
+            },
+            {
+              "id": "plasmids",
+              "property_kind": "https://sbol.io/ns/capability#Plasmids",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "plasmids"
+              }
+            },
+            {
+              "id": "dependencies",
+              "property_kind": "https://sbol.io/ns/capability#Dependencies",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "replicates"
+              }
+            },
+            {
+              "id": "dna_count",
+              "property_kind": "https://sbol.io/ns/capability#DnaCount",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_count"
+              }
+            },
+            {
+              "id": "cell_aliquot_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellAliquotVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_aliquot_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cell_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#DnaVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cell_mix_cycles",
+              "property_kind": "https://sbol.io/ns/capability#CellMixCycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "3"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "cell_mix_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellMixVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "50"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "dna_mix_cycles",
+              "property_kind": "https://sbol.io/ns/capability#DnaMixCycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "3"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "bubble_clear_cycles",
+              "property_kind": "https://sbol.io/ns/capability#BubbleClearCycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "2"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "bubble_clear_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#BubbleClearVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "20"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "bubble_clear_dispense_offset_mm",
+              "property_kind": "https://sbol.io/ns/capability#BubbleClearDispenseOffsetMm",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "8"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MilliM"
+                  }
+                }
+              }
+            },
+            {
+              "id": "cell_staging_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#CellStagingTemperatureC",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "4"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/DEG_C"
+                  }
+                }
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "dependencies",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#PrepareChemicalTransformationV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl"
+              ]
+            }
+          }
+        },
+        {
+          "id": "heat-shock",
+          "operation": "https://www.lab-compiler.org/ns/procedure#HeatShockTransformation",
+          "inputs": [
+            {
+              "kind": "task_output",
+              "task": "prepare-transformation",
+              "output": "mixture"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "strain",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            },
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "replicates"
+              }
+            },
+            {
+              "id": "dna_count",
+              "property_kind": "https://sbol.io/ns/capability#DnaCount",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_count"
+              }
+            },
+            {
+              "id": "cell_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#DnaVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cold_minutes",
+              "property_kind": "https://sbol.io/ns/capability#ColdMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cold_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "heat_shock_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HeatShockTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_shock_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "heat_shock_minutes",
+              "property_kind": "https://sbol.io/ns/capability#HeatShockMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_shock_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "cold_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#ColdTemperatureC",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "4"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/DEG_C"
+                  }
+                }
+              }
+            },
+            {
+              "id": "post_shock_minutes",
+              "property_kind": "https://sbol.io/ns/capability#PostShockMinutes",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "2"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MIN"
+                  }
+                }
+              }
+            },
+            {
+              "id": "hold_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HoldTemperatureC",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "4"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/DEG_C"
+                  }
+                }
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#HeatShockTransformationV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl",
+                "https://sbol.io/ns/facility#SiLA2Control"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "strain",
+          "source": {
+            "kind": "task_output",
+            "task": "heat-shock",
+            "output": "strain"
+          }
+        },
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "heat-shock",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-chemical-transformation",
+      "refines": "std.lab.plasmid.transform",
+      "inputs": [
+        {
+          "name": "design",
+          "port_type": {
+            "kind": "design"
+          }
+        },
+        {
+          "name": "cells",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#competent"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "artifact",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "chassis",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "plasmids",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "dependencies",
+          "source": "plasmids",
+          "value_type": {
+            "kind": "list",
+            "element_type": "text"
+          }
+        },
+        {
+          "name": "replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "transformation_replicates",
+          "default": 2
+        },
+        {
+          "name": "dna_count",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "plasmids_count"
+        },
+        {
+          "name": "cell_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 20
+        },
+        {
+          "name": "dna_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "cell_aliquot_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 100
+        },
+        {
+          "name": "recovery_aliquot_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 1200
+        },
+        {
+          "name": "recovery_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 60
+        },
+        {
+          "name": "cold_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "cold_incubation_min",
+          "default": 30
+        },
+        {
+          "name": "heat_shock_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 42
+        },
+        {
+          "name": "heat_shock_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "heat_shock_duration_min",
+          "default": 1
+        },
+        {
+          "name": "recovery_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 37
+        },
+        {
+          "name": "recovery_minutes",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "recovery_duration_min",
+          "default": 60
+        },
+        {
+          "name": "medium_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 18
+        },
+        {
+          "name": "culture_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "colony_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        }
+      ],
+      "tasks": [
+        {
+          "id": "transform",
+          "operation": "https://www.lab-compiler.org/ns/procedure#ChemicallyTransformCells",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "design"
+            },
+            {
+              "kind": "input",
+              "input": "cells"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "strain",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            },
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "artifact",
+              "property_kind": "https://sbol.io/ns/capability#Artifact",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "artifact"
+              }
+            },
+            {
+              "id": "chassis",
+              "property_kind": "https://sbol.io/ns/capability#Chassis",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "chassis"
+              }
+            },
+            {
+              "id": "plasmids",
+              "property_kind": "https://sbol.io/ns/capability#Plasmids",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "plasmids"
+              }
+            },
+            {
+              "id": "dependencies",
+              "property_kind": "https://sbol.io/ns/capability#Dependencies",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "replicates"
+              }
+            },
+            {
+              "id": "dna_count",
+              "property_kind": "https://sbol.io/ns/capability#DnaCount",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_count"
+              }
+            },
+            {
+              "id": "cell_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#DnaVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cell_aliquot_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellAliquotVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_aliquot_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "recovery_aliquot_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryAliquotVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_aliquot_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "recovery_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "cold_minutes",
+              "property_kind": "https://sbol.io/ns/capability#ColdMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cold_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "heat_shock_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HeatShockTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_shock_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "heat_shock_minutes",
+              "property_kind": "https://sbol.io/ns/capability#HeatShockMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "heat_shock_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "recovery_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "recovery_minutes",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryMinutes",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_minutes",
+                "unit": "http://qudt.org/vocab/unit/MIN"
+              }
+            },
+            {
+              "id": "medium_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MediumVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "medium_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "culture_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CultureVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "culture_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "colony_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#ColonyVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "colony_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "dependencies",
+              "source": {
+                "kind": "intent_parameter",
+                "parameter": "dependencies"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "chemical-transformation",
+                "capability_kind": "https://sbol.io/ns/capability#ChemicalTransformation",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "strain",
+          "source": {
+            "kind": "task_output",
+            "task": "transform",
+            "output": "strain"
+          }
+        },
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "transform",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-recovery",
+      "refines": "std.lab.plasmid.recover",
+      "inputs": [
+        {
+          "name": "culture",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#transformed"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "duration",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "recover",
+          "operation": "https://www.lab-compiler.org/ns/procedure#RecoverCulture",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "culture"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "duration",
+              "property_kind": "https://sbol.io/ns/capability#Duration",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "duration"
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "medium",
+              "source": {
+                "kind": "literal",
+                "symbol": "recovery_medium"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "incubation",
+                "capability_kind": "https://sbol.io/ns/capability#Incubation",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ],
+                "constraints": [
+                  {
+                    "property_kind": "https://sbol.io/ns/capability#Duration",
+                    "relation": "exact",
+                    "required": {
+                      "kind": "intent_parameter",
+                      "parameter": "duration"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "recover",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#controlled-recovery",
+      "refines": "std.lab.plasmid.recover",
+      "inputs": [
+        {
+          "name": "culture",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#transformed"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "duration",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "recover",
+          "operation": "https://www.lab-compiler.org/ns/procedure#RecoverCulture",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "culture"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "duration",
+              "property_kind": "https://sbol.io/ns/capability#Duration",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "duration"
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "medium",
+              "source": {
+                "kind": "literal",
+                "symbol": "recovery_medium"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "incubation",
+                "capability_kind": "https://sbol.io/ns/capability#Incubation",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ReviewedFileControl",
+                  "https://sbol.io/ns/facility#VendorSessionControl",
+                  "https://sbol.io/ns/facility#ApiControl",
+                  "https://sbol.io/ns/facility#SiLA2Control",
+                  "https://sbol.io/ns/facility#OpcUaControl"
+                ],
+                "constraints": [
+                  {
+                    "property_kind": "https://sbol.io/ns/capability#Duration",
+                    "relation": "exact",
+                    "required": {
+                      "kind": "intent_parameter",
+                      "parameter": "duration"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "recover",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#automated-recovery",
+      "refines": "std.lab.plasmid.recover",
+      "inputs": [
+        {
+          "name": "culture",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#transformed"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "subject",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "duration",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        },
+        {
+          "name": "replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "transformation_replicates",
+          "default": 2
+        },
+        {
+          "name": "cell_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 20
+        },
+        {
+          "name": "dna_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "dna_count",
+          "source": "plasmids_count",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          }
+        },
+        {
+          "name": "recovery_aliquot_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 1200
+        },
+        {
+          "name": "recovery_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 60
+        },
+        {
+          "name": "recovery_temperature_c",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 37
+        }
+      ],
+      "tasks": [
+        {
+          "id": "add-medium",
+          "operation": "https://www.lab-compiler.org/ns/procedure#AddRecoveryMedium",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "culture"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mixture",
+              "port_type": {
+                "kind": "material",
+                "state": "https://www.lab-compiler.org/ns/material-state#RecoveryMixture"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "subject",
+              "property_kind": "https://sbol.io/ns/capability#Subject",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "subject"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "replicates"
+              }
+            },
+            {
+              "id": "cell_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#DnaVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_count",
+              "property_kind": "https://sbol.io/ns/capability#DnaCount",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_count"
+              }
+            },
+            {
+              "id": "recovery_aliquot_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryAliquotVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_aliquot_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "recovery_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "air_gap_ul",
+              "property_kind": "https://sbol.io/ns/capability#AirGapUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "10"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "medium",
+              "source": {
+                "kind": "literal",
+                "symbol": "recovery_medium"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#AddRecoveryMediumV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl"
+              ]
+            }
+          }
+        },
+        {
+          "id": "incubate",
+          "operation": "https://www.lab-compiler.org/ns/procedure#IncubateRecoveryCulture",
+          "inputs": [
+            {
+              "kind": "task_output",
+              "task": "add-medium",
+              "output": "mixture"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "subject",
+              "property_kind": "https://sbol.io/ns/capability#Subject",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "subject"
+              }
+            },
+            {
+              "id": "duration",
+              "property_kind": "https://sbol.io/ns/capability#Duration",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "duration"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "replicates"
+              }
+            },
+            {
+              "id": "cell_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#DnaVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_count",
+              "property_kind": "https://sbol.io/ns/capability#DnaCount",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_count"
+              }
+            },
+            {
+              "id": "recovery_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "recovery_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryTemperatureC",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_temperature_c",
+                "unit": "http://qudt.org/vocab/unit/DEG_C"
+              }
+            },
+            {
+              "id": "hold_temperature_c",
+              "property_kind": "https://sbol.io/ns/capability#HoldTemperatureC",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "4"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/DEG_C"
+                  }
+                }
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#IncubateRecoveryCultureV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl",
+                "https://sbol.io/ns/facility#SiLA2Control"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "incubate",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#serial-dilution",
+      "refines": "std.lab.plasmid.dilute",
+      "inputs": [
+        {
+          "name": "culture",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#recovered"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "subject",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "transformation_replicates",
+          "default": 2
+        },
+        {
+          "name": "cell_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 20
+        },
+        {
+          "name": "dna_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "dna_count",
+          "source": "plasmids_count",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          }
+        },
+        {
+          "name": "recovery_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 60
+        },
+        {
+          "name": "serial_dilutions",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "medium_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 18
+        },
+        {
+          "name": "culture_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        }
+      ],
+      "tasks": [
+        {
+          "id": "dilute",
+          "operation": "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "culture"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "subject",
+              "property_kind": "https://sbol.io/ns/capability#Subject",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "subject"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "replicates"
+              }
+            },
+            {
+              "id": "cell_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CellVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "cell_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#DnaVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "dna_count",
+              "property_kind": "https://sbol.io/ns/capability#DnaCount",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "dna_count"
+              }
+            },
+            {
+              "id": "recovery_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#RecoveryVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "recovery_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "serial_dilutions",
+              "property_kind": "https://sbol.io/ns/capability#SerialDilutions",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "serial_dilutions"
+              }
+            },
+            {
+              "id": "medium_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MediumVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "medium_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "culture_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CultureVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "culture_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "mix_cycles",
+              "property_kind": "https://sbol.io/ns/capability#MixCycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "5"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "mix_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MixVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "19"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "medium_source_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MediumSourceVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "10000"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "medium_dead_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MediumDeadVolumeUl",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "1000"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            }
+          ],
+          "materials": [
+            {
+              "id": "medium",
+              "source": {
+                "kind": "literal",
+                "symbol": "recovery_medium"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#SerialDilutionV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ManualControl",
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "dilute",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#automated-antibiotic-selection",
+      "refines": "std.lab.plasmid.plate",
+      "inputs": [
+        {
+          "name": "culture",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#diluted"
+          }
+        },
+        {
+          "name": "medium",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#poured"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "subject",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "selection",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "plating_replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "culture_replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "source": "transformation_replicates",
+          "default": 2
+        },
+        {
+          "name": "serial_dilutions",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "medium_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 18
+        },
+        {
+          "name": "culture_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        },
+        {
+          "name": "colony_volume_ul",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 4
+        }
+      ],
+      "tasks": [
+        {
+          "id": "plate",
+          "operation": "https://www.lab-compiler.org/ns/procedure#PlateDilutedCulture",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "culture"
+            },
+            {
+              "kind": "input",
+              "input": "medium"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "plate",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "subject",
+              "property_kind": "https://sbol.io/ns/capability#Subject",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "subject"
+              }
+            },
+            {
+              "id": "selection",
+              "property_kind": "https://sbol.io/ns/capability#Selection",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "selection"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "plating_replicates"
+              }
+            },
+            {
+              "id": "culture_replicates",
+              "property_kind": "https://sbol.io/ns/capability#CultureReplicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "culture_replicates"
+              }
+            },
+            {
+              "id": "serial_dilutions",
+              "property_kind": "https://sbol.io/ns/capability#SerialDilutions",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "serial_dilutions"
+              }
+            },
+            {
+              "id": "medium_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#MediumVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "medium_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "culture_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#CultureVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "culture_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            },
+            {
+              "id": "colony_volume_ul",
+              "property_kind": "https://sbol.io/ns/capability#ColonyVolumeUl",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "colony_volume_ul",
+                "unit": "http://qudt.org/vocab/unit/MicroL"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "builder",
+            "builder": "https://www.lab-compiler.org/ns/procedure-builder#PlateDilutedCultureV1",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl",
+                "https://sbol.io/ns/facility#ApiControl"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "plate",
+          "source": {
+            "kind": "task_output",
+            "task": "plate",
+            "output": "plate"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-antibiotic-selection",
+      "refines": "std.lab.plasmid.plate",
+      "inputs": [
+        {
+          "name": "culture",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#diluted"
+          }
+        },
+        {
+          "name": "medium",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#poured"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "selection",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "text"
+          }
+        },
+        {
+          "name": "plating_replicates",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "integer"
+          },
+          "default": 2
+        }
+      ],
+      "tasks": [
+        {
+          "id": "plate",
+          "operation": "https://www.lab-compiler.org/ns/procedure#PlateCultureForSelection",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "culture"
+            },
+            {
+              "kind": "input",
+              "input": "medium"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "plate",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "selection",
+              "property_kind": "https://sbol.io/ns/capability#Selection",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "selection"
+              }
+            },
+            {
+              "id": "replicates",
+              "property_kind": "https://sbol.io/ns/capability#Replicates",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "plating_replicates"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "antibiotic-selection",
+                "capability_kind": "https://sbol.io/ns/capability#AntibioticSelection",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "plate",
+          "source": {
+            "kind": "task_output",
+            "task": "plate",
+            "output": "plate"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-competence-growth",
+      "refines": "std.lab.competence.grow",
+      "inputs": [
+        {
+          "name": "cells",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#ChassisProduct"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "temperature",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        },
+        {
+          "name": "target",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "grow",
+          "operation": "https://www.lab-compiler.org/ns/procedure#GrowCellsToTargetDensity",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "cells"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "culture",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "temperature",
+              "property_kind": "https://sbol.io/ns/capability#Temperature",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "temperature"
+              }
+            },
+            {
+              "id": "target",
+              "property_kind": "https://sbol.io/ns/capability#Target",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "target"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "shaking-incubation",
+                "capability_kind": "https://sbol.io/ns/capability#ShakingIncubation",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "culture",
+          "source": {
+            "kind": "task_output",
+            "task": "grow",
+            "output": "culture"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-competence-chilling",
+      "refines": "std.lab.competence.chill",
+      "inputs": [
+        {
+          "name": "cells",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#growing"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "duration",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "chill",
+          "operation": "https://www.lab-compiler.org/ns/procedure#ChillCells",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "cells"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "chilled",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "duration",
+              "property_kind": "https://sbol.io/ns/capability#Duration",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "duration"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "refrigeration",
+                "capability_kind": "https://sbol.io/ns/capability#Refrigeration",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "chilled",
+          "source": {
+            "kind": "task_output",
+            "task": "chill",
+            "output": "chilled"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-competence-centrifugation",
+      "refines": "std.lab.competence.centrifuge",
+      "inputs": [
+        {
+          "name": "cells",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#growing"
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "name": "force",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        },
+        {
+          "name": "duration",
+          "value_type": {
+            "kind": "scalar",
+            "scalar_type": "real"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "centrifuge",
+          "operation": "https://www.lab-compiler.org/ns/procedure#CentrifugeCells",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "cells"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "pellet",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "force",
+              "property_kind": "https://sbol.io/ns/capability#Force",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "force"
+              }
+            },
+            {
+              "id": "duration",
+              "property_kind": "https://sbol.io/ns/capability#Duration",
+              "value": {
+                "kind": "intent_parameter",
+                "parameter": "duration"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "centrifugation",
+                "capability_kind": "https://sbol.io/ns/capability#Centrifugation",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pellet",
+          "source": {
+            "kind": "task_output",
+            "task": "centrifuge",
+            "output": "pellet"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-competence-resuspension",
+      "refines": "std.lab.competence.resuspend",
+      "inputs": [
+        {
+          "name": "cells",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#pelleted"
+          }
+        },
+        {
+          "name": "buffer",
+          "port_type": {
+            "kind": "material",
+            "state": "https://www.lab-compiler.org/ns/material-state#BufferProduct"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "resuspend",
+          "operation": "https://www.lab-compiler.org/ns/procedure#ResuspendCells",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "cells"
+            },
+            {
+              "kind": "input",
+              "input": "buffer"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "competent",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "manual-pipetting",
+                "capability_kind": "https://sbol.io/ns/capability#ManualPipetting",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "competent",
+          "source": {
+            "kind": "task_output",
+            "task": "resuspend",
+            "output": "competent"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-material-split",
+      "refines": "std.lab.plasmid.split",
+      "inputs": [
+        {
+          "name": "material",
+          "port_type": {
+            "kind": "material_as_supplied"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "split",
+          "operation": "https://www.lab-compiler.org/ns/procedure#SplitMaterial",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "material"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "retained",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            },
+            {
+              "name": "aliquot",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "manual-pipetting",
+                "capability_kind": "https://sbol.io/ns/capability#ManualPipetting",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "retained",
+          "source": {
+            "kind": "task_output",
+            "task": "split",
+            "output": "retained"
+          }
+        },
+        {
+          "name": "aliquot",
+          "source": {
+            "kind": "task_output",
+            "task": "split",
+            "output": "aliquot"
+          }
+        }
+      ]
+    },
+    {
+      "id": "https://www.lab-compiler.org/ns/method#manual-material-disposal",
+      "refines": "std.lab.plasmid.dispose",
+      "inputs": [
+        {
+          "name": "material",
+          "port_type": {
+            "kind": "material_as_supplied"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "dispose",
+          "operation": "https://www.lab-compiler.org/ns/procedure#DisposeMaterial",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "material"
+            }
+          ],
+          "execution": {
+            "kind": "primitive",
+            "requirements": [
+              {
+                "id": "waste-disposal",
+                "capability_kind": "https://sbol.io/ns/capability#WasteHandling",
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": [
+                  "https://sbol.io/ns/facility#ManualControl"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "outputs": []
+    }
+  ]
+}

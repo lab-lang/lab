@@ -4,12 +4,14 @@ use crate::procedure::{
     Vessel, VesselRole, Volume,
 };
 
-use super::ProcedureTaskInstance;
 use super::view::{TaskView, procedure_id};
+use crate::procedure::ProcedureProgramBuildContext;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 
-pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedureProgram, String> {
+pub(super) fn normalize(
+    task: &ProcedureProgramBuildContext<'_>,
+) -> Result<ProcedureProgram, String> {
     if task.input_count != 1 {
         return Err(format!(
             "the serial-dilution contract requires exactly one culture input, found {}",
@@ -27,7 +29,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     view.require_material_roles(&["medium"])?;
     let medium = view.one_material("medium")?;
     let replicates = view.integer_parameter("replicates", None)?;
-    let initial_volume = view.integer_parameter("initial_volume_ul", Some(MICROLITRE))?;
+    let initial_volume = recovered_culture_volume(&view)?;
     let serial_dilutions = view.integer_parameter("serial_dilutions", None)?;
     let medium_volume = view.integer_parameter("medium_volume_ul", Some(MICROLITRE))?;
     let culture_volume = view.integer_parameter("culture_volume_ul", Some(MICROLITRE))?;
@@ -192,4 +194,19 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
 
 fn volume(microlitres: u32) -> Result<Volume, String> {
     Volume::parse_microlitres(microlitres.to_string()).map_err(|error| error.to_string())
+}
+
+/// The dilution input is the transformed volume plus the recovery medium added by the preceding
+/// Method. This domain calculation belongs to the Procedure builder rather than generic source
+/// lowering.
+fn recovered_culture_volume(view: &TaskView<'_, '_>) -> Result<u32, String> {
+    let cells = view.integer_parameter("cell_volume_ul", Some(MICROLITRE))?;
+    let dna_each = view.integer_parameter("dna_volume_ul", Some(MICROLITRE))?;
+    let dna_count = view.integer_parameter("dna_count", None)?;
+    let recovery = view.integer_parameter("recovery_volume_ul", Some(MICROLITRE))?;
+    dna_each
+        .checked_mul(dna_count)
+        .and_then(|dna| cells.checked_add(dna))
+        .and_then(|transformed| transformed.checked_add(recovery))
+        .ok_or_else(|| "recovered culture volume arithmetic overflows".to_owned())
 }

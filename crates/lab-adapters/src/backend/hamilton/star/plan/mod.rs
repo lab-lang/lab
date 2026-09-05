@@ -6,11 +6,17 @@ mod execution;
 mod invocation;
 mod liquids;
 
+pub(in crate::backend::hamilton::star) use choreograph::{
+    FluidPathOperation, RunBuilder, TipFeeder, Transfer,
+};
 pub(in crate::backend::hamilton::star) use error::StarEmissionError;
 pub(in crate::backend::hamilton::star) use execution::{
-    ChannelLiquid, SourceFill, StarExecutionPlan, StarOperation, StarRunPlan, TipClass,
+    ChannelLiquid, SourceFill, StarExecutionPlan, StarOperation, StarRunPlan, StarWell, TipClass,
     TipPickupPosition,
 };
 pub(in crate::backend::hamilton::star) use invocation::{
-    SetupAddition, plan_dilution_invocation, plan_setup_invocation,
+    execution_plan, seeded_liquids, source_fill, tip_usage,
+};
+pub(in crate::backend::hamilton::star) use liquids::{
+    DeckIndex, LiquidState, PLATE_DEAD_VOLUME_UL, TUBE_DEAD_VOLUME_UL,
 };

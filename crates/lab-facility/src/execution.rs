@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_adapters::AdapterInvocationPlan;
+use lab_adapter_api::AdapterInvocationPlan;
 use lab_capability::{ControlMode, ScalarValue};
 use lab_compiler::allocation::{
     AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
@@ -10,6 +10,7 @@ use lab_compiler::allocation::{
 use lab_compiler::method::ProcedureValue;
 use lab_compiler::planning::{PlanningValueSource, SelectedMaterialSource};
 use lab_compiler::procedure::BindingScope;
+use lab_compiler::procedure::ProcedureContractRegistry;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,
@@ -48,10 +49,12 @@ impl Default for ExecutionPlanOptions {
 /// Build a reviewed plan from the exact selected Method graph and adapter invocations.
 pub fn build_execution_plan_from_invocations(
     invocations: &AdapterInvocationPlan,
-    mut options: ExecutionPlanOptions,
+    contracts: &ProcedureContractRegistry,
+    options: ExecutionPlanOptions,
 ) -> Result<ExecutionPlanDocument, ExecutionPlanBuildError> {
+    let mut options = options;
     invocations
-        .validate()
+        .validate(contracts)
         .map_err(|error| ExecutionPlanBuildError::InvalidInvocations(error.to_string()))?;
     let planning = options
         .planning
@@ -70,6 +73,8 @@ pub fn build_execution_plan_from_invocations(
             (
                 method.choice.as_str(),
                 method.source_operation.as_str(),
+                serde_json::to_value(&method.source_intent)
+                    .expect("typed source Intent serializes infallibly"),
                 method.method.as_str(),
                 method
                     .tasks
@@ -86,6 +91,7 @@ pub fn build_execution_plan_from_invocations(
             (
                 method.choice.as_str(),
                 method.source_operation.as_str(),
+                method.source_intent.clone(),
                 method.method.as_str(),
                 method.tasks.iter().map(String::as_str).collect::<Vec<_>>(),
             )
@@ -133,7 +139,7 @@ pub fn build_execution_plan_from_invocations(
                     .as_ref()
                     .map_or(BindingScope::Independent, |program| {
                         program
-                            .validate()
+                            .validate(contracts)
                             .expect("adapter invocation validation checked the Procedure program")
                             .capability_formula()
                             .binding_scope
@@ -629,9 +635,7 @@ fn semantic_value(value: &lab_capability::ScalarValue) -> ExecutionParameterValu
 /// A step an instrument runs arrives with its own operator document, rendered
 /// by the adapter that lowered it. These are the ones a person performs,
 /// projected as display-ready text for the run sheet the CLI typesets.
-pub fn manual_run_steps(
-    invocations: &AdapterInvocationPlan,
-) -> Vec<lab_adapters::run_sheet::RunStep> {
+pub fn manual_run_steps(invocations: &AdapterInvocationPlan) -> Vec<lab_runfmt::ManualRunStep> {
     let mut steps = Vec::new();
     for method in &invocations.allocated.methods {
         for task in &method.tasks {
@@ -639,7 +643,7 @@ pub fn manual_run_steps(
                 if binding.control_mode != ControlMode::Manual.iri() {
                     continue;
                 }
-                steps.push(lab_adapters::run_sheet::RunStep {
+                steps.push(lab_runfmt::ManualRunStep {
                     title: spaced_words(local_fragment(task.operation.as_str())),
                     operation: task.operation.to_string(),
                     asset: local_fragment(&binding.asset).to_owned(),
@@ -824,6 +828,7 @@ mod tests {
         AllocatedMethod {
             choice: id(name),
             source_operation: IntentOperationId::new("example.intent").unwrap(),
+            source_intent: crate::test_source_intent("example.intent"),
             method: MethodId::new(format!("https://example.org/method/{name}")).unwrap(),
             after: Vec::new(),
             inputs: Vec::new(),
