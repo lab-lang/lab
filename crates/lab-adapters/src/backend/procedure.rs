@@ -981,12 +981,12 @@ fn normalized_pipetting_program(
         )
     })?;
     validate_normalized_requirements(adapter, task, requirements, &validated)?;
-    let ValidatedProcedureProgram::PipettingV1(program) = validated else {
-        return Err(format!(
-            "{adapter} {label} task '{}' normalized to a non-pipetting contract",
+    let program = validated.pipetting().map_err(|error| {
+        format!(
+            "{adapter} {label} task '{}' normalized to a non-pipetting contract: {error}",
             task.id
-        ));
-    };
+        )
+    })?;
     Ok(program)
 }
 
@@ -1019,12 +1019,12 @@ pub(crate) fn normalized_golden_gate_setup<'a>(
         )
     })?;
     validate_normalized_requirements(adapter, task, requirements, &validated)?;
-    let ValidatedProcedureProgram::PipettingV1(program) = validated else {
-        return Err(format!(
-            "{adapter} Golden Gate task '{}' normalized to a non-pipetting contract",
+    let program = validated.pipetting().map_err(|error| {
+        format!(
+            "{adapter} Golden Gate task '{}' normalized to a non-pipetting contract: {error}",
             task.id
-        ));
-    };
+        )
+    })?;
     let ledger = program.liquid_ledger().clone();
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
@@ -1595,12 +1595,12 @@ pub(crate) fn normalized_thermal_program(
         )
     })?;
     validate_normalized_requirements(adapter, task, requirements, &validated)?;
-    let ValidatedProcedureProgram::ThermalV1(program) = validated else {
-        return Err(format!(
-            "{adapter} thermal task '{}' normalized to a non-thermal contract",
+    let program = validated.thermal().map_err(|error| {
+        format!(
+            "{adapter} thermal task '{}' normalized to a non-thermal contract: {error}",
             task.id
-        ));
-    };
+        )
+    })?;
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);
     view.require_material_roles(&[])?;
@@ -1711,12 +1711,12 @@ pub(crate) fn normalized_serial_dilution<'a>(
         )
     })?;
     validate_normalized_requirements(adapter, task, requirements, &validated)?;
-    let ValidatedProcedureProgram::PipettingV1(program) = validated else {
-        return Err(format!(
-            "{adapter} serial-dilution task '{}' normalized to a non-pipetting contract",
+    let program = validated.pipetting().map_err(|error| {
+        format!(
+            "{adapter} serial-dilution task '{}' normalized to a non-pipetting contract: {error}",
             task.id
-        ));
-    };
+        )
+    })?;
     let ledger = program.liquid_ledger().clone();
     let program = program.as_program();
     let view = ProcedureTaskView::new(adapter, task);

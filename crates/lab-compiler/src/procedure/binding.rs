@@ -6,8 +6,15 @@ use lab_capability::{CapabilityKind, ControlMode, PropertyConstraint, Qualificat
 use thiserror::Error;
 
 use crate::procedure::{
-    BindingScope, CapabilityFormula, ProcedureLocalId, ValidatedProcedureProgram, VesselRole,
+    BindingScope, CapabilityFormula, ProcedureLocalId, ValidatedProcedureProgram,
 };
+
+/// Whether a canonical program may reference some or must reference all task materials.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaterialReferencePolicy {
+    Subset,
+    Exact,
+}
 
 /// The task-facing references contained in a validated canonical program.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,6 +22,7 @@ pub struct ProcedureProgramInterface {
     pub inputs: BTreeSet<u32>,
     pub materials: BTreeSet<ProcedureLocalId>,
     pub outputs: BTreeSet<ProcedureLocalId>,
+    pub material_policy: MaterialReferencePolicy,
 }
 
 /// The enclosing task surface against which a canonical program is checked.
@@ -69,40 +77,7 @@ impl<'program> ValidatedProcedureTaskContract<'program> {
 impl ValidatedProcedureProgram {
     /// Return every enclosing-task reference contained in this canonical body.
     pub fn interface(&self) -> ProcedureProgramInterface {
-        match self {
-            Self::PipettingV1(program) => {
-                let program = program.as_program();
-                ProcedureProgramInterface {
-                    inputs: program
-                        .vessels
-                        .iter()
-                        .filter_map(|vessel| match &vessel.role {
-                            VesselRole::ProcedureInput { input }
-                            | VesselRole::InputOutput { input, .. } => Some(*input),
-                            _ => None,
-                        })
-                        .collect(),
-                    materials: program
-                        .materials
-                        .iter()
-                        .map(|material| material.id.clone())
-                        .collect(),
-                    outputs: program
-                        .outputs
-                        .iter()
-                        .map(|output| output.id.clone())
-                        .collect(),
-                }
-            }
-            Self::ThermalV1(program) => {
-                let program = program.as_program();
-                ProcedureProgramInterface {
-                    inputs: [program.load.input].into_iter().collect(),
-                    materials: BTreeSet::new(),
-                    outputs: program.load.outputs.iter().cloned().collect(),
-                }
-            }
-        }
+        self.analysis().interface.clone()
     }
 
     /// Verify the references that are owned directly by `procedure.task`.
@@ -151,20 +126,21 @@ impl ValidatedProcedureProgram {
             return Err(ProcedureBindingError::DuplicateTaskMaterial);
         }
         let program_materials = self.interface().materials;
-        match self {
-            Self::PipettingV1(_) => {
+        match self.interface().material_policy {
+            MaterialReferencePolicy::Subset => {
                 if let Some(material) = program_materials.difference(&task_materials).next() {
                     return Err(ProcedureBindingError::UndeclaredMaterial {
                         material: material.clone(),
                     });
                 }
             }
-            Self::ThermalV1(_) if !task_materials.is_empty() => {
-                return Err(ProcedureBindingError::UnexpectedThermalMaterials {
-                    materials: task_materials,
+            MaterialReferencePolicy::Exact if program_materials != task_materials => {
+                return Err(ProcedureBindingError::MaterialMismatch {
+                    task: task_materials,
+                    program: program_materials,
                 });
             }
-            Self::ThermalV1(_) => {}
+            MaterialReferencePolicy::Exact => {}
         }
         Ok(())
     }
@@ -291,9 +267,10 @@ pub enum ProcedureBindingError {
     DuplicateTaskMaterial,
     #[error("program material `{material}` is not declared by the task")]
     UndeclaredMaterial { material: ProcedureLocalId },
-    #[error("thermal programs cannot bind task materials {materials:?}")]
-    UnexpectedThermalMaterials {
-        materials: BTreeSet<ProcedureLocalId>,
+    #[error("program materials {program:?} do not match task materials {task:?}")]
+    MaterialMismatch {
+        task: BTreeSet<ProcedureLocalId>,
+        program: BTreeSet<ProcedureLocalId>,
     },
     #[error("program outputs {program:?} do not exactly match task outputs {expected:?}")]
     OutputMismatch {
@@ -329,8 +306,8 @@ mod tests {
 
     use crate::procedure::{
         Duration, MaterialInput, MaterialOutput, PipettingConstraints, PipettingProgramV1,
-        ProcedureLocalId, Temperature, ThermalLoad, ThermalProgramV1, ThermalStage, ThermalStep,
-        ValidatedProcedureProgram, Vessel, VesselRole, Volume,
+        ProcedureLocalId, ProcedureProgram, Temperature, ThermalLoad, ThermalProgramV1,
+        ThermalStage, ThermalStep, ValidatedProcedureProgram, Vessel, VesselRole, Volume,
     };
 
     use super::{ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface};
@@ -395,7 +372,9 @@ mod tests {
         )
         .validate()
         .unwrap();
-        ValidatedProcedureProgram::PipettingV1(program)
+        ProcedureProgram::from_pipetting(&program)
+            .validate()
+            .unwrap()
     }
 
     fn thermal() -> ValidatedProcedureProgram {
@@ -421,7 +400,7 @@ mod tests {
         }
         .validate()
         .unwrap();
-        ValidatedProcedureProgram::ThermalV1(program)
+        ProcedureProgram::from_thermal(&program).validate().unwrap()
     }
 
     fn requirements(
@@ -496,7 +475,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            ProcedureBindingError::UnexpectedThermalMaterials { .. }
+            ProcedureBindingError::MaterialMismatch { .. }
         ));
         let error = program
             .validate_task_ports(1, &[id("product"), id("product")])

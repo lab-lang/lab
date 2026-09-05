@@ -7,6 +7,7 @@
 pub(crate) mod analysis;
 pub mod binding;
 pub mod capability;
+pub mod contract;
 pub mod feature;
 pub mod id;
 pub(crate) mod ir;
@@ -18,6 +19,10 @@ pub mod thermal;
 pub mod vocabulary;
 
 pub use capability::{BindingScope, CapabilityClause, CapabilityFormula};
+pub use contract::{
+    ProcedureContractAnalysis, ProcedureContractRegistration, ProcedureContractRegistry,
+    ProcedureContractRegistryError, builtin_procedure_contracts,
+};
 pub use feature::{ProgramFeature, pipetting_features, thermal_features};
 pub use id::{ProcedureLocalId, ProcedureLocalIdError};
 pub use normalization::{
@@ -29,7 +34,10 @@ pub use pipetting::{
     PipettingProgramValidationError, PipettingStep, TransferTechnique, ValidatedPipettingProgramV1,
     Vessel, VesselRole, VolumeConflict, staged_temperature_envelope,
 };
-pub use program::{ProcedureProgram, ProcedureProgramValidationError, ValidatedProcedureProgram};
+pub use program::{
+    ProcedureProgram, ProcedureProgramDecodeError, ProcedureProgramValidationError,
+    ValidatedProcedureProgram,
+};
 pub use quantity::{
     Duration, Length, Mass, MassConcentration, QuantityError, Temperature, TemperatureRampRate,
     TemperatureRange, Volume,

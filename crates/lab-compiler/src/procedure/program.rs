@@ -1,13 +1,15 @@
 use lab_capability::ProcedureContractId;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::procedure::contract::{ProcedureContractAnalysis, builtin_procedure_contracts};
 use crate::procedure::vocabulary::{PIPETTING_PROGRAM_V1, THERMAL_PROGRAM_V1};
 use crate::procedure::{
-    PipettingProgramV1, PipettingProgramValidationError, ThermalProgramV1,
-    ThermalProgramValidationError, ValidatedPipettingProgramV1, ValidatedThermalProgramV1,
+    PipettingProgramV1, ProcedureContractRegistry, ThermalProgramV1, ValidatedPipettingProgramV1,
+    ValidatedThermalProgramV1,
 };
 
 /// An open, versioned operational Procedure payload.
@@ -42,56 +44,95 @@ impl ProcedureProgram {
     }
 
     pub fn validate(&self) -> Result<ValidatedProcedureProgram, ProcedureProgramValidationError> {
-        match self.contract.as_str() {
-            PIPETTING_PROGRAM_V1 => {
-                let program = serde_json::from_value::<PipettingProgramV1>(self.body.clone())
-                    .map_err(|error| ProcedureProgramValidationError::InvalidBody {
-                        contract: self.contract.clone(),
-                        message: error.to_string(),
-                    })?
-                    .validate()?;
-                Ok(ValidatedProcedureProgram::PipettingV1(program))
-            }
-            THERMAL_PROGRAM_V1 => {
-                let program = serde_json::from_value::<ThermalProgramV1>(self.body.clone())
-                    .map_err(|error| ProcedureProgramValidationError::InvalidBody {
-                        contract: self.contract.clone(),
-                        message: error.to_string(),
-                    })?
-                    .validate()?;
-                Ok(ValidatedProcedureProgram::ThermalV1(program))
-            }
-            _ => Err(ProcedureProgramValidationError::UnknownContract {
+        self.validate_with(builtin_procedure_contracts())
+    }
+
+    pub fn validate_with(
+        &self,
+        registry: &ProcedureContractRegistry,
+    ) -> Result<ValidatedProcedureProgram, ProcedureProgramValidationError> {
+        let registration = registry.registration(&self.contract).ok_or_else(|| {
+            ProcedureProgramValidationError::UnknownContract {
                 contract: self.contract.clone(),
-            }),
-        }
+            }
+        })?;
+        let analysis = registration.analyze(&self.body).map_err(|message| {
+            ProcedureProgramValidationError::InvalidBody {
+                contract: self.contract.clone(),
+                message,
+            }
+        })?;
+        Ok(ValidatedProcedureProgram {
+            document: self.clone(),
+            analysis,
+        })
     }
 }
 
-/// One typed built-in program returned by the current contract registry.
+/// One canonical program validated by the registry selected by the compiler composition.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ValidatedProcedureProgram {
-    PipettingV1(ValidatedPipettingProgramV1),
-    ThermalV1(ValidatedThermalProgramV1),
+pub struct ValidatedProcedureProgram {
+    document: ProcedureProgram,
+    analysis: ProcedureContractAnalysis,
 }
 
 impl ValidatedProcedureProgram {
+    pub fn document(&self) -> &ProcedureProgram {
+        &self.document
+    }
+
+    pub fn contract(&self) -> &ProcedureContractId {
+        &self.document.contract
+    }
+
+    pub fn decode_body<T: DeserializeOwned>(
+        &self,
+        expected_contract: &str,
+    ) -> Result<T, ProcedureProgramDecodeError> {
+        if self.document.contract.as_str() != expected_contract {
+            return Err(ProcedureProgramDecodeError::ContractMismatch {
+                expected: expected_contract.to_owned(),
+                actual: self.document.contract.clone(),
+            });
+        }
+        serde_json::from_value(self.document.body.clone()).map_err(|error| {
+            ProcedureProgramDecodeError::InvalidBody {
+                contract: self.document.contract.clone(),
+                message: error.to_string(),
+            }
+        })
+    }
+
+    pub fn pipetting(&self) -> Result<ValidatedPipettingProgramV1, ProcedureProgramDecodeError> {
+        self.decode_body::<PipettingProgramV1>(PIPETTING_PROGRAM_V1)?
+            .validate()
+            .map_err(|error| ProcedureProgramDecodeError::InvalidBody {
+                contract: self.document.contract.clone(),
+                message: error.to_string(),
+            })
+    }
+
+    pub fn thermal(&self) -> Result<ValidatedThermalProgramV1, ProcedureProgramDecodeError> {
+        self.decode_body::<ThermalProgramV1>(THERMAL_PROGRAM_V1)?
+            .validate()
+            .map_err(|error| ProcedureProgramDecodeError::InvalidBody {
+                contract: self.document.contract.clone(),
+                message: error.to_string(),
+            })
+    }
+
+    pub(crate) fn analysis(&self) -> &ProcedureContractAnalysis {
+        &self.analysis
+    }
+
     /// Derive the exact facility capability formula required to realize this program.
     pub fn capability_formula(&self) -> crate::procedure::CapabilityFormula {
-        match self {
-            Self::PipettingV1(program) => program.capability_formula(),
-            Self::ThermalV1(program) => program.capability_formula(),
-        }
+        self.analysis.capability_formula.clone()
     }
 
     /// Every fine-grained feature an implementation must declare to realize this program.
     pub fn features(&self) -> std::collections::BTreeSet<crate::procedure::ProgramFeature> {
-        match self {
-            Self::PipettingV1(program) => {
-                crate::procedure::pipetting_features(program.as_program())
-            }
-            Self::ThermalV1(program) => crate::procedure::thermal_features(program.as_program()),
-        }
+        self.analysis.features.clone()
     }
 }
 
@@ -104,10 +145,20 @@ pub enum ProcedureProgramValidationError {
         contract: ProcedureContractId,
         message: String,
     },
-    #[error(transparent)]
-    InvalidPipetting(#[from] PipettingProgramValidationError),
-    #[error(transparent)]
-    InvalidThermal(#[from] ThermalProgramValidationError),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum ProcedureProgramDecodeError {
+    #[error("expected Procedure contract `{expected}`, found `{actual}`")]
+    ContractMismatch {
+        expected: String,
+        actual: ProcedureContractId,
+    },
+    #[error("Procedure contract `{contract}` has a body this consumer cannot decode: {message}")]
+    InvalidBody {
+        contract: ProcedureContractId,
+        message: String,
+    },
 }
 
 #[cfg(test)]
@@ -179,10 +230,13 @@ mod tests {
         let json = serde_json::to_string_pretty(&document).unwrap();
         let round_trip = serde_json::from_str::<ProcedureProgram>(&json).unwrap();
         assert_eq!(round_trip, document);
-        assert!(matches!(
-            round_trip.validate().unwrap(),
-            ValidatedProcedureProgram::PipettingV1(_)
-        ));
+        let validated = round_trip.validate().unwrap();
+        assert_eq!(validated.contract().as_str(), PIPETTING_PROGRAM_V1);
+        validated
+            .decode_body::<crate::procedure::PipettingProgramV1>(PIPETTING_PROGRAM_V1)
+            .unwrap()
+            .validate()
+            .unwrap();
     }
 
     #[test]
@@ -234,9 +288,12 @@ mod tests {
         let json = serde_json::to_string_pretty(&document).unwrap();
         let round_trip = serde_json::from_str::<ProcedureProgram>(&json).unwrap();
         assert_eq!(round_trip, document);
-        assert!(matches!(
-            round_trip.validate().unwrap(),
-            ValidatedProcedureProgram::ThermalV1(_)
-        ));
+        let validated = round_trip.validate().unwrap();
+        assert_eq!(validated.contract().as_str(), THERMAL_PROGRAM_V1);
+        validated
+            .decode_body::<ThermalProgramV1>(THERMAL_PROGRAM_V1)
+            .unwrap()
+            .validate()
+            .unwrap();
     }
 }

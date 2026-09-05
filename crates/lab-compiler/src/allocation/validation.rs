@@ -272,7 +272,7 @@ fn map_procedure_binding_error(
         }
         ProcedureBindingError::DuplicateTaskMaterial
         | ProcedureBindingError::UndeclaredMaterial { .. }
-        | ProcedureBindingError::UnexpectedThermalMaterials { .. } => {
+        | ProcedureBindingError::MaterialMismatch { .. } => {
             AllocatedProgramValidationError::ProcedureMaterialBindings { task: task.clone() }
         }
         ProcedureBindingError::BindingScopeMismatch { .. }

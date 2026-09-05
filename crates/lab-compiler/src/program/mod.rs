@@ -660,9 +660,7 @@ fn workflow_value(
 #[cfg(test)]
 mod tests {
     use crate::method::{ProcedureValue, ScalarType};
-    use crate::procedure::{
-        AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
-    };
+    use crate::procedure::{AspirationStrategy, DispenseStrategy, PipettingStep, vocabulary};
     use lab_capability::ScalarValue;
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
@@ -1323,9 +1321,9 @@ workflow main() -> (
             .expect("Golden Gate setup is normalized before facility planning")
             .validate()
             .expect("normalized program validates");
-        let ValidatedProcedureProgram::PipettingV1(program) = program else {
-            panic!("Golden Gate setup must normalize to the pipetting contract")
-        };
+        let program = program
+            .pipetting()
+            .expect("Golden Gate setup must normalize to the pipetting contract");
         assert_eq!(program.as_program().materials.len(), 9);
         assert_eq!(program.as_program().steps.len(), 10);
         let capabilities = program
@@ -1390,9 +1388,9 @@ workflow main() -> (
             .expect("Golden Gate cycling is normalized before facility planning")
             .validate()
             .expect("normalized thermal program validates");
-        let ValidatedProcedureProgram::ThermalV1(thermal) = thermal else {
-            panic!("Golden Gate cycling must normalize to the thermal contract")
-        };
+        let thermal = thermal
+            .thermal()
+            .expect("Golden Gate cycling must normalize to the thermal contract");
         let thermal = thermal.as_program();
         assert_eq!(thermal.load.input, 0);
         assert_eq!(thermal.load.outputs.len(), 1);
@@ -1443,9 +1441,9 @@ workflow main() -> (
             .expect("temperature-staged setup is normalized before facility planning")
             .validate()
             .expect("temperature-staged setup validates");
-        let ValidatedProcedureProgram::PipettingV1(staged_program) = staged_program else {
-            panic!("temperature-staged setup must normalize to the pipetting contract")
-        };
+        let staged_program = staged_program
+            .pipetting()
+            .expect("temperature-staged setup must normalize to the pipetting contract");
         let staged_program = staged_program.as_program();
         assert_eq!(staged_program.materials.len(), 9);
         assert_eq!(staged_program.steps.len(), 18);
@@ -1547,9 +1545,9 @@ workflow main() -> (
             .expect("serial dilution is normalized before facility planning")
             .validate()
             .expect("normalized serial-dilution program validates");
-        let ValidatedProcedureProgram::PipettingV1(dilution_program) = dilution_program else {
-            panic!("serial dilution must normalize to the pipetting contract")
-        };
+        let dilution_program = dilution_program
+            .pipetting()
+            .expect("serial dilution must normalize to the pipetting contract");
         assert!(dilution_program.as_program().vessels.iter().any(|vessel| {
             matches!(
                 &vessel.role,
@@ -1600,9 +1598,9 @@ workflow main() -> (
             .expect("recovery medium addition is normalized")
             .validate()
             .expect("recovery medium program validates");
-        let ValidatedProcedureProgram::PipettingV1(add_medium) = add_medium else {
-            panic!("recovery medium addition must be pipetting")
-        };
+        let add_medium = add_medium
+            .pipetting()
+            .expect("recovery medium addition must be pipetting");
         let recovered_location = crate::procedure::Location {
             vessel: crate::procedure::ProcedureLocalId::new("recovery-cultures").unwrap(),
             position: 0,
@@ -1621,9 +1619,9 @@ workflow main() -> (
             .expect("recovery incubation is normalized")
             .validate()
             .expect("recovery incubation program validates");
-        let ValidatedProcedureProgram::ThermalV1(incubation) = incubation else {
-            panic!("recovery incubation must be thermal")
-        };
+        let incubation = incubation
+            .thermal()
+            .expect("recovery incubation must be thermal");
         assert_eq!(
             incubation.as_program().load.volume_each.value().to_string(),
             "82"
@@ -1658,9 +1656,9 @@ workflow main() -> (
             .expect("transformation preparation is normalized")
             .validate()
             .expect("transformation preparation validates");
-        let ValidatedProcedureProgram::PipettingV1(preparation) = preparation else {
-            panic!("transformation preparation must be pipetting")
-        };
+        let preparation = preparation
+            .pipetting()
+            .expect("transformation preparation must be pipetting");
         assert_eq!(preparation.as_program().steps.len(), 8);
         assert_eq!(automated_transformation.tasks[0].requirements.len(), 6);
         assert!(
@@ -1677,9 +1675,7 @@ workflow main() -> (
             .expect("heat shock is normalized")
             .validate()
             .expect("heat shock validates");
-        let ValidatedProcedureProgram::ThermalV1(heat_shock) = heat_shock else {
-            panic!("heat shock must be thermal")
-        };
+        let heat_shock = heat_shock.thermal().expect("heat shock must be thermal");
         assert_eq!(heat_shock.as_program().load.outputs.len(), 2);
         assert_eq!(
             heat_shock.as_program().load.volume_each.value().to_string(),
@@ -1711,9 +1707,9 @@ workflow main() -> (
             .expect("selective plating is normalized")
             .validate()
             .expect("selective plating validates");
-        let ValidatedProcedureProgram::PipettingV1(plate_program) = plate_program else {
-            panic!("selective plating must be pipetting")
-        };
+        let plate_program = plate_program
+            .pipetting()
+            .expect("selective plating must be pipetting");
         assert_eq!(plate_program.as_program().steps.len(), 4);
         assert_eq!(plate_program.as_program().vessels.len(), 3);
         assert_eq!(automated_plating.tasks[0].requirements.len(), 3);
