@@ -671,8 +671,19 @@ fn realization_flows(
     selections: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
     let mut result = BTreeMap::new();
+    // A workflow that realizes one of its own parameters is a build written
+    // once for many designs: `prepare_competent_cells(chassis: Chassis)` is the
+    // same wash whichever strain it starts from. Its flow is a template, keyed
+    // by workflow name and instantiated for the design each call site passes.
+    let mut templates: BTreeMap<String, (usize, RealizationFlow)> = BTreeMap::new();
     for declaration in declarations(modules) {
-        let CheckedDeclaration::Workflow { body, .. } = declaration else {
+        let CheckedDeclaration::Workflow {
+            name: workflow_name,
+            inputs,
+            body,
+            ..
+        } = declaration
+        else {
             continue;
         };
         let Some(design) = realized_design(body) else {
@@ -808,8 +819,45 @@ fn realization_flows(
                 .ok_or_else(|| SourceLoweringError::InvalidDependencyFlow(design.clone()))?,
             actions,
         };
-        if result.insert(design.clone(), flow).is_some() {
+        if let Some(parameter) = inputs.iter().position(|input| input.name == design) {
+            templates.insert(workflow_name.clone(), (parameter, flow));
+        } else if result.insert(design.clone(), flow).is_some() {
             return Err(SourceLoweringError::InvalidDependencyFlow(design));
+        }
+    }
+
+    // Each call to a template realizes the design it passes, so the call site
+    // is where the flow gets its key. An argument that is itself a caller's
+    // parameter names no design yet and instantiates nothing.
+    for declaration in declarations(modules) {
+        let CheckedDeclaration::Workflow { inputs, body, .. } = declaration else {
+            continue;
+        };
+        for statement in body {
+            let CheckedStatement::Effect { action, .. } = statement else {
+                continue;
+            };
+            let Some(workflow_name) = action.operation.strip_prefix("workflow.") else {
+                continue;
+            };
+            let Some((parameter, template)) = templates.get(workflow_name) else {
+                continue;
+            };
+            let design = action
+                .arguments
+                .get(*parameter)
+                .and_then(|argument| reference_name(&argument.value))
+                .ok_or_else(|| {
+                    SourceLoweringError::InvalidDependencyFlow(workflow_name.to_owned())
+                })?;
+            if inputs.iter().any(|input| input.name == design) {
+                continue;
+            }
+            if result.insert(design.to_owned(), template.clone()).is_some() {
+                return Err(SourceLoweringError::InvalidDependencyFlow(
+                    design.to_owned(),
+                ));
+            }
         }
     }
     Ok(result)

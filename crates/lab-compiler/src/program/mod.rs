@@ -1118,6 +1118,75 @@ workflow prepare() -> Material<Chassis is competent>:
         }
     }
 
+    /// A protocol is written once and run for many designs: a workflow that
+    /// realizes one of its own parameters is a template, and each call site's
+    /// argument decides which declared artifact its flow builds.
+    #[test]
+    fn a_workflow_realizing_its_parameter_serves_every_design_its_callers_pass() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+use std.lab.plasmid
+use std.lab.competence
+
+buy buffer cold_cacl2:
+  concentration = 100 mM
+
+build chassis DH5alpha:
+  heat_shock_temperature = 42 C
+
+build chassis Top10:
+  heat_shock_temperature = 42 C
+
+workflow prepare_competent_cells(chassis: Chassis) -> Material<Chassis is competent>:
+  cells <- realize chassis
+  wash <- provision cold_cacl2
+  culture <- grow cells at 37 C to 0.40 OD600
+  chilled <- chill culture for 10 min
+  pellet <- centrifuge chilled at 4000 rcf for 10 min
+  ready <- resuspend pellet in wash
+  return ready
+
+workflow main() -> (
+  a: Material<Chassis is competent>,
+  b: Material<Chassis is competent>,
+):
+  a <- prepare_competent_cells DH5alpha
+  b <- prepare_competent_cells Top10
+  return a, b
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("the program checks");
+        let portable = PortableLairProgram::lower(&module).expect("both instantiations lower");
+        let intent = portable.ir();
+        assert_eq!(
+            intent.matches("design.made_artifact").count(),
+            2,
+            "each chassis keeps its own design: {intent}"
+        );
+
+        let problem = portable
+            .refine_standard_methods()
+            .expect("both instantiations refine")
+            .planning_problem()
+            .expect("the problem projects");
+        let realizations = problem
+            .choices
+            .iter()
+            .filter(|choice| choice.source_operation.as_str() == "std.bio.build.realize")
+            .count();
+        assert_eq!(realizations, 2, "one realization per design the calls pass");
+        assert_eq!(
+            problem
+                .choices
+                .iter()
+                .filter(|choice| {
+                    choice.source_operation.as_str() == "std.lab.competence.centrifuge"
+                })
+                .count(),
+            2,
+            "the one written protocol runs once per instantiation"
+        );
+    }
+
     #[test]
     fn standard_methods_replace_every_workflow_op_with_verified_alternatives() {
         let checked = compile_module(
