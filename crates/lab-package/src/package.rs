@@ -282,6 +282,14 @@ impl LabPackage {
             .find(|source| normalize_relative(&source.relative_path) == normalized_entry)
     }
 
+    /// The runnable programs: every source under `src/programs/`, in path
+    /// order. Each is an entry a build can be rooted at, named by its file.
+    pub fn program_sources(&self) -> impl Iterator<Item = &PackageSource> {
+        self.sources.iter().filter(|source| {
+            normalize_relative(&source.relative_path).starts_with(Path::new("src/programs"))
+        })
+    }
+
     pub fn module_graph(&self) -> Result<ModuleGraph, ModuleGraphError> {
         ModuleGraph::new(
             &self.manifest,

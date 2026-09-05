@@ -330,13 +330,24 @@ pub(crate) struct StrainArtifactIntent {
 /// supplies them in a deterministic order.
 pub(crate) fn lower_build_intent(
     modules: &[&CheckedModule],
+    entry: Option<&str>,
 ) -> Result<Vec<BuildArtifactIntent>, SourceLoweringError> {
     let supplier_identities = supplier_identities(modules);
     let stated = inventory_properties(modules);
     let bindings = binding_values(modules);
     let catalog_types = catalog_types(modules);
     let selections = selections(modules, &supplier_identities);
-    let flows = realization_flows(modules, &supplier_identities, &catalog_types, &selections)?;
+    // Rooted at a program, the build is what that program's `main` reaches
+    // through workflow calls. Everything else in scope is a library: declared,
+    // importable, and not built by this run.
+    let reachable = entry.map(|entry| reachable_workflows(modules, entry));
+    let flows = realization_flows(
+        modules,
+        &supplier_identities,
+        &catalog_types,
+        &selections,
+        reachable.as_ref(),
+    )?;
     let context = BuildLoweringContext {
         flows: &flows,
         supplier_identities: &supplier_identities,
@@ -356,14 +367,18 @@ pub(crate) fn lower_build_intent(
             else {
                 continue;
             };
-            artifacts.push(lower_artifact(
+            let lowered = lower_artifact(
                 module.module.as_str(),
                 artifact.as_str(),
                 name,
                 produces,
                 properties,
                 &context,
-            )?);
+            );
+            match lowered {
+                Err(SourceLoweringError::MissingRealization(_)) if reachable.is_some() => {}
+                other => artifacts.push(other?),
+            }
         }
     }
     if artifacts.is_empty() {
@@ -372,10 +387,88 @@ pub(crate) fn lower_build_intent(
     Ok(artifacts)
 }
 
+/// The workflows a program runs: its entry module's `main` and everything that
+/// main reaches through workflow calls, keyed by module and workflow name.
+fn reachable_workflows(modules: &[&CheckedModule], entry: &str) -> BTreeSet<(String, String)> {
+    let mut by_name: BTreeMap<&str, Vec<(&str, &[CheckedStatement])>> = BTreeMap::new();
+    for module in modules {
+        for declaration in &module.declarations {
+            let CheckedDeclaration::Workflow { name, body, .. } = declaration else {
+                continue;
+            };
+            by_name
+                .entry(name.as_str())
+                .or_default()
+                .push((module.module.as_str(), body.as_slice()));
+        }
+    }
+    let mut reached = BTreeSet::new();
+    let mut queue = Vec::new();
+    for (module, body) in by_name.get("main").into_iter().flatten() {
+        if *module == entry {
+            reached.insert((module.to_string(), "main".to_owned()));
+            queue.push(*body);
+        }
+    }
+    while let Some(body) = queue.pop() {
+        for action in effects(body) {
+            let Some(callee) = action.operation.strip_prefix("workflow.") else {
+                continue;
+            };
+            for (module, callee_body) in by_name.get(callee).into_iter().flatten() {
+                if reached.insert((module.to_string(), callee.to_owned())) {
+                    queue.push(callee_body);
+                }
+            }
+        }
+    }
+    reached
+}
+
+/// Every action a body performs, wherever its statement sits.
+fn effects(body: &[CheckedStatement]) -> Vec<&ResolvedAction> {
+    let mut actions = Vec::new();
+    let mut queue = vec![body];
+    while let Some(body) = queue.pop() {
+        for statement in body {
+            match statement {
+                CheckedStatement::Effect { action, .. } => actions.push(action),
+                CheckedStatement::If {
+                    body, else_body, ..
+                } => {
+                    queue.push(body);
+                    queue.push(else_body);
+                }
+                CheckedStatement::Match { cases, .. } => {
+                    for case in cases {
+                        queue.push(&case.body);
+                    }
+                }
+                CheckedStatement::For { body, .. } | CheckedStatement::When { body, .. } => {
+                    queue.push(body);
+                }
+                _ => {}
+            }
+        }
+    }
+    actions
+}
+
 fn declarations<'a>(
     modules: &'a [&'a CheckedModule],
 ) -> impl Iterator<Item = &'a CheckedDeclaration> {
     modules.iter().flat_map(|module| module.declarations.iter())
+}
+
+fn module_declarations<'a>(
+    modules: &'a [&'a CheckedModule],
+) -> impl Iterator<Item = (&'a CheckedModule, &'a CheckedDeclaration)> {
+    modules.iter().flat_map(|module| {
+        module
+            .declarations
+            .iter()
+            .map(move |declaration| (&**module, declaration))
+    })
 }
 
 fn lower_artifact(
@@ -669,14 +762,20 @@ fn realization_flows(
     identities: &BTreeMap<String, String>,
     catalog_types: &BTreeMap<String, String>,
     selections: &BTreeMap<String, String>,
+    reachable: Option<&BTreeSet<(String, String)>>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
+    let in_scope = |module: &CheckedModule, workflow: &str| {
+        reachable.is_none_or(|reachable| {
+            reachable.contains(&(module.module.as_str().to_owned(), workflow.to_owned()))
+        })
+    };
     let mut result = BTreeMap::new();
     // A workflow that realizes one of its own parameters is a build written
     // once for many designs: `prepare_competent_cells(chassis: Chassis)` is the
     // same wash whichever strain it starts from. Its flow is a template, keyed
     // by workflow name and instantiated for the design each call site passes.
     let mut templates: BTreeMap<String, (usize, RealizationFlow)> = BTreeMap::new();
-    for declaration in declarations(modules) {
+    for (module, declaration) in module_declarations(modules) {
         let CheckedDeclaration::Workflow {
             name: workflow_name,
             inputs,
@@ -686,6 +785,9 @@ fn realization_flows(
         else {
             continue;
         };
+        if !in_scope(module, workflow_name) {
+            continue;
+        }
         let Some(design) = realized_design(body) else {
             continue;
         };
@@ -829,14 +931,20 @@ fn realization_flows(
     // Each call to a template realizes the design it passes, so the call site
     // is where the flow gets its key. An argument that is itself a caller's
     // parameter names no design yet and instantiates nothing.
-    for declaration in declarations(modules) {
-        let CheckedDeclaration::Workflow { inputs, body, .. } = declaration else {
+    for (module, declaration) in module_declarations(modules) {
+        let CheckedDeclaration::Workflow {
+            name: caller,
+            inputs,
+            body,
+            ..
+        } = declaration
+        else {
             continue;
         };
-        for statement in body {
-            let CheckedStatement::Effect { action, .. } = statement else {
-                continue;
-            };
+        if !in_scope(module, caller) {
+            continue;
+        }
+        for action in effects(body) {
             let Some(workflow_name) = action.operation.strip_prefix("workflow.") else {
                 continue;
             };

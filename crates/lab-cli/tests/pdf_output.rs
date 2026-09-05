@@ -120,4 +120,21 @@ fn a_manual_only_plan_typesets_a_run_sheet() {
         human.contains("manual_protocol.pdf"),
         "plan output lists the run sheet: {human}"
     );
+
+    // Planned as a named program, the same build roots at that program's main
+    // and writes its plan under the program's own directory.
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["plan", project.to_str().unwrap(), "--program", "main"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "program plan failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let program_pdf = project.join(".lab/plan/main/documents/manual_protocol.pdf");
+    assert!(
+        std::fs::read(&program_pdf).unwrap().starts_with(b"%PDF-"),
+        "the program's run sheet is a PDF of its own"
+    );
 }

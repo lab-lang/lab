@@ -93,7 +93,21 @@ impl PortableLairProgram {
     /// policies, and workflows into their own modules. The caller supplies the
     /// modules in its own deterministic compilation order.
     pub fn lower_program(modules: &[&CheckedModule]) -> Result<Self, PortableLairError> {
-        let artifacts = lower_build_intent(modules)?;
+        Self::lower_program_rooted(modules, None)
+    }
+
+    /// Lower one program: the build its entry module's `main` reaches.
+    ///
+    /// A workspace declares more than any one run builds. Rooted at an entry,
+    /// the artifacts are the ones `main` reaches through workflow calls, and a
+    /// declaration nothing reaches is a library entry rather than an error.
+    /// Without a root, every declared artifact must be realized by some
+    /// workflow in scope.
+    pub fn lower_program_rooted(
+        modules: &[&CheckedModule],
+        entry: Option<&str>,
+    ) -> Result<Self, PortableLairError> {
+        let artifacts = lower_build_intent(modules, entry)?;
         let mut context = Context::new();
         let root = ModuleOp::new(
             &mut context,
