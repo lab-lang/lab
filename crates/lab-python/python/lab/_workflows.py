@@ -130,6 +130,11 @@ def _translate(fn: Callable[..., Any], module: Module, origin: Origin) -> Workfl
     results = _results(fn, tree)
     body = _Body(fn, module, {name for name, _ in parameters})
     lines = body.block(tree.body, skip_doc=True)
+    # A signature names types the body may never mention: a workflow that only
+    # performs other workflows still returns their materials. The modules its
+    # annotations come from import after the ones the body needed.
+    for hint in _annotations(fn).values():
+        body.uses.update(dict.fromkeys(type_modules(hint)))
     declaration = WorkflowDeclaration(
         module=module,
         name=fn.__name__,
