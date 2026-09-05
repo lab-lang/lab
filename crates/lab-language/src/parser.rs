@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checked::OwnershipMode;
 use crate::error::{ParseError, syntax_span};
 use crate::lexer::lex;
 use crate::source::{Identifier, Span, Spanned};
@@ -61,6 +62,14 @@ impl<'a> Parser<'a> {
                 let mut declaration = self.parse_role()?;
                 declaration.doc = doc;
                 Item::Role(declaration)
+            } else if self.check_word("facet") {
+                let mut declaration = self.parse_facet()?;
+                declaration.doc = doc;
+                Item::Facet(declaration)
+            } else if self.check_word("action") {
+                let mut declaration = self.parse_action()?;
+                declaration.doc = doc;
+                Item::Action(declaration)
             } else if self.check_word("circuit") {
                 let mut declaration = self.parse_circuit()?;
                 declaration.doc = doc;
@@ -143,6 +152,161 @@ impl<'a> Parser<'a> {
             doc: None,
             name,
             term,
+            span: start.join(end),
+        })
+    }
+
+    /// `facet Competence on Chassis:` — the states a kind's materials may be in.
+    ///
+    /// A line inside the block is a state, or a transition when an arrow follows
+    /// the first name. Both begin with a state name, so the arrow is what tells
+    /// them apart and neither needs a keyword of its own.
+    fn parse_facet(&mut self) -> Result<FacetDecl, ParseError> {
+        let start = self.expect_word("facet")?.span;
+        let name = self.take_identifier("a facet name")?;
+        if !self.check_word("on") {
+            return Err(syntax_span(
+                self.current_span(),
+                "a facet states the kind it classifies, written 'on <Kind>'",
+            ));
+        }
+        self.next();
+        let subject = self.parse_type()?;
+        self.open_block()?;
+        let mut states = Vec::new();
+        let mut transitions = Vec::new();
+        while !self.check(&TokenKind::Dedent) {
+            let doc = self.take_doc()?;
+            let first = self.take_identifier("a state name")?;
+            if self.consume(&TokenKind::RightArrow).is_some() {
+                if doc.is_some() {
+                    return Err(syntax_span(
+                        first.span,
+                        "documentation describes a state; a transition is documented by the states it joins",
+                    ));
+                }
+                let to = self.take_identifier("the state a transition reaches")?;
+                let end = self.expect_line_end()?;
+                transitions.push(FacetTransitionDecl {
+                    span: first.span.join(end),
+                    from: first,
+                    to,
+                });
+                continue;
+            }
+            // A state carrying nothing needs no block, the way a kind whose
+            // instances state nothing beyond their name needs none.
+            if !self.check(&TokenKind::Colon) {
+                let end = self.expect_line_end()?;
+                states.push(FacetStateDecl {
+                    doc,
+                    span: first.span.join(end),
+                    name: first,
+                    fields: Vec::new(),
+                });
+                continue;
+            }
+            self.open_block()?;
+            let mut fields = Vec::new();
+            while !self.check(&TokenKind::Dedent) {
+                fields.push(self.parse_field_line(false)?);
+            }
+            let end = self.expect(TokenKind::Dedent)?.span;
+            states.push(FacetStateDecl {
+                doc,
+                span: first.span.join(end),
+                name: first,
+                fields,
+            });
+        }
+        let end = self.expect(TokenKind::Dedent)?.span;
+        Ok(FacetDecl {
+            doc: None,
+            name,
+            subject,
+            states,
+            transitions,
+            span: start.join(end),
+        })
+    }
+
+    /// `action centrifuge <culture> at <force> for <duration> -> pellet:`
+    ///
+    /// The header is the phrase a workflow writes: words as they are, operands
+    /// in `<>`, results after `->`. The block types every operand and result,
+    /// and states the capability the verb needs.
+    fn parse_action(&mut self) -> Result<ActionDecl, ParseError> {
+        let start = self.expect_word("action")?.span;
+        let name = self.take_identifier("an action name")?;
+        let mut phrase = vec![PhraseToken::Word(name.clone())];
+        while !self.check(&TokenKind::RightArrow) && !self.check(&TokenKind::Colon) {
+            if self.consume(&TokenKind::Less).is_some() {
+                let operand = self.take_identifier("an operand name")?;
+                self.expect(TokenKind::Greater)?;
+                phrase.push(PhraseToken::Hole(operand));
+            } else {
+                phrase.push(PhraseToken::Word(self.take_identifier("a phrase word")?));
+            }
+        }
+        let mut results = Vec::new();
+        if self.consume(&TokenKind::RightArrow).is_some() {
+            results.push(self.take_identifier("a result name")?);
+            while self.consume(&TokenKind::Comma).is_some() {
+                results.push(self.take_identifier("a result name")?);
+            }
+        }
+        self.open_block()?;
+        let mut bindings = Vec::new();
+        let mut capability = None;
+        while !self.check(&TokenKind::Dedent) {
+            if self.check_word("requires") {
+                let keyword = self.next().expect("checked");
+                if capability.is_some() {
+                    return Err(syntax_span(
+                        keyword.span,
+                        "an action states the one capability it needs once",
+                    ));
+                }
+                capability = Some(self.take_identifier("a capability")?);
+                self.expect_line_end()?;
+                continue;
+            }
+            let binding = self.take_identifier("an operand or result name")?;
+            self.expect(TokenKind::Colon)?;
+            // An ownership mode is a word before the type, and only an operand
+            // has one. A result is never owned by the action that yields it.
+            let mode = match () {
+                _ if self.check_word("take") => Some(OwnershipMode::Take),
+                _ if self.check_word("borrow") => Some(OwnershipMode::Borrow),
+                _ if self.check_word("copy") => Some(OwnershipMode::Copy),
+                _ => None,
+            };
+            if mode.is_some() {
+                self.next();
+            }
+            let ty = self.parse_type()?;
+            let end = self.expect_line_end()?;
+            bindings.push(ActionBinding {
+                span: binding.span.join(end),
+                name: binding,
+                mode,
+                ty,
+            });
+        }
+        let end = self.expect(TokenKind::Dedent)?.span;
+        let capability = capability.ok_or_else(|| {
+            syntax_span(
+                start,
+                "an action states the capability a facility must offer to run it, written 'requires <Capability>'",
+            )
+        })?;
+        Ok(ActionDecl {
+            doc: None,
+            name,
+            phrase,
+            results,
+            bindings,
+            capability,
             span: start.join(end),
         })
     }
@@ -930,7 +1094,13 @@ impl<'a> Parser<'a> {
     /// `100 ng/uL` and `Quantity<ng/uL>`, so the two can never drift apart.
     fn parse_unit(&mut self) -> Result<String, ParseError> {
         let mut unit = self.take_identifier("a unit")?.value;
-        if self.consume(&TokenKind::Slash).is_some() {
+        // A denominator is a unit, so a slash followed by anything else is
+        // division. Without this, `20 uL / 2` reads the `2` as a denominator and
+        // a quantity cannot be divided at all.
+        if self.check(&TokenKind::Slash)
+            && matches!(self.peek_kind(1), Some(TokenKind::Identifier(_)))
+        {
+            self.next();
             unit.push('/');
             unit.push_str(&self.take_identifier("a unit denominator")?.value);
         }
@@ -955,7 +1125,15 @@ impl<'a> Parser<'a> {
             && self.check(&TokenKind::Less)
         {
             self.next();
-            let unit = self.parse_unit()?;
+            // `Quantity<any Volume>` asks for a measurement of something
+            // without pinning which unit it is written in, the way `any Signal`
+            // asks for a type playing a role without naming which.
+            let unit = if self.check_word("any") {
+                self.next();
+                Unit::Dimension(self.take_identifier("a dimension")?.value)
+            } else {
+                Unit::Exact(self.parse_unit()?)
+            };
             let end = self.expect(TokenKind::Greater)?.span;
             return Ok(TypeExpr::Quantity {
                 unit,
@@ -1002,7 +1180,20 @@ impl<'a> Parser<'a> {
             let span = name.span.join(role.span);
             return Ok(TypeArgument::Binding { name, role, span });
         }
-        Ok(TypeArgument::Type(self.parse_type()?))
+        let subject = self.parse_type()?;
+        // `is` after an argument narrows it to one facet state. It reads as the
+        // same word that says a type plays a role, because it says the same
+        // kind of thing: this material is one of the things its kind may be.
+        if self.check_word("is") {
+            self.next();
+            let state = self.take_identifier("a facet state")?;
+            return Ok(TypeArgument::InState {
+                span: subject.span().join(state.span),
+                subject: Box::new(subject),
+                state,
+            });
+        }
+        Ok(TypeArgument::Type(subject))
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -1115,6 +1306,20 @@ impl<'a> Parser<'a> {
                 expression = Expr::Field {
                     subject: Box::new(expression),
                     field,
+                    span,
+                };
+            } else if self.check_word("in")
+                && matches!(self.peek_kind(1), Some(TokenKind::Identifier(_)))
+            {
+                // `500 mL in uL` converts. A loop header never reaches here,
+                // because `for` takes its binding as a name rather than as an
+                // expression and reads its own `in`.
+                self.next();
+                let unit = self.take_identifier("a unit to convert to")?;
+                let span = expression.span().join(unit.span);
+                expression = Expr::Convert {
+                    value: Box::new(expression),
+                    unit,
                     span,
                 };
             } else if is_numeric(&expression) && self.peek_identifier().is_some() {

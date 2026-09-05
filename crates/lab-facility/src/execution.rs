@@ -599,6 +599,94 @@ fn semantic_value(value: &lab_capability::ScalarValue) -> ExecutionParameterValu
     }
 }
 
+/// The manual steps of a lowered program, in the order the plan performs them.
+///
+/// A step an instrument runs arrives with its own operator document, rendered
+/// by the adapter that lowered it. These are the ones a person performs,
+/// projected as display-ready text for the run sheet the CLI typesets.
+pub fn manual_run_steps(
+    invocations: &AdapterInvocationPlan,
+) -> Vec<lab_adapters::run_sheet::RunStep> {
+    let mut steps = Vec::new();
+    for method in &invocations.allocated.methods {
+        for task in &method.tasks {
+            for binding in &task.requirements {
+                if binding.control_mode != ControlMode::Manual.iri() {
+                    continue;
+                }
+                steps.push(lab_adapters::run_sheet::RunStep {
+                    title: spaced_words(local_fragment(task.operation.as_str())),
+                    operation: task.operation.to_string(),
+                    asset: local_fragment(&binding.asset).to_owned(),
+                    parameters: task
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            (
+                                local_fragment(parameter.id.as_str()).to_owned(),
+                                display_procedure_value(&parameter.value),
+                            )
+                        })
+                        .collect(),
+                });
+            }
+        }
+    }
+    steps
+}
+
+/// The local name at the end of an IRI or a `::`-qualified identifier.
+fn local_fragment(value: &str) -> &str {
+    let value = value.rsplit("::").next().unwrap_or(value);
+    value
+        .rsplit(['#', '/'])
+        .next()
+        .filter(|fragment| !fragment.is_empty())
+        .unwrap_or(value)
+}
+
+/// `RealizeArtifact` read aloud: "Realize artifact".
+fn spaced_words(value: &str) -> String {
+    let mut words = String::new();
+    for (index, character) in value.chars().enumerate() {
+        if character.is_uppercase() && index > 0 {
+            words.push(' ');
+            words.extend(character.to_lowercase());
+        } else {
+            words.push(character);
+        }
+    }
+    words
+}
+
+/// A parameter value the way an operator reads it: text unquoted, a unit by
+/// its name, and an empty list said in words.
+fn display_procedure_value(value: &ProcedureValue) -> String {
+    match value {
+        ProcedureValue::Scalar { value } => display_property_value(value),
+        ProcedureValue::List { values, .. } if values.is_empty() => "none".to_owned(),
+        ProcedureValue::List { values, .. } => values
+            .iter()
+            .map(display_property_value)
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
+fn display_property_value(value: &lab_capability::PropertyValue) -> String {
+    let scalar = match &value.value {
+        ScalarValue::Text(value) => value.clone(),
+        ScalarValue::Integer(value) => value.to_string(),
+        ScalarValue::Real(value) => value.to_string(),
+        ScalarValue::Boolean(value) => value.to_string(),
+        ScalarValue::Iri(value) => local_fragment(value.as_str()).to_owned(),
+    };
+    match &value.unit {
+        Some(unit) => format!("{scalar} {}", local_fragment(unit.as_str())),
+        None => scalar,
+    }
+}
+
 fn manual_instructions(
     task: &AllocatedProcedureTask,
     binding: &AllocatedRequirementBinding,

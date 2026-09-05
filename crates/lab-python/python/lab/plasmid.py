@@ -86,11 +86,11 @@ Binds culture.
 
 plate = Action(
     name="plate",
-    phrase=("plate", "<culture>", "on", "<antibiotic>"),
+    phrase=("plate", "<culture>", "on", "<medium>"),
     results=("plate",),
     uses=("std.lab.plasmid",),
 )
-"""Performed as `plate <culture> on <antibiotic>`.
+"""Performed as `plate <culture> on <medium>`.
 
 Binds plate.
 """
@@ -117,13 +117,13 @@ screen = Action(
 Binds screening.
 """
 
-grow = Action(
-    name="grow",
-    phrase=("grow", "<clone>", "at", "<temperature>", "for", "<duration>"),
+culture = Action(
+    name="culture",
+    phrase=("culture", "<clone>", "at", "<temperature>", "for", "<duration>"),
     results=("culture",),
     uses=("std.lab.plasmid",),
 )
-"""Performed as `grow <clone> at <temperature> for <duration>`.
+"""Performed as `culture <clone> at <temperature> for <duration>`.
 
 Binds culture.
 """

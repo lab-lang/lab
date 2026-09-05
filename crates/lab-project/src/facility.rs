@@ -163,7 +163,7 @@ impl LabProject {
             .filter(|module| program_packages.contains(&module.package))
             .map(|module| &module.module)
             .collect::<Vec<_>>();
-        plan_modules_with_inventory(package, &modules, methods, inventory)
+        plan_modules_with_inventory(package, &modules, methods, inventory, None)
     }
 
     /// Plans with the standard and package-contributed Methods captured during compilation.
@@ -172,6 +172,36 @@ impl LabProject {
         compiled: &CompiledProject,
     ) -> Result<FacilityPlanningResult, FacilityProjectError> {
         self.plan_facility(compiled, &compiled.methods)
+    }
+
+    /// Plans one program of the default runnable package: the build the named
+    /// entry module's `main` reaches through workflow calls. What the workspace
+    /// declares beyond that is a library and stays unplanned.
+    pub fn plan_facility_program(
+        &self,
+        compiled: &CompiledProject,
+        entry_module: &str,
+    ) -> Result<FacilityPlanningResult, FacilityProjectError> {
+        let package = self.default_package();
+        let inventory = load_package_inventory(package)?.ok_or_else(|| {
+            FacilityProjectError::MissingInventory {
+                package: package.manifest.package.name.clone(),
+            }
+        })?;
+        let program_packages = self.program_packages();
+        let modules = compiled
+            .modules
+            .iter()
+            .filter(|module| program_packages.contains(&module.package))
+            .map(|module| &module.module)
+            .collect::<Vec<_>>();
+        plan_modules_with_inventory(
+            package,
+            &modules,
+            &compiled.methods,
+            inventory,
+            Some(entry_module),
+        )
     }
 }
 
@@ -189,7 +219,7 @@ pub fn plan_modules_for_package(
         load_package_inventory(package)?.ok_or_else(|| FacilityProjectError::MissingInventory {
             package: package.manifest.package.name.clone(),
         })?;
-    plan_modules_with_inventory(package, modules, methods, inventory)
+    plan_modules_with_inventory(package, modules, methods, inventory, None)
 }
 
 fn plan_modules_with_inventory(
@@ -197,9 +227,10 @@ fn plan_modules_with_inventory(
     modules: &[&lab_language::CheckedModule],
     methods: &MethodRegistry,
     inventory: InventorySnapshot,
+    entry: Option<&str>,
 ) -> Result<FacilityPlanningResult, FacilityProjectError> {
-    let portable =
-        PortableLairProgram::lower_program(modules).map_err(FacilityProjectError::PortableLair)?;
+    let portable = PortableLairProgram::lower_program_rooted(modules, entry)
+        .map_err(FacilityProjectError::PortableLair)?;
     let refined = portable
         .refine_methods(methods)
         .map_err(FacilityProjectError::RefinedLair)?;

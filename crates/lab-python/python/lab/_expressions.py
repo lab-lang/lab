@@ -344,6 +344,10 @@ class Binary(Expression):
 def expression(value: object) -> Expression:
     """The Lab expression a Python value stands for."""
 
+    from ._types import state_name
+
+    if (state := state_name(value)) is not None:
+        return Reference(state)
     if isinstance(value, Expression):
         return value
     if isinstance(value, Expressible):

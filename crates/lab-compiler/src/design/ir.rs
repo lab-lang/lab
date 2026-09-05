@@ -228,6 +228,61 @@ impl Verify for DesignPlasmidOp {
 }
 
 #[pliron_op(
+    name = "design.made_artifact",
+    format,
+    attributes = (
+        made_artifact_name: StringAttr,
+        made_artifact_kind: StringAttr
+    ),
+    interfaces = [NOpdsInterface<0>],
+    results = (design: DesignType)
+)]
+/// Declare a facility-independent artifact of a kind with no lowering contract
+/// of its own.
+///
+/// A plasmid carries an assembly recipe and a strain carries transformation
+/// chemistry, and each has a design op that states those facts. Everything else
+/// a laboratory makes is identified by its name and its kind, and what making
+/// it involves is a Method's business.
+pub struct DesignMadeArtifactOp;
+
+impl DesignMadeArtifactOp {
+    pub fn new(
+        ctx: &mut Context,
+        artifact_name: impl Into<String>,
+        artifact_kind: impl Into<String>,
+    ) -> Self {
+        let op = Operation::new(
+            ctx,
+            Self::get_concrete_op_info(),
+            vec![DesignType::get(ctx).into()],
+            vec![],
+            vec![],
+            0,
+        );
+        let result = Self { op };
+        result.set_attr_made_artifact_name(ctx, StringAttr::new(artifact_name.into()));
+        result.set_attr_made_artifact_kind(ctx, StringAttr::new(artifact_kind.into()));
+        result
+    }
+}
+
+impl Verify for DesignMadeArtifactOp {
+    fn verify(&self, ctx: &Context) -> Result<()> {
+        require_string(
+            self.get_attr_made_artifact_name(ctx).as_deref(),
+            "design.made_artifact artifact_name",
+            self.loc(ctx),
+        )?;
+        require_string(
+            self.get_attr_made_artifact_kind(ctx).as_deref(),
+            "design.made_artifact artifact_kind",
+            self.loc(ctx),
+        )
+    }
+}
+
+#[pliron_op(
     name = "design.strain",
     format,
     attributes = (

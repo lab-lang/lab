@@ -18,8 +18,29 @@ pub enum PortType {
     Design,
     /// Physical matter in an open, method-defined state.
     Material { state: AbsoluteIri },
+    /// Physical matter in whatever state the Intent operation asked for.
+    ///
+    /// A Method usually knows the state it produces: a transformation yields a
+    /// transformed culture whatever went in. Fetching something off a shelf does
+    /// not. What `provision` returns is competent cells, or a plasmid prep, or a
+    /// bottle of medium, according to what was asked for, and one signature has
+    /// to serve all of them because every candidate refining one Intent
+    /// implements one signature.
+    ///
+    /// This is a port whose state the Intent decides. It is only meaningful on
+    /// an output, and only where a Method output exports it, since the state is
+    /// read from the Intent result it corresponds to.
+    MaterialAsRequested,
     /// Non-physical information or evidence of an open semantic kind.
     Data { data_kind: AbsoluteIri },
+}
+
+impl PortType {
+    /// Whether this port carries physical matter, in a stated state or in
+    /// whichever one the Intent asked for.
+    pub fn is_material(&self) -> bool {
+        matches!(self, Self::Material { .. } | Self::MaterialAsRequested)
+    }
 }
 
 /// One named input accepted by every candidate refining the same Intent operation.

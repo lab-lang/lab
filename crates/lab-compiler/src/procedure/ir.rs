@@ -37,6 +37,13 @@ pub(crate) struct MaterialType {
     state: StringAttr,
 }
 
+impl MaterialType {
+    /// The absolute IRI of the state this material is in.
+    pub(crate) fn state(&self) -> &str {
+        self.state.as_str()
+    }
+}
+
 impl Verify for MaterialType {
     fn verify(&self, _context: &Context) -> Result<()> {
         if AbsoluteIri::new(self.state.as_str()).is_err() {

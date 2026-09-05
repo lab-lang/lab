@@ -130,6 +130,11 @@ def _translate(fn: Callable[..., Any], module: Module, origin: Origin) -> Workfl
     results = _results(fn, tree)
     body = _Body(fn, module, {name for name, _ in parameters})
     lines = body.block(tree.body, skip_doc=True)
+    # A signature names types the body may never mention: a workflow that only
+    # performs other workflows still returns their materials. The modules its
+    # annotations come from import after the ones the body needed.
+    for hint in _annotations(fn).values():
+        body.uses.update(dict.fromkeys(type_modules(hint)))
     declaration = WorkflowDeclaration(
         module=module,
         name=fn.__name__,
@@ -233,7 +238,10 @@ class _Body:
         self.context = _context_name(fn)
         self.bound = set(bound)
         self.state: set[str] = set()
-        self.uses: set[str] = set()
+        # Keyed by module path in the order the body first needs each one. The
+        # emitted `use` lines read from this, and emitted source must be
+        # byte-stable across runs, so iteration order cannot come from a set.
+        self.uses: dict[str, None] = {}
 
     def block(self, statements: Sequence[ast.stmt], *, skip_doc: bool = False) -> list[str]:
         """The statements of one body, spaced the way Lab is written by hand.
@@ -339,7 +347,7 @@ class _Body:
                 f"as wf.state(list[Observation], []), at {self._where(value)}"
             )
         stated = lab_type(self.evaluate(arguments[0]))
-        self.uses.update(type_modules(self.evaluate(arguments[0])))
+        self.uses.update(dict.fromkeys(type_modules(self.evaluate(arguments[0]))))
         writer.line(f"state {name}: {stated} = {self.expression(arguments[1]).render()}")
         self.bound.add(name)
         self.state.add(name)
@@ -354,7 +362,7 @@ class _Body:
                 f"wf.perform takes a durable action or another workflow, not "
                 f"{type(step).__name__}, at {self._where(value)}"
             )
-        self.uses.update(step.lab_modules())
+        self.uses.update(dict.fromkeys(step.lab_modules()))
         names = [] if target is None else _targets(target, self._where(value))
         expected = len(step.results)
         if names and len(names) != expected:
@@ -520,7 +528,7 @@ class _Body:
             rendered = expression(value)
         except TypeError as error:
             raise WorkflowError(f"{ast.unparse(node)} is not a Lab expression: {error}") from error
-        self.uses.update(rendered.lab_modules())
+        self.uses.update(dict.fromkeys(rendered.lab_modules()))
         return rendered
 
     def evaluate(self, node: ast.expr) -> Any:

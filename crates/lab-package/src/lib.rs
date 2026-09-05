@@ -13,7 +13,7 @@ pub use manifest::{
 };
 pub use package::{
     DiscoveredRoot, LabPackage, LabWorkspace, PackageError, PackageSource, SbolSyntax,
-    SourceLanguage,
+    SourceLanguage, source_generator,
 };
 
 pub const MANIFEST_FILE: &str = "lab.toml";

@@ -11,227 +11,258 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
     let copy = OwnershipMode::Copy;
     let borrow = OwnershipMode::Borrow;
     let take = OwnershipMode::Take;
-    let operand = |name, r#type, mode| PhrasePart::Operand { name, r#type, mode };
+    let operand = |name: &str, r#type, mode| PhrasePart::operand(name, r#type, mode);
     // Most results are the same material further along. The two that are not
     // say so: a transformation establishes an organism, and each picked colony
     // is an independent transformant.
-    let result = |name, r#type| ResultSpec {
-        name,
+    let result = |name: &str, r#type| ResultSpec {
+        name: name.to_owned(),
         r#type,
         lineage: Lineage::Continues,
     };
-    let begins = |name, r#type| ResultSpec {
-        name,
+    let begins = |name: &str, r#type| ResultSpec {
+        name: name.to_owned(),
         r#type,
         lineage: Lineage::Begins,
     };
     let concrete = ContractType::Concrete;
     let named = Ty::named;
     let material = Ty::material;
+    // A culture and a picked colony are one organism at different points in
+    // being grown, and a plate is a medium that has been poured. Each was a
+    // fieldless type of its own, which is why none could name what it was made
+    // of. Naming the state instead keeps the design underneath readable.
+    let in_state = |subject: Ty, state: &str| Ty::InState(Box::new(subject), state.to_owned());
+    let strain = |state: &str| material(in_state(named("Strain"), state));
+    let plate = |state: &str| material(in_state(named("Medium"), state));
 
     let actions = vec![
         ActionContractSpec {
-            operation: "std.lab.plasmid.capture",
+            operation: "std.lab.plasmid.capture".to_owned(),
             phrase: vec![
-                PhrasePart::Word("capture"),
-                PhrasePart::Word("image"),
-                PhrasePart::Word("of"),
-                operand("plate", concrete(material(named("Plate"))), borrow),
+                PhrasePart::word("capture"),
+                PhrasePart::word("image"),
+                PhrasePart::word("of"),
+                operand("plate", concrete(plate("inoculated")), borrow),
             ],
+            inert: Vec::new(),
             results: vec![result("image", concrete(named("Image")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.synthesize",
+            operation: "std.lab.plasmid.synthesize".to_owned(),
             phrase: vec![
-                PhrasePart::Word("synthesize"),
+                PhrasePart::word("synthesize"),
                 operand("design", concrete(named("Plasmid")), copy),
             ],
+            inert: Vec::new(),
             results: vec![result(
                 "fragments",
                 concrete(Ty::List(Box::new(named("Fragment")))),
             )],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.assemble",
+            operation: "std.lab.plasmid.assemble".to_owned(),
             phrase: vec![
-                PhrasePart::Word("assemble"),
+                PhrasePart::word("assemble"),
                 operand(
                     "fragments",
                     concrete(Ty::List(Box::new(named("Fragment")))),
                     take,
                 ),
             ],
+            inert: Vec::new(),
             results: vec![result("construct", concrete(material(named("Plasmid"))))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.provision",
+            operation: "std.lab.plasmid.provision".to_owned(),
             phrase: vec![
-                PhrasePart::Word("provision"),
+                PhrasePart::word("provision"),
                 operand("item", ContractType::AnyValue, copy),
             ],
             // Whether this laboratory bought the thing or made it last month is
             // not provision's business: it says what to fetch, and whether one
             // is available is a question for the plan.
-            results: vec![result("material", ContractType::MaterialOf("item"))],
+            inert: Vec::new(),
+            results: vec![result(
+                "material",
+                ContractType::MaterialOf("item".to_owned()),
+            )],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.transform",
+            operation: "std.lab.plasmid.transform".to_owned(),
             phrase: vec![
-                PhrasePart::Word("transform"),
+                PhrasePart::word("transform"),
                 operand("design", concrete(named("Strain")), copy),
-                PhrasePart::Word("from"),
+                PhrasePart::word("from"),
                 operand(
                     "plasmids",
                     concrete(Ty::List(Box::new(material(named("Plasmid"))))),
                     take,
                 ),
-                PhrasePart::Word("into"),
-                operand("cells", concrete(material(named("Chassis"))), take),
+                PhrasePart::word("into"),
+                // Cells that were never made competent take up nothing, so the
+                // state is required rather than assumed. A chassis fetched off
+                // the shelf carries it because its declaration states it.
+                operand(
+                    "cells",
+                    concrete(material(Ty::InState(
+                        Box::new(named("Chassis")),
+                        "competent".to_owned(),
+                    ))),
+                    take,
+                ),
             ],
+            inert: Vec::new(),
             results: vec![
                 begins("strain", concrete(material(named("Strain")))),
-                begins("culture", concrete(material(named("Culture")))),
+                begins("culture", concrete(strain("transformed"))),
             ],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.recover",
+            operation: "std.lab.plasmid.recover".to_owned(),
             phrase: vec![
-                PhrasePart::Word("recover"),
-                operand("culture", concrete(material(named("Culture"))), take),
-                PhrasePart::Word("for"),
-                PhrasePart::Quantity {
-                    name: "duration",
-                    signed: false,
-                    units: &["min", "h"],
-                },
+                PhrasePart::word("recover"),
+                operand("culture", concrete(strain("transformed")), take),
+                PhrasePart::word("for"),
+                PhrasePart::quantity("duration", false, &["min", "h"]),
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            inert: Vec::new(),
+            results: vec![result("culture", concrete(strain("recovered")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.dilute",
+            operation: "std.lab.plasmid.dilute".to_owned(),
             phrase: vec![
-                PhrasePart::Word("dilute"),
-                operand("culture", concrete(material(named("Culture"))), take),
+                PhrasePart::word("dilute"),
+                operand("culture", concrete(strain("recovered")), take),
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            inert: Vec::new(),
+            results: vec![result("culture", concrete(strain("diluted")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.plate",
+            operation: "std.lab.plasmid.plate".to_owned(),
             phrase: vec![
-                PhrasePart::Word("plate"),
-                operand("culture", concrete(material(named("Culture"))), take),
-                PhrasePart::Word("on"),
-                operand("antibiotic", concrete(named("Antibiotic")), copy),
+                PhrasePart::word("plate"),
+                // A culture is plated whether or not it was thinned first.
+                // Diluting matters for counting what grows, not for the act of
+                // spreading it, so both states are spreadable.
+                operand(
+                    "culture",
+                    concrete(Ty::Union(vec![strain("recovered"), strain("diluted")])),
+                    take,
+                ),
+                PhrasePart::word("on"),
+                // What a culture is spread on is a medium that has been poured,
+                // so plating on the wrong one is now something to see rather
+                // than a name nobody checked.
+                operand("medium", concrete(plate("poured")), take),
             ],
-            results: vec![result("plate", concrete(material(named("Plate"))))],
+            inert: vec!["medium".to_owned()],
+            results: vec![result("plate", concrete(plate("inoculated")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.pick",
+            operation: "std.lab.plasmid.pick".to_owned(),
             phrase: vec![
-                PhrasePart::Word("pick"),
-                PhrasePart::Integer {
-                    name: "count",
-                    signed: false,
-                },
-                PhrasePart::Word("isolated"),
-                PhrasePart::Word("colonies"),
-                PhrasePart::Word("from"),
-                operand("plate", concrete(material(named("Plate"))), borrow),
+                PhrasePart::word("pick"),
+                PhrasePart::integer("count", false),
+                PhrasePart::word("isolated"),
+                PhrasePart::word("colonies"),
+                PhrasePart::word("from"),
+                operand("plate", concrete(plate("inoculated")), borrow),
             ],
+            inert: Vec::new(),
             results: vec![begins(
                 "candidates",
-                concrete(Ty::List(Box::new(material(named("Clone"))))),
+                concrete(Ty::List(Box::new(strain("isolated")))),
             )],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.screen",
+            operation: "std.lab.plasmid.screen".to_owned(),
             phrase: vec![
-                PhrasePart::Word("screen"),
+                PhrasePart::word("screen"),
                 operand(
                     "candidates",
-                    concrete(Ty::List(Box::new(material(named("Clone"))))),
+                    concrete(Ty::List(Box::new(strain("isolated")))),
                     take,
                 ),
-                PhrasePart::Word("against"),
+                PhrasePart::word("against"),
                 operand("design", concrete(named("Plasmid")), copy),
             ],
+            inert: Vec::new(),
             results: vec![result("screening", concrete(named("Screening")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.grow",
+            operation: "std.lab.plasmid.culture".to_owned(),
             phrase: vec![
-                PhrasePart::Word("grow"),
-                operand("clone", concrete(material(named("Clone"))), take),
-                PhrasePart::Word("at"),
-                PhrasePart::Quantity {
-                    name: "temperature",
-                    signed: true,
-                    units: &["C"],
-                },
-                PhrasePart::Word("for"),
-                PhrasePart::Quantity {
-                    name: "duration",
-                    signed: false,
-                    units: &["h"],
-                },
+                PhrasePart::word("culture"),
+                operand("clone", concrete(strain("isolated")), take),
+                PhrasePart::word("at"),
+                PhrasePart::quantity("temperature", true, &["C"]),
+                PhrasePart::word("for"),
+                PhrasePart::quantity("duration", false, &["h"]),
             ],
-            results: vec![result("culture", concrete(material(named("Culture"))))],
+            inert: Vec::new(),
+            results: vec![result("culture", concrete(strain("grown")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.purify",
+            operation: "std.lab.plasmid.purify".to_owned(),
             phrase: vec![
-                PhrasePart::Word("purify"),
-                operand("culture", concrete(material(named("Culture"))), take),
+                PhrasePart::word("purify"),
+                operand("culture", concrete(strain("grown")), take),
             ],
+            inert: Vec::new(),
             results: vec![result("plasmid", concrete(material(named("Plasmid"))))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.split",
+            operation: "std.lab.plasmid.split".to_owned(),
             phrase: vec![
-                PhrasePart::Word("split"),
+                PhrasePart::word("split"),
                 operand("material", concrete(material(named("Plasmid"))), take),
             ],
+            inert: Vec::new(),
             results: vec![
-                result("retained", ContractType::SameAs("material")),
-                result("aliquot", ContractType::SameAs("material")),
+                result("retained", ContractType::SameAs("material".to_owned())),
+                result("aliquot", ContractType::SameAs("material".to_owned())),
             ],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.sequence",
+            operation: "std.lab.plasmid.sequence".to_owned(),
             phrase: vec![
-                PhrasePart::Word("sequence"),
+                PhrasePart::word("sequence"),
                 operand("aliquot", concrete(material(named("Plasmid"))), take),
             ],
+            inert: Vec::new(),
             results: vec![result("result", concrete(named("SequenceCheck")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.quantify",
+            operation: "std.lab.plasmid.quantify".to_owned(),
             phrase: vec![
-                PhrasePart::Word("quantify"),
+                PhrasePart::word("quantify"),
                 operand("material", concrete(material(named("Plasmid"))), borrow),
             ],
+            inert: Vec::new(),
             results: vec![result("evidence", concrete(named("Evidence")))],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.store",
+            operation: "std.lab.plasmid.store".to_owned(),
             phrase: vec![
-                PhrasePart::Word("store"),
+                PhrasePart::word("store"),
                 operand("material", concrete(material(named("Plasmid"))), take),
-                PhrasePart::Word("at"),
-                PhrasePart::Quantity {
-                    name: "temperature",
-                    signed: true,
-                    units: &["C"],
-                },
+                PhrasePart::word("at"),
+                PhrasePart::quantity("temperature", true, &["C"]),
             ],
-            results: vec![result("material", ContractType::SameAs("material"))],
+            inert: Vec::new(),
+            results: vec![result(
+                "material",
+                ContractType::SameAs("material".to_owned()),
+            )],
         },
         ActionContractSpec {
-            operation: "std.lab.plasmid.dispose",
+            operation: "std.lab.plasmid.dispose".to_owned(),
             phrase: vec![
-                PhrasePart::Word("dispose"),
+                PhrasePart::word("dispose"),
                 operand("material", ContractType::AnyMaterial, take),
             ],
+            inert: Vec::new(),
             results: Vec::new(),
         },
     ];

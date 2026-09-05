@@ -21,7 +21,7 @@ plasmid p_tet_reporter:
 
   require topology == circular
   require sites(BsaI) == 0
-  require length <= 12 kb
+  require length <= 12000 bp
 
   accept sequence == design.sequence
   accept concentration >= 100 ng/uL

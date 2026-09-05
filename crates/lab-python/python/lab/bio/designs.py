@@ -14,8 +14,8 @@ is a small molecule without being told separately.
 
 from typing import Generic, TypeVar
 
-from .._types import LabType
-from .._vocabulary import ArtifactKind
+from .._types import LabConstructor, LabState, LabType
+from .._vocabulary import ArtifactKind, Symbol
 
 _T1 = TypeVar("_T1")
 _T2 = TypeVar("_T2")
@@ -35,6 +35,74 @@ class Both(LabType, Generic[_T1, _T2]):
     __lab_uses__ = ("std.bio.designs",)
 
 
+Competence = Symbol(name="Competence", uses=("std.bio.designs",))
+"""Whether a chassis will take up DNA.
+
+Cells are made competent or bought that way, and the difference matters to
+the one operation that needs it: transformation takes cells that are, and
+says so, rather than trusting that whatever was fetched will do.
+
+How competent they are is the batch's own number. A preparation is accepted
+on a control transformation, so the efficiency belongs to the cells rather
+than to the strain they came from or the plasmid they will carry.
+"""
+
+
+class naive(LabState, Generic[_T1]):
+    __lab_state__ = "naive"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class competent(LabState, Generic[_T1]):
+    __lab_state__ = "competent"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+Cultivation = Symbol(name="Cultivation", uses=("std.bio.designs",))
+"""Where an organism is in the course of being grown.
+
+A culture was a type of its own, which is why it could never say what was
+growing in it. It is an organism in a state, so the organism is the type and
+how far along it is travels beside it.
+"""
+
+
+class designed(LabState, Generic[_T1]):
+    __lab_state__ = "designed"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class transformed(LabState, Generic[_T1]):
+    __lab_state__ = "transformed"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class recovered(LabState, Generic[_T1]):
+    __lab_state__ = "recovered"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class diluted(LabState, Generic[_T1]):
+    __lab_state__ = "diluted"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class isolated(LabState, Generic[_T1]):
+    __lab_state__ = "isolated"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class grown(LabState, Generic[_T1]):
+    __lab_state__ = "grown"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class Ingredient(LabConstructor):
+    """How much of one substance a medium holds per unit volume."""
+
+    __lab_uses__ = ("std.bio.designs",)
+
+
 class Operon(LabType, Generic[_T1, _T2]):
     """Two products expressed from one promoter.
 
@@ -43,6 +111,29 @@ class Operon(LabType, Generic[_T1, _T2]):
     two, the way `Both` does for the signals a promoter answers to.
     """
 
+    __lab_uses__ = ("std.bio.designs",)
+
+
+Pouring = Symbol(name="Pouring", uses=("std.bio.designs",))
+"""Whether a medium has been poured and what has been put on it.
+
+A plate was a type of its own and could not say what it was poured from, so
+plating on the wrong medium was not something the compiler could see.
+"""
+
+
+class prepared(LabState, Generic[_T1]):
+    __lab_state__ = "prepared"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class poured(LabState, Generic[_T1]):
+    __lab_state__ = "poured"
+    __lab_uses__ = ("std.bio.designs",)
+
+
+class inoculated(LabState, Generic[_T1]):
+    __lab_state__ = "inoculated"
     __lab_uses__ = ("std.bio.designs",)
 
 
@@ -99,6 +190,26 @@ class Chassis(ArtifactKind, LabType):
         "recovery_duration",
         "recovery_temperature",
     )
+
+
+class Medium(ArtifactKind, LabType):
+    """What an organism is grown in or on.
+
+    A medium is a recipe: what goes in it, and how much of each per unit volume.
+    Concentrations rather than masses, because a recipe is the same whether a
+    laboratory makes half a litre or five, and what to weigh out is the recipe
+    times the batch.
+
+    A solid medium is a liquid one with a gelling agent, which is why agar is a
+    component rather than a second kind.
+
+    Properties: components?: List<Ingredient>, ph?: Decimal, selection?: Antibiotic.
+    """
+
+    word = "medium"
+    uses = ("std.bio.designs",)
+    __lab_uses__ = ("std.bio.designs",)
+    properties = ("components", "ph", "selection")
 
 
 class Part(ArtifactKind, LabType):

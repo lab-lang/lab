@@ -79,6 +79,57 @@ impl Checker {
                         term: self.role_terms.get(&declaration.name.value).cloned(),
                     });
                 }
+                Item::Facet(declaration) => {
+                    let signature = self
+                        .facets
+                        .get(&declaration.name.value)
+                        .expect("the facet was collected");
+                    declarations.push(CheckedDeclaration::Facet {
+                        doc: declaration.doc.clone(),
+                        name: declaration.name.value.clone(),
+                        subject: to_checked_type(&signature.subject),
+                        states: signature
+                            .states
+                            .iter()
+                            .map(|state| CheckedFacetState {
+                                doc: state.doc.clone(),
+                                name: state.name.clone(),
+                                fields: state
+                                    .fields
+                                    .iter()
+                                    .map(|(name, field)| CheckedSchemaField {
+                                        name: name.clone(),
+                                        r#type: to_checked_type(&field.ty),
+                                        optional: field.optional,
+                                    })
+                                    .collect(),
+                            })
+                            .collect(),
+                        transitions: signature
+                            .transitions
+                            .iter()
+                            .map(|(from, to)| CheckedFacetTransition {
+                                from: from.clone(),
+                                to: to.clone(),
+                            })
+                            .collect(),
+                    });
+                }
+                Item::Action(declaration) => {
+                    let contract = self
+                        .action_contracts
+                        .get(&declaration.name.value)
+                        .expect("the action was collected");
+                    declarations.push(CheckedDeclaration::Action {
+                        doc: declaration.doc.clone(),
+                        name: declaration.name.value.clone(),
+                        operation: contract.operation.clone(),
+                        phrase: contract.phrase.clone(),
+                        operands: contract.operands.clone(),
+                        results: contract.results.clone(),
+                        capability: contract.capability.clone(),
+                    });
+                }
                 Item::ArtifactKind(declaration) => {
                     let signature = self
                         .artifact_kinds
@@ -727,21 +778,23 @@ plasmid reporter_region:
     #[test]
     fn checks_named_workflow_results_and_multi_result_calls() {
         let module = compile_module(
-            r#"workflow preserve(
+            r#"use std.bio.designs
+
+workflow preserve(
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ) -> (
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   return product, plate
 
 workflow delegate(
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ) -> (
   product: Material<Plasmid>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   preserved_product, preserved_plate <- preserve product plate
   return preserved_product, preserved_plate
@@ -1970,7 +2023,7 @@ workflow preserve(plasmid: Material<Plasmid>) -> Material<Plasmid>:
         let CheckedStatement::Effect { action, .. } = &body[0] else {
             panic!("expected effect")
         };
-        assert_eq!(module.schema_version, "lab.portable-module.v9");
+        assert_eq!(module.schema_version, "lab.portable-module.v11");
         assert_eq!(action.operation, "std.lab.plasmid.store");
         assert_eq!(action.arguments[0].mode, OwnershipMode::Take);
         assert_eq!(action.results[0].name, "material");
@@ -2390,6 +2443,225 @@ buy reagent BsaI:
         );
     }
 
+    /// A measurement composes with another, and the result measures something
+    /// neither operand measured. That is what lets a recipe state concentrations
+    /// once and scale to whatever batch is being made.
+    mod dimensions {
+        use super::*;
+
+        const SCHEMA: &str = r#"record Recipe
+
+artifact Recipe:
+  tryptone?: Quantity<g>
+  salt?: Quantity<any Concentration>
+  buffer?: Quantity<any Molarity>
+  either?: Quantity<any Concentration> | Quantity<any Molarity>
+  bulk?: Quantity<any Mass>
+  length?: Quantity<bp>
+  volume?: Quantity<uL>
+
+"#;
+
+        fn stated(body: &str) -> Result<String, ModuleError> {
+            let module = compile_module(&format!("{SCHEMA}build recipe LB:\n{body}"))?;
+            let declaration = module
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    CheckedDeclaration::Artifact { properties, .. } => properties.first(),
+                    _ => None,
+                })
+                .expect("the property was checked");
+            let CheckedExpression::Quantity { magnitude, unit } = &declaration.value.value else {
+                panic!("a composed measurement is a measurement");
+            };
+            Ok(format!("{magnitude} {unit}"))
+        }
+
+        /// The headline: a recipe holds concentrations and a batch is a volume,
+        /// so what to weigh out is their product.
+        #[test]
+        fn a_recipe_scales_to_a_batch() {
+            assert_eq!(
+                stated("  tryptone = 10 g/L * 500 mL\n").expect("a recipe scales"),
+                "5 g"
+            );
+        }
+
+        /// A concentration divides into a mass to give the volume holding it,
+        /// which is the arithmetic behind every dilution done at a bench.
+        #[test]
+        fn a_mass_over_a_concentration_is_a_volume() {
+            assert_eq!(
+                stated("  volume = (500 ng / 100 ng/uL) in uL\n").expect("a dilution computes"),
+                "5 uL"
+            );
+        }
+
+        /// The result lands in the canonical unit of what it measures, so it is
+        /// predictable rather than inherited from whichever operand came first.
+        #[test]
+        fn a_composed_measurement_lands_in_a_canonical_unit() {
+            assert_eq!(
+                stated("  bulk = 2 mg * 3\n").expect("scaling keeps its unit"),
+                "6 mg"
+            );
+        }
+
+        /// Conversion is written. `12 kb` is what a person means and `12000 bp`
+        /// is what the field holds, and saying so is one word.
+        #[test]
+        fn a_measurement_converts_where_it_is_written() {
+            assert_eq!(
+                stated("  length = 12 kb in bp\n").expect("kilobases are base pairs"),
+                "12000 bp"
+            );
+        }
+
+        #[test]
+        fn refuses_converting_between_different_things() {
+            let error = stated("  length = 12 kb in uL\n").unwrap_err().to_string();
+            assert!(
+                error.contains("do not measure the same thing"),
+                "a length is not a volume: {error}"
+            );
+        }
+
+        /// A field naming a dimension takes any unit of it, so a recipe holds
+        /// milligrams per litre beside grams per litre without pinning either.
+        ///
+        /// Mass in a volume and amount in a volume stay different things: going
+        /// between them needs a molar mass, which is a fact about the substance
+        /// and not about the recipe. A field that holds either says so.
+        #[test]
+        fn a_field_may_ask_for_a_dimension_rather_than_a_unit() {
+            compile_module(&format!("{SCHEMA}build recipe LB:\n  salt = 10 g/L\n"))
+                .expect("grams per litre is a concentration");
+            compile_module(&format!("{SCHEMA}build recipe TE:\n  buffer = 50 mM\n"))
+                .expect("millimolar is a molarity");
+            compile_module(&format!("{SCHEMA}build recipe TE:\n  either = 50 mM\n"))
+                .expect("a field holding either takes both");
+            let error = compile_module(&format!("{SCHEMA}build recipe TE:\n  salt = 50 mM\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("expects Quantity<any Concentration>"),
+                "mass in a volume is not amount in a volume: {error}"
+            );
+
+            let error = compile_module(&format!("{SCHEMA}build recipe LB:\n  bulk = 5 mL\n"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("expects Quantity<any Mass>"),
+                "a volume is not a mass: {error}"
+            );
+        }
+
+        #[test]
+        fn refuses_a_dimension_this_compiler_does_not_measure() {
+            let error = compile_module(
+                "record R\n\nartifact R:\n  x?: Quantity<any Luminosity>\n\nbuild r a:\n  x = 1 cd\n",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("'Luminosity' is not something this compiler measures"),
+                "the diagnostic names what it does measure: {error}"
+            );
+        }
+    }
+
+    /// An assignment refused microlitres against millilitres while arithmetic
+    /// and comparison let the same two units meet freely. Both halves of the
+    /// language now hold the unit to the same standard.
+    mod quantity_arithmetic {
+        use super::*;
+
+        fn body(body: &str) -> Result<CheckedModule, ModuleError> {
+            compile_module(&format!(
+                "artifact Plasmid:\n  a?: Quantity<uL>\n\nplasmid p:\n{body}"
+            ))
+        }
+
+        fn refuses(source: &str) -> String {
+            body(source)
+                .expect_err("two units that are not the same unit cannot meet")
+                .to_string()
+        }
+
+        #[test]
+        fn measurements_in_one_unit_combine() {
+            body("  a = 20 uL + 5 uL\n").expect("microlitres add to microlitres");
+            body("  a = 20 uL - 5 uL\n").expect("microlitres subtract from microlitres");
+            body("  a = 20 uL\n  require a > 5 uL\n").expect("one unit compares with itself");
+        }
+
+        /// Scaling a measurement by a count is how a recipe states a batch, and
+        /// it keeps the unit it started in.
+        #[test]
+        fn a_measurement_scales_by_a_plain_number() {
+            body("  a = 20 uL * 3\n").expect("a volume times a count is a volume");
+            body("  a = 20 uL / 2\n").expect("a volume divided by a count is a volume");
+        }
+
+        /// A slash after a unit reads as a denominator, which made a quantity
+        /// impossible to divide. A denominator is a unit, so anything else is
+        /// division.
+        #[test]
+        fn a_compound_unit_still_reads_as_one_unit() {
+            compile_module(
+                "record Reagent:\n  concentration: Quantity<ng/uL>\n\nartifact Reagent\n\nbuy reagent stock:\n  concentration = 100 ng/uL\n",
+            )
+            .expect("a compound unit is not a division");
+        }
+
+        #[test]
+        fn refuses_two_units_meeting_in_arithmetic() {
+            for source in ["  a = 20 uL + 5 mL\n", "  a = 20 uL - 5 mL\n"] {
+                let error = refuses(source);
+                assert!(
+                    error.contains("'uL' and 'mL' are different units"),
+                    "the diagnostic names both units: {error}"
+                );
+            }
+        }
+
+        #[test]
+        fn refuses_two_units_meeting_in_a_comparison() {
+            for source in [
+                "  a = 20 uL\n  require a > 5 mL\n",
+                "  a = 20 uL\n  require a == 5 mL\n",
+            ] {
+                let error = refuses(source);
+                assert!(
+                    error.contains("'uL' and 'mL' are different units"),
+                    "equality is no more askable across units than ordering is: {error}"
+                );
+            }
+        }
+
+        /// Two measurements multiplied give a quantity in neither operand's
+        /// unit. A volume times a volume measures something a laboratory has no
+        /// unit for, so there is nothing to write the answer in.
+        #[test]
+        fn refuses_a_product_with_no_unit_to_write_it_in() {
+            let error = refuses("  a = 20 uL * 5 uL\n");
+            assert!(
+                error.contains("no unit to write it in"),
+                "a volume times a volume is not a volume: {error}"
+            );
+        }
+
+        /// A measurement divided by one measuring the same thing is a plain
+        /// ratio, which is how a dilution factor is written.
+        #[test]
+        fn one_measurement_over_another_of_the_same_thing_is_a_number() {
+            body("  a = 20 uL\n  require (100 uL / 20 uL) > 4.0\n")
+                .expect("a ratio of volumes is a number");
+        }
+    }
+
     #[test]
     fn requires_every_field_a_schema_does_not_mark_optional() {
         let error = compile_module(
@@ -2467,6 +2739,137 @@ plasmid sample:
         .expect("a rule reads the produced type's field");
     }
 
+    /// A package declares a durable verb with `action`, and a workflow checks
+    /// against it the way it checks a bundled one. A new verb is a declaration.
+    mod actions {
+        use super::*;
+
+        const CENTRIFUGE: &str = r#"use std.bio.designs
+use std.lab.plasmid
+
+action centrifuge <culture> at <force> for <duration> -> pellet:
+  culture: take Material<Strain is recovered>
+  force: Quantity<rcf>
+  duration: Quantity<min>
+  pellet: Material<Strain is recovered>
+  requires Centrifugation
+
+buy chassis DH5alpha:
+  competence = competent
+  efficiency = 1e9 cfu/ug
+
+buy plasmid p:
+  sbol_identity = "https://example.org/p"
+  sequence = dna("ACGT")
+
+build strain s:
+  chassis = DH5alpha
+  plasmids = [p]
+
+workflow spin(dna: List<Material<Plasmid>>) -> Material<Strain is recovered>:
+  cells <- provision DH5alpha
+  strain, culture <- transform s from dna into cells
+  culture <- recover culture for 1 h
+  pellet <- centrifuge culture at 4000 rcf for 10 min
+  <- dispose strain
+  return pellet
+"#;
+
+        #[test]
+        fn a_declared_verb_checks_in_a_workflow() {
+            let module = compile_module(CENTRIFUGE).expect("a declared verb is usable");
+            let action = module
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    CheckedDeclaration::Action {
+                        name,
+                        operation,
+                        capability,
+                        ..
+                    } => Some((name.clone(), operation.clone(), capability.clone())),
+                    _ => None,
+                });
+            let (name, operation, capability) = action.expect("the action was checked");
+            assert_eq!(name, "centrifuge");
+            assert_eq!(operation, "standalone.centrifuge");
+            assert_eq!(capability, "Centrifugation");
+        }
+
+        /// The phrase is checked as written: a wrong word or a missing operand
+        /// is a diagnostic against the declared shape.
+        #[test]
+        fn refuses_a_call_that_does_not_match_the_phrase() {
+            let wrong = CENTRIFUGE.replace(
+                "centrifuge culture at 4000 rcf for 10 min",
+                "centrifuge culture at 4000 rcf",
+            );
+            let error = compile_module(&wrong).unwrap_err().to_string();
+            assert!(
+                error.contains("centrifuge"),
+                "the phrase is checked against the declaration: {error}"
+            );
+        }
+
+        /// A measurement operand pins its unit, so calling with another is the
+        /// same thousandfold refusal a field gets.
+        #[test]
+        fn a_measurement_operand_checks_its_unit() {
+            let wrong = CENTRIFUGE.replace("at 4000 rcf", "at 4000 g");
+            let error = compile_module(&wrong).unwrap_err().to_string();
+            assert!(
+                error.contains("rcf"),
+                "the operand's unit is what it accepts: {error}"
+            );
+        }
+
+        /// A verb an importing module uses is checked against the same contract
+        /// the declaring module wrote.
+        #[test]
+        fn a_verb_crosses_a_module_boundary() {
+            let verbs = "use std.bio.designs
+
+action chill <culture> for <duration> -> chilled:
+  culture: take Material<Strain is recovered>
+  duration: Quantity<min>
+  chilled: Material<Strain is recovered>
+  requires StaticIncubation
+";
+            let designs =
+                compile_module_with_id(ModuleId::new("pkg.verbs"), verbs).expect("verbs compile");
+            let mut environment = SemanticEnvironment::default();
+            environment.insert("pkg.verbs", designs.interface.clone());
+            compile_module_in_environment(
+                ModuleId::new("pkg.work"),
+                "use std.bio.designs
+use std.lab.plasmid
+use pkg.verbs
+
+workflow w(c: Material<Strain is recovered>) -> Material<Strain is recovered>:
+  c <- chill c for 20 min
+  return c
+",
+                &environment,
+            )
+            .expect("an imported verb checks a workflow");
+        }
+
+        #[test]
+        fn an_action_states_the_capability_it_needs() {
+            let error = compile_module(
+                "action spin <c> -> c:
+  c: take Material<Plasmid>
+",
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("capability"),
+                "a verb without a capability cannot be allocated: {error}"
+            );
+        }
+    }
+
     #[test]
     fn rejects_a_completeness_rule_naming_a_required_field() {
         let error = compile_module(
@@ -2485,5 +2888,324 @@ plasmid sample:
                 .contains("'label' is required, so a completeness rule cannot mention it"),
             "requiredness and a completeness rule must not disagree: {error}"
         );
+    }
+
+    /// A facet classifies a kind's materials by the state they are in, which is
+    /// what keeps a state off the type. `Culture` and `Plate` were types for
+    /// want of this, and neither could name the design underneath it.
+    mod facets {
+        use super::*;
+        use crate::ExportKind;
+
+        const COMPETENCE: &str = r#"artifact Chassis:
+  label?: String
+
+facet Competence on Chassis:
+  /** Cells as they come off an overnight culture. */
+  naive
+  /** Cells a transformation may be attempted in. */
+  competent:
+    efficiency: Quantity<cfu/ug>
+
+  naive -> competent
+"#;
+
+        fn facet(module: &CheckedModule) -> (&CheckedType, &[CheckedFacetState]) {
+            module
+                .declarations
+                .iter()
+                .find_map(|declaration| match declaration {
+                    CheckedDeclaration::Facet {
+                        subject, states, ..
+                    } => Some((subject, states.as_slice())),
+                    _ => None,
+                })
+                .expect("the facet was checked")
+        }
+
+        #[test]
+        fn a_facet_carries_its_subject_states_and_transitions() {
+            let module = compile_module(COMPETENCE).expect("a facet over a declared kind checks");
+            let (subject, states) = facet(&module);
+            assert_eq!(subject.display_name(), "Chassis");
+            assert_eq!(
+                states
+                    .iter()
+                    .map(|state| state.name.as_str())
+                    .collect::<Vec<_>>(),
+                ["naive", "competent"],
+                "declaration order is preserved, so the first state stays identifiable"
+            );
+            assert!(states[0].fields.is_empty());
+            assert_eq!(states[1].fields[0].name, "efficiency");
+            assert_eq!(
+                states[1].fields[0].r#type.display_name(),
+                "Quantity<cfu/ug>"
+            );
+            assert_eq!(
+                states[1].doc.as_deref(),
+                Some("Cells a transformation may be attempted in."),
+                "a state documents itself, so the reference cannot drift from it"
+            );
+        }
+
+        /// A facet is part of a module's public surface. An importer that cannot
+        /// see the states cannot constrain a material to one.
+        #[test]
+        fn a_facet_is_exported_with_its_states() {
+            let module = compile_module(COMPETENCE).expect("checks");
+            let export = module
+                .interface
+                .exports
+                .get("Competence")
+                .expect("the facet is exported");
+            assert_eq!(export.kind, ExportKind::Facet);
+            let surface = export.facet.as_ref().expect("the states travel with it");
+            assert_eq!(surface.subject.display_name(), "Chassis");
+            assert_eq!(surface.states.len(), 2);
+            assert_eq!(surface.transitions.len(), 1);
+            assert_eq!(surface.transitions[0].from, "naive");
+            assert_eq!(surface.transitions[0].to, "competent");
+        }
+
+        #[test]
+        fn rejects_a_transition_naming_a_state_the_facet_has_not_declared() {
+            let error = compile_module(
+                "artifact Chassis\n\nfacet Competence on Chassis:\n  naive\n  competent\n\n  naive -> transformed\n",
+            )
+            .unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("facet 'Competence' has no state 'transformed'"),
+                "the diagnostic names the facet and the missing state: {error}"
+            );
+        }
+
+        /// A state nothing reaches cannot be established, so the kind is making a
+        /// claim it cannot honor. The first state needs no transition into it
+        /// because that is where a material starts.
+        #[test]
+        fn rejects_a_state_no_transition_reaches() {
+            let error = compile_module(
+                "artifact Chassis\n\nfacet Competence on Chassis:\n  naive\n  competent\n",
+            )
+            .unwrap_err();
+            let message = error.to_string();
+            assert!(
+                message.contains("no transition reaches state 'competent'"),
+                "an unreachable state is refused at its declaration: {error}"
+            );
+        }
+
+        #[test]
+        fn rejects_a_duplicate_state() {
+            let error = compile_module(
+                "artifact Chassis\n\nfacet Competence on Chassis:\n  naive\n  naive\n",
+            )
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("duplicate state 'naive'"),
+                "each state a facet admits is listed once: {error}"
+            );
+        }
+
+        /// Several facets may classify one kind and they stay independent. A
+        /// culture that is both diluted and grown under selection is two facets,
+        /// not one state naming both.
+        #[test]
+        fn a_kind_carries_several_independent_facets() {
+            let module = compile_module(
+                r#"record Broth
+
+artifact Broth
+
+facet Dilution on Broth:
+  neat
+  diluted
+
+  neat -> diluted
+
+facet Selection on Broth:
+  permissive
+  selective
+
+  permissive -> selective
+"#,
+            )
+            .expect("two facets over one kind check");
+            let facets = module
+                .declarations
+                .iter()
+                .filter(|declaration| matches!(declaration, CheckedDeclaration::Facet { .. }))
+                .count();
+            assert_eq!(facets, 2);
+        }
+
+        /// A facet resolves after every kind in the file, so a module reads with
+        /// the thing first and the states it may be in after.
+        #[test]
+        fn a_facet_may_be_declared_above_the_kind_it_classifies() {
+            compile_module(
+                "facet Competence on Chassis:\n  naive\n  competent\n\n  naive -> competent\n\nartifact Chassis\n",
+            )
+            .expect("declaration order does not decide whether a facet resolves");
+        }
+
+        /// The first state is where a material starts, so it needs no transition
+        /// into it and a facet naming only that state is complete.
+        #[test]
+        fn an_initial_state_needs_no_transition_into_it() {
+            compile_module("artifact Chassis\n\nfacet Competence on Chassis:\n  naive\n")
+                .expect("the state a material starts in is reachable by definition");
+        }
+
+        #[test]
+        fn rejects_a_facet_on_something_that_is_not_a_kind() {
+            let error = compile_module("facet Competence on Widget:\n  naive\n").unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("'Widget' is not a kind in scope"),
+                "a facet classifies a kind that exists: {error}"
+            );
+        }
+
+        /// A material narrowed to a state is written `Material<Chassis is
+        /// competent>`. The state constrains the argument rather than wrapping
+        /// the material, so ownership analysis still sees a material.
+        mod narrowing {
+            use super::*;
+
+            const BASE: &str = r#"use std.lab.plasmid
+
+artifact Chassis
+
+facet Competence on Chassis:
+  naive
+  competent:
+    efficiency: Quantity<cfu>
+
+  naive -> competent
+"#;
+
+            fn check(tail: &str) -> Result<CheckedModule, ModuleError> {
+                compile_module(&format!("{BASE}\n{tail}"))
+            }
+
+            /// Knowing which state a material is in is never a problem where any
+            /// state is accepted. The reverse is what narrowing exists to
+            /// refuse.
+            #[test]
+            fn narrowing_runs_one_way() {
+                check("workflow w(c: Material<Chassis is competent>) -> Material<Chassis>:\n  return c\n")
+                    .expect("a competent chassis is a chassis");
+
+                let error =
+                    check("workflow w(c: Material<Chassis>) -> Material<Chassis is competent>:\n  return c\n")
+                        .expect_err("a chassis is not known to be competent");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("expected Material<Chassis is competent>"),
+                    "the diagnostic shows the state that was required: {error}"
+                );
+            }
+
+            #[test]
+            fn refuses_one_state_where_another_is_required() {
+                let error = check(
+                    "workflow w(c: Material<Chassis is naive>) -> Material<Chassis is competent>:\n  return c\n",
+                )
+                .expect_err("naive cells are not competent cells");
+                assert!(
+                    error.to_string().contains("Material<Chassis is naive>"),
+                    "the diagnostic shows the state that was offered: {error}"
+                );
+            }
+
+            /// The encoding matters. Wrapping the material instead of its
+            /// argument would take it out of ownership analysis, which finds a
+            /// material by its outermost name.
+            #[test]
+            fn a_narrowed_material_is_still_affine() {
+                let error = check(
+                    "workflow w(c: Material<Chassis is competent>) -> None:\n  <- dispose c\n  <- dispose c\n  return None\n",
+                )
+                .expect_err("narrowing a material does not launder its ownership");
+                assert!(
+                    error.to_string().contains("'c' is no longer available"),
+                    "a narrowed material is consumed exactly like any other: {error}"
+                );
+            }
+
+            #[test]
+            fn rejects_a_state_no_facet_admits() {
+                let error =
+                    check("workflow w(c: Material<Chassis is transformed>) -> None:\n  <- dispose c\n  return None\n")
+                        .expect_err("a state has to be one the kind declares");
+                let message = error.to_string();
+                assert!(
+                    message.contains("'Chassis' has no state 'transformed'"),
+                    "the diagnostic names the kind and the state: {error}"
+                );
+            }
+
+            /// The whole point, end to end. `transform` requires competent
+            /// cells; a chassis carries the state its declaration states; so
+            /// transforming into cells nobody made competent is a diagnostic at
+            /// the operand rather than a silent success.
+            #[test]
+            fn transformation_requires_cells_that_were_made_competent() {
+                const PROGRAM: &str = r#"use std.bio.designs
+use std.lab.plasmid
+
+buy chassis DH5alpha:
+  competence = competent
+  efficiency = 1e9 cfu/ug
+
+buy chassis Naive:
+  competence = naive
+
+buy plasmid p:
+  sbol_identity = "https://example.org/p"
+  sequence = dna("ACGT")
+
+build strain s:
+  chassis = DH5alpha
+  plasmids = [p]
+
+workflow build(dna: List<Material<Plasmid>>) -> Material<Strain>:
+  cells <- provision {host}
+  strain, culture <- transform s from dna into cells
+  <- dispose culture
+  return strain
+"#;
+                compile_module(&PROGRAM.replace("{host}", "DH5alpha"))
+                    .expect("cells declared competent may be transformed");
+
+                let error = compile_module(&PROGRAM.replace("{host}", "Naive"))
+                    .expect_err("naive cells take up nothing");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("expects Material<Chassis is competent>"),
+                    "the operand names the state it required: {error}"
+                );
+            }
+
+            #[test]
+            fn rejects_narrowing_a_kind_no_facet_classifies() {
+                let error = compile_module(
+                    "use std.lab.plasmid\n\nrecord Widget\n\nartifact Widget\n\nworkflow w(c: Material<Widget is competent>) -> None:\n  <- dispose c\n  return None\n",
+                )
+                .expect_err("a kind with no facet has no states to narrow to");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("'Widget' has no state 'competent'"),
+                    "the diagnostic names the kind: {error}"
+                );
+            }
+        }
     }
 }

@@ -3,6 +3,7 @@
  * cultures, serially dilute them, and spot the dilutions onto selective agar.
  */
 
+use std.bio.designs
 use std.lab.plasmid
 use golden_gate.designs.inventory
 use golden_gate.designs.strains
@@ -13,12 +14,13 @@ workflow build_GVD_strain(
   GVD0015: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [GVD0011, GVD0013, GVD0015]
   cells <- provision DH5alpha
   strain, culture <- transform GVD_strain from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate

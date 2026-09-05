@@ -414,6 +414,12 @@ materials:BL21
     sbol:hasNamespace <https://example.org/golden-gate/materials> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
+materials:LB_chloramphenicol_agar
+    a sbol:Component ;
+    sbol:displayId "LB_chloramphenicol_agar" ;
+    sbol:hasNamespace <https://example.org/golden-gate/materials> ;
+    sbol:type <https://identifiers.org/SBO:0000241> .
+
 materials:chloramphenicol
     a sbol:Component ;
     sbol:displayId "chloramphenicol" ;
@@ -610,6 +616,16 @@ lots:BL21_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:BL21 ;
     fac:materialKind inv:BacterialStock ;
+    fac:facility ex:facility ;
+    fac:locatedIn ex:stock_storage ;
+    fac:isActive true .
+
+lots:LB_chloramphenicol_agar_lot
+    a sbol:Implementation ;
+    sbol:displayId "LB_chloramphenicol_agar_lot" ;
+    sbol:hasNamespace <https://example.org/golden-gate/lots> ;
+    sbol:built materials:LB_chloramphenicol_agar ;
+    fac:materialKind inv:ProcuredMaterial ;
     fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .

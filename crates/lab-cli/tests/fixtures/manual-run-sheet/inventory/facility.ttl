@@ -1,0 +1,36 @@
+@prefix cap: <https://sbol.io/ns/capability#> .
+@prefix ex: <https://example.org/manual-media/> .
+@prefix fac: <https://sbol.io/ns/facility#> .
+@prefix sbol: <http://sbols.org/v3#> .
+
+# A facility that is one person at one bench: every step of a build here is a
+# manual-control step, so the plan's only document is the typeset run sheet.
+
+ex:facility a sbol:TopLevel, fac:Facility ;
+    sbol:displayId "facility" ;
+    sbol:hasNamespace <https://example.org/manual-media> ;
+    sbol:name "Manual media kitchen" .
+
+ex:room a sbol:TopLevel, fac:Zone ;
+    sbol:displayId "room" ;
+    sbol:hasNamespace <https://example.org/manual-media> ;
+    fac:facility ex:facility ;
+    fac:zoneKind fac:Room ;
+    fac:isActive true .
+
+ex:bench a sbol:TopLevel, fac:Asset ;
+    sbol:displayId "bench" ;
+    sbol:hasNamespace <https://example.org/manual-media> ;
+    fac:facility ex:facility ;
+    fac:assetKind fac:Workstation ;
+    fac:locatedIn ex:room ;
+    fac:isActive true ;
+    fac:capability <https://example.org/manual-media/bench/artifact_realization> .
+
+<https://example.org/manual-media/bench/artifact_realization>
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "artifact_realization" ;
+    fac:capabilityKind cap:ArtifactRealization ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .

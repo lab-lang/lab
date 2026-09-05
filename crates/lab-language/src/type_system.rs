@@ -22,6 +22,19 @@ pub(crate) enum Ty {
     /// constrained to a role. `Circuit<any Signal, Fluorescence>` is a circuit
     /// driven by some signal nobody may name again.
     Any(String),
+    /// A measurement of a stated thing, in whatever unit it was written in.
+    ///
+    /// A field asks for this where it holds measurements an author chose the
+    /// units of: a recipe carries grams per litre and millimolar together, and
+    /// pinning one unit would refuse the other. Each value still names its own
+    /// unit, so nothing converts on its own.
+    Measuring(String),
+    /// A type argument narrowed to one facet state.
+    ///
+    /// This only ever appears as an argument, the way `Any` does, so a material
+    /// in a state is still `Material<..>` to the passes that detect one by its
+    /// outermost name. Ownership and linearity are unaffected by a narrowing.
+    InState(Box<Ty>, String),
     Integer,
     Decimal,
     String,
@@ -66,6 +79,8 @@ impl fmt::Display for Ty {
             Self::List(element) => write!(formatter, "List<{element}>"),
             Self::Quantity(unit) => write!(formatter, "Quantity<{unit}>"),
             Self::Any(role) => write!(formatter, "any {role}"),
+            Self::Measuring(dimension) => write!(formatter, "Quantity<any {dimension}>"),
+            Self::InState(subject, state) => write!(formatter, "{subject} is {state}"),
             Self::Integer => formatter.write_str("Integer"),
             Self::Decimal => formatter.write_str("Decimal"),
             Self::String => formatter.write_str("String"),
@@ -93,6 +108,13 @@ pub(crate) fn to_checked_type(ty: &Ty) -> CheckedType {
         Ty::Decimal => CheckedType::Decimal,
         Ty::String => CheckedType::String,
         Ty::Any(role) => CheckedType::Any { role: role.clone() },
+        Ty::Measuring(dimension) => CheckedType::Measuring {
+            dimension: dimension.clone(),
+        },
+        Ty::InState(subject, state) => CheckedType::InState {
+            subject: Box::new(to_checked_type(subject)),
+            state: state.clone(),
+        },
         Ty::Bool => CheckedType::Bool,
         Ty::None => CheckedType::None,
         Ty::EmptyList => CheckedType::List {
@@ -116,6 +138,10 @@ pub(crate) fn from_checked_type(ty: &CheckedType) -> Ty {
         CheckedType::List { element } => Ty::List(Box::new(from_checked_type(element))),
         CheckedType::Quantity { unit } => Ty::Quantity(unit.clone()),
         CheckedType::Any { role } => Ty::Any(role.clone()),
+        CheckedType::Measuring { dimension } => Ty::Measuring(dimension.clone()),
+        CheckedType::InState { subject, state } => {
+            Ty::InState(Box::new(from_checked_type(subject)), state.clone())
+        }
         CheckedType::Integer => Ty::Integer,
         CheckedType::Decimal => Ty::Decimal,
         CheckedType::String => Ty::String,
@@ -157,10 +183,30 @@ pub(crate) fn compatible(roles: &RoleTable, actual: &Ty, expected: &Ty) -> bool 
         // `Circuit<Tetracycline, R>` become `Circuit<any Signal, R>` without a
         // separate rule, and it never runs in the other direction.
         Ty::Any(role) => plays_role(roles, actual, role),
+        // A measurement fits a field asking for what it measures. This runs one
+        // way: a field naming a unit still refuses every other unit, so the
+        // thousandfold error 0025 refuses is refused here too.
+        Ty::Measuring(dimension) => matches!(
+            (actual, crate::units::Dimension::named(dimension)),
+            (Ty::Quantity(unit), Some(wanted))
+                if crate::units::measured(unit).is_some_and(|it| it.dimension == wanted)
+        ),
         Ty::Union(alternatives) => alternatives.iter().any(|ty| compatible(roles, actual, ty)),
         Ty::List(expected) => match actual {
             Ty::List(actual) => compatible(roles, actual, expected),
             Ty::EmptyList => true,
+            _ => false,
+        },
+        // Narrowing runs one way. A material known to be in a state may be used
+        // where any state of that subject is accepted, because knowing more is
+        // never a problem. The reverse is what this exists to refuse: an
+        // unnarrowed material cannot stand in where a state is required, which
+        // is how transforming into cells nobody made competent is caught.
+        Ty::InState(expected_subject, expected_state) => match actual {
+            Ty::InState(actual_subject, actual_state) => {
+                actual_state == expected_state
+                    && compatible(roles, actual_subject, expected_subject)
+            }
             _ => false,
         },
         Ty::Named(expected_name, expected_args) => match actual {
@@ -172,6 +218,7 @@ pub(crate) fn compatible(roles: &RoleTable, actual: &Ty, expected: &Ty) -> bool 
                         .zip(expected_args)
                         .all(|(actual, expected)| compatible(roles, actual, expected))
             }
+            Ty::InState(actual_subject, _) => compatible(roles, actual_subject, expected),
             _ => false,
         },
         _ => false,
@@ -205,10 +252,21 @@ pub(crate) fn common_type(roles: &RoleTable, left: Ty, right: Ty) -> Ty {
     Ty::Union(alternatives)
 }
 
+/// Whether two types may be compared or added to one another.
+///
+/// Two quantities qualify only when they are measured in the same unit. Letting
+/// any quantity meet any other made `20 uL + 5 mL` a microlitre volume and
+/// `volume > 5 mL` a question worth asking of microlitres, which is the
+/// thousandfold error [0025](../../docs/language/decisions/0025-quantity-types.md)
+/// refuses when the same two units meet across an assignment.
 pub(crate) fn comparable(roles: &RoleTable, left: &Ty, right: &Ty) -> bool {
-    compatible(roles, left, right)
-        || compatible(roles, right, left)
-        || matches!((left, right), (Ty::Quantity(_), Ty::Quantity(_)))
+    compatible(roles, left, right) || compatible(roles, right, left)
+}
+
+/// Whether a type counts without being measured in anything, and so may scale a
+/// quantity.
+pub(crate) fn dimensionless(ty: &Ty) -> bool {
+    matches!(ty, Ty::Integer | Ty::Decimal)
 }
 
 /// What each type parameter was inferred as, and the operand that fixed it.

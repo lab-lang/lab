@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::checked::OwnershipMode;
 use crate::source::{Identifier, Span};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -46,6 +47,8 @@ pub fn instance_word(type_name: &str) -> String {
 pub enum Item {
     Use(UseDecl),
     Role(RoleDecl),
+    Facet(FacetDecl),
+    Action(ActionDecl),
     ArtifactKind(ArtifactKindDecl),
     Circuit(CircuitDecl),
     Artifact(ArtifactDecl),
@@ -59,6 +62,8 @@ impl Item {
         match self {
             Self::Use(item) => item.span,
             Self::Role(item) => item.span,
+            Self::Facet(item) => item.span,
+            Self::Action(item) => item.span,
             Self::ArtifactKind(item) => item.span,
             Self::Circuit(item) => item.span,
             Self::Artifact(item) => item.span,
@@ -92,6 +97,101 @@ pub struct RoleDecl {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UseDecl {
     pub path: Path,
+    pub span: Span,
+}
+
+/// A durable laboratory verb a package declares.
+///
+/// The header is the phrase a workflow writes, with each operand in `<>` and
+/// each result named after `->`. The body types every operand and result, gives
+/// an operand its ownership mode, and names the capability the verb needs. What
+/// the compiler bundles as `centrifuge`, `chill`, and the rest is the same
+/// shape a package supplies, so a new verb is a declaration rather than a
+/// compiler change.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// The verb, which is the phrase's first word.
+    pub name: Identifier,
+    /// The phrase in order: literal words and `<operand>` holes.
+    pub phrase: Vec<PhraseToken>,
+    /// The names a result binds, in order, listed after `->`.
+    pub results: Vec<Identifier>,
+    /// A type, and for an operand an ownership mode, for each named operand and
+    /// result.
+    pub bindings: Vec<ActionBinding>,
+    /// The capability a facility must offer to run this verb.
+    pub capability: Identifier,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "token", rename_all = "snake_case")]
+pub enum PhraseToken {
+    Word(Identifier),
+    Hole(Identifier),
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActionBinding {
+    pub name: Identifier,
+    /// The ownership mode, where this names an operand. A result is never owned
+    /// by the action, so it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<OwnershipMode>,
+    pub ty: TypeExpr,
+    pub span: Span,
+}
+
+/// `facet Competence on Chassis` — how a kind's materials are classified by the
+/// state they are in.
+///
+/// A state is not a kind of thing, so it travels on the material rather than
+/// becoming a second type. `Culture` and `Plate` were types for want of this,
+/// which is why neither could name the design underneath it.
+///
+/// Several facets may classify one kind, and they are independent. A culture
+/// that is both diluted and grown under selection is two facets; flattening
+/// them into one state naming both does not survive a third axis.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacetDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: Identifier,
+    /// The type whose materials this facet classifies, written after `on`.
+    pub subject: TypeExpr,
+    /// The states in declaration order. The first is the state a newly
+    /// established material is in unless its declaration says otherwise.
+    pub states: Vec<FacetStateDecl>,
+    pub transitions: Vec<FacetTransitionDecl>,
+    pub span: Span,
+}
+
+/// One state a material may be in, together with what that state carries.
+///
+/// A state's fields are required. Knowing a batch of cells is competent without
+/// knowing how competent is not a state worth distinguishing, so a field that
+/// may be unstated belongs on the kind rather than on the state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacetStateDecl {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: Identifier,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldDecl>,
+    pub span: Span,
+}
+
+/// `naive -> competent` — a state change an action may establish.
+///
+/// Transitions are written rather than inferred from the actions a package
+/// happens to declare, so the reachable states are a claim the kind makes and a
+/// reviewer can read.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacetTransitionDecl {
+    pub from: Identifier,
+    pub to: Identifier,
     pub span: Span,
 }
 
@@ -455,7 +555,7 @@ pub enum TypeExpr {
     ///
     /// The argument is a unit rather than a type, so it is written the way a
     /// unit is written everywhere else: a name, optionally over a denominator.
-    Quantity { unit: String, span: Span },
+    Quantity { unit: Unit, span: Span },
 }
 
 impl TypeExpr {
@@ -493,13 +593,48 @@ pub enum TypeArgument {
         role: Path,
         span: Span,
     },
+    /// `Chassis is competent` — the subject, narrowed to one facet state.
+    ///
+    /// The state constrains the argument rather than wrapping `Material`, so
+    /// `Material<Chassis is competent>` is still a material to every pass that
+    /// asks. Wrapping the material instead would take it out of ownership and
+    /// linearity analysis, which detect one by its outermost name.
+    InState {
+        subject: Box<TypeExpr>,
+        state: Identifier,
+        span: Span,
+    },
 }
 
 impl TypeArgument {
     pub fn span(&self) -> Span {
         match self {
             Self::Type(ty) => ty.span(),
-            Self::Binding { span, .. } | Self::Any { span, .. } => *span,
+            Self::Binding { span, .. } | Self::Any { span, .. } | Self::InState { span, .. } => {
+                *span
+            }
+        }
+    }
+}
+
+/// What a written quantity type is measured in.
+///
+/// A field usually names the unit, because a thousandfold error is worth
+/// refusing and the unit is what refuses it. A recipe holds measurements in
+/// units its author chose, so it names the dimension instead and lets each
+/// value keep its own unit.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Unit {
+    Exact(String),
+    Dimension(String),
+}
+
+impl Unit {
+    pub fn written(&self) -> String {
+        match self {
+            Self::Exact(unit) => unit.clone(),
+            Self::Dimension(dimension) => format!("any {dimension}"),
         }
     }
 }
@@ -550,6 +685,15 @@ pub enum Expr {
         field: Identifier,
         span: Span,
     },
+    /// `500 mL in uL` — the same measurement written in another unit.
+    ///
+    /// Conversion is written rather than implied, so a unit still means what it
+    /// says everywhere else and a thousandfold error stays a diagnostic.
+    Convert {
+        value: Box<Expr>,
+        unit: Identifier,
+        span: Span,
+    },
     Unary {
         op: UnaryOp,
         operand: Box<Expr>,
@@ -575,6 +719,7 @@ impl Expr {
             | Self::Call { span, .. }
             | Self::Record { span, .. }
             | Self::Field { span, .. }
+            | Self::Convert { span, .. }
             | Self::Unary { span, .. }
             | Self::Binary { span, .. } => *span,
         }

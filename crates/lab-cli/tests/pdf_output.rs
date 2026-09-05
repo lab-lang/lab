@@ -80,3 +80,61 @@ fn facility_plan_typesets_every_document_to_pdf() {
         "plan output lists the typeset documents: {human}"
     );
 }
+
+/// A plan whose every step is manual has no adapter to render an operator
+/// document, so the plan itself typesets a run sheet for the whole protocol.
+#[test]
+fn a_manual_only_plan_typesets_a_run_sheet() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/manual-run-sheet");
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("manual-media");
+    copy_dir(&fixture, &project);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["plan", project.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "facility plan failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let documents = project.join(".lab/plan/documents");
+    let pdf = std::fs::read(documents.join("manual_protocol.pdf")).unwrap();
+    assert!(pdf.starts_with(b"%PDF-"), "the run sheet is a PDF");
+    let source = std::fs::read_to_string(documents.join("manual_protocol.typ")).unwrap();
+    assert!(source.contains("Step 1"), "{source}");
+    assert!(source.contains("Realize artifact"), "{source}");
+    assert!(
+        source.contains("LB\\_broth"),
+        "the artifact name is escaped for Typst markup: {source}"
+    );
+    assert!(
+        documents.join("lab-style.typ").is_file(),
+        "the style sheet is bundled beside the sheet"
+    );
+
+    let human = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        human.contains("manual_protocol.pdf"),
+        "plan output lists the run sheet: {human}"
+    );
+
+    // Planned as a named program, the same build roots at that program's main
+    // and writes its plan under the program's own directory.
+    let output = Command::new(env!("CARGO_BIN_EXE_lab"))
+        .args(["plan", project.to_str().unwrap(), "--program", "main"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "program plan failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let program_pdf = project.join(".lab/plan/main/documents/manual_protocol.pdf");
+    assert!(
+        std::fs::read(&program_pdf).unwrap().starts_with(b"%PDF-"),
+        "the program's run sheet is a PDF of its own"
+    );
+}

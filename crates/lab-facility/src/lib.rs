@@ -17,6 +17,7 @@ pub use adapters::{
 };
 pub use execution::{
     ExecutionPlanBuildError, ExecutionPlanOptions, build_execution_plan_from_invocations,
+    manual_run_steps,
 };
 pub use explain::explain_facility_planning_error;
 pub use inventory::{

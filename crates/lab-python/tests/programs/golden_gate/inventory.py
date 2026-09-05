@@ -7,8 +7,20 @@ resolution and a runtime evidence question.
 
 import lab
 from lab import dna
-from lab.bio.designs import CDS, Antibiotic, Backbone, Chassis, Part, Promoter, RestrictionEnzyme
-from lab.units import C, minutes
+from lab.bio.designs import (
+    CDS,
+    Antibiotic,
+    Backbone,
+    Chassis,
+    Ingredient,
+    Medium,
+    Part,
+    Promoter,
+    RestrictionEnzyme,
+    competent,
+    poured,
+)
+from lab.units import C, L, cfu, g, minutes, ug
 
 module = lab.Module("golden_gate.designs.inventory", doc=__doc__)
 
@@ -119,6 +131,8 @@ recovery_medium = Reagent.buy(
 # Host organisms. DH5alpha is a cloning strain; BL21 is an expression strain.
 # Both are transformed the way competent cells are: chilled, shocked, recovered.
 DH5alpha = Chassis.buy(
+    competence=competent,
+    efficiency=10**9 * cfu / ug,
     sbol_identity="https://sbolcanvas.org/DH5alpha",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
@@ -127,6 +141,8 @@ DH5alpha = Chassis.buy(
 )
 
 BL21 = Chassis.buy(
+    competence=competent,
+    efficiency=10**7 * cfu / ug,
     sbol_identity="https://sbolcanvas.org/BL21",
     heat_shock_temperature=42 * C,
     cold_incubation=30 * minutes,
@@ -136,4 +152,15 @@ BL21 = Chassis.buy(
 
 chloramphenicol = Antibiotic.buy(
     sbol_identity="https://example.org/golden-gate/materials/chloramphenicol"
+)
+LB_chloramphenicol_agar = Medium.buy(
+    sbol_identity="https://example.org/golden-gate/materials/LB_chloramphenicol_agar",
+    pouring=poured,
+    selection=chloramphenicol,
+    components=[
+        Ingredient(substance="tryptone", concentration=10 * g / L),
+        Ingredient(substance="yeast extract", concentration=5 * g / L),
+        Ingredient(substance="sodium chloride", concentration=10 * g / L),
+        Ingredient(substance="agar", concentration=15 * g / L),
+    ],
 )

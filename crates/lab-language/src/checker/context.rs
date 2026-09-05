@@ -7,13 +7,15 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::ast::Path;
-use crate::checked::CheckedType;
+use crate::checked::{CheckedActionOperand, CheckedActionResult, CheckedPhraseToken, CheckedType};
 use crate::semantic_error::SemanticError;
-use crate::semantics::{DefinitionId, ExportKind, ModuleId, ModuleInterface, SemanticEnvironment};
+use crate::semantics::{
+    ActionSurface, DefinitionId, ExportKind, ModuleId, ModuleInterface, SemanticEnvironment,
+};
 use crate::source::Span;
 use crate::standard_library::{
-    ActionContractSpec, ConstructorSpec, PureFunctionSpec, StandardLibrary, StandardModule,
-    TypeSpec,
+    ActionContractSpec, ConstructorSpec, ContractType, Lineage, PhrasePart, PureFunctionSpec,
+    ResultSpec, StandardLibrary, StandardModule, TypeSpec,
 };
 use crate::type_system::{Ty, from_checked_type};
 
@@ -65,6 +67,106 @@ pub(super) struct ArtifactKindSignature {
     pub declares: Option<crate::checked::CheckedPresence>,
 }
 
+/// Rebuild the contract a workflow checks against from an imported action's
+/// surface.
+///
+/// A hole becomes a quantity slot for a measurement, an integer slot for a
+/// whole number, and an operand otherwise, exactly as the declaring module
+/// decided; the surface carries enough to make the same choice.
+fn action_contract_from_surface(surface: &ActionSurface) -> ActionContractSpec {
+    let operand = |name: &str| {
+        surface
+            .operands
+            .iter()
+            .find(|operand| operand.name == name)
+            .expect("an action surface names every operand its phrase holds")
+    };
+    let phrase = surface
+        .phrase
+        .iter()
+        .map(|token| match token {
+            CheckedPhraseToken::Word(word) => PhrasePart::word(word),
+            CheckedPhraseToken::Hole(name) => {
+                let operand = operand(name);
+                match from_checked_type(&operand.r#type) {
+                    Ty::Quantity(unit) => PhrasePart::quantity(name, false, &[unit.as_str()]),
+                    // A union of measurements is one operand read in any of its
+                    // units, the way a growth endpoint is written as OD600 or
+                    // OD700. The reconstruction mirrors what the declaration
+                    // collected, so an imported verb reads the same phrase.
+                    Ty::Union(alternatives)
+                        if !alternatives.is_empty()
+                            && alternatives
+                                .iter()
+                                .all(|alternative| matches!(alternative, Ty::Quantity(_))) =>
+                    {
+                        let units = alternatives
+                            .iter()
+                            .map(|alternative| match alternative {
+                                Ty::Quantity(unit) => unit.as_str(),
+                                _ => unreachable!("every alternative is a measurement"),
+                            })
+                            .collect::<Vec<_>>();
+                        PhrasePart::quantity(name, false, &units)
+                    }
+                    Ty::Integer => PhrasePart::integer(name, false),
+                    ty => PhrasePart::operand(name, ContractType::Concrete(ty), operand.mode),
+                }
+            }
+        })
+        .collect();
+    let results = surface
+        .results
+        .iter()
+        .map(|result| ResultSpec {
+            name: result.name.clone(),
+            r#type: ContractType::Concrete(from_checked_type(&result.r#type)),
+            lineage: Lineage::Continues,
+        })
+        .collect();
+    ActionContractSpec {
+        operation: surface.operation.clone(),
+        phrase,
+        results,
+        inert: Vec::new(),
+    }
+}
+
+/// The full contract of an action declared in source.
+#[derive(Clone)]
+pub(super) struct CheckedActionContract {
+    pub operation: String,
+    pub phrase: Vec<CheckedPhraseToken>,
+    pub operands: Vec<CheckedActionOperand>,
+    pub results: Vec<CheckedActionResult>,
+    pub capability: String,
+}
+
+/// A facet in scope: the type it classifies, its states, and the state changes
+/// it admits.
+#[derive(Clone)]
+pub(super) struct FacetSignature {
+    pub subject: Ty,
+    /// The states in declaration order, so the first stays identifiable as the
+    /// state a newly established material is in.
+    pub states: Vec<FacetState>,
+    pub transitions: Vec<(String, String)>,
+}
+
+impl FacetSignature {
+    /// The state this facet admits under that name, if it admits one.
+    pub fn state(&self, name: &str) -> Option<&FacetState> {
+        self.states.iter().find(|state| state.name == name)
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct FacetState {
+    pub doc: Option<String>,
+    pub name: String,
+    pub fields: BTreeMap<String, SchemaField>,
+}
+
 #[derive(Clone)]
 pub(super) struct WorkflowSignature {
     pub generics: Generics,
@@ -85,6 +187,13 @@ pub(super) struct SemanticContext {
     pub pure_functions: HashMap<String, PureFunctionSpec>,
     pub constructors: HashMap<String, ConstructorSpec>,
     pub actions: HashMap<String, ActionContractSpec>,
+    /// The full contract of each action declared in source, by verb.
+    ///
+    /// The action map above is what a workflow checks against, shared with the
+    /// standard library. This carries the extra a source declaration states and
+    /// exports: the phrase, the operands and results with their types, and the
+    /// capability, so the compiler can derive a method to run the verb.
+    pub action_contracts: HashMap<String, CheckedActionContract>,
     pub circuits: HashMap<String, CircuitSignature>,
     pub data: HashMap<String, DataSignature>,
     pub cases: HashMap<String, String>,
@@ -104,6 +213,14 @@ pub(super) struct SemanticContext {
     /// SBOL document states about it. A role with no term classifies types and
     /// says nothing about any ontology.
     pub role_terms: HashMap<String, String>,
+    /// Every facet in scope, by facet name.
+    pub facets: HashMap<String, FacetSignature>,
+    /// The facets classifying each subject type, by the type's name.
+    ///
+    /// A material type constrains a state without naming the facet it belongs
+    /// to, so resolving `Material<Chassis is competent>` starts from the
+    /// subject and asks which of its facets admits that state.
+    pub type_facets: HashMap<String, BTreeSet<String>>,
 }
 
 impl SemanticContext {
@@ -132,6 +249,7 @@ impl SemanticContext {
             pure_functions: HashMap::new(),
             constructors: HashMap::new(),
             actions: HashMap::new(),
+            action_contracts: HashMap::new(),
             circuits: HashMap::new(),
             data: HashMap::new(),
             cases: HashMap::new(),
@@ -141,6 +259,8 @@ impl SemanticContext {
             roles: BTreeSet::new(),
             type_roles: HashMap::new(),
             role_terms: HashMap::new(),
+            facets: HashMap::new(),
+            type_facets: HashMap::new(),
         }
     }
 
@@ -314,6 +434,53 @@ impl SemanticContext {
                 // Types and roles are registered above, before anything that
                 // could refer to them.
                 ExportKind::Type | ExportKind::Role => {}
+                // A facet means nothing without its states, so the two travel
+                // together the way a kind travels with its schema.
+                ExportKind::Facet => {
+                    if let Some(surface) = &export.facet {
+                        let subject = from_checked_type(&surface.subject);
+                        if let Ty::Named(subject_name, _) = &subject {
+                            self.type_facets
+                                .entry(subject_name.clone())
+                                .or_default()
+                                .insert(name.clone());
+                        }
+                        self.facets.insert(
+                            name.clone(),
+                            FacetSignature {
+                                subject,
+                                states: surface
+                                    .states
+                                    .iter()
+                                    .map(|state| FacetState {
+                                        doc: state.doc.clone(),
+                                        name: state.name.clone(),
+                                        fields: state
+                                            .fields
+                                            .iter()
+                                            .map(|field| {
+                                                (
+                                                    field.name.clone(),
+                                                    SchemaField {
+                                                        ty: from_checked_type(&field.r#type),
+                                                        optional: field.optional,
+                                                    },
+                                                )
+                                            })
+                                            .collect(),
+                                    })
+                                    .collect(),
+                                transitions: surface
+                                    .transitions
+                                    .iter()
+                                    .map(|transition| {
+                                        (transition.from.clone(), transition.to.clone())
+                                    })
+                                    .collect(),
+                            },
+                        );
+                    }
+                }
                 // A word a package supplies means nothing without its schema,
                 // so the two travel together.
                 ExportKind::ArtifactKind => {
@@ -396,7 +563,27 @@ impl SemanticContext {
                         );
                     }
                 }
-                ExportKind::Workflow | ExportKind::Action => {
+                ExportKind::Action => {
+                    self.insert_imported_name(interface.module.as_str(), name, span)?;
+                    if let Some(surface) = &export.action {
+                        self.actions
+                            .insert(name.clone(), action_contract_from_surface(surface));
+                        // The capability an imported verb needs travels with its
+                        // surface, so a workflow that performs it can carry the
+                        // capability to the method the compiler derives.
+                        self.action_contracts.insert(
+                            name.clone(),
+                            CheckedActionContract {
+                                operation: surface.operation.clone(),
+                                phrase: surface.phrase.clone(),
+                                operands: surface.operands.clone(),
+                                results: surface.results.clone(),
+                                capability: surface.capability.clone(),
+                            },
+                        );
+                    }
+                }
+                ExportKind::Workflow => {
                     self.insert_imported_name(interface.module.as_str(), name, span)?;
                     if let Some(signature) = &export.callable {
                         self.workflows.insert(

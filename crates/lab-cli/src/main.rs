@@ -50,6 +50,10 @@ enum Command {
         /// Artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        /// A program under src/programs/ to build, named by its file. The
+        /// build is rooted at that program's main workflow.
+        #[arg(long)]
+        program: Option<String>,
     },
     /// Write only the reviewed facility plan and its adapter lowerings.
     Plan {
@@ -59,6 +63,11 @@ enum Command {
         /// Plan artifact directory, relative to the project root unless absolute.
         #[arg(long)]
         out_dir: Option<PathBuf>,
+        /// A program under src/programs/ to plan, named by its file. The plan
+        /// is rooted at that program's main workflow and written under its own
+        /// directory.
+        #[arg(long)]
+        program: Option<String>,
     },
     /// Discover, validate, and render asset-bound adapter profiles.
     Adapters {
@@ -163,8 +172,16 @@ fn run() -> Result<()> {
     match cli.command {
         Command::New { path, name } => commands::new_project(path, name, &output),
         Command::Check { path } => commands::check(path, &output),
-        Command::Build { path, out_dir } => commands::build(path, out_dir, &output),
-        Command::Plan { path, out_dir } => commands::plan(path, out_dir, &output),
+        Command::Build {
+            path,
+            out_dir,
+            program,
+        } => commands::build(path, out_dir, program, &output),
+        Command::Plan {
+            path,
+            out_dir,
+            program,
+        } => commands::plan(path, out_dir, program, &output),
         Command::Adapters { command } => match command {
             AdaptersCommand::Describe { driver } => adapters::describe(driver, &output),
             AdaptersCommand::Default { driver, name } => adapters::default(driver, name, &output),
@@ -201,7 +218,7 @@ mod tests {
         let cli = Cli::try_parse_from(["lab", "build", "project", "--out-dir", "dist"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Build { path, out_dir }
+            Command::Build { path, out_dir, .. }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
         ));
@@ -212,7 +229,7 @@ mod tests {
         let cli = Cli::try_parse_from(["lab", "plan", "project", "--out-dir", "review"]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Plan { path, out_dir }
+            Command::Plan { path, out_dir, .. }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("review"))
         ));

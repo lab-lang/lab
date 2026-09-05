@@ -74,6 +74,32 @@ workflow main() -> Material<Plasmid>:
     )
 }
 
+/// Run the package's source generator, where its manifest declares one.
+///
+/// A workspace whose Lab another frontend emits stays compiled from its source
+/// of truth: the generator runs from the package root before every check,
+/// plan, and build, the way a build script would. Its output surfaces only on
+/// failure.
+fn generate_sources(path: &Path) -> Result<()> {
+    let Some((root, command)) = lab_package::source_generator(path)? else {
+        return Ok(());
+    };
+    let generated = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&command)
+        .current_dir(&root)
+        .output()
+        .with_context(|| format!("failed to run build.generate command `{command}`"))?;
+    if !generated.status.success() {
+        bail!(
+            "build.generate command `{command}` failed:\n{}{}",
+            String::from_utf8_lossy(&generated.stdout),
+            String::from_utf8_lossy(&generated.stderr),
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
     if path.is_file() && path.extension().is_some_and(|extension| extension == "lab") {
         let text = fs::read_to_string(&path)
@@ -107,6 +133,7 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
         );
     }
 
+    generate_sources(&path)?;
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     validate_project_inventories(&project)?;
@@ -129,7 +156,13 @@ pub(crate) fn check(path: PathBuf, output: &Output) -> Result<()> {
     )
 }
 
-pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
+pub(crate) fn build(
+    path: PathBuf,
+    out_dir: Option<PathBuf>,
+    program: Option<String>,
+    output: &Output,
+) -> Result<()> {
+    generate_sources(&path)?;
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     validate_project_inventories(&project)?;
@@ -193,12 +226,22 @@ pub(crate) fn build(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) ->
         });
     }
 
-    let facility =
-        if package.manifest.inventory.document.is_some() && package.entry_source().is_some() {
-            Some(write_facility_plan(&project, &compiled, &output_root)?)
-        } else {
-            None
-        };
+    let entry = program
+        .as_deref()
+        .map(|program| resolve_program(package, &compiled, program))
+        .transpose()?;
+    let facility = if package.manifest.inventory.document.is_some()
+        && (entry.is_some() || package.entry_source().is_some())
+    {
+        Some(write_facility_plan(
+            &project,
+            &compiled,
+            &output_root,
+            entry.as_deref(),
+        )?)
+    } else {
+        None
+    };
     let facility_index = facility
         .as_ref()
         .map(|planned| build_facility_index(planned, &output_root))
@@ -325,17 +368,50 @@ fn build_products(modules: &[CompiledModule], program_packages: &[String]) -> Ve
         .collect()
 }
 
-pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> Result<()> {
+pub(crate) fn plan(
+    path: PathBuf,
+    out_dir: Option<PathBuf>,
+    program: Option<String>,
+    output: &Output,
+) -> Result<()> {
+    generate_sources(&path)?;
     let project = LabProject::discover(&path)
         .with_context(|| format!("failed to load project from {}", path.display()))?;
     let compiled = project.compile()?;
+    let entry = program
+        .as_deref()
+        .map(|program| resolve_program(project.default_package(), &compiled, program))
+        .transpose()?;
+    if entry.is_none() && project.default_package().entry_source().is_none() {
+        let programs = project
+            .default_package()
+            .program_sources()
+            .filter_map(|source| {
+                source
+                    .relative_path
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+            })
+            .collect::<Vec<_>>();
+        if !programs.is_empty() {
+            bail!(
+                "package declares no build.entry; pick a program with --program <name>: {}",
+                programs.join(", ")
+            );
+        }
+    }
     let project_root = project.root();
     let output_root = match out_dir {
         Some(path) if path.is_absolute() => path,
         Some(path) => project_root.join(path),
-        None => project_root.join(".lab").join("plan"),
+        // Each program's plan is its own reviewable artifact, so it gets its
+        // own directory rather than overwriting the last program planned.
+        None => match &program {
+            Some(program) => project_root.join(".lab").join("plan").join(program),
+            None => project_root.join(".lab").join("plan"),
+        },
     };
-    let planned = write_facility_plan(&project, &compiled, &output_root)?;
+    let planned = write_facility_plan(&project, &compiled, &output_root, entry.as_deref())?;
     let mut human = format!(
         "Planned {} {} against {}\n  Methods selected: {}\n  Requirements allocated: {}\n  Adapter invocations lowered: {}\n  Plan output: {}\n  Planning problem: {}\n  Facility solution: {}\n  Allocated LAIR: {}\n  Adapter invocations: {}\n  Reviewed plan: {}",
         planned.package,
@@ -355,13 +431,75 @@ pub(crate) fn plan(path: PathBuf, out_dir: Option<PathBuf>, output: &Output) -> 
     output.success("planned", planned, human)
 }
 
+/// The entry module of one named program under `src/programs/`.
+fn resolve_program(
+    package: &LabPackage,
+    compiled: &CompiledProject,
+    program: &str,
+) -> Result<String> {
+    let stem = program.replace('-', "_");
+    let source = package
+        .program_sources()
+        .find(|source| {
+            source
+                .relative_path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .map(|name| name.replace('-', "_"))
+                .as_deref()
+                == Some(stem.as_str())
+        })
+        .with_context(|| {
+            let programs = package
+                .program_sources()
+                .filter_map(|source| {
+                    source
+                        .relative_path
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                })
+                .collect::<Vec<_>>();
+            if programs.is_empty() {
+                format!(
+                    "package '{}' has no programs under src/programs/",
+                    package.manifest.package.name
+                )
+            } else {
+                format!(
+                    "no program '{program}' under src/programs/; available: {}",
+                    programs.join(", ")
+                )
+            }
+        })?;
+    let declares_main = compiled
+        .modules
+        .iter()
+        .find(|module| module.source.module == source.module)
+        .is_some_and(|module| {
+            module.module.declarations.iter().any(|declaration| {
+                matches!(declaration, CheckedDeclaration::Workflow { name, .. } if name == "main")
+            })
+        });
+    if !declares_main {
+        bail!(
+            "program '{program}' ({}) declares no `main` workflow",
+            source.module
+        );
+    }
+    Ok(source.module.clone())
+}
+
 fn write_facility_plan(
     project: &LabProject,
     compiled: &CompiledProject,
     output_root: &Path,
+    entry: Option<&str>,
 ) -> Result<PlanCompleted> {
     let package = project.default_package();
-    let facility = project.plan_facility_with_package_methods(compiled)?;
+    let facility = match entry {
+        Some(entry) => project.plan_facility_program(compiled, entry)?,
+        None => project.plan_facility_with_package_methods(compiled)?,
+    };
     let inventory = &facility.inventory;
     let adapter_bindings = facility.adapter_bindings.as_ref();
     let allocated = &facility.allocated;
@@ -460,6 +598,11 @@ fn write_facility_plan(
         None
     };
 
+    let mut documents = lowered.documents;
+    if let Some(run_sheet) = write_manual_run_sheet(package, invocations, output_root)? {
+        documents.push(run_sheet);
+    }
+
     let bundles = lowered
         .manifest
         .routes
@@ -490,8 +633,49 @@ fn write_facility_plan(
         execution_plan: execution_plan_path,
         bundles,
         protocols: lowered.protocols,
-        documents: lowered.documents,
+        documents,
     })
+}
+
+/// Typeset the operator run sheet for the plan's manual steps.
+///
+/// An instrument's steps arrive with their own operator manual from the
+/// adapter that lowered them; the manual steps have no adapter, so the run
+/// sheet is where a person reads them. A plan with no manual step writes
+/// nothing.
+fn write_manual_run_sheet(
+    package: &lab_package::LabPackage,
+    invocations: &lab_adapters::AdapterInvocationPlan,
+    output_root: &Path,
+) -> Result<Option<PathBuf>> {
+    let steps = lab_facility::manual_run_steps(invocations);
+    if steps.is_empty() {
+        return Ok(None);
+    }
+    let source = lab_adapters::run_sheet::render_run_sheet(&lab_adapters::run_sheet::RunSheet {
+        package: package.manifest.package.name.clone(),
+        version: package.manifest.package.version.clone(),
+        facility: invocations.allocated.facility.clone(),
+        steps,
+    });
+    let directory = output_root.join("documents");
+    fs::create_dir_all(&directory)
+        .with_context(|| format!("failed to create {}", directory.display()))?;
+    fs::write(
+        directory.join(lab_adapters::run_sheet::RUN_SHEET_STYLE_PATH),
+        lab_adapters::run_sheet::RUN_SHEET_STYLE,
+    )
+    .context("failed to write the run-sheet style sheet")?;
+    let source_path = directory.join("manual_protocol.typ");
+    fs::write(&source_path, &source)
+        .with_context(|| format!("failed to write {}", source_path.display()))?;
+    let pdf = crate::typeset::Typesetter::new()
+        .compile_pdf(&directory, "manual_protocol.typ")
+        .context("failed to typeset the manual run sheet")?;
+    let pdf_path = directory.join("manual_protocol.pdf");
+    fs::write(&pdf_path, &pdf)
+        .with_context(|| format!("failed to write {}", pdf_path.display()))?;
+    Ok(Some(pdf_path))
 }
 
 fn append_facility_artifacts(human: &mut String, planned: &PlanCompleted) {

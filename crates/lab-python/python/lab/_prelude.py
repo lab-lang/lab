@@ -19,13 +19,12 @@ __all__ = [
     "Accepted",
     "Antibiotic",
     "Backbone",
+    "Buffer",
     "Chassis",
     "Circuit",
-    "Clone",
     "CloneSet",
     "Colonies",
     "ColonyMap",
-    "Culture",
     "Duration",
     "Event",
     "Evidence",
@@ -34,9 +33,9 @@ __all__ = [
     "Image",
     "List",
     "Material",
+    "Medium",
     "Part",
     "Plasmid",
-    "Plate",
     "Promoter",
     "Protein",
     "Reason",
@@ -45,6 +44,7 @@ __all__ = [
     "RestrictionEnzyme",
     "Screening",
     "Signal",
+    "Solution",
     "Strain",
     "Topology",
     "WorkflowContext",
@@ -74,6 +74,12 @@ class Backbone(LabType):
     __lab_uses__ = ()
 
 
+class Buffer(LabType):
+    """A salt solution cells are washed and resuspended in."""
+
+    __lab_uses__ = ()
+
+
 class CDS(LabType, Generic[_T1]):
     __lab_uses__ = ()
 
@@ -88,23 +94,15 @@ class Circuit(LabType, Generic[_T1, _T2]):
     __lab_uses__ = ()
 
 
-class Clone(LabType):
+class CloneSet(LabConstructor):
     __lab_uses__ = ()
 
 
-class CloneSet(LabType):
+class Colonies(LabConstructor):
     __lab_uses__ = ()
 
 
-class Colonies(LabType):
-    __lab_uses__ = ()
-
-
-class ColonyMap(LabType):
-    __lab_uses__ = ()
-
-
-class Culture(LabType):
+class ColonyMap(LabConstructor):
     __lab_uses__ = ()
 
 
@@ -150,15 +148,17 @@ class Material(LabType, Generic[_T1]):
     __lab_uses__ = ()
 
 
+class Medium(LabType):
+    """What an organism is grown in or on."""
+
+    __lab_uses__ = ()
+
+
 class Part(LabType):
     __lab_uses__ = ()
 
 
-class Plate(LabType):
-    __lab_uses__ = ()
-
-
-class Plasmid(LabType):
+class Plasmid(LabConstructor):
     """A backend-neutral plasmid design."""
 
     __lab_uses__ = ()
@@ -193,7 +193,7 @@ class RestrictionEnzyme(LabType):
     __lab_uses__ = ()
 
 
-class Screening(LabType):
+class Screening(LabConstructor):
     __lab_uses__ = ()
 
 
@@ -204,7 +204,14 @@ class Signal(LabRole):
     __lab_uses__ = ()
 
 
-class Strain(LabType):
+class Solution(LabRole):
+    """A poured solution: a buffer or a medium a verb pours the same way."""
+
+    __lab_role__ = "Solution"
+    __lab_uses__ = ()
+
+
+class Strain(LabConstructor):
     """A chassis carrying a defined set of plasmid designs."""
 
     __lab_uses__ = ()
@@ -214,7 +221,7 @@ class Topology(LabType):
     __lab_uses__ = ()
 
 
-class WorkflowContext(LabType):
+class WorkflowContext(LabConstructor):
     __lab_uses__ = ()
 
 

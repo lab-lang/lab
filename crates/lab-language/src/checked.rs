@@ -19,12 +19,16 @@ use crate::semantics::{DefinitionId, ModuleId, ModuleInterface};
 /// produced type plays, and artifact instances preserve exact SBOL identities
 /// independently of laboratory provenance. Durable actions preserve stable
 /// Intent operation identities, typed values, ownership, and exact workflow
-/// callees, while Method definitions separately own capability refinement.
+/// callees, while Method definitions separately own capability refinement. A
+/// facet is a declaration of its own, carrying the states a kind's materials
+/// may be in and the changes between them, a type argument may be narrowed to one
+/// of those states, and an action declares a durable verb with its phrase,
+/// operands, results, and capability.
 ///
 /// Grounding, design identities, and Intent operation identities are semantic
 /// contracts, so each incompatible change raises the version rather than
 /// riding along as an optional field.
-pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v9";
+pub const PORTABLE_MODULE_SCHEMA_VERSION: &str = "lab.portable-module.v11";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckedModule {
@@ -58,6 +62,42 @@ pub enum CheckedDeclaration {
         /// a Lab type resolves to the terms a document states about it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         term: Option<String>,
+    },
+    /// How a kind's materials are classified by the state they are in.
+    ///
+    /// A facet is what keeps a state off the type. Several facets may classify
+    /// one kind and they stay independent, so a material in two states at once
+    /// is two facets rather than one state naming both.
+    Facet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        doc: Option<String>,
+        name: String,
+        /// The type whose materials this facet classifies.
+        subject: CheckedType,
+        /// The states in declaration order. The first is the initial state.
+        states: Vec<CheckedFacetState>,
+        /// The state changes this facet admits, as `(from, to)` pairs.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        transitions: Vec<CheckedFacetTransition>,
+    },
+    /// A durable laboratory verb a package declares.
+    ///
+    /// The phrase a workflow writes, its operands and results and their types,
+    /// and the capability it needs travel together, so an importer checks a
+    /// workflow against it and the compiler derives a manual method to run it.
+    Action {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        doc: Option<String>,
+        /// The verb, which is the phrase's first word.
+        name: String,
+        /// The Intent operation this verb refines, namespaced by its module.
+        operation: String,
+        /// The phrase a workflow writes, its words and operand holes in order.
+        phrase: Vec<CheckedPhraseToken>,
+        operands: Vec<CheckedActionOperand>,
+        results: Vec<CheckedActionResult>,
+        /// The capability a facility must offer to run this verb.
+        capability: String,
     },
     /// A name a supplier lists, and the Lab type it stands for.
     ///
@@ -172,6 +212,17 @@ pub enum CheckedType {
     Any {
         role: String,
     },
+    /// A measurement of a stated thing, in whatever unit it was written in.
+    Measuring {
+        dimension: String,
+    },
+    /// A type argument narrowed to one facet state, written `Chassis is
+    /// competent`. It appears only as an argument, so a narrowed material is
+    /// still a `Material` to anything reading the outer type.
+    InState {
+        subject: Box<CheckedType>,
+        state: String,
+    },
     Integer,
     Decimal,
     String,
@@ -180,6 +231,19 @@ pub enum CheckedType {
 }
 
 impl CheckedType {
+    /// This type with any state narrowing removed.
+    ///
+    /// A narrowing says which state a thing is in, never what it is, so a reader
+    /// that wants the underlying kind asks for the subject. Without this, every
+    /// consumer matching on `Named` would silently stop recognizing a thing the
+    /// moment its state was stated.
+    pub fn subject(&self) -> &Self {
+        match self {
+            Self::InState { subject, .. } => subject.subject(),
+            other => other,
+        }
+    }
+
     pub fn display_name(&self) -> String {
         match self {
             Self::Named { name, arguments } if arguments.is_empty() => name.clone(),
@@ -199,6 +263,8 @@ impl CheckedType {
             Self::List { element } => format!("List<{}>", element.display_name()),
             Self::Quantity { unit } => format!("Quantity<{unit}>"),
             Self::Any { role } => format!("any {role}"),
+            Self::Measuring { dimension } => format!("Quantity<any {dimension}>"),
+            Self::InState { subject, state } => format!("{} is {state}", subject.display_name()),
             Self::Integer => "Integer".to_owned(),
             Self::Decimal => "Decimal".to_owned(),
             Self::String => "String".to_owned(),
@@ -274,6 +340,46 @@ pub struct CheckedSchemaField {
     pub r#type: CheckedType,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub optional: bool,
+}
+
+/// One token of an action's phrase: a literal word or an operand hole.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "token", rename_all = "snake_case")]
+pub enum CheckedPhraseToken {
+    Word(String),
+    Hole(String),
+}
+
+/// One operand an action takes: its name, its type, and how the action owns it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedActionOperand {
+    pub name: String,
+    pub r#type: CheckedType,
+    pub mode: OwnershipMode,
+}
+
+/// One result an action yields: its name and the type it arrives as.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedActionResult {
+    pub name: String,
+    pub r#type: CheckedType,
+}
+
+/// One state a facet admits, together with what a material in it carries.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedFacetState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<CheckedSchemaField>,
+}
+
+/// A state change a facet admits.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckedFacetTransition {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -400,6 +506,14 @@ pub struct ResolvedAction {
     /// already the stable semantic operation identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub callee: Option<DefinitionId>,
+    /// The capability a facility must offer to run a declared verb.
+    ///
+    /// A verb declared with `action` states the one capability it needs, and it
+    /// travels with the call so the compiler can derive a method that requires
+    /// it. The six bundled verbs carry their capability in their own lowering,
+    /// so this is absent for them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability: Option<String>,
     pub arguments: Vec<CheckedActionArgument>,
     pub results: Vec<CheckedField>,
 }

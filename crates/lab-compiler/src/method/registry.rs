@@ -5,8 +5,8 @@ use thiserror::Error;
 
 use crate::method::{
     IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodSignature,
-    ParameterType, ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput,
-    ValueReference,
+    ParameterType, PortType, ProcedureValueExpression, ScalarType, ScalarValueExpression,
+    TaskOutput, ValueReference,
 };
 
 /// A malformed portable method definition.
@@ -14,6 +14,16 @@ use crate::method::{
 pub enum MethodDefinitionError {
     #[error("method input `{id}` occurs more than once")]
     DuplicateInput { id: LocalId },
+    #[error(
+        "method input `{id}` asks the Intent for its state, but only an output's state may be \
+decided by the Intent"
+    )]
+    RequestedInput { id: LocalId },
+    #[error(
+        "Procedure task `{task}` output `{output}` asks the Intent for its state, but no method \
+output exports it, so there is no Intent result to read it from"
+    )]
+    UnexportedRequestedOutput { task: LocalId, output: LocalId },
     #[error("method parameter `{id}` occurs more than once")]
     DuplicateParameter { id: LocalId },
     #[error("Procedure task `{id}` occurs more than once")]
@@ -115,6 +125,14 @@ impl MethodDefinition {
         for input in &self.inputs {
             if !input_ids.insert(input.name.clone()) {
                 return Err(MethodDefinitionError::DuplicateInput {
+                    id: input.name.clone(),
+                });
+            }
+            // What the Intent asked for is what it asked to receive. An input
+            // takes whatever an earlier operation produced, so there is no
+            // request for it to read.
+            if matches!(input.port_type, PortType::MaterialAsRequested) {
+                return Err(MethodDefinitionError::RequestedInput {
                     id: input.name.clone(),
                 });
             }
@@ -280,6 +298,27 @@ impl MethodDefinition {
                     },
                     output.port_type.clone(),
                 );
+            }
+        }
+
+        // A requested state is read from the Intent result the Method exports
+        // this output as. One that is never exported has nothing to read.
+        for task in &self.tasks {
+            for output in &task.outputs {
+                if matches!(output.port_type, PortType::MaterialAsRequested)
+                    && !self.outputs.iter().any(|exported| {
+                        exported.source
+                            == (ValueReference::TaskOutput {
+                                task: task.id.clone(),
+                                output: output.name.clone(),
+                            })
+                    })
+                {
+                    return Err(MethodDefinitionError::UnexportedRequestedOutput {
+                        task: task.id.clone(),
+                        output: output.name.clone(),
+                    });
+                }
             }
         }
 

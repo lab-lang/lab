@@ -451,7 +451,7 @@ fn record_material_use(
     source: &PlanningValueSource,
     port_type: &PortType,
 ) {
-    if matches!(port_type, PortType::Material { .. }) {
+    if port_type.is_material() {
         *uses.entry(source.clone()).or_default() += 1;
     }
 }
@@ -533,7 +533,7 @@ fn validate_allocated_material_linearity(
             let Some(PlanningValueSource::ChoiceOutput { choice, output }) = &input.source else {
                 continue;
             };
-            if matches!(input.port_type, PortType::Material { .. }) {
+            if input.port_type.is_material() {
                 *uses.entry((choice.clone(), output.clone())).or_default() += 1;
             }
         }

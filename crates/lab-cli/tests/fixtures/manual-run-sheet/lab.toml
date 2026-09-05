@@ -1,0 +1,10 @@
+[package]
+name = "manual-media"
+version = "0.1.0"
+edition = "2026"
+
+[build]
+entry = "src/programs/main.lab"
+
+[inventory]
+document = "inventory/facility.ttl"

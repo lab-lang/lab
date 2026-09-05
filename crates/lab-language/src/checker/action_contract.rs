@@ -32,7 +32,7 @@ impl Checker {
                 // A clause is present exactly when the word introducing it is,
                 // so an omitted one is not mistaken for a malformed phrase.
                 let introducer = match clause.first() {
-                    Some(PhrasePart::Word(word)) => *word,
+                    Some(PhrasePart::Word(word)) => word.as_str(),
                     _ => unreachable!("contract validation requires a leading word"),
                 };
                 if words.get(cursor) == Some(&introducer) {
@@ -106,7 +106,7 @@ impl Checker {
                 unreachable!("contract validation rejects a nested optional clause")
             }
             PhrasePart::Word(expected) => {
-                if words.get(*cursor) != Some(expected) {
+                if words.get(*cursor) != Some(&expected.as_str()) {
                     return Err(SemanticError::new(
                         effect.span,
                         format!("malformed '{}' action phrase", contract.operation),
@@ -156,7 +156,7 @@ impl Checker {
                         actual.clone(),
                         expected,
                         effect.span,
-                        contract.operation,
+                        &contract.operation,
                     )?;
                 }
                 operands.insert((*name).to_owned(), actual.clone());
@@ -199,7 +199,21 @@ impl Checker {
                         ),
                     )
                 })?;
-                checked_integer_literal(magnitude, *signed, effect.span)?;
+                // A measured operand carries a decimal magnitude: an optical
+                // density is 0.40, not 0. The magnitude rides through as the
+                // text it was written as, so the check is that it is a number
+                // and, where the operand is unsigned, that it is not negative.
+                let negative = magnitude.starts_with('-');
+                if crate::units::Decimal::parse(magnitude).is_none() || (!*signed && negative) {
+                    return Err(SemanticError::new(
+                        effect.span,
+                        format!(
+                            "action '{}' expects a {}number for '{name}', found '{magnitude}'",
+                            contract.operation,
+                            if *signed { "" } else { "non-negative " },
+                        ),
+                    ));
+                }
                 let unit = words.get(*cursor + 1).ok_or_else(|| {
                     SemanticError::new(
                         effect.span,
@@ -209,7 +223,7 @@ impl Checker {
                         ),
                     )
                 })?;
-                if !units.contains(unit) {
+                if !units.iter().any(|allowed| allowed == unit) {
                     return Err(SemanticError::new(
                         effect.span,
                         format!(
@@ -248,7 +262,7 @@ impl Checker {
             .iter()
             .map(|result| {
                 let ty = resolve_contract_type(&result.r#type, &operands, effect.span)?;
-                Ok((super::checked_field(result.name, &ty), ty))
+                Ok((super::checked_field(&result.name, &ty), ty))
             })
             .collect::<Result<Vec<_>, SemanticError>>()?;
         let results = result_contracts
@@ -263,6 +277,7 @@ impl Checker {
             ResolvedAction {
                 operation: contract.operation.to_owned(),
                 callee: None,
+                capability: None,
                 arguments,
                 results: checked_results,
             },
@@ -278,14 +293,14 @@ pub(super) fn resolve_contract_type(
 ) -> Result<Ty, SemanticError> {
     match r#type {
         ContractType::Concrete(ty) => Ok(ty.clone()),
-        ContractType::SameAs(name) => operands.get(*name).cloned().ok_or_else(|| {
+        ContractType::SameAs(name) => operands.get(name.as_str()).cloned().ok_or_else(|| {
             SemanticError::new(
                 span,
                 format!("action contract references unknown operand '{name}'"),
             )
         }),
         ContractType::MaterialOf(name) => operands
-            .get(*name)
+            .get(name.as_str())
             .map(|ty| Ty::material(ty.clone()))
             .ok_or_else(|| {
                 SemanticError::new(

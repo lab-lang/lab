@@ -60,6 +60,13 @@ pub enum Export {
     /// A part types can play. It has no values, so it may bound a type
     /// parameter and may never be the type of anything.
     Role { name: String, documentation: String },
+    /// How a kind's materials are classified by the state they are in.
+    Facet {
+        name: String,
+        documentation: String,
+        subject: String,
+        states: Vec<String>,
+    },
     Value {
         name: String,
         documentation: String,
@@ -314,6 +321,45 @@ fn authored_export(name: &str, export: &ModuleExport) -> Option<Export> {
                     .map_or_else(String::new, |output| output.r#type.display_name()),
             })
         }
-        ExportKind::Action => None,
+        ExportKind::Facet => {
+            let surface = export.facet.as_ref()?;
+            Some(Export::Facet {
+                name: name.to_owned(),
+                documentation,
+                subject: surface.subject.display_name(),
+                states: surface
+                    .states
+                    .iter()
+                    .map(|state| state.name.clone())
+                    .collect(),
+            })
+        }
+        ExportKind::Action => {
+            let surface = export.action.as_ref()?;
+            Some(Export::Action {
+                name: name.to_owned(),
+                documentation,
+                phrase: surface
+                    .phrase
+                    .iter()
+                    .map(|token| match token {
+                        crate::checked::CheckedPhraseToken::Word(word) => word.clone(),
+                        crate::checked::CheckedPhraseToken::Hole(operand) => {
+                            format!("<{operand}>")
+                        }
+                    })
+                    .collect(),
+                optional: Vec::new(),
+                results: surface
+                    .results
+                    .iter()
+                    .map(|result| Field {
+                        name: result.name.clone(),
+                        r#type: result.r#type.display_name(),
+                        optional: false,
+                    })
+                    .collect(),
+            })
+        }
     }
 }

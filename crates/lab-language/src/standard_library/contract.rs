@@ -8,32 +8,32 @@ use crate::type_system::Ty;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ContractType {
     Concrete(Ty),
-    SameAs(&'static str),
+    SameAs(String),
     AnyMaterial,
     /// Any declared thing, whatever its type. Fetching one off the shelf does
     /// not depend on what it is.
     AnyValue,
     /// Material of whatever an earlier operand was. What comes back from the
     /// shelf is the thing that was asked for.
-    MaterialOf(&'static str),
+    MaterialOf(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PhrasePart {
-    Word(&'static str),
+    Word(String),
     Operand {
-        name: &'static str,
+        name: String,
         r#type: ContractType,
         mode: OwnershipMode,
     },
     Integer {
-        name: &'static str,
+        name: String,
         signed: bool,
     },
     Quantity {
-        name: &'static str,
+        name: String,
         signed: bool,
-        units: &'static [&'static str],
+        units: Vec<String>,
     },
     /// A clause a phrase may leave out. Omitting it binds every operand it
     /// carries to the empty collection, so an optional clause may only carry
@@ -45,6 +45,41 @@ pub(crate) enum PhrasePart {
 }
 
 impl PhrasePart {
+    /// A literal word in a phrase, such as `capture` or `from`.
+    pub(crate) fn word(word: impl Into<String>) -> Self {
+        Self::Word(word.into())
+    }
+
+    /// A material or value operand.
+    pub(crate) fn operand(
+        name: impl Into<String>,
+        r#type: ContractType,
+        mode: OwnershipMode,
+    ) -> Self {
+        Self::Operand {
+            name: name.into(),
+            r#type,
+            mode,
+        }
+    }
+
+    /// A whole-number operand.
+    pub(crate) fn integer(name: impl Into<String>, signed: bool) -> Self {
+        Self::Integer {
+            name: name.into(),
+            signed,
+        }
+    }
+
+    /// A measurement operand, in one of the stated units.
+    pub(crate) fn quantity(name: impl Into<String>, signed: bool, units: &[&str]) -> Self {
+        Self::Quantity {
+            name: name.into(),
+            signed,
+            units: units.iter().map(|unit| (*unit).to_owned()).collect(),
+        }
+    }
+
     /// The words and operands a phrase part contributes, flattening an optional
     /// clause into the parts it would contribute when present.
     pub(crate) fn parts(&self) -> &[PhrasePart] {
@@ -75,27 +110,34 @@ pub(crate) enum Lineage {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResultSpec {
-    pub name: &'static str,
+    pub name: String,
     pub r#type: ContractType,
     pub lineage: Lineage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ActionContractSpec {
-    pub operation: &'static str,
+    pub operation: String,
     pub phrase: Vec<PhrasePart>,
     pub results: Vec<ResultSpec>,
+    /// Operands whose lineage a result does not carry on.
+    ///
+    /// Lineage answers which samples are the same organism, so only what an
+    /// organism is made of contributes to it. A plate is a culture spread on
+    /// agar: the culture is the organism and the agar is what it sits on, and
+    /// counting the agar would make one plate look like two independent things.
+    pub inert: Vec<String>,
 }
 
 impl ActionContractSpec {
-    pub(crate) fn source_name(&self) -> Option<&'static str> {
+    pub(crate) fn source_name(&self) -> Option<&str> {
         match self.phrase.first() {
             Some(PhrasePart::Word(name)) => Some(name),
             _ => None,
         }
     }
 
-    pub(in crate::standard_library) fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         let action = self
             .source_name()
             .ok_or_else(|| "action phrase must begin with its source name".to_owned())?;
@@ -117,17 +159,17 @@ impl ActionContractSpec {
                 }
                 PhrasePart::Operand { name, r#type, .. } => {
                     if let ContractType::SameAs(reference) = r#type
-                        && !operands.contains(reference)
+                        && !operands.contains(reference.as_str())
                     {
                         return Err(format!(
                             "action argument '{name}' references unknown earlier operand '{reference}'"
                         ));
                     }
-                    operands.insert(*name);
-                    (*name, None)
+                    operands.insert(name.as_str());
+                    (name.as_str(), None)
                 }
-                PhrasePart::Integer { name, .. } => (*name, None),
-                PhrasePart::Quantity { name, units, .. } => (*name, Some(*units)),
+                PhrasePart::Integer { name, .. } => (name.as_str(), None),
+                PhrasePart::Quantity { name, units, .. } => (name.as_str(), Some(units.as_slice())),
                 PhrasePart::Optional(_) => {
                     return Err("an optional clause cannot nest another".to_owned());
                 }
@@ -170,7 +212,7 @@ impl ActionContractSpec {
 
         let mut result_names = BTreeSet::new();
         for result in &self.results {
-            if !result_names.insert(result.name) {
+            if !result_names.insert(result.name.as_str()) {
                 return Err(format!(
                     "action result '{}' is declared more than once",
                     result.name
@@ -179,7 +221,7 @@ impl ActionContractSpec {
             match &result.r#type {
                 ContractType::Concrete(_) => {}
                 ContractType::MaterialOf(reference) | ContractType::SameAs(reference)
-                    if operands.contains(reference) => {}
+                    if operands.contains(reference.as_str()) => {}
                 ContractType::MaterialOf(reference) | ContractType::SameAs(reference) => {
                     return Err(format!(
                         "action result '{}' references unknown operand '{reference}'",
@@ -204,27 +246,24 @@ mod tests {
 
     fn contract(phrase: Vec<PhrasePart>) -> ActionContractSpec {
         ActionContractSpec {
-            operation: "test.action",
+            operation: "test.action".to_owned(),
             phrase,
+            inert: Vec::new(),
             results: Vec::new(),
         }
     }
 
     fn optional_operand(r#type: ContractType) -> PhrasePart {
         PhrasePart::Optional(vec![
-            PhrasePart::Word("from"),
-            PhrasePart::Operand {
-                name: "items",
-                r#type,
-                mode: OwnershipMode::Take,
-            },
+            PhrasePart::word("from"),
+            PhrasePart::operand("items", r#type, OwnershipMode::Take),
         ])
     }
 
     #[test]
     fn an_optional_clause_may_only_carry_collections() {
         let listed = contract(vec![
-            PhrasePart::Word("act"),
+            PhrasePart::word("act"),
             optional_operand(ContractType::Concrete(Ty::List(Box::new(Ty::named(
                 "Plasmid",
             ))))),
@@ -232,7 +271,7 @@ mod tests {
         listed.validate().unwrap();
 
         let scalar = contract(vec![
-            PhrasePart::Word("act"),
+            PhrasePart::word("act"),
             optional_operand(ContractType::Concrete(Ty::named("Plasmid"))),
         ]);
         let error = scalar
@@ -244,12 +283,12 @@ mod tests {
     #[test]
     fn an_optional_clause_must_announce_itself_with_a_word() {
         let error = contract(vec![
-            PhrasePart::Word("act"),
-            PhrasePart::Optional(vec![PhrasePart::Operand {
-                name: "items",
-                r#type: ContractType::Concrete(Ty::List(Box::new(Ty::named("Plasmid")))),
-                mode: OwnershipMode::Take,
-            }]),
+            PhrasePart::word("act"),
+            PhrasePart::Optional(vec![PhrasePart::operand(
+                "items",
+                ContractType::Concrete(Ty::List(Box::new(Ty::named("Plasmid")))),
+                OwnershipMode::Take,
+            )]),
         ])
         .validate()
         .expect_err("without a leading word an omitted clause is indistinguishable");
@@ -259,12 +298,12 @@ mod tests {
     #[test]
     fn an_optional_operand_still_shares_the_one_argument_namespace() {
         let error = contract(vec![
-            PhrasePart::Word("act"),
-            PhrasePart::Operand {
-                name: "items",
-                r#type: ContractType::Concrete(Ty::named("Plasmid")),
-                mode: OwnershipMode::Copy,
-            },
+            PhrasePart::word("act"),
+            PhrasePart::operand(
+                "items",
+                ContractType::Concrete(Ty::named("Plasmid")),
+                OwnershipMode::Copy,
+            ),
             optional_operand(ContractType::Concrete(Ty::List(Box::new(Ty::named(
                 "Plasmid",
             ))))),

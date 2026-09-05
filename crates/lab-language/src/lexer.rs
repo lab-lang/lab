@@ -304,16 +304,28 @@ impl<'a> Lexer<'a> {
         while self.bytes.get(self.cursor).is_some_and(u8::is_ascii_digit) {
             self.cursor += 1;
         }
+        let mut fractional = false;
         if self.bytes.get(self.cursor) == Some(&b'.')
             && self
                 .bytes
                 .get(self.cursor + 1)
                 .is_some_and(u8::is_ascii_digit)
         {
+            fractional = true;
             self.cursor += 1;
             while self.bytes.get(self.cursor).is_some_and(u8::is_ascii_digit) {
                 self.cursor += 1;
             }
+        }
+        // A transformation efficiency is 1e9 cfu/ug and a copy number is 2e5.
+        // Writing those out is a row of zeros to miscount, which is the class
+        // of error a measured language exists to refuse.
+        if self.lex_exponent() {
+            let magnitude = expanded_exponent(&self.source[start..self.cursor]);
+            self.push(TokenKind::Decimal(magnitude), start, self.cursor);
+            return Ok(());
+        }
+        if fractional {
             self.push(
                 TokenKind::Decimal(self.source[start..self.cursor].to_owned()),
                 start,
@@ -326,6 +338,29 @@ impl<'a> Lexer<'a> {
             self.push(TokenKind::Integer(value), start, self.cursor);
         }
         Ok(())
+    }
+
+    /// Consume an `e12` or `e-3` suffix, reporting whether one was there.
+    ///
+    /// `e` is only an exponent when digits follow it, optionally after a sign.
+    /// Otherwise it opens a unit, and `20 eq` has to keep meaning twenty of
+    /// whatever `eq` is.
+    fn lex_exponent(&mut self) -> bool {
+        if !matches!(self.bytes.get(self.cursor), Some(b'e' | b'E')) {
+            return false;
+        }
+        let mut lookahead = self.cursor + 1;
+        if matches!(self.bytes.get(lookahead), Some(b'+' | b'-')) {
+            lookahead += 1;
+        }
+        if !self.bytes.get(lookahead).is_some_and(u8::is_ascii_digit) {
+            return false;
+        }
+        self.cursor = lookahead;
+        while self.bytes.get(self.cursor).is_some_and(u8::is_ascii_digit) {
+            self.cursor += 1;
+        }
+        true
     }
 
     fn lex_identifier(&mut self) {
@@ -382,6 +417,30 @@ impl<'a> Lexer<'a> {
 /// The prose inside a `/** ... */`, with the decoration a reader supplies for
 /// alignment removed: the leading `*` of a continuation line, trailing spaces,
 /// and blank lines at either end. Blank lines between paragraphs are kept.
+/// `1e9` written out as `1000000000`, and `2e-3` as `0.002`.
+///
+/// An exponent is a way of writing a number, not a different kind of number, so
+/// it is expanded where it is read. Every later pass then sees one decimal
+/// spelling and none of them has to learn a second one.
+fn expanded_exponent(literal: &str) -> String {
+    let (mantissa, exponent) = literal
+        .split_once(['e', 'E'])
+        .expect("an exponent literal carries its marker");
+    let exponent: i64 = exponent.parse().expect("the exponent is a signed integer");
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = format!("{whole}{fraction}");
+    // Where the point sits once the exponent has moved it.
+    let point = whole.len() as i64 + exponent;
+    if point <= 0 {
+        return format!("0.{}{digits}", "0".repeat(point.unsigned_abs() as usize));
+    }
+    let point = point as usize;
+    if point >= digits.len() {
+        return format!("{digits}{}", "0".repeat(point - digits.len()));
+    }
+    format!("{}.{}", &digits[..point], &digits[point..])
+}
+
 fn documentation(text: &str) -> String {
     let mut lines: Vec<&str> = text
         .lines()

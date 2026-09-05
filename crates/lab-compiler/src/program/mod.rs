@@ -21,10 +21,14 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use self::lowering::{BuildArtifactIntent, WorkflowActionIntent, lower_build_intent};
-use crate::design::ir::{DesignDnaSequenceOp, DesignPlasmidOp, DesignStrainOp};
+use crate::design::ir::{
+    DesignDnaSequenceOp, DesignMadeArtifactOp, DesignPlasmidOp, DesignStrainOp,
+};
 use crate::ir::attributes::quantity_dict;
 use crate::stage::{IrStage, detect_stage, initialize_stage, set_stage};
-use crate::workflow::ir::{DiluteOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp};
+use crate::workflow::ir::{
+    DiluteOp, PerformOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp,
+};
 
 pub use self::lowering::SourceLoweringError;
 use crate::planning::PlanningProblemExtractionError;
@@ -89,7 +93,21 @@ impl PortableLairProgram {
     /// policies, and workflows into their own modules. The caller supplies the
     /// modules in its own deterministic compilation order.
     pub fn lower_program(modules: &[&CheckedModule]) -> Result<Self, PortableLairError> {
-        let artifacts = lower_build_intent(modules)?;
+        Self::lower_program_rooted(modules, None)
+    }
+
+    /// Lower one program: the build its entry module's `main` reaches.
+    ///
+    /// A workspace declares more than any one run builds. Rooted at an entry,
+    /// the artifacts are the ones `main` reaches through workflow calls, and a
+    /// declaration nothing reaches is a library entry rather than an error.
+    /// Without a root, every declared artifact must be realized by some
+    /// workflow in scope.
+    pub fn lower_program_rooted(
+        modules: &[&CheckedModule],
+        entry: Option<&str>,
+    ) -> Result<Self, PortableLairError> {
+        let artifacts = lower_build_intent(modules, entry)?;
         let mut context = Context::new();
         let root = ModuleOp::new(
             &mut context,
@@ -141,6 +159,16 @@ impl PortableLairProgram {
                         intent.chassis.clone(),
                         intent.plasmids.clone(),
                         intent.selection.clone(),
+                    );
+                    let design = operation.get_result_design(&context);
+                    root.append_operation(&mut context, operation.get_operation(), 0);
+                    design
+                }
+                BuildArtifactIntent::Made(intent) => {
+                    let operation = DesignMadeArtifactOp::new(
+                        &mut context,
+                        intent.name.clone(),
+                        intent.kind.clone(),
                     );
                     let design = operation.get_result_design(&context);
                     root.append_operation(&mut context, operation.get_operation(), 0);
@@ -337,29 +365,43 @@ fn append_workflow(
     for action in artifact.actions() {
         match action {
             WorkflowActionIntent::Realize { product } => {
-                let BuildArtifactIntent::Plasmid(intent) = &artifact else {
-                    return Err(unsupported_realization(&name, "realize", "plasmid"));
-                };
-                let operation = if let Some(recipe) = &intent.recipe {
-                    RealizeOp::golden_gate(
+                let operation = match &artifact {
+                    BuildArtifactIntent::Plasmid(intent) => match &intent.recipe {
+                        Some(recipe) => RealizeOp::golden_gate(
+                            context,
+                            design,
+                            name.clone(),
+                            recipe.backbone.clone(),
+                            recipe.components.clone(),
+                            dependencies.clone(),
+                            recipe.restriction_enzyme.clone(),
+                            recipe.assembly_replicates,
+                            assembly_chemistry(&recipe.chemistry, context),
+                        ),
+                        None => RealizeOp::new(
+                            context,
+                            design,
+                            name.clone(),
+                            dependencies.clone(),
+                            "PlasmidProduct",
+                        ),
+                    },
+                    BuildArtifactIntent::Made(intent) => RealizeOp::new(
                         context,
                         design,
                         name.clone(),
-                        recipe.backbone.clone(),
-                        recipe.components.clone(),
                         dependencies.clone(),
-                        recipe.restriction_enzyme.clone(),
-                        recipe.assembly_replicates,
-                        assembly_chemistry(&recipe.chemistry, context),
-                    )
-                } else {
-                    RealizeOp::new(context, design, name.clone(), dependencies.clone())
+                        &intent.state,
+                    ),
+                    BuildArtifactIntent::Strain(_) => {
+                        return Err(unsupported_realization(&name, "realize", "plasmid"));
+                    }
                 };
                 values.insert(product.clone(), operation.get_result_product(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
-            WorkflowActionIntent::Provision { cells, item } => {
-                let operation = ProvisionOp::competent_cells(context, item.clone());
+            WorkflowActionIntent::Provision { cells, item, state } => {
+                let operation = ProvisionOp::new(context, item.clone(), state);
                 values.insert(cells.clone(), operation.get_result_material(context));
                 root.append_operation(context, operation.get_operation(), 0);
             }
@@ -450,6 +492,35 @@ fn append_workflow(
                 );
                 values.insert(plate.clone(), operation.get_result_plate(context));
                 root.append_operation(context, operation.get_operation(), 0);
+            }
+            WorkflowActionIntent::Perform {
+                operation,
+                capability,
+                results,
+                operands,
+                parameters,
+            } => {
+                let operand_values = operands
+                    .iter()
+                    .map(|operand| workflow_value(&values, operand, &name))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let states = results
+                    .iter()
+                    .map(|(_, state)| state.clone())
+                    .collect::<Vec<_>>();
+                let performed = PerformOp::new(
+                    context,
+                    operation.clone(),
+                    name.clone(),
+                    capability.clone(),
+                    parameters.clone(),
+                    operand_values,
+                    &states,
+                );
+                for ((binding, _), result) in results.iter().zip(performed.results(context)) {
+                    values.insert(binding.clone(), result);
+                }
+                root.append_operation(context, performed.get_operation(), 0);
             }
         }
     }
@@ -620,8 +691,14 @@ buy restriction_enzyme BsaI:
   sbol_identity = "https://SBOL2Build.org/BsaI"
 buy chassis DH5alpha:
   sbol_identity = "https://sbolcanvas.org/DH5alpha"
+  competence = competent
+  efficiency = 1e9 cfu/ug
 buy antibiotic chloramphenicol:
   sbol_identity = "https://example.org/golden-gate/materials/chloramphenicol"
+buy medium LB_chloramphenicol_agar:
+  sbol_identity = "https://example.org/golden-gate/materials/LB_chloramphenicol_agar"
+  pouring = poured
+  selection = chloramphenicol
 buy part T4_DNA_ligase:
   sbol_identity = "https://example.org/golden-gate/materials/T4_DNA_ligase"
 buy part T4_DNA_ligase_buffer:
@@ -667,14 +744,15 @@ workflow build_reporter_host(
   p_gfp: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
-  plate: Material<Plate>,
+  plate: Material<Medium is inoculated>,
 ):
   dependencies = [p_gfp]
   cells <- provision DH5alpha
   strain, culture <- transform reporter_host from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_chloramphenicol_agar
+  plate <- plate culture on agar
   return strain, plate
 "#;
 
@@ -713,6 +791,157 @@ workflow build_second() -> Material<Plasmid>:
   return product
 "#;
 
+    /// Fetching something off a shelf yields what was asked for.
+    ///
+    /// Provisioning minted competent cells for every item, so an antibiotic
+    /// arrived in LAIR as a value the IR believed was a tube of cells and no
+    /// later check disagreed. One provisioning signature still serves every
+    /// kind, because the state is the one the Intent asked for.
+    /// The reason the whole state machinery exists: making LB media.
+    ///
+    /// A medium is realized from its declaration exactly as a plasmid is, and
+    /// arrives as a `MediumProduct` rather than being refused for not being a
+    /// plasmid. The Golden Gate methods do not apply, because the Intent
+    /// carries no assembly recipe, so the one candidate is manual realization.
+    #[test]
+    fn a_medium_realizes_without_being_a_plasmid() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+
+build medium LB_broth:
+  sbol_identity = "https://example.org/media/LB_broth"
+  ph = 7.0
+  components = [
+    Ingredient { substance: "tryptone", concentration: 10 g/L },
+    Ingredient { substance: "yeast extract", concentration: 5 g/L },
+    Ingredient { substance: "sodium chloride", concentration: 10 g/L },
+  ]
+
+workflow make_LB() -> Material<Medium>:
+  product <- realize LB_broth
+  return product
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("module checks");
+        let program = PortableLairProgram::lower(&module).expect("program lowers");
+        let intent = program.ir();
+        assert!(
+            intent.contains("design.made_artifact"),
+            "a medium has a design of its own: {intent}"
+        );
+        assert!(
+            intent.contains("material-state#MediumProduct"),
+            "a realized medium is a MediumProduct: {intent}"
+        );
+
+        let refined = program
+            .refine_methods(crate::method::standard_method_registry())
+            .expect("the manual realization method refines it")
+            .ir();
+        assert!(
+            refined.contains("method#manual-artifact-realization"),
+            "manual realization applies: {refined}"
+        );
+        assert!(
+            !refined.contains("golden-gate"),
+            "an Intent with no assembly recipe is not a Golden Gate candidate: {refined}"
+        );
+    }
+
+    /// A package can declare a verb the compiler has never seen, and a workflow
+    /// that performs it refines to a manual bench method derived from the
+    /// declaration alone: the operand it consumes, the parameter it carries, and
+    /// the state its result arrives in.
+    #[test]
+    fn a_declared_verb_refines_to_a_derived_manual_method() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+
+build medium LB_broth:
+  components = [
+    Ingredient { substance: "tryptone", concentration: 10 g/L },
+  ]
+
+action degas <medium> for <duration> -> degassed:
+  medium: take Material<Medium>
+  duration: Quantity<min>
+  degassed: Material<Medium>
+  requires StaticIncubation
+
+workflow make_LB() -> Material<Medium>:
+  broth <- realize LB_broth
+  clear <- degas broth for 5 min
+  return clear
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("module checks");
+        let portable = PortableLairProgram::lower(&module).expect("program lowers");
+        let intent = portable.ir();
+        assert!(
+            intent.contains("workflow.perform"),
+            "the declared verb lowers to a perform Intent: {intent}"
+        );
+
+        let refined = portable
+            .refine_standard_methods()
+            .expect("the derived manual method refines the declared verb");
+        let problem = refined.planning_problem().expect("problem projects");
+        let choice = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "standalone.degas")
+            .expect("the declared verb becomes a planning choice");
+        assert_eq!(choice.candidates.len(), 1);
+        assert_eq!(
+            choice.candidates[0].method.as_str(),
+            "https://www.lab-compiler.org/ns/method#derived-standalone-degas"
+        );
+    }
+
+    #[test]
+    fn provisioning_yields_the_state_of_the_thing_fetched() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+use std.lab.plasmid
+
+buy chassis DH5alpha:
+  competence = competent
+  efficiency = 1e9 cfu/ug
+buy antibiotic chloramphenicol:
+  sbol_identity = "https://example.org/cam"
+
+build plasmid p:
+  sequence = dna("ACGTACGT")
+
+workflow w() -> (
+  product: Material<Plasmid>,
+  cells: Material<Chassis is competent>,
+  drug: Material<Antibiotic>,
+):
+  dependencies = []
+  product <- realize p from dependencies
+  cells <- provision DH5alpha
+  drug <- provision chloramphenicol
+  return product, cells, drug
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("module checks");
+        let ir = PortableLairProgram::lower(&module)
+            .expect("program lowers")
+            .ir();
+
+        assert!(
+            ir.contains("material-state#CompetentCells"),
+            "a chassis is bought competent: {ir}"
+        );
+        assert!(
+            ir.contains("material-state#AntibioticStock"),
+            "an antibiotic is an antibiotic, not a tube of cells: {ir}"
+        );
+        assert_eq!(
+            ir.matches("material-state#CompetentCells").count(),
+            1,
+            "only the chassis is competent cells: {ir}"
+        );
+    }
+
     #[test]
     fn lowers_an_artifact_and_its_workflow_from_separate_modules() {
         let designs = compile_module_in_environment(
@@ -730,6 +959,18 @@ workflow build_second() -> Material<Plasmid>:
         let program =
             PortableLairProgram::lower_program(&[&designs, &workflows]).expect("program lowers");
         let split = program.ir();
+
+        // What comes off a shelf is what was asked for. Fetching the chassis
+        // yields competent cells; fetching the antibiotic used to yield them
+        // too, which was the IR believing an antibiotic was a tube of cells.
+        assert!(
+            split.contains("workflow.material <\"https://www.lab-compiler.org/ns/material-state#CompetentCells\">"),
+            "a provisioned chassis is competent cells: {split}"
+        );
+        assert!(
+            !split.contains("#AntibioticStock"),
+            "this program provisions no antibiotic, so no such state appears"
+        );
 
         assert_eq!(split.matches(" = design.dna_sequence ").count(), 1);
         assert!(split.contains("sequence_name: builtin.string \"gfp_sequence\""));
@@ -827,6 +1068,136 @@ workflow main() -> Material<Plasmid>:
         assert_eq!(
             realization.candidates[0].method.as_str(),
             "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
+        );
+    }
+
+    /// Making competent cells: the whole point of the declared-verb machinery.
+    ///
+    /// Growing cells up to a target optical density, chilling them, spinning
+    /// them into a pellet, and washing them into cold buffer are four verbs the
+    /// compiler has no Rust for. They arrive from `std.lab.competence` as
+    /// declarations, lower to perform Intents, and refine to derived manual
+    /// methods, so the protocol reaches a planning problem end to end.
+    #[test]
+    fn a_competent_cell_protocol_lowers_and_refines() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+use std.lab.plasmid
+use std.lab.competence
+
+buy buffer cold_cacl2:
+  concentration = 100 mM
+
+build chassis DH5a_competent:
+  heat_shock_temperature = 42 C
+
+workflow prepare() -> Material<Chassis is competent>:
+  cells <- realize DH5a_competent
+  wash <- provision cold_cacl2
+  culture <- grow cells at 37 C to 0.40 OD600
+  chilled <- chill culture for 10 min
+  pellet <- centrifuge chilled at 4000 rcf for 10 min
+  competent <- resuspend pellet in wash
+  return competent
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("the protocol checks");
+        let portable = PortableLairProgram::lower(&module).expect("the protocol lowers");
+        let intent = portable.ir();
+        assert_eq!(
+            intent.matches("workflow.perform").count(),
+            4,
+            "grow, chill, centrifuge, and resuspend each lower to a perform: {intent}"
+        );
+
+        let refined = portable
+            .refine_standard_methods()
+            .expect("every declared verb refines to a derived manual method");
+        let problem = refined.planning_problem().expect("the problem projects");
+        for verb in [
+            "std.lab.competence.grow",
+            "std.lab.competence.chill",
+            "std.lab.competence.centrifuge",
+            "std.lab.competence.resuspend",
+        ] {
+            let choice = problem
+                .choices
+                .iter()
+                .find(|choice| choice.source_operation.as_str() == verb)
+                .unwrap_or_else(|| panic!("'{verb}' becomes a planning choice"));
+            assert_eq!(
+                choice.candidates.len(),
+                1,
+                "'{verb}' has one derived method"
+            );
+        }
+    }
+
+    /// A protocol is written once and run for many designs: a workflow that
+    /// realizes one of its own parameters is a template, and each call site's
+    /// argument decides which declared artifact its flow builds.
+    #[test]
+    fn a_workflow_realizing_its_parameter_serves_every_design_its_callers_pass() {
+        const SOURCE: &str = r#"use std.bio.designs
+use std.bio.build
+use std.lab.plasmid
+use std.lab.competence
+
+buy buffer cold_cacl2:
+  concentration = 100 mM
+
+build chassis DH5alpha:
+  heat_shock_temperature = 42 C
+
+build chassis Top10:
+  heat_shock_temperature = 42 C
+
+workflow prepare_competent_cells(chassis: Chassis) -> Material<Chassis is competent>:
+  cells <- realize chassis
+  wash <- provision cold_cacl2
+  culture <- grow cells at 37 C to 0.40 OD600
+  chilled <- chill culture for 10 min
+  pellet <- centrifuge chilled at 4000 rcf for 10 min
+  ready <- resuspend pellet in wash
+  return ready
+
+workflow main() -> (
+  a: Material<Chassis is competent>,
+  b: Material<Chassis is competent>,
+):
+  a <- prepare_competent_cells DH5alpha
+  b <- prepare_competent_cells Top10
+  return a, b
+"#;
+        let module = lab_language::compile_module(SOURCE).expect("the program checks");
+        let portable = PortableLairProgram::lower(&module).expect("both instantiations lower");
+        let intent = portable.ir();
+        assert_eq!(
+            intent.matches("design.made_artifact").count(),
+            2,
+            "each chassis keeps its own design: {intent}"
+        );
+
+        let problem = portable
+            .refine_standard_methods()
+            .expect("both instantiations refine")
+            .planning_problem()
+            .expect("the problem projects");
+        let realizations = problem
+            .choices
+            .iter()
+            .filter(|choice| choice.source_operation.as_str() == "std.bio.build.realize")
+            .count();
+        assert_eq!(realizations, 2, "one realization per design the calls pass");
+        assert_eq!(
+            problem
+                .choices
+                .iter()
+                .filter(|choice| {
+                    choice.source_operation.as_str() == "std.lab.competence.centrifuge"
+                })
+                .count(),
+            2,
+            "the one written protocol runs once per instantiation"
         );
     }
 

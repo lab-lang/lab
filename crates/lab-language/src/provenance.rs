@@ -101,7 +101,14 @@ impl LineageMap {
 /// Positional rather than keyed by name, because a binding renames a result:
 /// `evidence <- quantify sample` and `first <- quantify sample` bind the same
 /// contract result to different names.
-type LineageTable = BTreeMap<String, Vec<Lineage>>;
+type LineageTable = BTreeMap<String, ActionLineage>;
+
+/// What one action does to the lineages passing through it.
+pub(crate) struct ActionLineage {
+    results: Vec<Lineage>,
+    /// Operands whose lineage no result carries on.
+    inert: Vec<String>,
+}
 
 /// What every workflow in a module knows about where its materials came from,
 /// keyed by workflow name.
@@ -128,7 +135,13 @@ pub(crate) fn lineage_table(library: &StandardLibrary) -> LineageTable {
         .action_specs()
         .map(|action| {
             let results = action.results.iter().map(|result| result.lineage).collect();
-            (action.operation.to_owned(), results)
+            (
+                action.operation.to_owned(),
+                ActionLineage {
+                    results,
+                    inert: action.inert.clone(),
+                },
+            )
         })
         .collect()
 }
@@ -139,6 +152,7 @@ pub(crate) fn analyze(body: &[CheckedStatement], table: &LineageTable) -> Lineag
         table,
         next: 0,
         map: LineageMap::default(),
+        shelf: BTreeMap::new(),
     };
     analyzer.block(body);
     analyzer.map
@@ -148,6 +162,15 @@ struct Analyzer<'a> {
     table: &'a LineageTable,
     next: usize,
     map: LineageMap,
+    /// The origin already minted for each thing fetched off a shelf.
+    ///
+    /// Naming the same catalogued item twice fetches the same thing, so two
+    /// such materials are one entity. Minting an origin per fetch would let a
+    /// program claim two biological replicates by writing `provision` twice,
+    /// which is the pseudo-replication this analysis exists to refuse. Whether
+    /// a facility holds one lot or two is its own question, and one a program
+    /// cannot see.
+    shelf: BTreeMap<Vec<String>, Origin>,
 }
 
 impl Analyzer<'_> {
@@ -209,6 +232,11 @@ impl Analyzer<'_> {
             if !mentions_material(&argument.value.r#type) {
                 continue;
             }
+            // What an organism sits on is not part of the organism.
+            if declared.is_some_and(|action| action.inert.iter().any(|name| name == &argument.name))
+            {
+                continue;
+            }
             match self.map.of(&argument.value) {
                 Provenance::From(origins) => inherited.extend(origins),
                 // A family's size is a runtime value, so what continues from
@@ -225,7 +253,7 @@ impl Analyzer<'_> {
         let mut event = None;
         for (position, result) in results.iter().enumerate() {
             let lineage = declared
-                .and_then(|lineages| lineages.get(position))
+                .and_then(|action| action.results.get(position))
                 .copied()
                 .unwrap_or_default();
             let provenance = match lineage {
@@ -246,13 +274,28 @@ impl Analyzer<'_> {
                 Lineage::Continues if any_unknown => Provenance::Unknown,
                 // A result that continues nothing must start something: no
                 // material flowed in, so two of these are as independent as two
-                // separate assemblies or two separate batches of cells.
+                // separate assemblies. Fetching a named thing off a shelf is
+                // the exception, because naming it twice fetches one thing.
                 Lineage::Continues if inherited.is_empty() => {
-                    let origin = *event.get_or_insert_with(|| {
-                        let origin = Origin(self.next);
-                        self.next += 1;
-                        origin
-                    });
+                    let origin = match fetched(action) {
+                        Some(key) => match self.shelf.get(&key) {
+                            Some(origin) => *origin,
+                            None => {
+                                let origin = *event.get_or_insert_with(|| {
+                                    let origin = Origin(self.next);
+                                    self.next += 1;
+                                    origin
+                                });
+                                self.shelf.insert(key, origin);
+                                origin
+                            }
+                        },
+                        None => *event.get_or_insert_with(|| {
+                            let origin = Origin(self.next);
+                            self.next += 1;
+                            origin
+                        }),
+                    };
                     Provenance::From(BTreeSet::from([origin]))
                 }
                 Lineage::Continues => Provenance::From(inherited.clone()),
@@ -260,6 +303,23 @@ impl Analyzer<'_> {
             self.map.bindings.insert(result.name.clone(), provenance);
         }
     }
+}
+
+/// What this action names, when it establishes material by naming a thing
+/// rather than by working on one.
+///
+/// The operation and every name it refers to identify the thing fetched, so two
+/// fetches of one item share a key and two fetches of different items do not.
+/// An action that refers to nothing has nothing to be the same as.
+fn fetched(action: &ResolvedAction) -> Option<Vec<String>> {
+    let mut key = vec![action.operation.clone()];
+    for argument in &action.arguments {
+        let CheckedExpression::Reference { path, .. } = &argument.value.value else {
+            return None;
+        };
+        key.extend(path.iter().cloned());
+    }
+    (key.len() > 1).then_some(key)
 }
 
 fn is_collection(r#type: &CheckedType) -> bool {
@@ -314,8 +374,13 @@ mod tests {
     const SETUP: &str = r#"use std.lab.plasmid
 use std.bio.designs
 
-buy chassis DH5alpha
+buy chassis DH5alpha:
+  competence = competent
+  efficiency = 1e9 cfu/ug
 buy antibiotic chloramphenicol
+buy medium LB_agar:
+  pouring = poured
+  selection = chloramphenicol
 
 strain host:
   chassis = DH5alpha
@@ -326,6 +391,53 @@ plasmid p_reporter:
 
 "#;
 
+    /// Naming one catalogued item twice fetches one thing, so two handles onto
+    /// it are one entity. Two provisions counted as two independent samples
+    /// would let a program claim replicates it does not have.
+    #[test]
+    fn fetching_one_item_twice_is_one_entity() {
+        let map = lineage_of(
+            &format!(
+                "{SETUP}{}",
+                r#"workflow fetch() -> (a: Material<Chassis is competent>, b: Material<Chassis is competent>):
+  a <- provision DH5alpha
+  b <- provision DH5alpha
+  return a, b
+"#
+            ),
+            "fetch",
+        );
+        let a = map.get("a").expect("a is bound");
+        let b = map.get("b").expect("b is bound");
+        assert!(
+            same_entity(a, b),
+            "one shelf item fetched twice is one thing: {a:?} vs {b:?}"
+        );
+        assert_eq!(a.independent_count(), Some(1));
+    }
+
+    /// Different items are different things, whatever they are fetched for.
+    #[test]
+    fn fetching_two_items_gives_two_entities() {
+        let map = lineage_of(
+            &format!(
+                "{SETUP}{}",
+                r#"workflow fetch() -> (cells: Material<Chassis is competent>, drug: Material<Antibiotic>):
+  cells <- provision DH5alpha
+  drug <- provision chloramphenicol
+  return cells, drug
+"#
+            ),
+            "fetch",
+        );
+        let cells = map.get("cells").expect("cells is bound");
+        let drug = map.get("drug").expect("drug is bound");
+        assert!(
+            !same_entity(cells, drug),
+            "a chassis and an antibiotic are not one thing: {cells:?} vs {drug:?}"
+        );
+    }
+
     /// Recovering and plating do not make a second organism, so everything
     /// downstream of one transformation is the same entity.
     #[test]
@@ -333,12 +445,14 @@ plasmid p_reporter:
         let map = lineage_of(
             &format!(
                 "{SETUP}{}",
-                r#"workflow build(carried: Material<Plasmid>) -> (strain: Material<Strain>, plate: Material<Plate>):
+                r#"workflow build(carried: Material<Plasmid>) -> (strain: Material<Strain>, plate: Material<Medium is inoculated>):
   dependencies = [carried]
   cells <- provision DH5alpha
   strain, culture <- transform host from dependencies into cells
   culture <- recover culture for 1 h
-  plate <- plate culture on chloramphenicol
+  agar <- provision LB_agar
+
+  plate <- plate culture on agar
   return strain, plate
 "#
             ),
@@ -361,11 +475,14 @@ plasmid p_reporter:
         let map = lineage_of(
             &format!(
                 "{SETUP}{}",
-                r#"workflow build(carried: Material<Plasmid>) -> (strain: Material<Strain>, plate: Material<Plate>):
+                r#"workflow build(carried: Material<Plasmid>) -> (strain: Material<Strain>, plate: Material<Medium is inoculated>):
   dependencies = [carried]
   cells <- provision DH5alpha
   strain, culture <- transform host from dependencies into cells
-  plate <- plate culture on chloramphenicol
+  culture <- recover culture for 1 h
+  agar <- provision LB_agar
+
+  plate <- plate culture on agar
   return strain, plate
 "#
             ),
@@ -388,11 +505,14 @@ plasmid p_reporter:
         let map = lineage_of(
             &format!(
                 "{SETUP}{}",
-                r#"workflow build(carried: Material<Plasmid>) -> (strain: Material<Strain>, plate: Material<Plate>):
+                r#"workflow build(carried: Material<Plasmid>) -> (strain: Material<Strain>, plate: Material<Medium is inoculated>):
   dependencies = [carried]
   cells <- provision DH5alpha
   strain, culture <- transform host from dependencies into cells
-  plate <- plate culture on chloramphenicol
+  culture <- recover culture for 1 h
+  agar <- provision LB_agar
+
+  plate <- plate culture on agar
   candidates <- pick 4 isolated colonies from plate
   screening <- screen candidates against p_reporter
   <- dispose screening.clones.highest_confidence

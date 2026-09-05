@@ -56,7 +56,7 @@ build plasmid composite_plasmid_1:
 
   require topology == circular
   require sites(BsaI) == 0
-  require length <= 12 kb
+  require length <= 12000 bp
 
   across 3 biological replicates
 

@@ -9,9 +9,9 @@ from lab import (
     Evidential,
     Image,
     Material,
-    Plate,
     detect_colonies,
 )
+from lab.bio.designs import Medium, inoculated
 from lab.units import h, minutes
 
 module = lab.Module("reporter.observe", doc=__doc__)
@@ -30,7 +30,7 @@ class PlateObservation(Evidential):
 class ColonyGrowth:
     """What watching a plate produced."""
 
-    plate: Material[Plate]
+    plate: Material[inoculated[Medium]]
     observations: list[PlateObservation]
 
     @lab.case
@@ -43,7 +43,7 @@ class ColonyGrowth:
 
 
 @lab.workflow
-def grow_colonies(wf: lab.Context, plate: Material[Plate]) -> ColonyGrowth:
+def grow_colonies(wf: lab.Context, plate: Material[inoculated[Medium]]) -> ColonyGrowth:
     """Image every half hour, and stop at the first plate worth picking from."""
     observations = wf.state(list[PlateObservation], [])
 

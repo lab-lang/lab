@@ -65,7 +65,7 @@ fn artifact_realization_service() -> MethodDefinition {
             "realize",
             "RealizeArtifact",
             vec![input_ref("design")],
-            vec![output("product", material("PlasmidProduct"))],
+            vec![output("product", PortType::MaterialAsRequested)],
             select_parameters(&parameters, &["artifact", "dependencies"]),
             vec![material_parameter("dependencies", "dependencies")],
             vec![requirement(
@@ -216,7 +216,7 @@ fn golden_gate_method(method_id: &str, setup: GoldenGateSetupMethod) -> MethodDe
                 "cycle-reaction",
                 "ThermalCycleGoldenGateReaction",
                 vec![task_ref("setup-reaction", "reaction")],
-                vec![output("product", material("PlasmidProduct"))],
+                vec![output("product", PortType::MaterialAsRequested)],
                 cycling_task_parameters,
                 vec![],
                 vec![requirement(
@@ -246,7 +246,10 @@ fn material_provisioning() -> MethodDefinition {
             "provision",
             "ProvisionMaterial",
             vec![],
-            vec![output("material", material("CompetentCells"))],
+            // What comes off a shelf is whatever was asked for: competent
+            // cells, a plasmid prep, a bottle of medium. One signature serves
+            // all of them because the Intent names the state.
+            vec![output("material", PortType::MaterialAsRequested)],
             select_parameters(&parameters, &["item"]),
             vec![material_parameter("item", "item")],
             vec![requirement(
@@ -658,6 +661,76 @@ fn manual_antibiotic_selection() -> MethodDefinition {
     }
 }
 
+/// The manual bench method the compiler derives for a declared verb.
+///
+/// A package's `action` declaration names the operation, the capability that
+/// runs it, the materials it consumes and produces, and its scalar parameters.
+/// That is already a complete method: one manual task takes the operands,
+/// carries the parameters, requires the capability, and yields each result in
+/// the state the Intent asked for. Every declared verb refines this way, so a
+/// package adds vocabulary without adding a method to the registry.
+pub(crate) fn derived_manual_method(
+    operation: &str,
+    capability: &str,
+    operand_states: &[String],
+    parameter_names: &[String],
+    result_count: usize,
+) -> MethodDefinition {
+    let inputs = operand_states
+        .iter()
+        .enumerate()
+        .map(|(index, state)| input(&format!("operand{index}"), material_iri(state)))
+        .collect::<Vec<_>>();
+    let parameters = parameter_names
+        .iter()
+        .map(|name| parameter(name, ScalarType::Text))
+        .collect::<Vec<_>>();
+    let task_inputs = (0..operand_states.len())
+        .map(|index| input_ref(&format!("operand{index}")))
+        .collect::<Vec<_>>();
+    let task_outputs = (0..result_count)
+        .map(|index| output(&format!("result{index}"), PortType::MaterialAsRequested))
+        .collect::<Vec<_>>();
+    let task_parameters = parameters
+        .iter()
+        .map(|parameter| procedure_parameter(&parameter.name, parameter, None))
+        .collect::<Vec<_>>();
+    let outputs = (0..result_count)
+        .map(|index| {
+            let name = format!("result{index}");
+            method_output(&name, "perform", &name)
+        })
+        .collect::<Vec<_>>();
+    MethodDefinition {
+        id: method(&format!("derived-{}", operation.replace('.', "-"))),
+        refines: intent(operation),
+        inputs,
+        parameters,
+        tasks: vec![task(
+            "perform",
+            &upper_camel(operation.rsplit('.').next().unwrap_or(operation)),
+            task_inputs,
+            task_outputs,
+            task_parameters,
+            vec![],
+            vec![requirement(
+                "perform",
+                capability,
+                [ControlMode::Manual],
+                vec![],
+            )],
+        )],
+        outputs,
+    }
+}
+
+fn material_iri(state: &str) -> PortType {
+    PortType::Material {
+        state: AbsoluteIri::new(state.to_owned())
+            .expect("a workflow material state is an absolute IRI"),
+    }
+}
+
 fn realization_parameters() -> Vec<MethodParameter> {
     [
         parameter("artifact", ScalarType::Text),
@@ -746,6 +819,10 @@ fn select_parameters(
 fn parameter_unit(name: &str) -> Option<UnitIri> {
     if name.ends_with("_ul") {
         Some(unit("MicroL"))
+    } else if name.ends_with("_g_per_l") {
+        Some(unit("GM-PER-L"))
+    } else if name.ends_with("_g") {
+        Some(unit("GM"))
     } else if name.ends_with("_mm") {
         Some(unit("MilliM"))
     } else if name.ends_with("_temperature_c") {
@@ -962,6 +1039,48 @@ fn upper_camel(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A parameter carries the unit its name says it is in, so a method
+    /// weighing something out reaches the exact quantity that measures it.
+    #[test]
+    fn a_parameter_names_the_unit_it_is_measured_in() {
+        use crate::procedure::{Mass, MassConcentration};
+
+        let mass = parameter_unit("tryptone_g").expect("a mass parameter names grams");
+        assert_eq!(mass.as_str(), "http://qudt.org/vocab/unit/GM");
+        assert_eq!(
+            Mass::parse_grams("5")
+                .expect("five grams")
+                .as_property_value()
+                .unit
+                .as_ref()
+                .map(UnitIri::as_str),
+            Some(mass.as_str()),
+            "the parameter and the quantity that carries it agree on the unit"
+        );
+
+        let concentration =
+            parameter_unit("tryptone_g_per_l").expect("a concentration names grams per litre");
+        assert_eq!(
+            concentration.as_str(),
+            "http://qudt.org/vocab/unit/GM-PER-L"
+        );
+        assert_eq!(
+            MassConcentration::parse_grams_per_litre("10")
+                .expect("ten grams per litre")
+                .as_property_value()
+                .unit
+                .as_ref()
+                .map(UnitIri::as_str),
+            Some(concentration.as_str())
+        );
+
+        // A longer suffix wins, so a concentration is not read as a mass.
+        assert_ne!(
+            parameter_unit("tryptone_g_per_l"),
+            parameter_unit("tryptone_g")
+        );
+    }
 
     #[test]
     fn bundled_methods_validate_and_retain_real_alternatives() {

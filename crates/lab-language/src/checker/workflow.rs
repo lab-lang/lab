@@ -458,7 +458,17 @@ impl Checker {
             .copied()
             .ok_or_else(|| SemanticError::new(effect.span, "empty effect action"))?;
         if let Some(contract) = self.actions.get(operation).cloned() {
-            return self.check_standard_action_contract(effect, &words, environment, contract);
+            let (mut action, types) =
+                self.check_standard_action_contract(effect, &words, environment, contract)?;
+            // A declared verb states the capability it needs; the call carries
+            // it so the compiler can derive a method that requires it. The six
+            // bundled verbs are not in this map and keep their capability in
+            // their own lowering.
+            action.capability = self
+                .action_contracts
+                .get(operation)
+                .map(|contract| contract.capability.clone());
+            return Ok((action, types));
         }
         let providers = self.standard_library.action_providers(operation);
         if let [required_module] = providers.as_slice() {
@@ -531,6 +541,7 @@ impl Checker {
             ResolvedAction {
                 operation: format!("workflow.{operation}"),
                 callee: Some(self.definition_for_action_word(operation)),
+                capability: None,
                 arguments,
                 results: outputs
                     .iter()

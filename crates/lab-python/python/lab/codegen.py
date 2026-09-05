@@ -193,12 +193,16 @@ def _joined(blocks: list[str]) -> str:
 
     A class stands two blank lines from its neighbours and a binding one, so
     the generated mirror is already formatted and regenerating it never shows
-    up as a diff.
+    up as a diff. A facet is one block holding both, so what it ends with
+    decides the space after it.
     """
+
+    def holds_class(block: str) -> bool:
+        return block.startswith("class ") or "\nclass " in block
 
     pieces = [blocks[0]]
     for index, block in enumerate(blocks[1:]):
-        apart = block.startswith("class ") or blocks[index].startswith("class ")
+        apart = holds_class(block) or holds_class(blocks[index])
         pieces.append("\n\n\n" if apart else "\n\n")
         pieces.append(block)
     return "".join(pieces).rstrip() + "\n"
@@ -213,11 +217,18 @@ def _runtime_imports(path: str, exports: list[dict[str, Any]], constructors: fro
         types.add("LabType")
     if "function" in kinds:
         names.add("Function")
-    if kinds & {"value", "constructor"}:
+    # A facet generates its own name and one per state it admits, and every
+    # one of them is a bare word Lab reads back.
+    if kinds & {"value", "constructor", "facet"}:
         names.add("Symbol")
+    if "facet" in kinds:
+        types.add("LabState")
     if "type" in kinds:
         types.add("LabType")
-    if constructors & {export["name"] for export in exports if export["kind"] == "type"}:
+    if any(
+        export["kind"] == "type" and (export["name"] in constructors or export.get("fields"))
+        for export in exports
+    ):
         types.add("LabConstructor")
     if "role" in kinds:
         types.add("LabRole")
@@ -247,8 +258,13 @@ def _indented(block: str) -> list[str]:
 def _parameters(exports: list[dict[str, Any]]) -> int:
     """The most type parameters any one type in a module takes."""
 
+    # A facet's states are generic in the one type each narrows.
     return max(
-        (export.get("parameters") or 0 for export in exports if export["kind"] == "type"),
+        (
+            1 if export["kind"] == "facet" else (export.get("parameters") or 0)
+            for export in exports
+            if export["kind"] in ("type", "facet")
+        ),
         default=0,
     )
 
@@ -273,6 +289,8 @@ def _export(
         return _action(export, uses)
     if export["kind"] in ("type", "role"):
         return _lab_type(export, uses, constructors)
+    if export["kind"] == "facet":
+        return _facet(export, uses)
     factory = "Function" if export["kind"] == "function" else "Symbol"
     name = export["name"]
     assignment = f'{name} = {factory}(name="{name}", uses={_tuple(uses)})'
@@ -281,6 +299,45 @@ def _export(
             [f"{name} = {factory}(", f'    name="{name}",', f"    uses={_tuple(uses)},", ")"]
         )
     return _documented(assignment, export)
+
+
+def _facet(export: dict[str, Any], uses: tuple[str, ...]) -> str:
+    """A facet, generated as its name and one name per state it admits.
+
+    The name is what a declaration states and each state is what it states as
+    the value, so `competence = competent` needs both to be importable. A state
+    is a bare word in Lab, which is what a `Symbol` renders as.
+    """
+
+    blocks = [_documented(_symbol(export["name"], uses), export)]
+    blocks.extend(_state(state, uses) for state in export.get("states") or ())
+    return "\n\n\n".join(blocks)
+
+
+def _state(name: str, uses: tuple[str, ...]) -> str:
+    """One state, generated as a generic class so an annotation may name it.
+
+    `inoculated[Medium]` reads to a type checker the way `Medium is inoculated`
+    reads to the compiler, and a bare `inoculated` still states the state where
+    a declaration puts itself in one.
+    """
+
+    return "\n".join(
+        [
+            f"class {name}(LabState, Generic[_T1]):",
+            f'    __lab_state__ = "{name}"',
+            f"    __lab_uses__ = {_tuple(uses)}",
+        ]
+    )
+
+
+def _symbol(name: str, uses: tuple[str, ...]) -> str:
+    assignment = f'{name} = Symbol(name="{name}", uses={_tuple(uses)})'
+    if len(assignment) > _LIMIT:
+        assignment = "\n".join(
+            [f"{name} = Symbol(", f'    name="{name}",', f"    uses={_tuple(uses)},", ")"]
+        )
+    return assignment
 
 
 def _lab_type(
@@ -297,7 +354,10 @@ def _lab_type(
     parameters = export.get("parameters") or 0
     if export["kind"] == "role":
         base = "LabRole"
-    elif export["name"] in constructors:
+    # A record with fields is a thing you build, and Lab writes building one the
+    # same way it writes naming one. The mirror is a single class for the same
+    # reason: it annotates like a type and calling it builds the record.
+    elif export["name"] in constructors or export.get("fields"):
         base = "LabConstructor"
     else:
         base = "LabType"

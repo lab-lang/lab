@@ -32,6 +32,25 @@ pub fn render_checked_module(module: &CheckedModule) -> String {
                 acceptance.len()
             )),
             CheckedDeclaration::Role { name, .. } => output.push_str(&format!("  - role {name}\n")),
+            CheckedDeclaration::Action {
+                name,
+                operands,
+                results,
+                ..
+            } => output.push_str(&format!(
+                "  - action {name} ({} operands, {} results)\n",
+                operands.len(),
+                results.len()
+            )),
+            CheckedDeclaration::Facet {
+                name,
+                subject,
+                states,
+                ..
+            } => output.push_str(&format!(
+                "  - facet {name} on {subject} ({} states)\n",
+                states.len()
+            )),
             CheckedDeclaration::ArtifactKind { name, produces, .. } => {
                 output.push_str(&format!("  - artifact {name} -> {produces}\n"))
             }

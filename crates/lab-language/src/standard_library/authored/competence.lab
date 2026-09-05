@@ -1,0 +1,92 @@
+/*!
+ * Making a chassis competent.
+ *
+ * Competent cells are grown up, chilled, spun into a pellet, and washed into a
+ * cold buffer until they will take up DNA. None of these steps is assembly or
+ * transformation, so none had a verb until a package could declare one. Each
+ * verb here is an `action`: it names the material it takes, the material it
+ * yields and the state that yielding leaves it in, and the capability a bench
+ * or a robot must offer to run it. The compiler derives a manual method for
+ * each, so the sequence plans without a line of Rust.
+ *
+ * A buffer and a medium are both solutions a laboratory pours, and both are
+ * washed or grown into cells, so they share the `Solution` role rather than
+ * repeating what a solution can do on each kind.
+ */
+
+use std.bio.designs
+
+/**
+ * A salt solution cells are washed and resuspended in.
+ *
+ * A buffer and a medium are both solutions a laboratory pours, so both play the
+ * `Solution` role and a verb that resuspends cells asks for either. The
+ * concentration is the batch's own: a competent-cell protocol is written for a
+ * molarity of calcium chloride, and what to weigh out is that times the volume.
+ */
+artifact Buffer is Solution:
+  concentration?: Quantity<any Molarity>
+
+/**
+ * How far a batch of cells is along the way to being competent.
+ *
+ * Competence itself is a separate fact, declared where a chassis is: cells are
+ * competent or they are not, and transformation is the one operation that
+ * cares. These are the physical states a preparation passes through before it
+ * gets there, so a verb that spins cells down can say it takes ones that are
+ * growing and leaves ones that are pelleted.
+ */
+facet Growth on Chassis:
+  /** Cells sitting in the fridge or freezer, not yet grown. */
+  dormant
+  /** Cells multiplying in warm medium. */
+  growing
+  /** Cells spun into a pellet, the spent medium poured off. */
+  pelleted
+
+  dormant -> growing
+  growing -> pelleted
+  pelleted -> growing
+
+/**
+ * Grow cells up to a target optical density.
+ *
+ * The target is read at 600 or 700 nanometres, and the two do not convert: an
+ * OD600 of 0.4 is not an OD700 of 0.4, so the unit says which meter the number
+ * came off. Either reaches the same growing culture, so the operand admits
+ * either and the protocol writes whichever its plate reader reports.
+ */
+action grow <cells> at <temperature> to <target> -> culture:
+  cells: take Material<Chassis>
+  temperature: Quantity<C>
+  target: Quantity<OD600> | Quantity<OD700>
+  culture: Material<Chassis is growing>
+  requires ShakingIncubation
+
+/** Chill a growing culture on ice before it is spun down. */
+action chill <cells> for <duration> -> chilled:
+  cells: take Material<Chassis is growing>
+  duration: Quantity<min>
+  chilled: Material<Chassis is growing>
+  requires Refrigeration
+
+/** Spin a chilled culture into a pellet at a stated relative force. */
+action centrifuge <cells> at <force> for <duration> -> pellet:
+  cells: take Material<Chassis is growing>
+  force: Quantity<rcf>
+  duration: Quantity<min>
+  pellet: Material<Chassis is pelleted>
+  requires Centrifugation
+
+/**
+ * Resuspend a pellet in cold buffer, which is the wash that makes it competent.
+ *
+ * The buffer is a solution, so the same verb pours a calcium-chloride wash or
+ * any other a protocol calls for. What comes out is competent: ready for the
+ * one operation that takes cells that are.
+ */
+action resuspend <cells> in <buffer> -> competent:
+  cells: take Material<Chassis is pelleted>
+  buffer: take Material<any Solution>
+  competent: Material<Chassis is competent>
+  requires ManualPipetting

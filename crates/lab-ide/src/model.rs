@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 pub enum SymbolKind {
     Module,
     Role,
+    Facet,
+    Action,
     Circuit,
     Artifact,
     Data,

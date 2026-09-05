@@ -16,6 +16,12 @@ pub(crate) enum WorkflowActionIntent {
     Provision {
         cells: String,
         item: String,
+        /// The state the fetched material is in, named for what was fetched.
+        ///
+        /// Provisioning claimed competent cells whatever it was asked for, so
+        /// fetching an antibiotic produced a value the IR believed was a tube of
+        /// cells and nothing downstream disagreed.
+        state: String,
     },
     Transform {
         strain: String,
@@ -37,6 +43,24 @@ pub(crate) enum WorkflowActionIntent {
         culture: String,
         selection: String,
     },
+    /// A verb a package declared, lowered generically.
+    ///
+    /// The six bespoke actions predate the `action` declaration form; everything
+    /// a package declares afterward arrives here. The operation, the operand
+    /// materials it takes, the scalar parameters it carries, and the state each
+    /// result arrives in are all read from the checked call and its contract.
+    Perform {
+        operation: String,
+        /// The capability a facility must offer to run the verb.
+        capability: String,
+        /// Result binding names paired with the state each arrives in.
+        results: Vec<(String, String)>,
+        /// The workflow bindings this action takes as material operands.
+        operands: Vec<String>,
+        /// Scalar and measurement parameters, each as the text it was written
+        /// as.
+        parameters: Vec<(String, String)>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +74,19 @@ struct BuildLoweringContext<'a> {
     supplier_identities: &'a BTreeMap<String, String>,
     stated: &'a BTreeMap<String, Vec<lab_language::CheckedProperty>>,
     bindings: &'a BTreeMap<(String, String), TypedExpression>,
+}
+
+/// The state a catalogued item is in when it is fetched off a shelf.
+///
+/// A chassis is bought competent, which is why transformation takes competent
+/// cells rather than a chassis. Anything else arrives as stock of its own kind,
+/// so a reagent is a reagent rather than a tube of cells.
+fn provisioned_state(item_type: Option<&String>) -> String {
+    match item_type.map(String::as_str) {
+        Some("Chassis") => "CompetentCells".to_owned(),
+        Some(kind) => format!("{kind}Stock"),
+        None => "Stock".to_owned(),
+    }
 }
 
 /// The three properties a Golden Gate assembly recipe cannot be planned without.
@@ -72,10 +109,6 @@ fn quoted_fields(fields: &[&str]) -> String {
 pub enum SourceLoweringError {
     #[error("source module does not declare any build artifacts")]
     EmptyBuild,
-    #[error(
-        "portable LAIR lowering does not support artifact kind '{kind}' declared by '{artifact}'"
-    )]
-    UnsupportedArtifactKind { artifact: String, kind: String },
     #[error("artifact '{artifact}' is missing workflow input '{field}'")]
     MissingField {
         artifact: String,
@@ -141,6 +174,13 @@ incomplete; add {missing} to assemble it, or remove {present} to build it by ano
 pub(crate) enum BuildArtifactIntent {
     Plasmid(PlasmidArtifactIntent),
     Strain(StrainArtifactIntent),
+    /// An artifact of a kind with no lowering contract of its own.
+    ///
+    /// A plasmid carries an assembly recipe and a strain carries transformation
+    /// chemistry, and each has a lowering that reads those facts. Everything
+    /// else a laboratory makes is realized from its declaration: the design
+    /// says what it is, and a Method says how making it runs.
+    Made(MadeArtifactIntent),
 }
 
 impl BuildArtifactIntent {
@@ -148,6 +188,7 @@ impl BuildArtifactIntent {
         match self {
             Self::Plasmid(intent) => &intent.name,
             Self::Strain(intent) => &intent.name,
+            Self::Made(intent) => &intent.name,
         }
     }
 
@@ -155,6 +196,7 @@ impl BuildArtifactIntent {
         match self {
             Self::Plasmid(intent) => &intent.dependencies,
             Self::Strain(intent) => &intent.dependencies,
+            Self::Made(intent) => &intent.dependencies,
         }
     }
 
@@ -162,8 +204,22 @@ impl BuildArtifactIntent {
         match self {
             Self::Plasmid(intent) => &intent.actions,
             Self::Strain(intent) => &intent.actions,
+            Self::Made(intent) => &intent.actions,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MadeArtifactIntent {
+    pub name: String,
+    /// The word the package declared this kind with.
+    pub kind: String,
+    /// The state the realized product arrives in, named for the type the kind
+    /// produces: a realized medium is a `MediumProduct` the way a realized
+    /// plasmid is a `PlasmidProduct`.
+    pub state: String,
+    pub dependencies: Vec<String>,
+    pub actions: Vec<WorkflowActionIntent>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -274,11 +330,24 @@ pub(crate) struct StrainArtifactIntent {
 /// supplies them in a deterministic order.
 pub(crate) fn lower_build_intent(
     modules: &[&CheckedModule],
+    entry: Option<&str>,
 ) -> Result<Vec<BuildArtifactIntent>, SourceLoweringError> {
     let supplier_identities = supplier_identities(modules);
     let stated = inventory_properties(modules);
     let bindings = binding_values(modules);
-    let flows = realization_flows(modules, &supplier_identities)?;
+    let catalog_types = catalog_types(modules);
+    let selections = selections(modules, &supplier_identities);
+    // Rooted at a program, the build is what that program's `main` reaches
+    // through workflow calls. Everything else in scope is a library: declared,
+    // importable, and not built by this run.
+    let reachable = entry.map(|entry| reachable_workflows(modules, entry));
+    let flows = realization_flows(
+        modules,
+        &supplier_identities,
+        &catalog_types,
+        &selections,
+        reachable.as_ref(),
+    )?;
     let context = BuildLoweringContext {
         flows: &flows,
         supplier_identities: &supplier_identities,
@@ -291,19 +360,25 @@ pub(crate) fn lower_build_intent(
             let CheckedDeclaration::Artifact {
                 artifact,
                 name,
+                produces,
                 properties,
                 ..
             } = declaration
             else {
                 continue;
             };
-            artifacts.push(lower_artifact(
+            let lowered = lower_artifact(
                 module.module.as_str(),
                 artifact.as_str(),
                 name,
+                produces,
                 properties,
                 &context,
-            )?);
+            );
+            match lowered {
+                Err(SourceLoweringError::MissingRealization(_)) if reachable.is_some() => {}
+                other => artifacts.push(other?),
+            }
         }
     }
     if artifacts.is_empty() {
@@ -312,16 +387,95 @@ pub(crate) fn lower_build_intent(
     Ok(artifacts)
 }
 
+/// The workflows a program runs: its entry module's `main` and everything that
+/// main reaches through workflow calls, keyed by module and workflow name.
+fn reachable_workflows(modules: &[&CheckedModule], entry: &str) -> BTreeSet<(String, String)> {
+    let mut by_name: BTreeMap<&str, Vec<(&str, &[CheckedStatement])>> = BTreeMap::new();
+    for module in modules {
+        for declaration in &module.declarations {
+            let CheckedDeclaration::Workflow { name, body, .. } = declaration else {
+                continue;
+            };
+            by_name
+                .entry(name.as_str())
+                .or_default()
+                .push((module.module.as_str(), body.as_slice()));
+        }
+    }
+    let mut reached = BTreeSet::new();
+    let mut queue = Vec::new();
+    for (module, body) in by_name.get("main").into_iter().flatten() {
+        if *module == entry {
+            reached.insert((module.to_string(), "main".to_owned()));
+            queue.push(*body);
+        }
+    }
+    while let Some(body) = queue.pop() {
+        for action in effects(body) {
+            let Some(callee) = action.operation.strip_prefix("workflow.") else {
+                continue;
+            };
+            for (module, callee_body) in by_name.get(callee).into_iter().flatten() {
+                if reached.insert((module.to_string(), callee.to_owned())) {
+                    queue.push(callee_body);
+                }
+            }
+        }
+    }
+    reached
+}
+
+/// Every action a body performs, wherever its statement sits.
+fn effects(body: &[CheckedStatement]) -> Vec<&ResolvedAction> {
+    let mut actions = Vec::new();
+    let mut queue = vec![body];
+    while let Some(body) = queue.pop() {
+        for statement in body {
+            match statement {
+                CheckedStatement::Effect { action, .. } => actions.push(action),
+                CheckedStatement::If {
+                    body, else_body, ..
+                } => {
+                    queue.push(body);
+                    queue.push(else_body);
+                }
+                CheckedStatement::Match { cases, .. } => {
+                    for case in cases {
+                        queue.push(&case.body);
+                    }
+                }
+                CheckedStatement::For { body, .. } | CheckedStatement::When { body, .. } => {
+                    queue.push(body);
+                }
+                _ => {}
+            }
+        }
+    }
+    actions
+}
+
 fn declarations<'a>(
     modules: &'a [&'a CheckedModule],
 ) -> impl Iterator<Item = &'a CheckedDeclaration> {
     modules.iter().flat_map(|module| module.declarations.iter())
 }
 
+fn module_declarations<'a>(
+    modules: &'a [&'a CheckedModule],
+) -> impl Iterator<Item = (&'a CheckedModule, &'a CheckedDeclaration)> {
+    modules.iter().flat_map(|module| {
+        module
+            .declarations
+            .iter()
+            .map(move |declaration| (&**module, declaration))
+    })
+}
+
 fn lower_artifact(
     module: &str,
     kind: &str,
     name: &str,
+    produces: &lab_language::CheckedType,
     properties: &[lab_language::CheckedProperty],
     context: &BuildLoweringContext<'_>,
 ) -> Result<BuildArtifactIntent, SourceLoweringError> {
@@ -480,12 +634,13 @@ fn lower_artifact(
             },
             actions: flow.actions.clone(),
         })),
-        // The initial portable lowering supports plasmid and strain intents. A
-        // package may declare other kinds, which require their own lowering contract.
-        other => Err(SourceLoweringError::UnsupportedArtifactKind {
-            artifact: name.to_owned(),
+        other => Ok(BuildArtifactIntent::Made(MadeArtifactIntent {
+            name: name.to_owned(),
             kind: other.to_owned(),
-        }),
+            state: format!("{}Product", produces.subject().display_name()),
+            dependencies: flow.dependencies.clone(),
+            actions: flow.actions.clone(),
+        })),
     }
 }
 
@@ -528,6 +683,62 @@ fn inventory_properties(
         .collect()
 }
 
+/// What each declared medium is selective for.
+///
+/// A plate is a poured medium, and what it selects for is a property of that
+/// medium rather than a second thing named beside it. Plating reads it from
+/// there, so the antibiotic on the bench and the one in the plan are the same
+/// statement.
+fn selections(
+    modules: &[&CheckedModule],
+    identities: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    declarations(modules)
+        .filter_map(|declaration| {
+            let (name, properties) = match declaration {
+                CheckedDeclaration::Catalog {
+                    name, properties, ..
+                }
+                | CheckedDeclaration::Artifact {
+                    name, properties, ..
+                } => (name, properties),
+                _ => return None,
+            };
+            let selection = properties
+                .iter()
+                .find(|property| property.name == "selection")?;
+            let CheckedExpression::Reference { path, .. } = &selection.value.value else {
+                return None;
+            };
+            let referenced = path.first()?;
+            Some((
+                name.clone(),
+                identities
+                    .get(referenced)
+                    .cloned()
+                    .unwrap_or_else(|| referenced.clone()),
+            ))
+        })
+        .collect()
+}
+
+/// The Lab type each catalogued symbol stands for, with any state narrowing
+/// removed.
+///
+/// A provisioned material's state is named for the kind that was fetched, so
+/// lowering has to know that `DH5alpha` is a `Chassis` and `chloramphenicol` is
+/// not.
+fn catalog_types(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
+    declarations(modules)
+        .filter_map(|declaration| match declaration {
+            CheckedDeclaration::Catalog { name, r#type, .. } => {
+                Some((name.clone(), r#type.subject().display_name()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// What each catalogued symbol calls the item a supplier lists.
 ///
 /// This deliberately ignores the separate SBOL Component IRI. Existing device
@@ -549,12 +760,34 @@ fn supplier_identities(modules: &[&CheckedModule]) -> BTreeMap<String, String> {
 fn realization_flows(
     modules: &[&CheckedModule],
     identities: &BTreeMap<String, String>,
+    catalog_types: &BTreeMap<String, String>,
+    selections: &BTreeMap<String, String>,
+    reachable: Option<&BTreeSet<(String, String)>>,
 ) -> Result<BTreeMap<String, RealizationFlow>, SourceLoweringError> {
+    let in_scope = |module: &CheckedModule, workflow: &str| {
+        reachable.is_none_or(|reachable| {
+            reachable.contains(&(module.module.as_str().to_owned(), workflow.to_owned()))
+        })
+    };
     let mut result = BTreeMap::new();
-    for declaration in declarations(modules) {
-        let CheckedDeclaration::Workflow { body, .. } = declaration else {
+    // A workflow that realizes one of its own parameters is a build written
+    // once for many designs: `prepare_competent_cells(chassis: Chassis)` is the
+    // same wash whichever strain it starts from. Its flow is a template, keyed
+    // by workflow name and instantiated for the design each call site passes.
+    let mut templates: BTreeMap<String, (usize, RealizationFlow)> = BTreeMap::new();
+    for (module, declaration) in module_declarations(modules) {
+        let CheckedDeclaration::Workflow {
+            name: workflow_name,
+            inputs,
+            body,
+            ..
+        } = declaration
+        else {
             continue;
         };
+        if !in_scope(module, workflow_name) {
+            continue;
+        }
         let Some(design) = realized_design(body) else {
             continue;
         };
@@ -572,6 +805,10 @@ fn realization_flows(
             .collect::<BTreeMap<_, _>>();
         let mut dependencies = None;
         let mut actions = Vec::new();
+        // Which declaration each fetched binding names. A plate is spread on a
+        // medium a workflow fetched, so what it selects for is read from the
+        // declaration that binding came from.
+        let mut provisioned: BTreeMap<String, String> = BTreeMap::new();
         for statement in body {
             let CheckedStatement::Effect { results, action } = statement else {
                 continue;
@@ -603,10 +840,13 @@ fn realization_flows(
                     let [cells] = names.as_slice() else {
                         return Err(invalid_results(&design, action));
                     };
+                    let declared = required_reference(action, "item", &design)?;
                     let item = resolved_reference(action, "item", identities, &design)?;
+                    provisioned.insert(cells.clone(), declared.clone());
                     actions.push(WorkflowActionIntent::Provision {
                         cells: cells.clone(),
                         item,
+                        state: provisioned_state(catalog_types.get(&declared)),
                     });
                 }
                 "std.lab.plasmid.transform" => {
@@ -656,14 +896,23 @@ fn realization_flows(
                     actions.push(WorkflowActionIntent::Plate {
                         plate: plate.clone(),
                         culture: required_reference(action, "culture", &design)?,
-                        selection: resolved_reference(action, "antibiotic", identities, &design)?,
+                        selection: {
+                            let binding = required_reference(action, "medium", &design)?;
+                            let medium = provisioned.get(&binding).unwrap_or(&binding);
+                            selections.get(medium).cloned().ok_or_else(|| {
+                                SourceLoweringError::MissingField {
+                                    artifact: design.clone(),
+                                    field: "selection",
+                                }
+                            })?
+                        },
                     });
                 }
-                operation => {
-                    return Err(SourceLoweringError::UnsupportedWorkflowAction {
-                        artifact: design,
-                        operation: operation.to_owned(),
-                    });
+                // A verb the frontend accepted that is not one of the six with a
+                // bespoke lowering is one a package declared. Its operands,
+                // parameters, and result states come from the checked call.
+                _ => {
+                    actions.push(perform_intent(action)?);
                 }
             }
         }
@@ -672,8 +921,51 @@ fn realization_flows(
                 .ok_or_else(|| SourceLoweringError::InvalidDependencyFlow(design.clone()))?,
             actions,
         };
-        if result.insert(design.clone(), flow).is_some() {
+        if let Some(parameter) = inputs.iter().position(|input| input.name == design) {
+            templates.insert(workflow_name.clone(), (parameter, flow));
+        } else if result.insert(design.clone(), flow).is_some() {
             return Err(SourceLoweringError::InvalidDependencyFlow(design));
+        }
+    }
+
+    // Each call to a template realizes the design it passes, so the call site
+    // is where the flow gets its key. An argument that is itself a caller's
+    // parameter names no design yet and instantiates nothing.
+    for (module, declaration) in module_declarations(modules) {
+        let CheckedDeclaration::Workflow {
+            name: caller,
+            inputs,
+            body,
+            ..
+        } = declaration
+        else {
+            continue;
+        };
+        if !in_scope(module, caller) {
+            continue;
+        }
+        for action in effects(body) {
+            let Some(workflow_name) = action.operation.strip_prefix("workflow.") else {
+                continue;
+            };
+            let Some((parameter, template)) = templates.get(workflow_name) else {
+                continue;
+            };
+            let design = action
+                .arguments
+                .get(*parameter)
+                .and_then(|argument| reference_name(&argument.value))
+                .ok_or_else(|| {
+                    SourceLoweringError::InvalidDependencyFlow(workflow_name.to_owned())
+                })?;
+            if inputs.iter().any(|input| input.name == design) {
+                continue;
+            }
+            if result.insert(design.to_owned(), template.clone()).is_some() {
+                return Err(SourceLoweringError::InvalidDependencyFlow(
+                    design.to_owned(),
+                ));
+            }
         }
     }
     Ok(result)
@@ -730,6 +1022,72 @@ fn dependency_names(
                 .ok_or_else(|| SourceLoweringError::InvalidDependencyFlow(design.to_owned()))
         })
         .collect()
+}
+
+/// Lower a declared verb generically from its checked call.
+///
+/// A material argument is an operand the value it names flows into; a scalar or
+/// measurement argument is a parameter; and each result arrives in the state its
+/// type narrows to, or the product state of its kind where it narrows to none.
+fn perform_intent(action: &ResolvedAction) -> Result<WorkflowActionIntent, SourceLoweringError> {
+    let invalid = || SourceLoweringError::InvalidActionResults {
+        artifact: String::new(),
+        operation: action.operation.clone(),
+    };
+    let capability = action.capability.clone().ok_or_else(invalid)?;
+    let mut operands = Vec::new();
+    let mut parameters = Vec::new();
+    for argument in &action.arguments {
+        match &argument.value.value {
+            CheckedExpression::Reference { path, .. } if path.len() == 1 => {
+                operands.push(path[0].clone());
+            }
+            CheckedExpression::Quantity { magnitude, unit } => {
+                parameters.push((argument.name.clone(), format!("{magnitude} {unit}")));
+            }
+            CheckedExpression::Integer { value } => {
+                parameters.push((argument.name.clone(), value.to_string()));
+            }
+            _ => return Err(invalid()),
+        }
+    }
+    let results = action
+        .results
+        .iter()
+        .map(|result| {
+            Ok((
+                result.name.clone(),
+                lair_state(&result.r#type).ok_or_else(invalid)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, SourceLoweringError>>()?;
+    Ok(WorkflowActionIntent::Perform {
+        operation: action.operation.clone(),
+        capability,
+        results,
+        operands,
+        parameters,
+    })
+}
+
+/// The workflow material state a result type stands for.
+///
+/// A material narrowed to a state arrives in that state; an unnarrowed one
+/// arrives in its kind's product state, the way a realized plasmid is a
+/// `PlasmidProduct`.
+fn lair_state(ty: &lab_language::CheckedType) -> Option<String> {
+    use lab_language::CheckedType;
+    let CheckedType::Named { name, arguments } = ty else {
+        return None;
+    };
+    if name != "Material" {
+        return None;
+    }
+    match arguments.first()? {
+        CheckedType::InState { state, .. } => Some(state.clone()),
+        CheckedType::Named { name, .. } => Some(format!("{name}Product")),
+        _ => None,
+    }
 }
 
 fn action_argument<'a>(action: &'a ResolvedAction, name: &str) -> Option<&'a TypedExpression> {
@@ -809,7 +1167,9 @@ fn checked_symbol(
     identities: &BTreeMap<String, String>,
     accepted: &[&str],
 ) -> Result<String, SourceLoweringError> {
-    let lab_language::CheckedType::Named { name, arguments } = &expression.r#type else {
+    // What a symbol refers to is its kind; which state that thing is in does not
+    // change which catalogued item the name stands for.
+    let lab_language::CheckedType::Named { name, arguments } = expression.r#type.subject() else {
         return Err(invalid_field(artifact, field));
     };
     if !arguments.is_empty() || !accepted.contains(&name.as_str()) {

@@ -22,4 +22,5 @@ pub use definition::{
 };
 pub use id::{IntentOperationId, LocalId, LocalIdError};
 pub use registry::{MethodDefinitionError, MethodRegistry, MethodRegistryError};
+pub(crate) use standard::derived_manual_method;
 pub use standard::{standard_method_definitions, standard_method_registry};
