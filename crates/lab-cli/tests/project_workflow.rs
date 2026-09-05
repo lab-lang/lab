@@ -1996,7 +1996,7 @@ ex:inheco_odtc
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
             artifact["format"].as_str(),
-            Some("lab.star-run.v0" | "lab.thermocycle-run.v0")
+            Some("lab.star-run.v0" | "lab.thermocycle-run.v1")
         ) && artifact["sha256"].as_str().unwrap().len() == 64
     }));
 
@@ -2032,14 +2032,21 @@ ex:inheco_odtc
                 assert_eq!(run["format"], "lab.star-run.v0");
                 assert!(!run["steps"].as_array().unwrap().is_empty());
             }
-            "lab.thermocycle-run.v0" => {
+            "lab.thermocycle-run.v1" => {
                 thermocycle_documents += 1;
                 assert!(path.starts_with("assets/inheco_odtc/"));
-                let run = read_json(out_dir.join(path));
-                assert_eq!(run["format"], "lab.thermocycle-run.v0");
+                let document = read_json(out_dir.join(path));
+                assert_eq!(document["format"], "lab.thermocycle-run.v1");
+                let run = &document["run"];
                 match run["profile"]["stages"][0]["repeats"].as_u64() {
-                    Some(75) => assert_eq!(run["fill_volume_ul"], 25.0),
-                    Some(1) => assert!(matches!(run["fill_volume_ul"].as_f64(), Some(35.0 | 95.0))),
+                    Some(75) => {
+                        assert_eq!(run["sample_count"], 1);
+                        assert_eq!(run["fill_volume_ul"], 25.0);
+                    }
+                    Some(1) => {
+                        assert_eq!(run["sample_count"], 3);
+                        assert!(matches!(run["fill_volume_ul"].as_f64(), Some(35.0 | 95.0)));
+                    }
                     repeats => panic!("unexpected thermocycler repeat count: {repeats:?}"),
                 }
             }

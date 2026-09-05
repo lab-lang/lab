@@ -8,7 +8,7 @@
 //! vocabulary and the neutral one. The adapters are the whole seam: if a
 //! vendor someday publishes a good Rust crate of their own, its adapter
 //! lands here and ours retires. The compiler uses only the data model (a
-//! `lab.thermocycle-run.v0` document embeds a [`ThermalProfile`]); only
+//! `lab.thermocycle-run.v1` document embeds a complete [`ThermalRun`]); only
 //! the runtime uses the traits and adapters. Nothing here may depend on
 //! the rest of the toolchain.
 //!
@@ -38,6 +38,6 @@ pub use plate_reader::{
 };
 pub use thermocycler::{
     OdtcStation, OdtcStationError, ProfileProgress, RunHandle, SensorReading, ThermalLimits,
-    ThermalProfile, ThermalProfileError, ThermalReadings, ThermalStage, ThermalStep, Thermocycler,
-    odtc_thermal_limits,
+    ThermalProfile, ThermalProfileError, ThermalReadings, ThermalRun, ThermalRunError,
+    ThermalStage, ThermalStep, Thermocycler, odtc_thermal_limits,
 };

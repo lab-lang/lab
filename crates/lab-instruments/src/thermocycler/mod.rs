@@ -18,6 +18,23 @@ pub struct ThermalProfile {
     pub stages: Vec<ThermalStage>,
 }
 
+/// One complete, device-neutral thermocycler command.
+///
+/// A profile alone is not enough to reproduce a physical run. Fill volume affects
+/// device control, sample count describes the addressed load, and a final hold is
+/// part of the requested lifecycle after the finite profile completes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThermalRun {
+    pub profile: ThermalProfile,
+    /// Number of samples carried through the profile.
+    pub sample_count: u32,
+    /// Per-sample fill volume in microliters.
+    pub fill_volume_ul: f64,
+    /// Temperature held after the finite profile completes, until retrieval.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub final_hold_celsius: Option<f64>,
+}
+
 /// A group of steps executed in order and repeated as a block.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ThermalStage {
@@ -106,6 +123,18 @@ pub enum ThermalProfileError {
     },
 }
 
+#[derive(Clone, Debug, Error, PartialEq)]
+pub enum ThermalRunError {
+    #[error(transparent)]
+    Profile(#[from] ThermalProfileError),
+    #[error("a thermal run must address at least one sample")]
+    ZeroSamples,
+    #[error("fill volume {volume} µL must be finite and greater than zero")]
+    InvalidFillVolume { volume: f64 },
+    #[error("final hold temperature {celsius} °C is outside the block range {min}–{max} °C")]
+    FinalHoldOutOfRange { celsius: f64, min: f64, max: f64 },
+}
+
 impl ThermalProfile {
     /// Validates the profile against a device's envelope. A valid profile
     /// is one the device will accept verbatim; anything else is an error
@@ -189,6 +218,34 @@ impl ThermalProfile {
     }
 }
 
+impl ThermalRun {
+    /// Validates every physical parameter carried by the command against a
+    /// device's thermal envelope.
+    pub fn validate(&self, limits: &ThermalLimits) -> Result<(), ThermalRunError> {
+        self.profile.validate(limits)?;
+        if self.sample_count == 0 {
+            return Err(ThermalRunError::ZeroSamples);
+        }
+        if !self.fill_volume_ul.is_finite() || self.fill_volume_ul <= 0.0 {
+            return Err(ThermalRunError::InvalidFillVolume {
+                volume: self.fill_volume_ul,
+            });
+        }
+        if let Some(celsius) = self.final_hold_celsius
+            && (!celsius.is_finite()
+                || celsius < limits.block_min_celsius
+                || celsius > limits.block_max_celsius)
+        {
+            return Err(ThermalRunError::FinalHoldOutOfRange {
+                celsius,
+                min: limits.block_min_celsius,
+                max: limits.block_max_celsius,
+            });
+        }
+        Ok(())
+    }
+}
+
 /// A running profile, resolved by [`Thermocycler::await_completion`]. The
 /// handle is opaque; drivers mint them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -249,8 +306,8 @@ pub trait Thermocycler {
     /// block and lid together over several minutes.
     fn hold_block(&mut self, celsius: f64, lid_celsius: Option<f64>) -> Result<(), Self::Error>;
 
-    /// Starts a validated profile and returns without waiting.
-    fn run_profile(&mut self, profile: &ThermalProfile) -> Result<RunHandle, Self::Error>;
+    /// Starts a validated run and returns without waiting.
+    fn start_run(&mut self, run: &ThermalRun) -> Result<RunHandle, Self::Error>;
 
     /// Blocks until the referenced run finishes, however long that takes.
     fn await_completion(&mut self, handle: RunHandle) -> Result<(), Self::Error>;
@@ -393,6 +450,39 @@ mod tests {
         assert_eq!(
             hollow.validate(&odtc_like_limits()),
             Err(ThermalProfileError::Empty)
+        );
+    }
+
+    #[test]
+    fn a_complete_run_validates_load_volume_and_final_hold() {
+        let mut run = ThermalRun {
+            profile: golden_gate_profile(),
+            sample_count: 8,
+            fill_volume_ul: 25.0,
+            final_hold_celsius: Some(4.0),
+        };
+        run.validate(&odtc_like_limits()).unwrap();
+
+        run.sample_count = 0;
+        assert_eq!(
+            run.validate(&odtc_like_limits()),
+            Err(ThermalRunError::ZeroSamples)
+        );
+        run.sample_count = 8;
+        run.fill_volume_ul = 0.0;
+        assert_eq!(
+            run.validate(&odtc_like_limits()),
+            Err(ThermalRunError::InvalidFillVolume { volume: 0.0 })
+        );
+        run.fill_volume_ul = 25.0;
+        run.final_hold_celsius = Some(2.0);
+        assert_eq!(
+            run.validate(&odtc_like_limits()),
+            Err(ThermalRunError::FinalHoldOutOfRange {
+                celsius: 2.0,
+                min: 4.0,
+                max: 99.0,
+            })
         );
     }
 

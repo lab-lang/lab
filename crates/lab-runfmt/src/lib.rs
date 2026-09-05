@@ -19,8 +19,8 @@ use serde::{Deserialize, Serialize};
 /// The format string every `lab.star-run.v0` document declares.
 pub const STAR_RUN_FORMAT: &str = "lab.star-run.v0";
 
-/// The format string every `lab.thermocycle-run.v0` document declares.
-pub const THERMOCYCLE_RUN_FORMAT: &str = "lab.thermocycle-run.v0";
+/// The format string every `lab.thermocycle-run.v1` document declares.
+pub const THERMOCYCLE_RUN_FORMAT: &str = "lab.thermocycle-run.v1";
 
 /// The format string every `lab.plate-read.v0` document declares.
 pub const PLATE_READ_FORMAT: &str = "lab.plate-read.v0";
@@ -98,7 +98,7 @@ pub fn load_star_run(path: &Path) -> Result<StarRunDocument, RunDocumentError> {
     Ok(document)
 }
 
-/// Load and format-check one `lab.thermocycle-run.v0` document.
+/// Load and format-check one `lab.thermocycle-run.v1` document.
 pub fn load_thermocycle(path: &Path) -> Result<ThermocycleRunDocument, RunDocumentError> {
     let document: ThermocycleRunDocument = load_document(path)?;
     check_format(path, THERMOCYCLE_RUN_FORMAT, &document.format)?;
@@ -653,7 +653,7 @@ fn validate_acyclic(nodes: &BTreeMap<&str, &ExecutionPlanNode>) -> Result<(), St
     }
 }
 
-/// One `lab.thermocycle-run.v0` document: a device-neutral thermal program
+/// One `lab.thermocycle-run.v1` document: a device-neutral thermal run
 /// for one plate. The exact Asset and adapter binding selects the executor;
 /// the document never names a vendor.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -665,12 +665,9 @@ pub struct ThermocycleRunDocument {
     pub title: String,
     /// The labware resource that rides through the program.
     pub plate: String,
-    pub profile: lab_instruments::ThermalProfile,
-    /// Temperature held after the profile ends, until retrieval.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub final_hold_celsius: Option<f64>,
-    /// Approximate per-well fill, for volume-dependent control classes.
-    pub fill_volume_ul: f64,
+    /// The complete command approved by the reviewer and consumed by the
+    /// capability implementation.
+    pub run: lab_instruments::ThermalRun,
 }
 
 /// One `lab.plate-read.v0` document: a device-neutral plate acquisition.
@@ -1031,6 +1028,45 @@ mod tests {
         let text = serde_json::to_string_pretty(&document).expect("the document serializes");
         let back: StarRunDocument = serde_json::from_str(&text).expect("the document parses");
         assert_eq!(back, document, "emitter and runner read the same schema");
+    }
+
+    #[test]
+    fn a_thermocycle_document_freezes_one_complete_run_command() {
+        let document = ThermocycleRunDocument {
+            format: THERMOCYCLE_RUN_FORMAT.to_owned(),
+            id: "assembly".to_owned(),
+            title: "Cycle assembly reactions".to_owned(),
+            plate: "plate-1".to_owned(),
+            run: lab_instruments::ThermalRun {
+                profile: lab_instruments::ThermalProfile {
+                    stages: vec![lab_instruments::ThermalStage {
+                        steps: vec![lab_instruments::ThermalStep {
+                            celsius: 37.0,
+                            hold_seconds: 60.0,
+                            ramp_c_per_s: None,
+                            lid_celsius: Some(105.0),
+                        }],
+                        repeats: 30,
+                    }],
+                },
+                sample_count: 8,
+                fill_volume_ul: 35.0,
+                final_hold_celsius: Some(4.0),
+            },
+        };
+
+        let value = serde_json::to_value(&document).unwrap();
+        assert_eq!(value["format"], "lab.thermocycle-run.v1");
+        assert_eq!(value["run"]["sample_count"], 8);
+        assert_eq!(value["run"]["fill_volume_ul"], 35.0);
+        assert!(
+            value.get("profile").is_none(),
+            "run parameters form one explicit command boundary"
+        );
+        assert_eq!(
+            serde_json::from_value::<ThermocycleRunDocument>(value).unwrap(),
+            document
+        );
     }
 
     #[test]

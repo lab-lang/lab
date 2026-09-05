@@ -1238,10 +1238,10 @@ fn load_reviewed_document(
                 );
             }
             document
-                .profile
+                .run
                 .validate(&lab_instruments::odtc_thermal_limits())
                 .with_context(|| {
-                    format!("{} is outside the Inheco ODTC envelope", path.display())
+                    format!("{} is outside the Inheco ODTC run contract", path.display())
                 })?;
             Ok(LoadedReviewedDocument::Thermocycle(document))
         }
