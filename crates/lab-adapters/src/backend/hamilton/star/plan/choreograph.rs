@@ -55,6 +55,7 @@ pub enum FluidPathOperation {
         well: StarWell,
         cycles: u32,
         volume_ul: f64,
+        liquid: String,
     },
 }
 
@@ -517,9 +518,12 @@ impl<'a> RunBuilder<'a> {
             let transfer = match operation {
                 FluidPathOperation::Transfer(transfer) => transfer.clone(),
                 FluidPathOperation::Mix {
-                    well, volume_ul, ..
+                    well,
+                    volume_ul,
+                    liquid,
+                    ..
                 } => Transfer::new(well.clone(), well.clone(), *volume_ul)
-                    .with_liquid("aqueous")
+                    .with_liquid(liquid.clone())
                     .with_technique("mix"),
             };
             let selected = self.select_class(class, &transfer)?;
@@ -588,9 +592,10 @@ impl<'a> RunBuilder<'a> {
                     well,
                     cycles,
                     volume_ul,
+                    liquid,
                 } => {
                     let transfer = Transfer::new(well.clone(), well.clone(), *volume_ul)
-                        .with_liquid("aqueous")
+                        .with_liquid(liquid.clone())
                         .with_technique("mix");
                     let liquid_class = self.select_class(class, &transfer)?;
                     let heights =
@@ -623,11 +628,12 @@ impl<'a> RunBuilder<'a> {
         class: TipClass,
         wells: &[StarWell],
         mix: (u32, f64),
+        liquid: &str,
     ) -> Result<(), StarPlanningError> {
         for well in wells {
             let channels = self.pick_up(class, 1)?;
             let transfer = Transfer::new(well.clone(), well.clone(), mix.1)
-                .with_liquid("aqueous")
+                .with_liquid(liquid)
                 .with_technique("mix");
             let liquid_class = self.select_class(class, &transfer)?;
             let heights = self

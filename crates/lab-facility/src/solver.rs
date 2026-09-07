@@ -282,6 +282,10 @@ struct RequirementCandidate {
     binding: SelectedRequirementBinding,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "allocation keeps independent policy and capability inputs explicit"
+)]
 fn allocate_method(
     candidate: &PlanningMethodCandidate,
     material_inventory: &MaterialLotInventory,
@@ -587,6 +591,10 @@ fn rejected_material(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "allocation keeps independent policy and capability inputs explicit"
+)]
 fn requirement_candidates(
     task: &PlanningProcedureTask,
     requirement: &PlanningCapabilityRequirement,

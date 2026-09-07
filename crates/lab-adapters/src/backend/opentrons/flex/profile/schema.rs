@@ -42,6 +42,8 @@ pub struct FlexResources {
     pub sources: TemperatureModule,
     #[serde(default = "default_work")]
     pub work: Thermocycler,
+    #[serde(default = "default_bulk")]
+    pub bulk: DeckLabware,
     #[serde(default = "default_small_tips")]
     pub small_tips: TipRacks,
     #[serde(default = "default_large_tips")]
@@ -55,6 +57,7 @@ impl Default for FlexResources {
         Self {
             sources: default_sources(),
             work: default_work(),
+            bulk: default_bulk(),
             small_tips: default_small_tips(),
             large_tips: default_large_tips(),
             trash: default_trash(),
@@ -88,6 +91,9 @@ pub struct TemperatureModule {
     /// Addressable source labware carried on the module.
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_source_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
 /// The thermocycler-backed work area. It occupies slots A1 and B1 and declares no slot.
@@ -97,6 +103,9 @@ pub struct Thermocycler {
     pub model: String,
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_work_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
 /// The movable trash bin, named by its addressable area. The bin occupies its
@@ -167,4 +176,15 @@ impl FlexTechniqueCalibration {
         }
         Ok(())
     }
+}
+
+/// Passive deck resource for the reference bulk-liquid geometry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeckLabware {
+    pub slot: String,
+    pub labware: String,
+    pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    pub max_volume_each_ul: u32,
 }

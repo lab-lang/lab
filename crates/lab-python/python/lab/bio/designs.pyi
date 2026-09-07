@@ -13,13 +13,15 @@ is a small molecule without being told separately."""
 
 # ruff: noqa
 
+# fmt: off
+
 from __future__ import annotations
 
-from typing import Any, Final, Generic, Protocol, TypeVar
+from typing import Any, Final, Generic, Protocol, TypeVar, overload
 
 from lab._effects import Effect
 from lab._expressions import Decimal, Quantity
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import WorkflowCall
 
@@ -28,11 +30,11 @@ import lab.bio.ontology as _module_1
 
 _Both_First_1 = TypeVar("_Both_First_1", bound=_module_0.Signal)
 _Both_Second_2 = TypeVar("_Both_Second_2", bound=_module_0.Signal)
-_Competence_T1_1 = TypeVar("_Competence_T1_1")
-_Cultivation_T1_1 = TypeVar("_Cultivation_T1_1")
+_Competence_T1_1 = TypeVar("_Competence_T1_1", covariant=True)
+_Cultivation_T1_1 = TypeVar("_Cultivation_T1_1", covariant=True)
 _Operon_First_1 = TypeVar("_Operon_First_1", bound=_module_0.Protein)
 _Operon_Second_2 = TypeVar("_Operon_Second_2", bound=_module_0.Protein)
-_Pouring_T1_1 = TypeVar("_Pouring_T1_1")
+_Pouring_T1_1 = TypeVar("_Pouring_T1_1", covariant=True)
 
 LAB_MODULE: Final[str]
 
@@ -111,23 +113,23 @@ class inoculated(LabState, Generic[_Pouring_T1_1]): ...
 A plate was a type of its own and could not say what it was poured from, so
 plating on the wrong medium was not something the compiler could see."""
 
-class Antibiotic(ArtifactKind, _module_1.SimpleChemical): ...
+class Antibiotic(ArtifactKind, _module_0.Antibiotic, _module_1.SimpleChemical): ...
 """A selection agent a transformed culture is plated on."""
 
-class Backbone(ArtifactKind, _module_1.NucleicAcid, _module_1.EngineeredRegion): ...
+class Backbone(ArtifactKind, _module_0.Backbone, _module_1.NucleicAcid, _module_1.EngineeredRegion): ...
 """An assembly backbone."""
 
-class CDS(ArtifactKind, _module_1.NucleicAcid, _module_1.CodingSequence): ...
+class CDS(ArtifactKind, _module_0.CDS[Any], _module_1.NucleicAcid, _module_1.CodingSequence): ...
 """A coding sequence for some protein."""
 
-class Chassis(ArtifactKind, _module_1.FunctionalEntity): ...
+class Chassis(ArtifactKind, _module_0.Chassis, _module_1.FunctionalEntity): ...
 """A host organism engineered DNA is carried in.
 
 Competent cells are transformed the way their supplier says, so the heat
 shock and recovery belong to the chassis rather than to each strain built in
 it."""
 
-class Medium(ArtifactKind, _module_1.FunctionalEntity): ...
+class Medium(ArtifactKind, _module_0.Medium, _module_1.FunctionalEntity): ...
 """What an organism is grown in or on.
 
 A medium is a recipe: what goes in it, and how much of each per unit volume.
@@ -138,14 +140,14 @@ times the batch.
 A solid medium is a liquid one with a gelling agent, which is why agar is a
 component rather than a second kind."""
 
-class Part(ArtifactKind, _module_1.NucleicAcid): ...
+class Part(ArtifactKind, _module_0.Part, _module_1.NucleicAcid): ...
 """A part a supplier lists, ordered rather than built.
 
 A part is made of DNA, so it may state the DNA it is made of. A catalogue
 that lists a part usually publishes its sequence, and a design that names the
 part is entitled to read it."""
 
-class Plasmid(ArtifactKind, _module_1.NucleicAcid, _module_1.EngineeredRegion): ...
+class Plasmid(ArtifactKind, _module_0.Plasmid, _module_1.NucleicAcid, _module_1.EngineeredRegion): ...
 """A DNA design a laboratory can build.
 
 A plasmid states its sequence directly, or states the backbone together with
@@ -163,7 +165,7 @@ they express. The triggers and products are forgotten because units with
 different triggers have no trigger in common; what each one responds to
 stays on the unit itself."""
 
-class Promoter(ArtifactKind, _module_1.NucleicAcid, _module_1.PromoterRegion): ...
+class Promoter(ArtifactKind, _module_0.Promoter[Any], _module_1.NucleicAcid, _module_1.PromoterRegion): ...
 """A promoter for some signal.
 
 The signal is what the promoter answers to; `regulation` is which way it
@@ -172,14 +174,14 @@ induced by it, and one that expresses less is repressed by it. The
 difference is the difference between a buffer and an inverter, so a
 catalogue that knows it says it."""
 
-class RestrictionEnzyme(ArtifactKind, _module_1.Macromolecule): ...
+class RestrictionEnzyme(ArtifactKind, _module_0.RestrictionEnzyme, _module_1.Macromolecule): ...
 """A type IIS enzyme that opens a backbone.
 
 The temperature and time a digest runs at are the enzyme's, not the design's:
 every plasmid cut with the same enzyme cuts the same way. A design may still
 state its own where a protocol departs from the datasheet."""
 
-class Strain(ArtifactKind, _module_1.FunctionalEntity): ...
+class Strain(ArtifactKind, _module_0.Strain, _module_1.FunctionalEntity): ...
 """An engineered organism: a chassis carrying named plasmid designs.
 
 The same plasmid in two hosts is two artifacts, each with its own acceptance

@@ -28,6 +28,8 @@ thiserror.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+lab-example-preview-adapter = { path = "../../examples/contributing/preview-adapter" }
+lab-example-pipetting = { path = "../../examples/contributing/pipetting-extension" }
 tempfile = "3.27.0"
 
 [lints]

@@ -283,9 +283,9 @@ impl<'a> Parser<'a> {
                     ),
                 ));
             }
-            if !is_result && lineage.is_some() {
+            if !is_result && let Some(lineage) = &lineage {
                 return Err(syntax_span(
-                    lineage.as_ref().expect("checked").span(),
+                    lineage.span(),
                     format!(
                         "action operand '{}' cannot state result lineage",
                         binding.value

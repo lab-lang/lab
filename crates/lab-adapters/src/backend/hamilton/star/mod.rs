@@ -6,6 +6,7 @@ pub mod catalog;
 mod emit;
 mod invocation;
 pub mod liquid_classes;
+pub mod liquid_handling;
 mod plan;
 pub mod profile;
 
@@ -15,3 +16,6 @@ pub(in crate::backend::hamilton::star) const BACKEND: &str = "hamilton.star";
 pub use crate::backend::hamilton::star::profile::{StarAdapterProfile, StarProfileError};
 
 pub(in crate::backend) use invocation::{check_task_feasibility, lower_invocation};
+
+mod registration;
+pub use registration::registration;

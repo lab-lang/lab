@@ -10,9 +10,7 @@ use std::process::Command;
 use lab_adapter_api::AdapterRegistry;
 use lab_compiler::method::{MethodDefinition, MethodRegistry, MethodRegistryError};
 use lab_compiler::planning::{PlanningProblem, PlanningProblemExtractionError};
-use lab_compiler::procedure::{
-    ProcedureCompiler, ProcedureMethodRegistryError, builtin_procedure_compiler,
-};
+use lab_compiler::procedure::{ProcedureCompiler, ProcedureMethodRegistryError};
 use lab_compiler::program::{PortableLairError, PortableLairProgram, RefinedLairError};
 use lab_language::{
     Analysis, CheckedDeclaration, CheckedModule, ModuleId, SemanticEnvironment, SourceId,
@@ -26,8 +24,7 @@ use crate::artifacts::{
     build_facility_artifacts, build_project_artifacts,
 };
 use crate::facility::{
-    builtin_project_adapter_registry, load_package_inventory, plan_modules_for_package,
-    resolve_package_adapter_bindings,
+    load_package_inventory, plan_modules_for_package, resolve_package_adapter_bindings,
 };
 use crate::{
     CompiledProject, FacilityArtifactBuild, FacilityArtifactError, FacilityDocumentRenderer,
@@ -114,11 +111,13 @@ impl Default for ProjectPlanningRequest<'_> {
 
 #[derive(Debug, Error)]
 pub enum ProjectApplicationError {
+    #[error("application extension composition is invalid")]
+    Extensions(#[from] crate::ApplicationExtensionError),
     #[error("failed to inspect build.generate for {path}")]
     GeneratorLookup {
         path: PathBuf,
         #[source]
-        source: PackageError,
+        source: Box<PackageError>,
     },
     #[error("failed to run build.generate command `{command}` from {root}")]
     GeneratorSpawn {
@@ -138,7 +137,7 @@ pub enum ProjectApplicationError {
     Discover {
         path: PathBuf,
         #[source]
-        source: ProjectError,
+        source: Box<ProjectError>,
     },
     #[error("project compilation failed")]
     Compile(#[source] ProjectError),
@@ -167,7 +166,7 @@ pub enum CompilerRefinementError {
 #[derive(Debug, Error)]
 pub enum ProjectArtifactError {
     #[error("project planning failed")]
-    Planning(#[source] ProjectApplicationError),
+    Planning(#[source] Box<ProjectApplicationError>),
     #[error(transparent)]
     Artifacts(#[from] FacilityArtifactError),
 }
@@ -175,9 +174,9 @@ pub enum ProjectArtifactError {
 #[derive(Debug, Error)]
 pub enum ProjectBuildError {
     #[error("failed to select the build program")]
-    ProgramSelection(#[source] ProjectApplicationError),
+    ProgramSelection(#[source] Box<ProjectApplicationError>),
     #[error("failed to plan and lower the build against its facility")]
-    Facility(#[source] ProjectArtifactError),
+    Facility(#[source] Box<ProjectArtifactError>),
     #[error(transparent)]
     Artifacts(#[from] ProjectArtifactBuildError),
 }
@@ -376,7 +375,7 @@ impl ProjectCompilation {
                 program: request.program,
                 methods: request.methods,
             })
-            .map_err(ProjectArtifactError::Planning)?;
+            .map_err(|error| ProjectArtifactError::Planning(Box::new(error)))?;
         build_facility_artifacts(FacilityArtifactRequest {
             package: self.project.default_package(),
             planning: &planning,
@@ -397,7 +396,7 @@ impl ProjectCompilation {
             ProjectProgram::Default => package.entry_source().map(|source| source.module.clone()),
             ProjectProgram::Named(program) => Some(
                 resolve_program(package, &self.compiled, program)
-                    .map_err(ProjectBuildError::ProgramSelection)?,
+                    .map_err(|error| ProjectBuildError::ProgramSelection(Box::new(error)))?,
             ),
         };
         let facility = if package.manifest.inventory.document.is_some() && entry_module.is_some() {
@@ -408,7 +407,7 @@ impl ProjectCompilation {
                     output_root: request.output_root,
                     renderer: request.renderer,
                 })
-                .map_err(ProjectBuildError::Facility)?,
+                .map_err(|error| ProjectBuildError::Facility(Box::new(error)))?,
             )
         } else {
             None
@@ -455,9 +454,8 @@ impl ProjectContext {
     /// Runs source generation and validates the package, inventory, and adapter context without
     /// compiling its Lab modules. This is the appropriate boundary for non-file frontends.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, ProjectApplicationError> {
-        let adapters =
-            builtin_project_adapter_registry().map_err(ProjectApplicationError::Inventory)?;
-        Self::load_with_extensions(path, adapters, builtin_procedure_compiler().clone())
+        let extensions = crate::application_extensions()?;
+        Self::load_with_extensions(path, extensions.adapters, extensions.procedures)
     }
 
     /// Loads a project against the exact adapter and Procedure composition supplied by the
@@ -472,7 +470,7 @@ impl ProjectContext {
         let project =
             LabProject::discover(path).map_err(|source| ProjectApplicationError::Discover {
                 path: path.to_path_buf(),
-                source,
+                source: Box::new(source),
             })?;
         validate_project_inventories(&project, &adapters)?;
         Ok(Self {
@@ -515,7 +513,7 @@ fn run_source_generator(path: &Path) -> Result<(), ProjectApplicationError> {
     let generator =
         source_generator(path).map_err(|source| ProjectApplicationError::GeneratorLookup {
             path: path.to_path_buf(),
-            source,
+            source: Box::new(source),
         })?;
     let Some((root, command)) = generator else {
         return Ok(());

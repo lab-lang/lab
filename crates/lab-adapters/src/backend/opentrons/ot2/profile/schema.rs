@@ -15,6 +15,11 @@ use crate::backend::opentrons::ot2::profile::defaults::*;
 pub struct TechniqueCalibration {
     #[serde(default = "default_aspiration_rate")]
     pub aspiration_rate: f64,
+    /// Source mixing and multi-dispense loads have independent calibrated rates.
+    #[serde(default = "default_dispense_rate")]
+    pub mix_aspiration_rate: f64,
+    #[serde(default = "default_dispense_rate")]
+    pub distribution_aspiration_rate: f64,
     #[serde(default = "default_dispense_rate")]
     pub dispense_rate: f64,
     #[serde(default = "default_tracked_source_volume_ul")]
@@ -92,6 +97,10 @@ pub struct Ot2Resources {
     pub sources: TemperatureModule,
     #[serde(default = "default_work")]
     pub work: Thermocycler,
+    #[serde(default = "default_bulk")]
+    pub bulk: DeckLabware,
+    #[serde(default = "default_surface")]
+    pub surface: DeckLabware,
     #[serde(default = "default_small_tips")]
     pub small_tips: TipRacks,
     #[serde(default = "default_large_tips")]
@@ -103,6 +112,8 @@ impl Default for Ot2Resources {
         Self {
             sources: default_sources(),
             work: default_work(),
+            bulk: default_bulk(),
+            surface: default_surface(),
             small_tips: default_small_tips(),
             large_tips: default_large_tips(),
         }
@@ -129,6 +140,9 @@ pub struct TemperatureModule {
     /// Addressable source labware carried on the module.
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_source_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
 /// The thermocycler-backed work area. It occupies fixed slots, so it declares no slot.
@@ -138,4 +152,18 @@ pub struct Thermocycler {
     pub model: String,
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_work_volume_limit")]
+    pub max_volume_each_ul: u32,
+}
+
+/// A passive deck resource for bulk liquids or material-surface dispensing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeckLabware {
+    pub slot: String,
+    pub labware: String,
+    pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    pub max_volume_each_ul: u32,
 }

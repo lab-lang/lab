@@ -77,9 +77,7 @@ def analyze(*modules: Module, project: str | Path | None = None) -> Program:
     return _analyze(sources, maps, project)
 
 
-def analyze_sources(
-    sources: dict[str, str], *, project: str | Path | None = None
-) -> Program:
+def analyze_sources(sources: dict[str, str], *, project: str | Path | None = None) -> Program:
     """Check Lab source text that was written rather than emitted."""
 
     return _analyze(sources, {}, project)
@@ -130,9 +128,7 @@ def check(*modules: Module, project: str | Path | None = None) -> Program:
     return _raising(analyze(*modules, project=project))
 
 
-def check_sources(
-    sources: dict[str, str], *, project: str | Path | None = None
-) -> Program:
+def check_sources(sources: dict[str, str], *, project: str | Path | None = None) -> Program:
     """Check written Lab source, raising `LabError` if any of it is rejected."""
 
     return _raising(analyze_sources(sources, project=project))

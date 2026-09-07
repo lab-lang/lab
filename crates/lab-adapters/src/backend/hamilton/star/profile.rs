@@ -108,6 +108,8 @@ pub enum StarProfileError {
     NoSites { context: String },
     #[error("the STAR liquid-class registry is invalid: {0}")]
     LiquidClasses(#[source] Box<LiquidClassError>),
+    #[error("invalid STAR liquid handling: {0}")]
+    LiquidHandling(String),
 }
 
 /// The machine variant, which fixes the deck's rail count.
@@ -276,6 +278,8 @@ pub struct StarAdapterProfile {
     /// library this Asset uses.
     #[serde(default)]
     pub liquid_classes: LiquidClassLibraryRegistry,
+    #[serde(default)]
+    pub liquid_handling: super::liquid_handling::StarLiquidHandling,
 }
 
 impl Default for StarAdapterProfile {
@@ -287,6 +291,7 @@ impl Default for StarAdapterProfile {
             resources: StarResources::default(),
             run: RunOptions::default(),
             liquid_classes: LiquidClassLibraryRegistry::default(),
+            liquid_handling: Default::default(),
         }
     }
 }
@@ -320,6 +325,9 @@ impl StarAdapterProfile {
     }
 
     pub fn validate(&self) -> Result<(), StarProfileError> {
+        self.liquid_handling
+            .validate()
+            .map_err(StarProfileError::LiquidHandling)?;
         if self.machine.channels != 8 {
             return Err(StarProfileError::UnsupportedChannels {
                 found: self.machine.channels,

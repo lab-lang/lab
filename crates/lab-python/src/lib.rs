@@ -162,7 +162,8 @@ fn lab_python_standard_bindings() -> PyResult<String> {
 /// Describe every adapter implementation and profile schema in this compiler build.
 #[pyfunction]
 fn lab_adapter_catalog() -> PyResult<String> {
-    let catalog = lab_adapters::adapter_catalog()
+    let catalog = lab_project::application_extensions()
+        .map(|extensions| extensions.adapters.catalog())
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&catalog).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -170,7 +171,11 @@ fn lab_adapter_catalog() -> PyResult<String> {
 /// Validate and canonicalize one operational adapter profile through its explicit driver.
 #[pyfunction]
 fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyResult<String> {
-    let profile = lab_adapters::validate_adapter_profile(driver, name, contents)
+    let extensions = lab_project::application_extensions()
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let profile = extensions
+        .adapters
+        .validate_profile(driver, name, contents)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -186,7 +191,9 @@ fn validate_method_catalog(
     definitions.sort_by(|left, right| left.id.cmp(&right.id));
     let registry = MethodRegistry::new(definitions.clone())
         .map_err(|error| py_error("invalid Method catalog", &error))?;
-    lab_compiler::procedure::builtin_procedure_compiler()
+    lab_project::application_extensions()
+        .map_err(|error| py_error("invalid application extensions", &error))?
+        .procedures
         .validate_methods(&registry)
         .map_err(|error| py_error("invalid Method and Procedure composition", &error))?;
     Ok(definitions)
@@ -308,7 +315,9 @@ fn refine_lab_modules(
             &module_refs,
             entry_module,
             &registry,
-            lab_compiler::procedure::builtin_procedure_compiler(),
+            &lab_project::application_extensions()
+                .map_err(|error| py_error("invalid application extensions", &error))?
+                .procedures,
         )
         .map_err(|error| py_error("failed to refine Lab program", &error))?
     };

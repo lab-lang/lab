@@ -98,3 +98,6 @@ fn render_value_source(source: &PlanningValueSource) -> String {
         }
     }
 }
+
+mod registration;
+pub use registration::registration;

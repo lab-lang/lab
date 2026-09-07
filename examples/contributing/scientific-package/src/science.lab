@@ -1,0 +1,8 @@
+/*! A scientific operation implemented entirely with portable pipetting steps. */
+use std.bio.designs
+use std.lab.plasmid
+
+/** Move the complete 30 uL sample to a fresh vessel and mix it three times. */
+action homogenize <sample> -> prepared:
+  sample: take Material<Medium>
+  prepared: Material<Medium> continues from sample

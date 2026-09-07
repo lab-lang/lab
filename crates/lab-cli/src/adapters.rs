@@ -4,15 +4,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_adapters::{
-    AdapterCatalog, AdapterDescriptor, ValidatedAdapterProfile, adapter_catalog,
-    default_adapter_profile, validate_adapter_profile,
-};
+use lab_adapters::{AdapterCatalog, AdapterDescriptor, ValidatedAdapterProfile};
 
 use crate::Output;
 
 pub(crate) fn describe(driver: Option<String>, output: &Output) -> Result<()> {
-    let catalog = adapter_catalog()?;
+    let catalog = lab_project::application_extensions()?.adapters.catalog();
     match driver {
         Some(driver) => {
             let descriptor = catalog
@@ -31,7 +28,9 @@ pub(crate) fn describe(driver: Option<String>, output: &Output) -> Result<()> {
 }
 
 pub(crate) fn default(driver: String, name: String, output: &Output) -> Result<()> {
-    let profile = default_adapter_profile(&driver, &name)?;
+    let profile = lab_project::application_extensions()?
+        .adapters
+        .validate_profile(&driver, &name, "")?;
     let human = profile.canonical_toml.clone();
     output.success("adapter-default", profile, human)
 }
@@ -64,7 +63,10 @@ pub(crate) fn load_and_validate(driver: &str, path: &Path) -> Result<ValidatedAd
         .file_stem()
         .and_then(|name| name.to_str())
         .context("an adapter profile file needs a UTF-8 file name")?;
-    validate_adapter_profile(driver, name, &contents).map_err(Into::into)
+    lab_project::application_extensions()?
+        .adapters
+        .validate_profile(driver, name, &contents)
+        .map_err(Into::into)
 }
 
 fn render_catalog(catalog: &AdapterCatalog) -> String {

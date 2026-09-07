@@ -4,8 +4,8 @@ use crate::procedure::{
     ProcedureProgram, Temperature, TemperatureRange, TransferTechnique, Vessel, VesselRole, Volume,
 };
 
-use super::view::{TaskView, material_symbols, procedure_id};
 use crate::procedure::ProcedureProgramBuildContext;
+use crate::procedure::context::{material_symbols, procedure_id};
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const MILLIMETRE: &str = "http://qudt.org/vocab/unit/MilliM";
@@ -28,7 +28,7 @@ enum SetupStrategy {
 pub(super) fn normalize(
     task: &ProcedureProgramBuildContext<'_>,
 ) -> Result<ProcedureProgram, String> {
-    let view = TaskView::new(task);
+    let view = task;
     view.require_material_roles(&[
         "backbone",
         "components",
@@ -319,29 +319,33 @@ pub(super) fn normalize(
                         },
                     });
                     if addition + 1 == normalized_additions.len() {
-                        steps.push(PipettingStep::Mix {
-                            id: procedure_id(&format!("clear-bubbles-replicate-{replicate:04}"))?,
-                            targets: vec![destination.clone()],
-                            cycles: bubble_clear_cycles,
-                            volume: Volume::parse_microlitres(bubble_clear_volume.to_string())
-                                .map_err(|error| error.to_string())?,
-                            fluid_path: FluidPathPolicy::IsolatedDestinations,
-                            fluid_path_group: Some(fluid_path_group),
-                            technique: MixTechnique {
-                                aspiration: AspirationStrategy::VesselBottom {
-                                    offset: Length::parse_millimetres("0")
-                                        .map_err(|error| error.to_string())?,
-                                },
-                                dispense: DispenseStrategy::VesselBottom {
-                                    offset: Length::parse_millimetres(
-                                        bubble_clear_offset.to_string(),
-                                    )
+                        for cycle in 0..bubble_clear_cycles {
+                            steps.push(PipettingStep::Mix {
+                                id: procedure_id(&format!(
+                                    "clear-bubbles-replicate-{replicate:04}-cycle-{cycle:04}"
+                                ))?,
+                                targets: vec![destination.clone()],
+                                cycles: 1,
+                                volume: Volume::parse_microlitres(bubble_clear_volume.to_string())
                                     .map_err(|error| error.to_string())?,
+                                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                                fluid_path_group: Some(fluid_path_group.clone()),
+                                technique: MixTechnique {
+                                    aspiration: AspirationStrategy::VesselBottom {
+                                        offset: Length::parse_millimetres("0")
+                                            .map_err(|error| error.to_string())?,
+                                    },
+                                    dispense: DispenseStrategy::VesselBottom {
+                                        offset: Length::parse_millimetres(
+                                            bubble_clear_offset.to_string(),
+                                        )
+                                        .map_err(|error| error.to_string())?,
+                                    },
+                                    blow_out: true,
+                                    touch_tip: true,
                                 },
-                                blow_out: true,
-                                touch_tip: true,
-                            },
-                        });
+                            });
+                        }
                     }
                 }
             }
@@ -359,4 +363,13 @@ pub(super) fn normalize(
     .validate()
     .map_err(|error| error.to_string())?;
     Ok(ProcedureProgram::from_pipetting(&program))
+}
+
+pub(super) fn registrations() -> Vec<crate::procedure::ProcedureProgramBuilderRegistration> {
+    use crate::procedure::vocabulary::*;
+    vec![crate::procedure::builder::registration(
+        SETUP_GOLDEN_GATE_BUILDER_V1,
+        PIPETTING_PROGRAM_V1,
+        normalize,
+    )]
 }

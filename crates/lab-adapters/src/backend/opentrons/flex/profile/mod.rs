@@ -18,8 +18,8 @@ pub use crate::backend::opentrons::flex::profile::error::FlexProfileError;
 // These types occur in public profile fields, so they remain nameable without exposing the
 // private source-module layout used to implement the schema.
 pub use crate::backend::opentrons::flex::profile::schema::{
-    FlexResources, FlexTechniqueCalibration, Instruments, Pipette, TemperatureModule, Thermocycler,
-    TipRacks, Trash,
+    DeckLabware, FlexResources, FlexTechniqueCalibration, Instruments, Pipette, TemperatureModule,
+    Thermocycler, TipRacks, Trash,
 };
 pub use crate::backend::resources::{
     PlateCapacity, UnknownPlateGeometry, supported_plate_capacities,
@@ -182,6 +182,10 @@ impl FlexAdapterProfile {
             vec![self.resources.sources.slot.clone()],
         ));
         claims.push((
+            "bulk liquids".to_owned(),
+            vec![self.resources.bulk.slot.clone()],
+        ));
+        claims.push((
             "small tips".to_owned(),
             self.resources.small_tips.slots.clone(),
         ));
@@ -198,6 +202,7 @@ impl FlexAdapterProfile {
         BTreeSet::from([
             self.resources.sources.labware.clone(),
             self.resources.work.labware.clone(),
+            self.resources.bulk.labware.clone(),
             self.resources.small_tips.labware.clone(),
             self.resources.large_tips.labware.clone(),
         ])

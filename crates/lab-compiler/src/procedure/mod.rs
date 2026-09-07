@@ -8,6 +8,7 @@ pub(crate) mod analysis;
 pub mod binding;
 pub mod builder;
 pub mod capability;
+pub mod context;
 pub mod contract;
 pub mod feature;
 pub mod id;

@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use lab_adapters::{AdapterRuntimeRegistryExt, builtin_adapter_registry};
+use lab_adapters::AdapterRuntimeRegistryExt;
 use lab_runtime::clock::WallClock;
 use lab_runtime::events::{EventSink, ProgramExtent, RunEvent};
 use lab_runtime::execution::{
@@ -27,7 +27,9 @@ pub(crate) fn run_execution_command(
     asset_endpoints: Vec<String>,
     output: &Output,
 ) -> Result<()> {
-    let adapters = builtin_adapter_registry().context("failed to compose the adapter registry")?;
+    let adapters = lab_project::application_extensions()
+        .context("failed to compose the adapter registry")?
+        .adapters;
     let document_loaders = adapters.reviewed_document_loaders()?;
     let loaded = load_execution_directory(&directory, &document_loaders)?;
     if dry_run {

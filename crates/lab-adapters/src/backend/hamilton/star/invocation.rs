@@ -239,26 +239,17 @@ fn plan_pipetting_program(
     let work_wells = plate_wells(profile.resources.work.capacity);
     let mut source_cursor = 0usize;
     let mut work_cursor = 0usize;
-    let mut input_locations = BTreeMap::<u32, Vec<StarWell>>::new();
     let mut locations = BTreeMap::new();
     let mut sources = Vec::new();
 
-    for vessel in program
-        .vessels
-        .iter()
-        .filter(|vessel| matches!(vessel.role, VesselRole::ProcedureInput { .. }))
-    {
-        let VesselRole::ProcedureInput { input } = vessel.role else {
-            unreachable!()
-        };
+    for vessel in program.vessels.iter().filter(|vessel| {
+        matches!(
+            vessel.role,
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. }
+        )
+    }) {
         let count = usize::try_from(vessel.positions)
             .map_err(|_| format!("STAR task '{}' vessel position count overflows", task.id))?;
-        if input_locations.contains_key(&input) {
-            return Err(format!(
-                "STAR Procedure task '{}' maps input {input} to more than one canonical vessel",
-                task.id
-            ));
-        }
         let physical = take_star_locations(
             task,
             "reaction-plate input wells",
@@ -273,7 +264,6 @@ fn plan_pipetting_program(
             binding: None,
             wells: physical.clone(),
         });
-        input_locations.insert(input, physical.clone());
         locations.insert(vessel.id.clone(), physical);
     }
     for vessel in &program.vessels {
@@ -311,17 +301,7 @@ fn plan_pipetting_program(
                 });
                 physical
             }
-            VesselRole::InputOutput { input, .. } => input_locations
-                .get(input)
-                .filter(|locations| locations.len() == count)
-                .cloned()
-                .ok_or_else(|| {
-                    format!(
-                        "STAR Procedure task '{}' InputOutput vessel '{}' has no equally sized ProcedureInput {input}",
-                        task.id, vessel.id
-                    )
-                })?,
-            VesselRole::ProcedureInput { .. } => unreachable!(),
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. } => unreachable!(),
             VesselRole::Product { .. }
             | VesselRole::MaterialProduct { .. }
             | VesselRole::Intermediate => take_star_locations(
@@ -551,6 +531,12 @@ fn plan_star_canonical_program(
     ))
 }
 
+type StarCanonicalSteps = (
+    Vec<crate::backend::hamilton::star::plan::StarOperation>,
+    Vec<TipFeeder>,
+    Vec<LiquidClassEvidence>,
+);
+
 fn execute_star_canonical_steps(
     profile: &StarAdapterProfile,
     task: &AllocatedProcedureTask,
@@ -558,18 +544,12 @@ fn execute_star_canonical_steps(
     locations: &BTreeMap<ProcedureLocalId, Vec<StarWell>>,
     deck: &DeckIndex,
     liquids: &mut LiquidState,
-) -> Result<
-    (
-        Vec<crate::backend::hamilton::star::plan::StarOperation>,
-        Vec<TipFeeder>,
-        Vec<LiquidClassEvidence>,
-    ),
-    String,
-> {
+) -> Result<StarCanonicalSteps, String> {
     let classes = profile
         .liquid_classes
         .resolve_selected()
         .map_err(|error| error.to_string())?;
+    let classifications = profile.liquid_handling.resolve(task, program, locations)?;
     let mut builder = RunBuilder::new(
         deck,
         liquids,
@@ -619,11 +599,10 @@ fn execute_star_canonical_steps(
                     } => {
                         let volume = volume_microlitres("STAR", task, "transfer", volume)?;
                         maximum = maximum.max(volume);
-                        path.push(FluidPathOperation::Transfer(Transfer::new(
-                            physical(source)?,
-                            physical(destination)?,
-                            volume,
-                        )));
+                        path.push(FluidPathOperation::Transfer(
+                            Transfer::new(physical(source)?, physical(destination)?, volume)
+                                .with_liquid(classifications[step.id()][0].clone()),
+                        ));
                     }
                     PipettingStep::Mix {
                         targets,
@@ -633,11 +612,12 @@ fn execute_star_canonical_steps(
                     } => {
                         let volume = volume_microlitres("STAR", task, "mix", volume)?;
                         maximum = maximum.max(volume);
-                        for target in targets {
+                        for (index, target) in targets.iter().enumerate() {
                             path.push(FluidPathOperation::Mix {
                                 well: physical(target)?,
                                 cycles: *cycles,
                                 volume_ul: volume,
+                                liquid: classifications[step.id()][index].clone(),
                             });
                         }
                     }
@@ -667,11 +647,12 @@ fn execute_star_canonical_steps(
                 builder
                     .distribute(
                         star_tip_class(volume),
-                        &[Transfer::new(
-                            physical(source)?,
-                            physical(destination)?,
-                            volume,
-                        )],
+                        &[
+                            Transfer::new(physical(source)?, physical(destination)?, volume)
+                                .with_liquid(
+                                    classifications[program.steps[cursor].id()][0].clone(),
+                                ),
+                        ],
                     )
                     .map_err(|error| error.to_string())?;
             }
@@ -688,7 +669,10 @@ fn execute_star_canonical_steps(
                     .map(|destination| {
                         Ok(
                             Transfer::new(physical(source)?, physical(destination)?, volume)
-                                .with_technique("distribution"),
+                                .with_technique("distribution")
+                                .with_liquid(
+                                    classifications[program.steps[cursor].id()][0].clone(),
+                                ),
                         )
                     })
                     .collect::<Result<Vec<_>, String>>()?;
@@ -715,9 +699,16 @@ fn execute_star_canonical_steps(
                     .iter()
                     .map(&physical)
                     .collect::<Result<Vec<_>, _>>()?;
-                builder
-                    .mix_wells(star_tip_class(volume), &wells, (*cycles, volume))
-                    .map_err(|error| error.to_string())?;
+                for (index, well) in wells.iter().enumerate() {
+                    builder
+                        .mix_wells(
+                            star_tip_class(volume),
+                            std::slice::from_ref(well),
+                            (*cycles, volume),
+                            &classifications[program.steps[cursor].id()][index],
+                        )
+                        .map_err(|error| error.to_string())?;
+                }
             }
             PipettingStep::Barrier { .. } => unreachable!(),
         }
@@ -978,14 +969,20 @@ mod tests {
         contributed.version = "3.2.1".to_owned();
         contributed.classes.truncate(1);
         let contributed_class = &mut contributed.classes[0];
-        contributed_class.id = "org.example.lab.star.aqueous-surface".to_owned();
+        contributed_class.id = "org.example.lab.star.glycerol-surface".to_owned();
         contributed_class.version = "7.4.0".to_owned();
+        contributed_class.applicability.liquids = vec!["glycerol_50_percent".to_owned()];
         contributed_class.speeds.aspirate_ul_s = 17.0;
         contributed_class.calibration.source =
             "Example Lab gravimetric calibration campaign".to_owned();
         contributed_class.calibration.source_version = "campaign-2026-09".to_owned();
 
         let authored_profile = StarAdapterProfile {
+            liquid_handling: super::super::liquid_handling::StarLiquidHandling {
+                default_liquid: None,
+                materials: BTreeMap::from([("water".to_owned(), "glycerol_50_percent".to_owned())]),
+                inputs: BTreeMap::new(),
+            },
             liquid_classes: LiquidClassLibraryRegistry {
                 selected_library: LiquidClassLibraryReference {
                     id: contributed.id.clone(),

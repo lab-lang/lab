@@ -4,10 +4,12 @@
 
 # ruff: noqa
 
+# fmt: off
+
 from typing import Generic, TypeVar
 
 from lab._effects import Action
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import ImportedWorkflow
 
@@ -16,7 +18,7 @@ _CDS_Product_1 = TypeVar("_CDS_Product_1")
 _Circuit_Trigger_1 = TypeVar("_Circuit_Trigger_1")
 _Circuit_Product_2 = TypeVar("_Circuit_Product_2")
 _List_Item_1 = TypeVar("_List_Item_1")
-_Material_Subject_1 = TypeVar("_Material_Subject_1")
+_Material_Subject_1 = TypeVar("_Material_Subject_1", covariant=True)
 _Promoter_Trigger_1 = TypeVar("_Promoter_Trigger_1")
 _Rejected_Value_1 = TypeVar("_Rejected_Value_1")
 

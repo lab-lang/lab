@@ -5,8 +5,8 @@ use crate::procedure::{
     Vessel, VesselRole, Volume,
 };
 
-use super::view::{TaskView, procedure_id};
 use crate::procedure::ProcedureProgramBuildContext;
+use crate::procedure::context::procedure_id;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
@@ -23,14 +23,14 @@ pub(super) fn normalize_add_medium(
             task.outputs.len()
         ));
     }
-    let view = TaskView::new(task);
+    let view = task;
     view.require_material_roles(&["medium"])?;
     let medium = view.one_material("medium")?;
-    let replicates = positive(&view, "replicates", None)?;
-    let initial_volume = transformation_volume(&view)?;
-    let recovery_aliquot_volume = positive(&view, "recovery_aliquot_volume_ul", Some(MICROLITRE))?;
-    let recovery_volume = positive(&view, "recovery_volume_ul", Some(MICROLITRE))?;
-    let air_gap = positive(&view, "air_gap_ul", Some(MICROLITRE))?;
+    let replicates = positive(view, "replicates", None)?;
+    let initial_volume = transformation_volume(view)?;
+    let recovery_aliquot_volume = positive(view, "recovery_aliquot_volume_ul", Some(MICROLITRE))?;
+    let recovery_volume = positive(view, "recovery_volume_ul", Some(MICROLITRE))?;
+    let air_gap = positive(view, "air_gap_ul", Some(MICROLITRE))?;
     let medium_id = procedure_id(medium.id.as_str())?;
     let medium_vessel = procedure_id("recovery-medium")?;
     let output = procedure_id(task.outputs[0].as_str())?;
@@ -103,11 +103,11 @@ pub(super) fn normalize_incubation(
             task.outputs.len()
         ));
     }
-    let view = TaskView::new(task);
+    let view = task;
     view.require_material_roles(&[])?;
-    let replicates = positive(&view, "replicates", None)?;
-    let initial_volume = transformation_volume(&view)?;
-    let recovery_volume = positive(&view, "recovery_volume_ul", Some(MICROLITRE))?;
+    let replicates = positive(view, "replicates", None)?;
+    let initial_volume = transformation_volume(view)?;
+    let recovery_volume = positive(view, "recovery_volume_ul", Some(MICROLITRE))?;
     let temperature_c = view.integer_parameter("recovery_temperature_c", Some(DEGREE_CELSIUS))?;
     let hold_temperature = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
     let (duration, unit) = view.decimal_parameter("duration")?;
@@ -151,7 +151,11 @@ pub(super) fn normalize_incubation(
     Ok(ProcedureProgram::from_thermal(&program))
 }
 
-fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u32, String> {
+fn positive(
+    view: &ProcedureProgramBuildContext<'_>,
+    name: &str,
+    unit: Option<&str>,
+) -> Result<u32, String> {
     let value = view.integer_parameter(name, unit)?;
     if value == 0 {
         return Err(format!("parameter `{name}` must be greater than zero"));
@@ -162,7 +166,7 @@ fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u
 /// Volume entering recovery is determined by the transformation Method, not source lowering.
 /// Keeping the derivation beside the Procedure builder lets another transformation Method choose
 /// a different formula without teaching the generic Intent boundary any biology.
-fn transformation_volume(view: &TaskView<'_, '_>) -> Result<u32, String> {
+fn transformation_volume(view: &ProcedureProgramBuildContext<'_>) -> Result<u32, String> {
     let cells = positive(view, "cell_volume_ul", Some(MICROLITRE))?;
     let dna_each = positive(view, "dna_volume_ul", Some(MICROLITRE))?;
     let dna_count = positive(view, "dna_count", None)?;
@@ -178,4 +182,20 @@ fn volume(value: u32) -> Result<Volume, String> {
 
 fn temperature(value: u32) -> Result<Temperature, String> {
     Temperature::parse_degrees_celsius(value.to_string()).map_err(|error| error.to_string())
+}
+
+pub(super) fn registrations() -> Vec<crate::procedure::ProcedureProgramBuilderRegistration> {
+    use crate::procedure::vocabulary::*;
+    vec![
+        crate::procedure::builder::registration(
+            ADD_RECOVERY_MEDIUM_BUILDER_V1,
+            PIPETTING_PROGRAM_V1,
+            normalize_add_medium,
+        ),
+        crate::procedure::builder::registration(
+            INCUBATE_RECOVERY_CULTURE_BUILDER_V1,
+            THERMAL_PROGRAM_V1,
+            normalize_incubation,
+        ),
+    ]
 }

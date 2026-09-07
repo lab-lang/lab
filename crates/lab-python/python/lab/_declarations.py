@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Generic, TypeVar
 
 from ._expressions import Expression, Fields, expression
 from ._source import Origin, SourceMap, SourceWriter
+from ._types import DesignReference
 
 if TYPE_CHECKING:
     from ._vocabulary import ArtifactKind
@@ -83,7 +84,7 @@ class DeclarationReference(Expression):
         yield self.declaration.module.name
 
 
-class Declaration(Generic[_ArtifactKindT]):
+class Declaration(DesignReference[_ArtifactKindT], Generic[_ArtifactKindT]):
     """One artifact declaration: a kind, a provenance, and what it states."""
 
     _expected_provenance: ClassVar[str | None] = None

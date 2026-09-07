@@ -451,6 +451,7 @@ fn validate_export_names(module: &BindingModule) -> Result<(), PythonBindingGene
         "Action",
         "ArtifactKind",
         "Decimal",
+        "DesignReference",
         "Effect",
         "Final",
         "Function",
@@ -462,6 +463,7 @@ fn validate_export_names(module: &BindingModule) -> Result<(), PythonBindingGene
         "LabState",
         "LabType",
         "Protocol",
+        "overload",
         "Quantity",
         "Symbol",
         "TypeVar",
@@ -491,6 +493,9 @@ fn validate_export_names(module: &BindingModule) -> Result<(), PythonBindingGene
             BindingKind::Function => Some(format!("_{}Function", pascal(&export.name))),
             BindingKind::Action => Some(format!("_{}Action", pascal(&export.name))),
             BindingKind::Workflow => Some(format!("_{}Workflow", pascal(&export.name))),
+            BindingKind::Constructor if is_variant_constructor(export) => {
+                Some(format!("_{}Constructor", pascal(&export.name)))
+            }
             _ => None,
         };
         if let Some(helper) = helper {
@@ -544,6 +549,8 @@ struct DefinitionModules {
     exact: BTreeMap<(String, String), Option<PathBuf>>,
     prelude: BTreeMap<String, Option<PathBuf>>,
     standard: BTreeMap<String, Option<PathBuf>>,
+    artifact_types: BTreeSet<(PathBuf, String)>,
+    arities: BTreeMap<(PathBuf, String), usize>,
 }
 
 impl DefinitionModules {
@@ -615,6 +622,10 @@ fn definition_modules(modules: &[BindingModule]) -> DefinitionModules {
     for module in modules {
         for export in &module.exports {
             definitions.insert(module, &export.source_name);
+            definitions.arities.insert(
+                (module.python_path.clone(), export.source_name.clone()),
+                export.parameters.len(),
+            );
             for state in &export.facet_states {
                 definitions.insert(module, state);
             }
@@ -623,7 +634,31 @@ fn definition_modules(modules: &[BindingModule]) -> DefinitionModules {
             }
         }
     }
+    for module in modules {
+        for export in &module.exports {
+            if export.kind == BindingKind::ArtifactKind {
+                let name = export.produces.as_deref().unwrap_or(&export.source_name);
+                definitions
+                    .artifact_types
+                    .insert((module.python_path.clone(), name.to_owned()));
+                if module.standard
+                    && let Some(Some(path)) = definitions.prelude.get(name)
+                {
+                    definitions
+                        .artifact_types
+                        .insert((path.clone(), name.to_owned()));
+                }
+            }
+        }
+    }
     definitions
+}
+
+fn is_variant_constructor(export: &BindingExport) -> bool {
+    export.kind == BindingKind::Constructor
+        && export.results.first().is_some_and(|result| {
+            result.ty.split('<').next().unwrap_or(&result.ty) != export.source_name
+        })
 }
 
 fn merge_type_constructors(module: &mut BindingModule) {
@@ -671,10 +706,11 @@ fn render_runtime(module: &BindingModule) -> String {
         "# Generated from a checked Lab ModuleInterface by `lab bindings python`. Do not edit."
             .to_owned(),
         "# ruff: noqa".to_owned(),
+        "# fmt: off".to_owned(),
         "from typing import Generic, TypeVar".to_owned(),
         [
             "from lab._effects import Action",
-            "from lab._types import LabConstructor, LabRole, LabState, LabType",
+            "from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType",
             "from lab._vocabulary import ArtifactKind, Function, Symbol",
             "from lab._workflows import ImportedWorkflow",
         ]
@@ -848,12 +884,13 @@ fn render_stub(module: &BindingModule, definitions: &DefinitionModules) -> Strin
         "# Generated from a checked Lab ModuleInterface by `lab bindings python`. Do not edit."
             .to_owned(),
         "# ruff: noqa".to_owned(),
+        "# fmt: off".to_owned(),
         "from __future__ import annotations".to_owned(),
-        "from typing import Any, Final, Generic, Protocol, TypeVar".to_owned(),
+        "from typing import Any, Final, Generic, Protocol, TypeVar, overload".to_owned(),
         [
             "from lab._effects import Effect",
             "from lab._expressions import Decimal, Quantity",
-            "from lab._types import LabConstructor, LabRole, LabState, LabType",
+            "from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType",
             "from lab._vocabulary import ArtifactKind, Function, Symbol",
             "from lab._workflows import WorkflowCall",
         ]
@@ -894,6 +931,19 @@ fn render_stub_export(
     definitions: &DefinitionModules,
     aliases: &BTreeMap<PathBuf, String>,
 ) -> String {
+    if is_variant_constructor(export) {
+        let protocol = format!("_{}Constructor", pascal(&export.name));
+        let signature =
+            constructor_signature(export, module, definitions, aliases).replacen("cls", "self", 1);
+        return documented(
+            format!(
+                "class {protocol}(Protocol):\n    def __call__({signature}) -> {}: ...\n\n{}: Final[{protocol}]",
+                constructor_result_type(export, module, definitions, aliases),
+                export.name,
+            ),
+            &export.documentation,
+        );
+    }
     match export.kind {
         BindingKind::Type | BindingKind::Role | BindingKind::Constructor => {
             let base = match export.kind {
@@ -937,6 +987,22 @@ fn render_stub_export(
                 python_identifier(export.produces.as_deref().unwrap_or(&export.source_name));
             let roles = role_bases(export, module, definitions, aliases);
             let mut bases = vec!["ArtifactKind".to_owned()];
+            if let Some(Some(path)) = definitions.prelude.get(&produces)
+                && path != &module.python_path
+                && let Some(alias) = aliases.get(path)
+            {
+                let arity = definitions
+                    .arities
+                    .get(&(path.clone(), produces.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                let arguments = if arity == 0 {
+                    String::new()
+                } else {
+                    format!("[{}]", vec!["Any"; arity].join(", "))
+                };
+                bases.push(format!("{alias}.{produces}{arguments}"));
+            }
             if roles.is_empty() {
                 bases.push("LabType".to_owned());
             } else {
@@ -979,19 +1045,20 @@ fn render_stub_export(
                 aliases,
                 &type_parameters,
             );
+            let result = python_type_with_parameters(
+                export
+                    .results
+                    .first()
+                    .map_or("object", |field| field.ty.as_str()),
+                module,
+                definitions,
+                aliases,
+                &type_parameters,
+            );
+            let calls = callable_signatures(export, &signature, &result);
             documented(
                 format!(
-                    "class {protocol}(Protocol):\n    def __call__({signature}) -> {}: ...\n\n{}: Final[{protocol}]",
-                    python_type_with_parameters(
-                        export
-                            .results
-                            .first()
-                            .map_or("object", |field| field.ty.as_str()),
-                        module,
-                        definitions,
-                        aliases,
-                        &type_parameters,
-                    ),
+                    "class {protocol}(Protocol):\n{calls}\n\n{}: Final[{protocol}]",
                     export.name
                 ),
                 &export.documentation,
@@ -1024,15 +1091,51 @@ fn render_stub_export(
                 aliases,
                 &type_parameters,
             );
+            let calls = callable_signatures(export, &signature, &format!("{effect}[{result}]"));
             documented(
                 format!(
-                    "class {protocol}(Protocol):\n    @property\n    def definition(self) -> tuple[str, str]: ...\n    def __call__({signature}) -> {effect}[{result}]: ...\n\n{}: Final[{protocol}]",
+                    "class {protocol}(Protocol):\n    @property\n    def definition(self) -> tuple[str, str]: ...\n{calls}\n\n{}: Final[{protocol}]",
                     export.name
                 ),
                 &export.documentation,
             )
         }
     }
+}
+
+// Splitting reference and value inputs preserves the subject inferred for generic actions.
+// A union T | DesignReference[T] makes Python infer Never or the wrapper as T.
+fn callable_signatures(export: &BindingExport, signature: &str, result: &str) -> String {
+    let names = type_parameter_names(export);
+    let mut signatures = vec![signature.to_owned()];
+    for (field, name) in export
+        .inputs
+        .iter()
+        .zip(python_parameter_names(&export.inputs))
+    {
+        if let Some(ty) = names.get(&field.ty) {
+            let union = format!("{name}: {ty} | DesignReference[{ty}]");
+            signatures = signatures
+                .into_iter()
+                .flat_map(|signature| {
+                    [
+                        signature.replace(&union, &format!("{name}: DesignReference[{ty}]")),
+                        signature.replace(&union, &format!("{name}: {ty}")),
+                    ]
+                })
+                .collect();
+        }
+    }
+    let decorator = if signatures.len() > 1 {
+        "    @overload\n"
+    } else {
+        ""
+    };
+    signatures
+        .iter()
+        .map(|signature| format!("{decorator}    def __call__({signature}) -> {result}: ..."))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn synthetic_type_parameters(count: usize) -> Vec<TypeParameter> {
@@ -1081,10 +1184,24 @@ fn runtime_type_parameter_declarations(module: &BindingModule) -> String {
         .flat_map(|export| {
             let names = type_parameter_names(export);
             ordered_type_parameter_names(export, &names)
+                .into_iter()
+                .map(|name| format!("{name} = TypeVar({name:?}{})", variance(export)))
+                .collect::<Vec<_>>()
         })
-        .map(|name| format!("{name} = TypeVar({name:?})"))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+// These bindings are read-only type markers. Affine ownership is checked by Lab,
+// independently of Python's annotations.
+fn variance(export: &BindingExport) -> &'static str {
+    if export.kind == BindingKind::Facet
+        || (export.definition_module == "std.prelude" && export.source_name == "Material")
+    {
+        ", covariant=True"
+    } else {
+        ""
+    }
 }
 
 fn stub_type_parameter_declarations(
@@ -1100,17 +1217,18 @@ fn stub_type_parameter_declarations(
             export.parameters.iter().map(move |parameter| {
                 let name = &names[&parameter.name];
                 parameter.bound.as_ref().map_or_else(
-                    || format!("{name} = TypeVar({name:?})"),
+                    || format!("{name} = TypeVar({name:?}{})", variance(export)),
                     |bound| {
                         format!(
-                            "{name} = TypeVar({name:?}, bound={})",
+                            "{name} = TypeVar({name:?}, bound={}{})",
                             python_type_with_parameters(
                                 bound,
                                 module,
                                 definitions,
                                 aliases,
                                 &names,
-                            )
+                            ),
+                            variance(export),
                         )
                     },
                 )
@@ -1131,19 +1249,27 @@ fn signature(
     let parameters = inputs
         .iter()
         .zip(names)
-        .enumerate()
-        .map(|(_index, (field, name))| {
+        .map(|(field, name)| {
             let default = if field.optional { " = ..." } else { "" };
-            format!(
-                "{name}: {}{default}",
-                python_type_with_parameters(
-                    &field.ty,
-                    module,
-                    definitions,
-                    aliases,
-                    type_parameters,
-                )
-            )
+            let ty = python_type_with_parameters(
+                &field.ty,
+                module,
+                definitions,
+                aliases,
+                type_parameters,
+            );
+            let accepts_design = type_parameters.contains_key(&field.ty)
+                || definitions.resolve(module, &field.ty).is_some_and(|path| {
+                    definitions
+                        .artifact_types
+                        .contains(&(path.clone(), field.ty.clone()))
+                });
+            let ty = if accepts_design {
+                format!("{ty} | DesignReference[{ty}]")
+            } else {
+                ty
+            };
+            format!("{name}: {ty}{default}")
         })
         .collect::<Vec<_>>();
     if parameters.is_empty() {
@@ -1292,6 +1418,13 @@ fn type_aliases(
 ) -> BTreeMap<PathBuf, String> {
     let mut paths = BTreeSet::new();
     for export in &module.exports {
+        if export.kind == BindingKind::ArtifactKind
+            && let Some(name) = &export.produces
+            && let Some(Some(path)) = definitions.prelude.get(name)
+            && path != &module.python_path
+        {
+            paths.insert(path.clone());
+        }
         for role in &export.roles {
             if let Some(path) = definitions.resolve(module, role)
                 && path != &module.python_path
@@ -2388,7 +2521,11 @@ workflow repeat(sample: Sample, cycles: Integer) -> Sample:
                 .source
                 .contains("class Empty(LabConstructor):")
         );
-        assert!(samples_stub.source.contains("def __new__(cls) -> Outcome"));
+        assert!(
+            samples_stub
+                .source
+                .contains("def __call__(self) -> Outcome")
+        );
     }
 
     #[test]
@@ -2447,7 +2584,7 @@ workflow repeat(sample: Sample, cycles: Integer) -> Sample:
         assert!(
             designs_stub
                 .source
-                .contains("class Antibiotic(ArtifactKind, _module_1.SimpleChemical): ..."),
+                .contains("class Antibiotic(ArtifactKind, _module_0.Antibiotic, _module_1.SimpleChemical): ..."),
             "an artifact role already supplies the LabType base:\n{}",
             designs_stub.source
         );
@@ -2497,7 +2634,7 @@ workflow repeat(sample: Sample, cycles: Integer) -> Sample:
         assert!(
             plasmid_stub
                 .source
-                .contains("plate: _module_0.Material[_module_1.inoculated[Any]]")
+                .contains("plate: _module_0.Material[_module_1.inoculated[_module_0.Medium]]")
         );
         assert!(
             plasmid_stub

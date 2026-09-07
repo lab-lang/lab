@@ -16,14 +16,16 @@ repeating what a solution can do on each kind."""
 
 # ruff: noqa
 
+# fmt: off
+
 from typing import Generic, TypeVar
 
 from lab._effects import Action
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import ImportedWorkflow
 
-_Growth_T1_1 = TypeVar("_Growth_T1_1")
+_Growth_T1_1 = TypeVar("_Growth_T1_1", covariant=True)
 
 LAB_MODULE = "std.lab.competence"
 """The exact Lab module these bindings import."""

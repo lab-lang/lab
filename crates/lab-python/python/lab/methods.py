@@ -282,8 +282,10 @@ def _method_parameter_default(
             valid = isinstance(item, str)
         elif expected is ScalarType.INTEGER:
             valid = isinstance(item, int) and not isinstance(item, bool)
-            if isinstance(item, int) and not isinstance(item, bool) and not (
-                -(2**63) <= item <= 2**64 - 1
+            if (
+                isinstance(item, int)
+                and not isinstance(item, bool)
+                and not (-(2**63) <= item <= 2**64 - 1)
             ):
                 raise ValueError(
                     "an integer Method parameter default is outside JSON's exact range"

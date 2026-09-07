@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "examples/contributing/pipetting-extension",
+    "examples/contributing/preview-adapter",
     "crates/lab-adapter-api",
     "crates/lab-adapters",
     "crates/lab-capability",

@@ -5,7 +5,9 @@
 
 mod application;
 mod artifacts;
+mod extensions;
 mod facility;
+pub use extensions::{ApplicationExtensionError, ApplicationExtensions, application_extensions};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;

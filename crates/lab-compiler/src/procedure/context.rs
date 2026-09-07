@@ -1,20 +1,46 @@
+//! Checked values and bindings for authors of Procedure construction algorithms.
+
 use crate::method::ProcedureValue;
-use crate::procedure::{ProcedureLocalId, ProcedureProgramBuildContext, ResolvedProcedureMaterial};
+use crate::procedure::{
+    ProcedureLocalId, ProcedureProgramBuildContext, ResolvedProcedureMaterial, Volume,
+};
 use lab_capability::{ExactDecimal, ScalarValue};
 
-pub(super) struct TaskView<'task, 'instance> {
-    task: &'task ProcedureProgramBuildContext<'instance>,
-}
-
-impl<'task, 'instance> TaskView<'task, 'instance> {
-    pub(super) fn new(task: &'task ProcedureProgramBuildContext<'instance>) -> Self {
-        Self { task }
+impl ProcedureProgramBuildContext<'_> {
+    /// Require a fixed material interface before constructing any operations.
+    pub fn require_io(&self, inputs: usize, outputs: usize) -> Result<(), String> {
+        if self.input_count != inputs || self.outputs.len() != outputs {
+            return Err(format!(
+                "expected {inputs} inputs and {outputs} outputs, found {} and {}",
+                self.input_count,
+                self.outputs.len()
+            ));
+        }
+        Ok(())
     }
 
-    fn parameter(&self, name: &str) -> Result<&ProcedureValue, String> {
+    /// The exact output identity selected by the Method graph.
+    pub fn output(&self, index: usize) -> Result<ProcedureLocalId, String> {
+        let output = self
+            .outputs
+            .get(index)
+            .ok_or_else(|| format!("missing output {index}"))?;
+        procedure_id(output.as_str())
+    }
+
+    /// A positive, exact volume with checked canonical microlitre units.
+    pub fn volume_parameter(&self, name: &str) -> Result<Volume, String> {
+        let (value, unit) = self.decimal_parameter(name)?;
+        if unit != Some(crate::procedure::vocabulary::MICROLITRE) {
+            return Err(format!(
+                "parameter `{name}` must use microlitres, found {unit:?}"
+            ));
+        }
+        Volume::microlitres(value).map_err(|error| format!("parameter `{name}`: {error}"))
+    }
+    pub fn parameter(&self, name: &str) -> Result<&ProcedureValue, String> {
         let suffix = format!("::parameter::{name}");
         let matches = self
-            .task
             .parameters
             .iter()
             .filter(|parameter| parameter.id.as_str().ends_with(&suffix))
@@ -28,7 +54,7 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
         Ok(&matches[0].value)
     }
 
-    pub(super) fn integer_parameter(
+    pub fn integer_parameter(
         &self,
         name: &str,
         expected_unit: Option<&str>,
@@ -51,10 +77,7 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
             .map_err(|_| format!("parameter `{name}` must fit the unsigned 32-bit range"))
     }
 
-    pub(super) fn decimal_parameter(
-        &self,
-        name: &str,
-    ) -> Result<(ExactDecimal, Option<&str>), String> {
+    pub fn decimal_parameter(&self, name: &str) -> Result<(ExactDecimal, Option<&str>), String> {
         let ProcedureValue::Scalar { value } = self.parameter(name)? else {
             return Err(format!("parameter `{name}` must be a numeric scalar"));
         };
@@ -66,7 +89,7 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
         Ok((decimal, value.unit.as_ref().map(|unit| unit.as_str())))
     }
 
-    pub(super) fn text_parameter(&self, name: &str) -> Result<String, String> {
+    pub fn text_parameter(&self, name: &str) -> Result<String, String> {
         let ProcedureValue::Scalar { value: property } = self.parameter(name)? else {
             return Err(format!("parameter `{name}` must be a text scalar"));
         };
@@ -81,7 +104,7 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
         Ok(value.clone())
     }
 
-    pub(super) fn text_list_parameter(&self, name: &str) -> Result<Vec<String>, String> {
+    pub fn text_list_parameter(&self, name: &str) -> Result<Vec<String>, String> {
         let ProcedureValue::List { values, .. } = self.parameter(name)? else {
             return Err(format!("parameter `{name}` must be a text list"));
         };
@@ -101,15 +124,14 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
             .collect()
     }
 
-    pub(super) fn materials(&self, role: &str) -> Vec<&ResolvedProcedureMaterial> {
-        self.task
-            .materials
+    pub fn materials(&self, role: &str) -> Vec<&ResolvedProcedureMaterial> {
+        self.materials
             .iter()
             .filter(|material| material_role(&material.id) == Some(role))
             .collect()
     }
 
-    pub(super) fn one_material(&self, role: &str) -> Result<&ResolvedProcedureMaterial, String> {
+    pub fn one_material(&self, role: &str) -> Result<&ResolvedProcedureMaterial, String> {
         let materials = self.materials(role);
         if materials.len() != 1 {
             return Err(format!(
@@ -120,8 +142,8 @@ impl<'task, 'instance> TaskView<'task, 'instance> {
         Ok(materials[0])
     }
 
-    pub(super) fn require_material_roles(&self, allowed: &[&str]) -> Result<(), String> {
-        for material in self.task.materials {
+    pub fn require_material_roles(&self, allowed: &[&str]) -> Result<(), String> {
+        for material in self.materials {
             let Some(role) = material_role(&material.id) else {
                 return Err(format!(
                     "material input `{}` has no stable role",
@@ -145,13 +167,13 @@ fn material_role(id: &crate::method::LocalId) -> Option<&str> {
         .map(|(_, role)| role.split("::").next().unwrap_or(role))
 }
 
-pub(super) fn material_symbols(materials: &[&ResolvedProcedureMaterial]) -> Vec<String> {
+pub fn material_symbols(materials: &[&ResolvedProcedureMaterial]) -> Vec<String> {
     materials
         .iter()
         .map(|material| material.symbol.clone())
         .collect()
 }
 
-pub(super) fn procedure_id(value: &str) -> Result<ProcedureLocalId, String> {
+pub fn procedure_id(value: &str) -> Result<ProcedureLocalId, String> {
     ProcedureLocalId::new(value).map_err(|error| error.to_string())
 }

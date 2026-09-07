@@ -3,7 +3,7 @@
 use crate::backend::resources::PlateCapacity;
 
 use crate::backend::opentrons::flex::profile::schema::{
-    Pipette, TemperatureModule, Thermocycler, TipRacks, Trash,
+    DeckLabware, Pipette, TemperatureModule, Thermocycler, TipRacks, Trash,
 };
 
 pub(super) fn default_small_pipette() -> Pipette {
@@ -25,6 +25,7 @@ pub(super) fn default_sources() -> TemperatureModule {
         model: "temperatureModuleV2".to_owned(),
         slot: "C1".to_owned(),
         labware: "opentrons_24_aluminumblock_nest_1.5ml_snapcap".to_owned(),
+        max_volume_each_ul: 1500,
         capacity: plate_capacity(24),
     }
 }
@@ -33,6 +34,7 @@ pub(super) fn default_work() -> Thermocycler {
     Thermocycler {
         model: "thermocyclerModuleV2".to_owned(),
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
+        max_volume_each_ul: 100,
         capacity: plate_capacity(96),
     }
 }
@@ -83,4 +85,20 @@ pub(super) fn default_flex_tracked_meniscus_offset_mm() -> f64 {
 
 pub(super) fn default_flex_tracked_minimum_height_mm() -> f64 {
     2.0
+}
+
+pub(super) fn default_bulk() -> DeckLabware {
+    DeckLabware {
+        slot: "D1".to_owned(),
+        labware: "opentrons_15_tuberack_falcon_15ml_conical".to_owned(),
+        max_volume_each_ul: 15000,
+        capacity: plate_capacity(15),
+    }
+}
+
+pub(super) fn default_source_volume_limit() -> u32 {
+    1500
+}
+pub(super) fn default_work_volume_limit() -> u32 {
+    100
 }

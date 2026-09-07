@@ -529,17 +529,37 @@ impl RootedWorkflowLowerer<'_> {
                                         })
                                         .collect(),
                                 };
-                                let parameter = (sources.len() == 1).then(|| {
-                                    let source = sources.iter().next().expect("one source");
-                                    let name = self
-                                        .artifacts
-                                        .get(source)
-                                        .map(|artifact| artifact.design.name.clone())
-                                        .unwrap_or_else(|| definition_key(source));
-                                    ProcedureValue::Scalar {
-                                        value: PropertyValue::unitless(ScalarValue::Text(name)),
-                                    }
-                                });
+                                let parameter = (sources.len() == 1)
+                                    .then(|| {
+                                        let source = sources.iter().next().expect("one source");
+                                        let name = self
+                                            .artifacts
+                                            .get(source)
+                                            .map(|artifact| artifact.design.name.clone())
+                                            .unwrap_or_else(|| definition_key(source));
+                                        ProcedureValue::Scalar {
+                                            value: PropertyValue::unitless(ScalarValue::Text(name)),
+                                        }
+                                    })
+                                    .or_else(|| {
+                                        // A purchased design has no artifact realization record.
+                                        // Preserve its declared identity through material lineage
+                                        // instead of exposing an inlined local variable as inventory.
+                                        let operands = match &result.lineage {
+                                            ResultLineage::Continues { from } => from,
+                                            ResultLineage::IdentifiedBy { operands } => operands,
+                                            ResultLineage::Begins => return None,
+                                        };
+                                        let [source] = operands.as_slice() else {
+                                            return None;
+                                        };
+                                        concrete_action
+                                            .arguments
+                                            .iter()
+                                            .zip(&resolved)
+                                            .find(|(argument, _)| argument.name == *source)
+                                            .and_then(|(_, value)| value.parameter.clone())
+                                    });
                                 BoundValue {
                                     expression: TypedExpression {
                                         r#type: binding.r#type.clone(),

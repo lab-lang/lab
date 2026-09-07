@@ -279,6 +279,10 @@ fn intent_instance(context: &Context, operation: Ptr<Operation>) -> Result<Inten
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal pass inputs and validation context are explicit"
+)]
 fn append_candidate(
     context: &mut Context,
     choice: &ChoiceOp,

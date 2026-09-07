@@ -7,7 +7,8 @@ use lab_compiler::method::LocalId;
 use lab_compiler::procedure::ProcedureContractRegistry;
 use lab_compiler::procedure::vocabulary::{PIPETTING_PROGRAM_V1, THERMAL_PROGRAM_V1};
 use lab_compiler::procedure::{
-    FluidPathPolicy, PipettingProgramV1, PipettingStep, ProcedureLocalId, VesselRole,
+    DispenseStrategy, FluidPathPolicy, Location, PipettingProgramV1, PipettingStep,
+    ProcedureLocalId, VesselRole,
 };
 use lab_instruments::ThermalProfile;
 use lab_runfmt::OPENTRONS_PYTHON_PROTOCOL_FORMAT;
@@ -103,7 +104,9 @@ pub(super) struct CanonicalPipettingExecution {
     title: String,
     program: PipettingProgramV1,
     locations: BTreeMap<ProcedureLocalId, Vec<Ot2PhysicalLocation>>,
+    staging_temperatures: BTreeMap<String, f64>,
     sources: Vec<CanonicalSourceReview>,
+    initial_volumes_ul: BTreeMap<ProcedureLocalId, Vec<f64>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -117,6 +120,8 @@ struct Ot2PhysicalLocation {
 enum Ot2PhysicalResource {
     Sources,
     Work,
+    Bulk,
+    Surface,
 }
 
 #[derive(Clone, Serialize)]
@@ -253,111 +258,133 @@ fn plan_pipetting_program(
 ) -> Result<Ot2TaskExecution, String> {
     let validated = canonical_pipetting_program("OT-2", task, requirements, contracts)?;
     let program = validated.as_program();
-    let source_wells = plate_wells(profile.resources.sources.capacity);
-    let work_wells = plate_wells(profile.resources.work.capacity);
-    let mut source_cursor = 0usize;
-    let mut work_cursor = 0usize;
-    let mut input_locations = BTreeMap::<u32, Vec<Ot2PhysicalLocation>>::new();
-    let mut locations = BTreeMap::new();
-    let mut sources = Vec::new();
-
-    for vessel in program
+    let initial_volumes_ul = program
         .vessels
         .iter()
-        .filter(|vessel| matches!(vessel.role, VesselRole::ProcedureInput { .. }))
-    {
-        let VesselRole::ProcedureInput { input } = vessel.role else {
-            unreachable!()
+        .map(|vessel| {
+            let volumes = (0..vessel.positions)
+                .map(|position| {
+                    let location = Location {
+                        vessel: vessel.id.clone(),
+                        position,
+                    };
+                    vessel
+                        .initial_volume_each
+                        .as_ref()
+                        .map(|v| v.value())
+                        .or_else(|| validated.liquid_ledger().required_initial_volume(&location))
+                        .map(|value| value.to_string().parse::<f64>().map_err(|e| e.to_string()))
+                        .unwrap_or(Ok(0.0))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok((vessel.id.clone(), volumes))
+        })
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    // Allocate by canonical vessel needs. No operation names or scientific recipe fields enter
+    // this decision. The current adapter supports these four reviewed resource geometries.
+    let mut locations = BTreeMap::new();
+    let mut sources = Vec::new();
+    let mut cursors = [0usize; 4];
+    let wells = [
+        plate_wells(profile.resources.sources.capacity),
+        plate_wells(profile.resources.work.capacity),
+        plate_wells(profile.resources.bulk.capacity),
+        plate_wells(profile.resources.surface.capacity),
+    ];
+    for vessel in &program.vessels {
+        let surface = program.steps.iter().any(|step| match step {
+            PipettingStep::Transfer {
+                destination,
+                technique,
+                ..
+            } => {
+                destination.vessel == vessel.id
+                    && matches!(
+                        technique.dispense,
+                        lab_compiler::procedure::DispenseStrategy::MaterialSurface
+                    )
+            }
+            PipettingStep::Distribute {
+                destinations,
+                technique,
+                ..
+            } => {
+                destinations.iter().any(|d| d.vessel == vessel.id)
+                    && matches!(
+                        technique.dispense,
+                        lab_compiler::procedure::DispenseStrategy::MaterialSurface
+                    )
+            }
+            _ => false,
+        });
+        let loaded = initial_volumes_ul[&vessel.id]
+            .iter()
+            .copied()
+            .fold(0.0, f64::max);
+        let is_input = matches!(
+            vessel.role,
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. }
+        );
+        let (index, resource) = if surface {
+            (3, Ot2PhysicalResource::Surface)
+        } else if loaded > f64::from(profile.resources.sources.max_volume_each_ul) {
+            (2, Ot2PhysicalResource::Bulk)
+        } else if matches!(vessel.role, VesselRole::MaterialSource { .. })
+            || (is_input && loaded > f64::from(profile.resources.work.max_volume_each_ul))
+        {
+            (0, Ot2PhysicalResource::Sources)
+        } else {
+            (1, Ot2PhysicalResource::Work)
         };
-        let count = usize::try_from(vessel.positions)
-            .map_err(|_| format!("OT-2 task '{}' vessel position count overflows", task.id))?;
-        if input_locations.contains_key(&input) {
-            return Err(format!(
-                "OT-2 Procedure task '{}' maps input {input} to more than one canonical vessel",
-                task.id
-            ));
-        }
         let physical = take_ot2_locations(
             task,
-            "thermocycler input wells",
-            &work_wells,
-            &mut work_cursor,
-            count,
-            |well| Ot2PhysicalLocation {
-                resource: Ot2PhysicalResource::Work,
-                well,
-            },
+            "canonical vessel positions",
+            &wells[index],
+            &mut cursors[index],
+            vessel.positions as usize,
+            |well| Ot2PhysicalLocation { resource, well },
         )?;
-        sources.push(CanonicalSourceReview {
-            vessel: vessel.id.clone(),
-            material: None,
-            binding: None,
-            wells: physical.clone(),
-        });
-        input_locations.insert(input, physical.clone());
-        locations.insert(vessel.id.clone(), physical);
-    }
-
-    for vessel in &program.vessels {
-        if locations.contains_key(&vessel.id) {
-            continue;
+        if is_input || matches!(vessel.role, VesselRole::MaterialSource { .. }) {
+            let (material, binding) = match &vessel.role {
+                VesselRole::MaterialSource { material } => (
+                    Some(material.clone()),
+                    Some(material_binding("OT-2", task, material)?.clone()),
+                ),
+                _ => (None, None),
+            };
+            sources.push(CanonicalSourceReview {
+                vessel: vessel.id.clone(),
+                material,
+                binding,
+                wells: physical.clone(),
+            });
         }
-        let count = usize::try_from(vessel.positions)
-            .map_err(|_| format!("OT-2 task '{}' vessel position count overflows", task.id))?;
-        let physical = match &vessel.role {
-            VesselRole::MaterialSource { material } => {
-                let binding = material_binding("OT-2", task, material)?.clone();
-                let physical = take_ot2_locations(
-                    task,
-                    "temperature-module source wells",
-                    &source_wells,
-                    &mut source_cursor,
-                    count,
-                    |well| Ot2PhysicalLocation {
-                        resource: Ot2PhysicalResource::Sources,
-                        well,
-                    },
-                )?;
-                sources.push(CanonicalSourceReview {
-                    vessel: vessel.id.clone(),
-                    material: Some(material.clone()),
-                    binding: Some(binding),
-                    wells: physical.clone(),
-                });
-                physical
-            }
-            VesselRole::InputOutput { input, .. } => input_locations
-                .get(input)
-                .filter(|locations| locations.len() == count)
-                .cloned()
-                .ok_or_else(|| {
-                    format!(
-                        "OT-2 Procedure task '{}' InputOutput vessel '{}' has no equally sized ProcedureInput {input}",
-                        task.id, vessel.id
-                    )
-                })?,
-            VesselRole::ProcedureInput { .. } => unreachable!(),
-            VesselRole::Product { .. }
-            | VesselRole::MaterialProduct { .. }
-            | VesselRole::Intermediate => take_ot2_locations(
-                task,
-                "thermocycler work wells",
-                &work_wells,
-                &mut work_cursor,
-                count,
-                |well| Ot2PhysicalLocation {
-                    resource: Ot2PhysicalResource::Work,
-                    well,
-                },
-            )?,
-        };
         locations.insert(vessel.id.clone(), physical);
     }
+    super::super::staging::working_volumes(program, |vessel| {
+        match locations[vessel][0].resource {
+            Ot2PhysicalResource::Sources => profile.resources.sources.max_volume_each_ul,
+            Ot2PhysicalResource::Work => profile.resources.work.max_volume_each_ul,
+            Ot2PhysicalResource::Bulk => profile.resources.bulk.max_volume_each_ul,
+            Ot2PhysicalResource::Surface => profile.resources.surface.max_volume_each_ul,
+        }
+    })?;
+    let staging_temperatures =
+        super::super::staging::temperatures(program, |vessel| {
+            match locations[vessel][0].resource {
+                Ot2PhysicalResource::Sources => "sources",
+                Ot2PhysicalResource::Work => "work",
+                Ot2PhysicalResource::Bulk => "bulk",
+                Ot2PhysicalResource::Surface => "surface",
+            }
+        })?;
     validate_ot2_canonical_steps(profile, task, program)?;
     Ok(Ot2TaskExecution::PipettingProgram(Box::new(
         CanonicalPipettingExecution {
             title: operation_title(task),
             program: program.clone(),
+            staging_temperatures,
+            initial_volumes_ul,
             locations,
             sources,
         },
@@ -413,6 +440,31 @@ fn validate_ot2_canonical_steps(
 ) -> Result<(), String> {
     let small_capacity = 20.0;
     let large_capacity = 200.0;
+    let mut group_volumes = BTreeMap::<&ProcedureLocalId, f64>::new();
+    for step in &program.steps {
+        let Some(group) = ot2_step_group(step) else {
+            continue;
+        };
+        let (volume, air) = match step {
+            PipettingStep::Transfer {
+                volume, technique, ..
+            }
+            | PipettingStep::Distribute {
+                volume_each: volume,
+                technique,
+                ..
+            } => (volume, technique.air_gap.as_ref()),
+            PipettingStep::Mix { volume, .. } => (volume, None),
+            PipettingStep::Barrier { .. } => continue,
+        };
+        let required = volume_microlitres("OT-2", task, "fluid-path group", volume)?
+            + air
+                .map(|air| volume_microlitres("OT-2", task, "air gap", air))
+                .transpose()?
+                .unwrap_or(0.0);
+        let maximum = group_volumes.entry(group).or_default();
+        *maximum = maximum.max(required);
+    }
     let mut small_tips = 0usize;
     let mut large_tips = 0usize;
     let mut open_group: Option<&ProcedureLocalId> = None;
@@ -478,9 +530,13 @@ fn validate_ot2_canonical_steps(
                     ));
                 }
                 let path_volume = each + air;
-                let working = if path_volume <= small_capacity {
+                let required_volume = group
+                    .and_then(|id| group_volumes.get(id))
+                    .copied()
+                    .unwrap_or(path_volume);
+                let working = if required_volume <= small_capacity {
                     small_capacity
-                } else if path_volume <= large_capacity {
+                } else if required_volume <= large_capacity {
                     large_capacity
                 } else {
                     return Err(format!(
@@ -491,9 +547,23 @@ fn validate_ot2_canonical_steps(
                 let tips = match fluid_path {
                     FluidPathPolicy::IsolatedDestinations => destinations.len(),
                     FluidPathPolicy::SharedSourceNoReentry => {
-                        ((each * destinations.len() as f64) / (working - air))
-                            .ceil()
-                            .max(1.0) as usize
+                        let per_load = if technique.blow_out {
+                            1
+                        } else {
+                            ((working - air) / each).floor().max(1.0) as usize
+                        };
+                        if group.is_some()
+                            && destinations.len() > per_load
+                            && (!matches!(technique.dispense, DispenseStrategy::AboveLiquid)
+                                || technique.touch_tip
+                                || technique.blow_out)
+                        {
+                            return Err(format!(
+                                "OT-2 Procedure task '{}' continuous distribution would re-enter its source after contacting a destination",
+                                task.id
+                            ));
+                        }
+                        destinations.len().div_ceil(per_load)
                     }
                 };
                 (path_volume, tips)
@@ -818,6 +888,7 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
     match &plan.execution {
         Ot2TaskExecution::PipettingProgram(execution) => {
             doc.heading(1, [text("Stage canonical vessel bindings")]);
+            doc.para_text("This file is one separately staged Procedure. Before starting it, load each input from its allocated upstream value into the wells listed here. Do not assume that the preceding file used the same well coordinates. Review the task input/output references and the manifest's complete location map at every handoff.");
             doc.para_text(format!(
                 "Execute all {} canonical PipettingProgramV1 steps in manifest order. The descriptive Procedure operation does not select a lowering path.",
                 execution.program.steps.len()
@@ -828,6 +899,7 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
                         Column::left("Logical vessel"),
                         Column::left("Physical source"),
                         Column::left("Allocated wells"),
+                        Column::left("Starting volumes (µL)"),
                     ],
                     execution.sources.iter().map(|source| {
                         vec![
@@ -841,6 +913,13 @@ fn render_manual(plan: &Ot2TaskPlan) -> Doc {
                                     .wells
                                     .iter()
                                     .map(|location| location.well.clone())
+                                    .collect::<Vec<_>>()
+                                    .join(", "),
+                            )],
+                            vec![text(
+                                execution.initial_volumes_ul[&source.vessel]
+                                    .iter()
+                                    .map(ToString::to_string)
                                     .collect::<Vec<_>>()
                                     .join(", "),
                             )],

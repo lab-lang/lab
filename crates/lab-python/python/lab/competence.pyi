@@ -16,20 +16,22 @@ repeating what a solution can do on each kind."""
 
 # ruff: noqa
 
+# fmt: off
+
 from __future__ import annotations
 
-from typing import Any, Final, Generic, Protocol, TypeVar
+from typing import Any, Final, Generic, Protocol, TypeVar, overload
 
 from lab._effects import Effect
 from lab._expressions import Decimal, Quantity
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import WorkflowCall
 
 import lab._prelude as _module_0
 import lab.bio.designs as _module_1
 
-_Growth_T1_1 = TypeVar("_Growth_T1_1")
+_Growth_T1_1 = TypeVar("_Growth_T1_1", covariant=True)
 
 LAB_MODULE: Final[str]
 
@@ -51,7 +53,7 @@ cares. These are the physical states a preparation passes through before it
 gets there, so a verb that spins cells down can say it takes ones that are
 growing and leaves ones that are pelleted."""
 
-class Buffer(ArtifactKind, _module_0.Solution): ...
+class Buffer(ArtifactKind, _module_0.Buffer, _module_0.Solution): ...
 """A salt solution cells are washed and resuspended in.
 
 A buffer and a medium are both solutions a laboratory pours, so both play the

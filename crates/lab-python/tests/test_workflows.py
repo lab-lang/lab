@@ -26,6 +26,7 @@ OBSERVE = """\
  */
 
 use std.bio.designs
+use std.bio.ontology
 use std.lab.plasmid
 
 /** One image, what was counted in it, and how long the plate had grown. */
@@ -130,7 +131,7 @@ class TranslationTests(unittest.TestCase):
 
     def test_perform_is_the_durable_arrow(self) -> None:
         self.assertIn("product <- realize reporter", self.build)
-        self.assertIn("culture <- dilute culture", self.build)
+        self.assertIn("diluted_culture <- dilute recovered_culture", self.build)
 
     def test_assignment_is_a_pure_binding(self) -> None:
         self.assertIn("colonies = detect_colonies(image)", self.observe)

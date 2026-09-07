@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use lab_adapter_api::{
     AdapterInvocationError, AdapterInvocationPlan, AdapterProfileContractError, AdapterRegistry,
 };
-use lab_adapters::builtin_adapter_registry;
+
 use lab_capability::CapabilityKind;
 use lab_capability::MethodId;
 use lab_compiler::method::{IntentOperationId, LocalId, MethodRegistry};
@@ -213,6 +213,10 @@ pub(crate) fn plan_modules_for_package(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the application passes explicit package, Method, Procedure and adapter compositions"
+)]
 fn plan_modules_with_inventory(
     package: &LabPackage,
     modules: &[&lab_language::CheckedModule],
@@ -232,7 +236,7 @@ fn plan_modules_with_inventory(
     let problem = refined
         .planning_problem()
         .map_err(FacilityProjectError::PlanningProblem)?;
-    let adapter_bindings = resolve_package_adapter_bindings(package, &inventory, &adapters)?;
+    let adapter_bindings = resolve_package_adapter_bindings(package, &inventory, adapters)?;
     let material_inventory = semantic_material_inventory(modules, &inventory)?;
     let policy = facility_planning_policy(package)?;
     let policy = scope_method_pins(policy, &problem, method_pin_scope);
@@ -375,11 +379,6 @@ pub(crate) fn resolve_package_adapter_bindings(
     AdapterBindingSnapshot::resolve(inventory, requests, adapters.descriptors())
         .map(Some)
         .map_err(FacilityProjectError::AdapterBindings)
-}
-
-/// The concrete adapter composition used by the default Lab application.
-pub(crate) fn builtin_project_adapter_registry() -> Result<AdapterRegistry, FacilityProjectError> {
-    builtin_adapter_registry().map_err(FacilityProjectError::AdapterCatalog)
 }
 
 fn semantic_material_inventory(

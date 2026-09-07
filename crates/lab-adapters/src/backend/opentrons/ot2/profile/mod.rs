@@ -20,8 +20,8 @@ pub use crate::backend::resources::{
     PlateCapacity, UnknownPlateGeometry, supported_plate_capacities,
 };
 pub use schema::{
-    Instruments, Ot2Resources, Pipette, ProtocolOptions, TechniqueCalibration, TemperatureModule,
-    Thermocycler, TipRacks,
+    DeckLabware, Instruments, Ot2Resources, Pipette, ProtocolOptions, TechniqueCalibration,
+    TemperatureModule, Thermocycler, TipRacks,
 };
 
 /// Deck slots an OT-2 can address. Slot 12 is the fixed trash.
@@ -99,6 +99,11 @@ impl Ot2AdapterProfile {
         let calibration = &self.techniques;
         for (parameter, value) in [
             ("aspiration_rate", calibration.aspiration_rate),
+            ("mix_aspiration_rate", calibration.mix_aspiration_rate),
+            (
+                "distribution_aspiration_rate",
+                calibration.distribution_aspiration_rate,
+            ),
             ("dispense_rate", calibration.dispense_rate),
             (
                 "tracked_meniscus_offset_mm",
@@ -160,6 +165,14 @@ impl Ot2AdapterProfile {
     fn resource_claims(&self) -> Vec<(String, Vec<String>)> {
         vec![
             (
+                "bulk liquids".to_owned(),
+                vec![self.resources.bulk.slot.clone()],
+            ),
+            (
+                "material surfaces".to_owned(),
+                vec![self.resources.surface.slot.clone()],
+            ),
+            (
                 "the source module".to_owned(),
                 vec![self.resources.sources.slot.clone()],
             ),
@@ -180,6 +193,8 @@ impl Ot2AdapterProfile {
         BTreeSet::from([
             self.resources.sources.labware.clone(),
             self.resources.work.labware.clone(),
+            self.resources.bulk.labware.clone(),
+            self.resources.surface.labware.clone(),
             self.resources.small_tips.labware.clone(),
             self.resources.large_tips.labware.clone(),
         ])

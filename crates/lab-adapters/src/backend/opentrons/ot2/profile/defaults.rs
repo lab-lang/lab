@@ -3,7 +3,7 @@
 use crate::backend::resources::PlateCapacity;
 
 use crate::backend::opentrons::ot2::profile::schema::{
-    Pipette, TechniqueCalibration, TemperatureModule, Thermocycler, TipRacks,
+    DeckLabware, Pipette, TechniqueCalibration, TemperatureModule, Thermocycler, TipRacks,
 };
 
 pub(super) fn default_api_level() -> String {
@@ -57,6 +57,8 @@ pub(super) fn default_touch_tip_speed_mm_s() -> f64 {
 pub(super) fn default_technique_calibration() -> TechniqueCalibration {
     TechniqueCalibration {
         aspiration_rate: default_aspiration_rate(),
+        mix_aspiration_rate: default_dispense_rate(),
+        distribution_aspiration_rate: default_dispense_rate(),
         dispense_rate: default_dispense_rate(),
         tracked_source_volume_ul: default_tracked_source_volume_ul(),
         tracked_meniscus_offset_mm: default_tracked_meniscus_offset_mm(),
@@ -89,6 +91,7 @@ pub(super) fn default_sources() -> TemperatureModule {
         model: "temperature module gen2".to_owned(),
         slot: "1".to_owned(),
         labware: "opentrons_24_aluminumblock_nest_1.5ml_snapcap".to_owned(),
+        max_volume_each_ul: 1500,
         capacity: plate_capacity(24),
     }
 }
@@ -97,6 +100,7 @@ pub(super) fn default_work() -> Thermocycler {
     Thermocycler {
         model: "thermocycler module gen2".to_owned(),
         labware: "nest_96_wellplate_100ul_pcr_full_skirt".to_owned(),
+        max_volume_each_ul: 100,
         capacity: plate_capacity(96),
     }
 }
@@ -124,4 +128,29 @@ pub(super) fn default_large_tips() -> TipRacks {
 /// A literal geometry this compiler ships as a default.
 fn plate_capacity(capacity: usize) -> PlateCapacity {
     PlateCapacity::new(capacity).expect("built-in defaults declare addressable geometries")
+}
+
+pub(super) fn default_bulk() -> DeckLabware {
+    DeckLabware {
+        slot: "3".to_owned(),
+        labware: "opentrons_15_tuberack_falcon_15ml_conical".to_owned(),
+        max_volume_each_ul: 15000,
+        capacity: plate_capacity(15),
+    }
+}
+
+pub(super) fn default_surface() -> DeckLabware {
+    DeckLabware {
+        slot: "9".to_owned(),
+        labware: "corning_96_wellplate_360ul_flat".to_owned(),
+        max_volume_each_ul: 360,
+        capacity: plate_capacity(96),
+    }
+}
+
+pub(super) fn default_source_volume_limit() -> u32 {
+    1500
+}
+pub(super) fn default_work_volume_limit() -> u32 {
+    100
 }

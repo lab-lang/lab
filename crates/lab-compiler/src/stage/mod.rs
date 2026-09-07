@@ -827,6 +827,10 @@ fn verify_refined_alternatives_impl(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "internal pass inputs and validation context are explicit"
+)]
 fn verify_candidate(
     context: &Context,
     choice: &ChoiceOp,

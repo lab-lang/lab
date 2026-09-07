@@ -12,10 +12,12 @@ behind a design that states nothing."""
 
 # ruff: noqa
 
+# fmt: off
+
 from typing import Generic, TypeVar
 
 from lab._effects import Action
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import ImportedWorkflow
 

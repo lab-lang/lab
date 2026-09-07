@@ -12,6 +12,7 @@ use thiserror::Error;
 
 use crate::method::{LocalId, MethodRegistry, ProcedureTaskExecutionDefinition, ProcedureValue};
 use crate::procedure::normalization;
+#[cfg(test)]
 use crate::procedure::vocabulary::{
     ADD_RECOVERY_MEDIUM_BUILDER_V1, CYCLE_GOLDEN_GATE_BUILDER_V1,
     HEAT_SHOCK_TRANSFORMATION_BUILDER_V1, INCUBATE_RECOVERY_CULTURE_BUILDER_V1,
@@ -472,55 +473,14 @@ pub fn builtin_procedure_compiler() -> &'static ProcedureCompiler {
     COMPILER.get_or_init(|| {
         ProcedureCompiler::new(
             crate::procedure::builtin_procedure_contracts().clone(),
-            ProcedureProgramBuilderRegistry::new([
-                registration(
-                    SETUP_GOLDEN_GATE_BUILDER_V1,
-                    PIPETTING_PROGRAM_V1,
-                    normalization::build_golden_gate,
-                ),
-                registration(
-                    SERIAL_DILUTION_BUILDER_V1,
-                    PIPETTING_PROGRAM_V1,
-                    normalization::build_serial_dilution,
-                ),
-                registration(
-                    CYCLE_GOLDEN_GATE_BUILDER_V1,
-                    THERMAL_PROGRAM_V1,
-                    normalization::build_golden_gate_cycle,
-                ),
-                registration(
-                    PREPARE_CHEMICAL_TRANSFORMATION_BUILDER_V1,
-                    PIPETTING_PROGRAM_V1,
-                    normalization::build_chemical_transformation_preparation,
-                ),
-                registration(
-                    HEAT_SHOCK_TRANSFORMATION_BUILDER_V1,
-                    THERMAL_PROGRAM_V1,
-                    normalization::build_chemical_transformation_heat_shock,
-                ),
-                registration(
-                    ADD_RECOVERY_MEDIUM_BUILDER_V1,
-                    PIPETTING_PROGRAM_V1,
-                    normalization::build_recovery_medium_addition,
-                ),
-                registration(
-                    INCUBATE_RECOVERY_CULTURE_BUILDER_V1,
-                    THERMAL_PROGRAM_V1,
-                    normalization::build_recovery_incubation,
-                ),
-                registration(
-                    PLATE_DILUTED_CULTURE_BUILDER_V1,
-                    PIPETTING_PROGRAM_V1,
-                    normalization::build_selective_plating,
-                ),
-            ])
-            .expect("built-in Procedure-program builder identities are unique"),
+            ProcedureProgramBuilderRegistry::new(normalization::registrations())
+                .expect("built-in Procedure-program builder identities are unique"),
         )
         .expect("every built-in Procedure-program builder names a built-in contract")
     })
 }
 
-fn registration(
+pub(crate) fn registration(
     builder: &str,
     contract: &str,
     build: ProcedureProgramBuilder,

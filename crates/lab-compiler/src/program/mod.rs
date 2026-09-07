@@ -812,6 +812,47 @@ workflow main() -> Evidence:
     }
 
     #[test]
+    fn provisioned_material_identity_survives_local_names_and_continuing_actions() {
+        let checked = compile_module(
+            r#"use std.bio.designs
+use std.lab.plasmid
+
+buy medium stock:
+  sbol_identity = "https://example.org/stock"
+
+action pass <sample> -> product:
+  sample: take Material<Medium>
+  product: Material<Medium> continues from sample
+
+workflow prepare() -> Material<Medium>:
+  renamed <- provision stock
+  aliquot <- pass renamed
+  return aliquot
+
+workflow main() -> Material<Medium>:
+  local <- prepare
+  result <- pass local
+  return result
+"#,
+        )
+        .unwrap();
+        let rooted =
+            super::lower_rooted_program_intent(&[&checked], checked.module.as_str()).unwrap();
+        assert_eq!(rooted.actions.len(), 3);
+        for action in &rooted.actions[1..] {
+            assert_eq!(
+                action.parameters["sample"],
+                crate::method::ProcedureValue::Scalar {
+                    value: lab_capability::PropertyValue::unitless(ScalarValue::Text(
+                        "stock".into()
+                    ))
+                }
+            );
+            assert_eq!(action.ssa_operands, ["sample"]);
+        }
+    }
+
+    #[test]
     fn repeated_workflow_calls_have_distinct_paths_and_result_bindings() {
         let checked = compile_module(
             r#"use std.bio.designs
@@ -2320,7 +2361,7 @@ workflow main() -> (
             .expect("temperature-staged setup must normalize to the pipetting contract");
         let staged_program = staged_program.as_program();
         assert_eq!(staged_program.materials.len(), 9);
-        assert_eq!(staged_program.steps.len(), 18);
+        assert_eq!(staged_program.steps.len(), 19);
         let source_temperature =
             crate::procedure::staged_temperature_envelope(&staged_program.vessels)
                 .expect("the Method requires controlled source staging");
@@ -2380,28 +2421,30 @@ workflow main() -> (
         else {
             panic!("the final reagent must be transferred before bubble clearing")
         };
-        let PipettingStep::Mix {
-            cycles,
-            volume,
-            fluid_path_group: final_mix_path,
-            technique,
-            ..
-        } = &staged_program.steps[17]
-        else {
-            panic!("the final operation must clear bubbles")
-        };
-        assert_eq!(*cycles, 2);
-        assert_eq!(volume.value().to_string(), "20");
-        assert_eq!(final_transfer_path, final_mix_path);
-        assert!(technique.blow_out && technique.touch_tip);
-        assert!(matches!(
-            &technique.aspiration,
-            AspirationStrategy::VesselBottom { offset } if offset.value().to_string() == "0"
-        ));
-        assert!(matches!(
-            &technique.dispense,
-            DispenseStrategy::VesselBottom { offset } if offset.value().to_string() == "8"
-        ));
+        for step in &staged_program.steps[17..] {
+            let PipettingStep::Mix {
+                cycles,
+                volume,
+                fluid_path_group: final_mix_path,
+                technique,
+                ..
+            } = step
+            else {
+                panic!("the final operation must clear bubbles")
+            };
+            assert_eq!(*cycles, 1);
+            assert_eq!(volume.value().to_string(), "20");
+            assert_eq!(final_transfer_path, final_mix_path);
+            assert!(technique.blow_out && technique.touch_tip);
+            assert!(matches!(
+                &technique.aspiration,
+                AspirationStrategy::VesselBottom { offset } if offset.value().to_string() == "0"
+            ));
+            assert!(matches!(
+                &technique.dispense,
+                DispenseStrategy::VesselBottom { offset } if offset.value().to_string() == "8"
+            ));
+        }
         assert_eq!(
             temperature_staged.tasks[1].program, automated.tasks[1].program,
             "preparation technique must not rewrite authored thermal intent"

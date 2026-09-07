@@ -35,6 +35,7 @@ RING = """\
  */
 
 use std.bio.designs
+use std.bio.ontology
 use std.bio.parts
 
 record TetR is Protein, Signal

@@ -106,9 +106,7 @@ class Action:
         self.slots = tuple(slot for slot in map(_slot, self.phrase) if slot)
         python_slots = tuple(python_slots) or self.slots
         if len(python_slots) != len(self.slots) or len(set(python_slots)) != len(python_slots):
-            raise ValueError(
-                f"{self.name} needs one unique Python name for each Lab operand"
-            )
+            raise ValueError(f"{self.name} needs one unique Python name for each Lab operand")
         self.python_to_slot = dict(zip(python_slots, self.slots, strict=True))
         #: Each optional clause, as the phrase positions it occupies and the
         #: operands it carries.

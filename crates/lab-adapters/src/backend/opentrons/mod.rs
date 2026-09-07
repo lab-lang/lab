@@ -6,5 +6,7 @@
 //! share with every liquid handler, so it lives beside the backend contracts
 //! rather than here.
 
+mod staging;
+
 pub mod flex;
 pub mod ot2;

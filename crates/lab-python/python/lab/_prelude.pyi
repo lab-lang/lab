@@ -4,13 +4,15 @@
 
 # ruff: noqa
 
+# fmt: off
+
 from __future__ import annotations
 
-from typing import Any, Final, Generic, Protocol, TypeVar
+from typing import Any, Final, Generic, Protocol, TypeVar, overload
 
 from lab._effects import Effect
 from lab._expressions import Decimal, Quantity
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import WorkflowCall
 
@@ -21,7 +23,7 @@ _CDS_Product_1 = TypeVar("_CDS_Product_1")
 _Circuit_Trigger_1 = TypeVar("_Circuit_Trigger_1")
 _Circuit_Product_2 = TypeVar("_Circuit_Product_2")
 _List_Item_1 = TypeVar("_List_Item_1")
-_Material_Subject_1 = TypeVar("_Material_Subject_1")
+_Material_Subject_1 = TypeVar("_Material_Subject_1", covariant=True)
 _Promoter_Trigger_1 = TypeVar("_Promoter_Trigger_1")
 _Rejected_Value_1 = TypeVar("_Rejected_Value_1")
 
@@ -143,12 +145,12 @@ class _DetectColoniesFunction(Protocol):
 detect_colonies: Final[_DetectColoniesFunction]
 
 class _SitesFunction(Protocol):
-    def __call__(self, argument_1: RestrictionEnzyme) -> int: ...
+    def __call__(self, argument_1: RestrictionEnzyme | DesignReference[RestrictionEnzyme]) -> int: ...
 
 sites: Final[_SitesFunction]
 
 class _AcceptsFunction(Protocol):
-    def __call__(self, argument_1: Plasmid, argument_2: list[Evidence]) -> bool: ...
+    def __call__(self, argument_1: Plasmid | DesignReference[Plasmid], argument_2: list[Evidence]) -> bool: ...
 
 accepts: Final[_AcceptsFunction]
 """Whether a design's acceptance criteria are met by this evidence."""

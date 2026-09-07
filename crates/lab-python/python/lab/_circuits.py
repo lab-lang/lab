@@ -500,9 +500,14 @@ def _mint_part(
     ascribed: str,
     properties: dict[str, object],
 ) -> Declaration[Any]:
+    from ._vocabulary import ArtifactKind
     from .bio import designs
 
-    kind = {"promoter": designs.Promoter, "cds": designs.CDS}[word]
+    kinds: dict[str, type[ArtifactKind]] = {
+        "promoter": designs.Promoter,
+        "cds": designs.CDS,
+    }
+    kind = kinds[word]
     stated = dict(properties)
     if component is not None:
         identity = getattr(component, "identity", None)

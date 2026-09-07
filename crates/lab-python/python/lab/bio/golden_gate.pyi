@@ -12,22 +12,25 @@ behind a design that states nothing."""
 
 # ruff: noqa
 
+# fmt: off
+
 from __future__ import annotations
 
-from typing import Any, Final, Generic, Protocol, TypeVar
+from typing import Any, Final, Generic, Protocol, TypeVar, overload
 
 from lab._effects import Effect
 from lab._expressions import Decimal, Quantity
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import WorkflowCall
 
-import lab.bio.designs as _module_0
+import lab._prelude as _module_0
+import lab.bio.designs as _module_1
 
 LAB_MODULE: Final[str]
 
-class Plasmid(ArtifactKind, LabType): ...
+class Plasmid(ArtifactKind, _module_0.Plasmid, LabType): ...
 """What Golden Gate assembly needs to build a plasmid."""
 
-class Strain(ArtifactKind, LabType): ...
+class Strain(ArtifactKind, _module_0.Strain, LabType): ...
 """What heat-shock transformation and plating need to build a strain."""

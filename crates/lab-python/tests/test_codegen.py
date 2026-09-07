@@ -11,6 +11,7 @@ from pathlib import Path
 from lab import codegen
 from lab.bio import designs, golden_gate
 from lab.bio.designs import Ingredient
+from lab.units import L, g
 
 ROOT = Path(codegen.__file__).resolve().parent
 
@@ -46,17 +47,17 @@ class CodegenTests(unittest.TestCase):
         self.assertIn("reaction_volume", golden_gate.Plasmid.properties)
 
     def test_a_generated_record_has_a_checked_runtime_constructor(self) -> None:
-        ingredient = Ingredient(substance="tryptone", concentration=1)  # type: ignore[arg-type]
+        ingredient = Ingredient(substance="tryptone", concentration=1 * g / L)
 
         self.assertEqual(
             ingredient.render(),  # type: ignore[attr-defined]
-            'Ingredient{substance: "tryptone", concentration: 1}',
+            'Ingredient{substance: "tryptone", concentration: 1 g/L}',
         )
         with self.assertRaisesRegex(TypeError, "missing field.*concentration"):
             Ingredient(substance="tryptone")  # type: ignore[call-arg]
         with self.assertRaisesRegex(TypeError, "no field.*unknown"):
             Ingredient(  # type: ignore[call-arg]
-                substance="tryptone", concentration=1, unknown=True
+                substance="tryptone", concentration=1 * g / L, unknown=True
             )
 
 

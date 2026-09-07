@@ -4,13 +4,15 @@
 
 # ruff: noqa
 
+# fmt: off
+
 from __future__ import annotations
 
-from typing import Any, Final, Generic, Protocol, TypeVar
+from typing import Any, Final, Generic, Protocol, TypeVar, overload
 
 from lab._effects import Effect
 from lab._expressions import Decimal, Quantity
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import WorkflowCall
 
@@ -26,16 +28,22 @@ class SequenceCheck(LabConstructor):
     def __new__(cls, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
 """A sequenced plasmid material together with the evidence used to judge it."""
 
-class Exact(LabConstructor):
-    def __new__(cls, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
+class _ExactConstructor(Protocol):
+    def __call__(self, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
+
+Exact: Final[_ExactConstructor]
 """A sequence that exactly matches the intended plasmid."""
 
-class Mismatch(LabConstructor):
-    def __new__(cls, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
+class _MismatchConstructor(Protocol):
+    def __call__(self, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
+
+Mismatch: Final[_MismatchConstructor]
 """A sequence that does not match the intended plasmid."""
 
-class Inconclusive(LabConstructor):
-    def __new__(cls, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
+class _InconclusiveConstructor(Protocol):
+    def __call__(self, *, evidence: list[_module_0.Evidence], material: _module_0.Material[_module_0.Plasmid]) -> SequenceCheck: ...
+
+Inconclusive: Final[_InconclusiveConstructor]
 """Evidence that is insufficient to judge the plasmid sequence."""
 
 class _CaptureAction(Protocol):
@@ -48,7 +56,7 @@ capture: Final[_CaptureAction]
 class _SynthesizeAction(Protocol):
     @property
     def definition(self) -> tuple[str, str]: ...
-    def __call__(self, design: _module_0.Plasmid) -> Effect[list[_module_0.Fragment]]: ...
+    def __call__(self, design: _module_0.Plasmid | DesignReference[_module_0.Plasmid]) -> Effect[list[_module_0.Fragment]]: ...
 
 synthesize: Final[_SynthesizeAction]
 
@@ -62,6 +70,9 @@ assemble: Final[_AssembleAction]
 class _ProvisionAction(Protocol):
     @property
     def definition(self) -> tuple[str, str]: ...
+    @overload
+    def __call__(self, item: DesignReference[_Provision_T_1]) -> Effect[_module_0.Material[_Provision_T_1]]: ...
+    @overload
     def __call__(self, item: _Provision_T_1) -> Effect[_module_0.Material[_Provision_T_1]]: ...
 
 provision: Final[_ProvisionAction]
@@ -69,7 +80,7 @@ provision: Final[_ProvisionAction]
 class _TransformAction(Protocol):
     @property
     def definition(self) -> tuple[str, str]: ...
-    def __call__(self, design: _module_0.Strain, plasmids: list[_module_0.Material[_module_0.Plasmid]], cells: _module_0.Material[_module_1.competent[_module_0.Chassis]]) -> Effect[tuple[_module_0.Material[_module_0.Strain], _module_0.Material[_module_1.transformed[_module_0.Strain]]]]: ...
+    def __call__(self, design: _module_0.Strain | DesignReference[_module_0.Strain], plasmids: list[_module_0.Material[_module_0.Plasmid]], cells: _module_0.Material[_module_1.competent[_module_0.Chassis]]) -> Effect[tuple[_module_0.Material[_module_0.Strain], _module_0.Material[_module_1.transformed[_module_0.Strain]]]]: ...
 
 transform: Final[_TransformAction]
 
@@ -104,7 +115,7 @@ pick: Final[_PickAction]
 class _ScreenAction(Protocol):
     @property
     def definition(self) -> tuple[str, str]: ...
-    def __call__(self, candidates: list[_module_0.Material[_module_1.isolated[_module_0.Strain]]], design: _module_0.Plasmid) -> Effect[_module_0.Screening]: ...
+    def __call__(self, candidates: list[_module_0.Material[_module_1.isolated[_module_0.Strain]]], design: _module_0.Plasmid | DesignReference[_module_0.Plasmid]) -> Effect[_module_0.Screening]: ...
 
 screen: Final[_ScreenAction]
 

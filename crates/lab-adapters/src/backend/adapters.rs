@@ -5,7 +5,7 @@
 //! and control modes that implementation can use. Product features stay separate from semantic
 //! capability kinds so neither manufacturer nor model can silently select a driver.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use lab_capability::{CapabilityKind, ControlMode, ProcedureContractId, ProcedureImplementationId};
 use lab_compiler::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
@@ -14,34 +14,15 @@ use lab_compiler::planning::{
     SelectedMaterialBinding, SelectedMaterialSource,
 };
 use lab_compiler::procedure::vocabulary::{
-    AIR_GAP_HANDLING, CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, IN_WELL_MIXING,
-    LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER, PIPETTING_PROGRAM_V1,
-    POST_DISPENSE_BLOWOUT, PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, TEMPERATURE_CONTROLLED_STAGING,
-    THERMAL_PROGRAM_V1, TOUCH_TIP, VESSEL_RELATIVE_LIQUID_ACCESS,
+    CONTROLLED_TEMPERATURE_RAMP, HEATED_LID_TEMPERATURE_CONTROL, PIPETTING_PROGRAM_V1,
+    PROGRAMMED_BLOCK_TEMPERATURE_CONTROL, THERMAL_PROGRAM_V1,
 };
 use lab_compiler::procedure::{ProcedureContractRegistry, ProgramFeature};
 use schemars::{JsonSchema, schema_for};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ArtifactBundle;
-use crate::backend::hamilton::star::StarAdapterProfile;
-use crate::backend::opentrons::flex::FlexAdapterProfile;
-use crate::backend::opentrons::ot2::Ot2AdapterProfile;
-use crate::{AdapterInvocation, AdapterInvocationPlan};
-use lab_runfmt::{
-    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, OPENTRONS_PYTHON_PROTOCOL_FORMAT, SIMULATION_RUN_FORMAT,
-    STAR_RUN_FORMAT, SimulationRunDocument, THERMOCYCLE_RUN_FORMAT,
-};
-use lab_runtime::reviewed_documents::{
-    load_opentrons_protocol_designer, load_opentrons_python_protocol, load_simulation_run,
-    load_star_run, load_thermocycle_run,
-};
-
-use crate::runtime::{
-    AdapterRuntimeRegistrationExt, RuntimeDocumentRegistration, hamilton_star_live_factory,
-    odtc_live_factory, simulation_executor, validate_runtime_registry,
-};
+use crate::runtime::validate_runtime_registry;
 
 pub use lab_adapter_api::{
     ADAPTER_CATALOG_FORMAT, ADAPTER_PROFILE_SCHEMA_VERSION, AdapterCatalog, AdapterDescriptor,
@@ -51,436 +32,20 @@ pub use lab_adapter_api::{
     ValidatedAdapterProfile,
 };
 
-const OT2_PIPETTING_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1";
-const OT2_THERMAL_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1";
-const FLEX_PIPETTING_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexPipettingV1";
-const FLEX_THERMAL_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsFlexThermalV1";
-const STAR_PIPETTING_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#HamiltonStarPipettingV1";
-const ODTC_THERMAL_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#InhecoOdtcThermalV1";
-const SIMULATOR_PIPETTING_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorPipettingV1";
-const SIMULATOR_THERMAL_IMPLEMENTATION: &str =
-    "https://www.lab-compiler.org/ns/adapter-implementation#LabSimulatorThermalV1";
-
-/// Thermal features the Opentrons Thermocycler Module templates realize. Neither Opentrons
-/// application format expresses a controlled ramp rate.
-const OPENTRONS_THERMAL_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::ThermalStageRepeat,
-    ProgramFeature::ThermalHeatedLid,
-    ProgramFeature::ThermalFinalHold,
-    ProgramFeature::ThermalMultiSample,
-];
-
-/// Canonical pipetting features the Flex protocol builder realizes.
-const FLEX_PIPETTING_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::VesselVolumeLimits,
-    ProgramFeature::MultiPositionVessel,
-    ProgramFeature::FluidPathGroup,
-    ProgramFeature::AspirateTrackedSurface,
-    ProgramFeature::Transfer,
-    ProgramFeature::Distribute,
-    ProgramFeature::Mix,
-    ProgramFeature::AspirateLiquid,
-    ProgramFeature::DispenseLiquid,
-    ProgramFeature::FluidPathIsolatedDestinations,
-    ProgramFeature::FluidPathSharedSourceNoReentry,
-];
-
-/// Canonical pipetting features the STAR choreographer realizes. It carries its own measured
-/// volume-to-height models, so it tracks a liquid surface the Flex builder cannot.
-const STAR_PIPETTING_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::VesselVolumeLimits,
-    ProgramFeature::MultiPositionVessel,
-    ProgramFeature::FluidPathGroup,
-    ProgramFeature::Transfer,
-    ProgramFeature::Distribute,
-    ProgramFeature::Mix,
-    ProgramFeature::AspirateLiquid,
-    ProgramFeature::AspirateTrackedSurface,
-    ProgramFeature::DispenseLiquid,
-    ProgramFeature::FluidPathIsolatedDestinations,
-    ProgramFeature::FluidPathSharedSourceNoReentry,
-];
-
-/// Thermal features the Inheco ODTC realizes. It controls ramp rate, and it addresses one load at
-/// a time rather than an independently addressable sample count.
-const ODTC_THERMAL_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::ThermalStageRepeat,
-    ProgramFeature::ThermalHeatedLid,
-    ProgramFeature::ThermalControlledRamp,
-    ProgramFeature::ThermalFinalHold,
-];
-
-/// The semantic simulator preserves every canonical value because it emits meaning rather than
-/// motion.
-const SIMULATOR_PIPETTING_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::Transfer,
-    ProgramFeature::Distribute,
-    ProgramFeature::Mix,
-    ProgramFeature::Barrier,
-    ProgramFeature::MultiPositionVessel,
-    ProgramFeature::VesselVolumeLimits,
-    ProgramFeature::VesselTemperatureControl,
-    ProgramFeature::FluidPathIsolatedDestinations,
-    ProgramFeature::FluidPathSharedSourceNoReentry,
-    ProgramFeature::FluidPathGroup,
-    ProgramFeature::AspirateLiquid,
-    ProgramFeature::AspirateTrackedSurface,
-    ProgramFeature::AspirateVesselBottom,
-    ProgramFeature::DispenseLiquid,
-    ProgramFeature::DispenseAboveLiquid,
-    ProgramFeature::DispenseVesselBottom,
-    ProgramFeature::DispenseVesselTop,
-    ProgramFeature::DispenseMaterialSurface,
-    ProgramFeature::AirGap,
-    ProgramFeature::PostDispenseBlowout,
-    ProgramFeature::TouchTip,
-];
-
-const SIMULATOR_THERMAL_FEATURES: &[ProgramFeature] = &[
-    ProgramFeature::ThermalStageRepeat,
-    ProgramFeature::ThermalHeatedLid,
-    ProgramFeature::ThermalControlledRamp,
-    ProgramFeature::ThermalFinalHold,
-    ProgramFeature::ThermalMultiSample,
-];
-
-fn builtin_adapter_descriptors() -> Result<Vec<AdapterDescriptor>, AdapterProfileContractError> {
-    let descriptors = vec![
-        descriptor(
-            "opentrons.ot2",
-            "Opentrons OT-2",
-            Some("Opentrons"),
-            ["on-deck-modules", "python-protocol-api", "single-channel"],
-            vec![
-                pipetting_implementation(
-                    OT2_PIPETTING_IMPLEMENTATION,
-                    &[
-                        ProgramFeature::Transfer,
-                        ProgramFeature::Distribute,
-                        ProgramFeature::Mix,
-                        ProgramFeature::MultiPositionVessel,
-                        ProgramFeature::VesselVolumeLimits,
-                        ProgramFeature::VesselTemperatureControl,
-                        ProgramFeature::FluidPathIsolatedDestinations,
-                        ProgramFeature::FluidPathSharedSourceNoReentry,
-                        ProgramFeature::FluidPathGroup,
-                        ProgramFeature::AspirateLiquid,
-                        ProgramFeature::AspirateTrackedSurface,
-                        ProgramFeature::AspirateVesselBottom,
-                        ProgramFeature::DispenseLiquid,
-                        ProgramFeature::DispenseAboveLiquid,
-                        ProgramFeature::DispenseVesselBottom,
-                        ProgramFeature::DispenseVesselTop,
-                        ProgramFeature::DispenseMaterialSurface,
-                        ProgramFeature::AirGap,
-                        ProgramFeature::PostDispenseBlowout,
-                        ProgramFeature::TouchTip,
-                    ],
-                    [
-                        METERED_LIQUID_TRANSFER,
-                        IN_WELL_MIXING,
-                        TEMPERATURE_CONTROLLED_STAGING,
-                        LIQUID_LEVEL_AWARE_ASPIRATION,
-                        VESSEL_RELATIVE_LIQUID_ACCESS,
-                        AIR_GAP_HANDLING,
-                        POST_DISPENSE_BLOWOUT,
-                        TOUCH_TIP,
-                    ],
-                    [ControlMode::ReviewedFile],
-                    [],
-                    [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: false,
-                        runtime: false,
-                    },
-                )?,
-                thermal_implementation(
-                    OT2_THERMAL_IMPLEMENTATION,
-                    OPENTRONS_THERMAL_FEATURES,
-                    [ControlMode::ReviewedFile],
-                    [],
-                    [OPENTRONS_PYTHON_PROTOCOL_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: false,
-                        runtime: false,
-                    },
-                    false,
-                )?,
-            ],
-            schema_value::<Ot2AdapterProfile>()?,
-            validate_ot2_profile("opentrons.ot2", "")?,
-        )?,
-        descriptor(
-            "opentrons.flex",
-            "Opentrons Flex",
-            Some("Opentrons"),
-            ["on-deck-modules", "protocol-designer-json"],
-            vec![
-                pipetting_implementation(
-                    FLEX_PIPETTING_IMPLEMENTATION,
-                    FLEX_PIPETTING_FEATURES,
-                    [
-                        METERED_LIQUID_TRANSFER,
-                        IN_WELL_MIXING,
-                        LIQUID_LEVEL_AWARE_ASPIRATION,
-                    ],
-                    [ControlMode::ReviewedFile],
-                    [],
-                    [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: false,
-                        runtime: false,
-                    },
-                )?,
-                thermal_implementation(
-                    FLEX_THERMAL_IMPLEMENTATION,
-                    OPENTRONS_THERMAL_FEATURES,
-                    [ControlMode::ReviewedFile],
-                    [],
-                    [OPENTRONS_PROTOCOL_DESIGNER_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: false,
-                        runtime: false,
-                    },
-                    false,
-                )?,
-            ],
-            schema_value::<FlexAdapterProfile>()?,
-            validate_flex_profile("opentrons.flex", "")?,
-        )?,
-        descriptor(
-            "hamilton.star",
-            "Hamilton STAR/STARlet",
-            Some("Hamilton"),
-            ["eight-channel", "firmware-frames", "live-usb"],
-            vec![pipetting_implementation(
-                STAR_PIPETTING_IMPLEMENTATION,
-                STAR_PIPETTING_FEATURES,
-                [
-                    METERED_LIQUID_TRANSFER,
-                    IN_WELL_MIXING,
-                    LIQUID_LEVEL_AWARE_ASPIRATION,
-                ],
-                [ControlMode::ReviewedFile, ControlMode::Api],
-                [STAR_RUN_FORMAT],
-                [STAR_RUN_FORMAT],
-                AdapterServices {
-                    planning: true,
-                    lowering: true,
-                    simulation: true,
-                    runtime: true,
-                },
-            )?],
-            schema_value::<StarAdapterProfile>()?,
-            validate_star_profile("hamilton.star", "")?,
-        )?,
-        descriptor(
-            "inheco.odtc",
-            "Inheco ODTC",
-            Some("Inheco"),
-            ["network-session", "thermal-profile"],
-            vec![thermal_implementation(
-                ODTC_THERMAL_IMPLEMENTATION,
-                ODTC_THERMAL_FEATURES,
-                [ControlMode::Sila2],
-                [THERMOCYCLE_RUN_FORMAT],
-                [THERMOCYCLE_RUN_FORMAT],
-                AdapterServices {
-                    planning: true,
-                    lowering: true,
-                    simulation: true,
-                    runtime: true,
-                },
-                true,
-            )?],
-            schema_value::<EmptyAdapterProfile>()?,
-            validate_odtc_profile("inheco.odtc", "")?,
-        )?,
-        descriptor(
-            "byonoy.absorbance96",
-            "Byonoy Absorbance 96",
-            Some("Byonoy"),
-            ["hid", "plate-reader"],
-            Vec::new(),
-            schema_value::<EmptyAdapterProfile>()?,
-            validate_byonoy_profile("byonoy.absorbance96", "")?,
-        )?,
-        descriptor(
-            "lab.simulator",
-            "Lab semantic capability simulator",
-            None,
-            ["no-hardware", "semantic-simulation"],
-            vec![
-                pipetting_implementation(
-                    SIMULATOR_PIPETTING_IMPLEMENTATION,
-                    SIMULATOR_PIPETTING_FEATURES,
-                    [
-                        METERED_LIQUID_TRANSFER,
-                        IN_WELL_MIXING,
-                        TEMPERATURE_CONTROLLED_STAGING,
-                        LIQUID_LEVEL_AWARE_ASPIRATION,
-                        VESSEL_RELATIVE_LIQUID_ACCESS,
-                        AIR_GAP_HANDLING,
-                        POST_DISPENSE_BLOWOUT,
-                        TOUCH_TIP,
-                    ],
-                    [ControlMode::ReviewedFile],
-                    [SIMULATION_RUN_FORMAT],
-                    [SIMULATION_RUN_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: true,
-                        runtime: false,
-                    },
-                )?,
-                thermal_implementation(
-                    SIMULATOR_THERMAL_IMPLEMENTATION,
-                    SIMULATOR_THERMAL_FEATURES,
-                    [ControlMode::ReviewedFile],
-                    [SIMULATION_RUN_FORMAT],
-                    [SIMULATION_RUN_FORMAT],
-                    AdapterServices {
-                        planning: true,
-                        lowering: true,
-                        simulation: true,
-                        runtime: false,
-                    },
-                    true,
-                )?,
-            ],
-            schema_value::<EmptyAdapterProfile>()?,
-            validate_simulator_profile("lab.simulator", "")?,
-        )?,
-    ];
-    Ok(descriptors)
-}
-
 /// The adapters linked into the default Lab application.
 ///
-/// This is the sole composition root. Each entry carries description, profile parsing, pure
-/// planning feasibility, and lowering together.
+/// Each entry owns its descriptor, profile parsing, feasibility, and lowering.
+/// `lab-project` composes this bundled registry with application extensions.
 pub fn builtin_adapter_registry() -> Result<AdapterRegistry, AdapterProfileContractError> {
-    let mut descriptors = builtin_adapter_descriptors()?
-        .into_iter()
-        .map(|descriptor| (descriptor.id.clone(), descriptor))
-        .collect::<BTreeMap<_, _>>();
-    let mut take = |id: &str| {
-        descriptors.remove(id).ok_or_else(|| {
-            AdapterProfileContractError::Contract(format!(
-                "built-in adapter composition is missing descriptor '{id}'"
-            ))
-        })
-    };
     let registry = AdapterRegistry::new([
-        AdapterRegistration::new(
-            take("opentrons.ot2")?,
-            validate_ot2_profile,
-            ot2_program_feasible,
-            lower_ot2_invocation,
-        )
-        .with_runtime_document(RuntimeDocumentRegistration::new(
-            implementation_id(OT2_PIPETTING_IMPLEMENTATION),
-            OPENTRONS_PYTHON_PROTOCOL_FORMAT,
-            load_opentrons_python_protocol,
-        ))
-        .with_runtime_document(RuntimeDocumentRegistration::new(
-            implementation_id(OT2_THERMAL_IMPLEMENTATION),
-            OPENTRONS_PYTHON_PROTOCOL_FORMAT,
-            load_opentrons_python_protocol,
-        )),
-        AdapterRegistration::new(
-            take("opentrons.flex")?,
-            validate_flex_profile,
-            flex_program_feasible,
-            lower_flex_invocation,
-        )
-        .with_runtime_document(RuntimeDocumentRegistration::new(
-            implementation_id(FLEX_PIPETTING_IMPLEMENTATION),
-            OPENTRONS_PROTOCOL_DESIGNER_FORMAT,
-            load_opentrons_protocol_designer,
-        ))
-        .with_runtime_document(RuntimeDocumentRegistration::new(
-            implementation_id(FLEX_THERMAL_IMPLEMENTATION),
-            OPENTRONS_PROTOCOL_DESIGNER_FORMAT,
-            load_opentrons_protocol_designer,
-        )),
-        AdapterRegistration::new(
-            take("hamilton.star")?,
-            validate_star_profile,
-            star_program_feasible,
-            lower_star_invocation,
-        )
-        .with_runtime_document(
-            RuntimeDocumentRegistration::new(
-                implementation_id(STAR_PIPETTING_IMPLEMENTATION),
-                STAR_RUN_FORMAT,
-                load_star_run,
-            )
-            .with_simulation(simulation_executor)
-            .with_live_executor(hamilton_star_live_factory),
-        ),
-        AdapterRegistration::new(
-            take("inheco.odtc")?,
-            validate_odtc_profile,
-            declared_program_feasible,
-            lower_odtc_invocation,
-        )
-        .with_runtime_document(
-            RuntimeDocumentRegistration::new(
-                implementation_id(ODTC_THERMAL_IMPLEMENTATION),
-                THERMOCYCLE_RUN_FORMAT,
-                load_thermocycle_run,
-            )
-            .with_simulation(simulation_executor)
-            .with_live_executor(odtc_live_factory),
-        ),
-        AdapterRegistration::new(
-            take("byonoy.absorbance96")?,
-            validate_byonoy_profile,
-            declared_program_feasible,
-            unsupported_invocation,
-        ),
-        AdapterRegistration::new(
-            take("lab.simulator")?,
-            validate_simulator_profile,
-            declared_program_feasible,
-            lower_simulator_registered_invocation,
-        )
-        .with_runtime_document(
-            RuntimeDocumentRegistration::new(
-                implementation_id(SIMULATOR_PIPETTING_IMPLEMENTATION),
-                SIMULATION_RUN_FORMAT,
-                load_simulation_run,
-            )
-            .with_simulation(simulation_executor),
-        )
-        .with_runtime_document(
-            RuntimeDocumentRegistration::new(
-                implementation_id(SIMULATOR_THERMAL_IMPLEMENTATION),
-                SIMULATION_RUN_FORMAT,
-                load_simulation_run,
-            )
-            .with_simulation(simulation_executor),
-        ),
+        crate::backend::opentrons::ot2::registration()?,
+        crate::backend::opentrons::flex::registration()?,
+        crate::backend::hamilton::star::registration()?,
+        crate::backend::inheco::odtc::registration()?,
+        crate::backend::byonoy::registration()?,
+        crate::backend::simulator::registration()?,
     ])?;
     validate_runtime_registry(&registry).map_err(AdapterProfileContractError::Contract)?;
-    debug_assert!(descriptors.is_empty());
     Ok(registry)
 }
 
@@ -489,7 +54,7 @@ pub fn adapter_catalog() -> Result<AdapterCatalog, AdapterProfileContractError> 
     Ok(builtin_adapter_registry()?.catalog())
 }
 
-fn descriptor<const F: usize>(
+pub(in crate::backend) fn descriptor<const F: usize>(
     id: &'static str,
     display_name: &'static str,
     manufacturer: Option<&'static str>,
@@ -510,7 +75,12 @@ fn descriptor<const F: usize>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn pipetting_implementation<const C: usize, const M: usize, const A: usize, const E: usize>(
+pub(in crate::backend) fn pipetting_implementation<
+    const C: usize,
+    const M: usize,
+    const A: usize,
+    const E: usize,
+>(
     id: &'static str,
     program_features: &'static [ProgramFeature],
     capability_kinds: [&'static str; C],
@@ -546,7 +116,7 @@ fn pipetting_implementation<const C: usize, const M: usize, const A: usize, cons
 }
 
 #[allow(clippy::too_many_arguments)]
-fn thermal_implementation<const M: usize, const A: usize, const E: usize>(
+pub(in crate::backend) fn thermal_implementation<const M: usize, const A: usize, const E: usize>(
     id: &'static str,
     program_features: &'static [ProgramFeature],
     control_modes: [ControlMode; M],
@@ -595,42 +165,12 @@ fn strings<const N: usize>(values: [&'static str; N]) -> BTreeSet<String> {
     values.into_iter().map(str::to_owned).collect()
 }
 
-fn implementation_id(value: &'static str) -> ProcedureImplementationId {
+pub(in crate::backend) fn implementation_id(value: &'static str) -> ProcedureImplementationId {
     ProcedureImplementationId::new(value)
         .expect("built-in Procedure implementation identity is an absolute IRI")
 }
 
-fn validate_ot2_profile(
-    name: &str,
-    contents: &str,
-) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    let driver = "opentrons.ot2";
-    let profile =
-        Ot2AdapterProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
-    canonical_adapter_profile(driver, name, &profile)
-}
-
-fn validate_flex_profile(
-    name: &str,
-    contents: &str,
-) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    let driver = "opentrons.flex";
-    let profile =
-        FlexAdapterProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
-    canonical_adapter_profile(driver, name, &profile)
-}
-
-fn validate_star_profile(
-    name: &str,
-    contents: &str,
-) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    let driver = "hamilton.star";
-    let profile =
-        StarAdapterProfile::parse(name, contents).map_err(|error| invalid(driver, error))?;
-    canonical_adapter_profile(driver, name, &profile)
-}
-
-fn validate_empty_for(
+pub(in crate::backend) fn validate_empty_for(
     driver: &str,
     name: &str,
     contents: &str,
@@ -639,28 +179,7 @@ fn validate_empty_for(
     Ok(empty_profile(driver, name))
 }
 
-fn validate_odtc_profile(
-    name: &str,
-    contents: &str,
-) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    validate_empty_for("inheco.odtc", name, contents)
-}
-
-fn validate_byonoy_profile(
-    name: &str,
-    contents: &str,
-) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    validate_empty_for("byonoy.absorbance96", name, contents)
-}
-
-fn validate_simulator_profile(
-    name: &str,
-    contents: &str,
-) -> Result<ValidatedAdapterProfile, AdapterProfileContractError> {
-    validate_empty_for("lab.simulator", name, contents)
-}
-
-fn declared_program_feasible(
+pub(in crate::backend) fn declared_program_feasible(
     _profile: &ValidatedAdapterProfile,
     implementation: &ProcedureImplementationDescriptor,
     task: &PlanningProcedureTask,
@@ -696,50 +215,11 @@ fn declared_program_feasible(
     Ok(())
 }
 
-fn ot2_program_feasible(
-    profile: &ValidatedAdapterProfile,
-    implementation: &ProcedureImplementationDescriptor,
-    task: &PlanningProcedureTask,
-    contracts: &ProcedureContractRegistry,
-) -> Result<(), String> {
-    declared_program_feasible(profile, implementation, task, contracts)?;
-    let parsed = Ot2AdapterProfile::parse(&profile.name, &profile.canonical_toml)
-        .map_err(|error| error.to_string())?;
-    let allocated = feasibility_task(task, implementation)?;
-    crate::backend::opentrons::ot2::check_task_feasibility(&parsed, &allocated, contracts)
-}
-
-fn flex_program_feasible(
-    profile: &ValidatedAdapterProfile,
-    implementation: &ProcedureImplementationDescriptor,
-    task: &PlanningProcedureTask,
-    contracts: &ProcedureContractRegistry,
-) -> Result<(), String> {
-    declared_program_feasible(profile, implementation, task, contracts)?;
-    let parsed = FlexAdapterProfile::parse(&profile.name, &profile.canonical_toml)
-        .map_err(|error| error.to_string())?;
-    let allocated = feasibility_task(task, implementation)?;
-    crate::backend::opentrons::flex::check_task_feasibility(&parsed, &allocated, contracts)
-}
-
-fn star_program_feasible(
-    profile: &ValidatedAdapterProfile,
-    implementation: &ProcedureImplementationDescriptor,
-    task: &PlanningProcedureTask,
-    contracts: &ProcedureContractRegistry,
-) -> Result<(), String> {
-    declared_program_feasible(profile, implementation, task, contracts)?;
-    let parsed = StarAdapterProfile::parse(&profile.name, &profile.canonical_toml)
-        .map_err(|error| error.to_string())?;
-    let allocated = feasibility_task(task, implementation)?;
-    crate::backend::hamilton::star::check_task_feasibility(&parsed, &allocated, contracts)
-}
-
 /// Build the immutable portion of an allocation so an adapter can run the same structural
 /// projection during candidate selection that it will run before lowering. Placeholder inventory
 /// identities never reach an artifact; the projection reads only program structure, typed task
 /// values, and material roles at this point.
-fn feasibility_task(
+pub(in crate::backend) fn feasibility_task(
     task: &PlanningProcedureTask,
     implementation: &ProcedureImplementationDescriptor,
 ) -> Result<AllocatedProcedureTask, String> {
@@ -819,7 +299,7 @@ fn feasibility_task(
     })
 }
 
-fn parse_profile_for_lowering<T>(
+pub(in crate::backend) fn parse_profile_for_lowering<T>(
     profile: &ValidatedAdapterProfile,
     parse: impl FnOnce(&str, &str) -> Result<T, String>,
 ) -> Result<T, AdapterLoweringError> {
@@ -828,91 +308,6 @@ fn parse_profile_for_lowering<T>(
             driver: profile.driver.clone(),
             message,
         }
-    })
-}
-
-fn lower_ot2_invocation(
-    profile: &ValidatedAdapterProfile,
-    plan: &AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-    contracts: &ProcedureContractRegistry,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    let parsed = parse_profile_for_lowering(profile, |name, contents| {
-        Ot2AdapterProfile::parse(name, contents).map_err(|error| error.to_string())
-    })?;
-    crate::backend::opentrons::ot2::lower_invocation(&parsed, plan, invocation, contracts).map_err(
-        |message| AdapterLoweringError::Lowering {
-            driver: profile.driver.clone(),
-            message,
-        },
-    )
-}
-
-fn lower_flex_invocation(
-    profile: &ValidatedAdapterProfile,
-    plan: &AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-    contracts: &ProcedureContractRegistry,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    let parsed = parse_profile_for_lowering(profile, |name, contents| {
-        FlexAdapterProfile::parse(name, contents).map_err(|error| error.to_string())
-    })?;
-    crate::backend::opentrons::flex::lower_invocation(&parsed, plan, invocation, contracts).map_err(
-        |message| AdapterLoweringError::Lowering {
-            driver: profile.driver.clone(),
-            message,
-        },
-    )
-}
-
-fn lower_star_invocation(
-    profile: &ValidatedAdapterProfile,
-    plan: &AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-    contracts: &ProcedureContractRegistry,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    let parsed = parse_profile_for_lowering(profile, |name, contents| {
-        StarAdapterProfile::parse(name, contents).map_err(|error| error.to_string())
-    })?;
-    crate::backend::hamilton::star::lower_invocation(&parsed, plan, invocation, contracts).map_err(
-        |message| AdapterLoweringError::Lowering {
-            driver: profile.driver.clone(),
-            message,
-        },
-    )
-}
-
-fn lower_odtc_invocation(
-    profile: &ValidatedAdapterProfile,
-    plan: &AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-    contracts: &ProcedureContractRegistry,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    crate::backend::inheco::odtc::lower_invocation(plan, invocation, contracts).map_err(|message| {
-        AdapterLoweringError::Lowering {
-            driver: profile.driver.clone(),
-            message,
-        }
-    })
-}
-
-fn lower_simulator_registered_invocation(
-    _profile: &ValidatedAdapterProfile,
-    plan: &AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-    _contracts: &ProcedureContractRegistry,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    lower_simulator_invocation(plan, invocation)
-}
-
-fn unsupported_invocation(
-    profile: &ValidatedAdapterProfile,
-    _plan: &AdapterInvocationPlan,
-    _invocation: &AdapterInvocation,
-    _contracts: &ProcedureContractRegistry,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    Err(AdapterLoweringError::UnsupportedInvocation {
-        driver: profile.driver.clone(),
     })
 }
 
@@ -936,78 +331,8 @@ pub fn validate_adapter_profile(
     builtin_adapter_registry()?.validate_profile(driver, name, contents)
 }
 
-fn lower_simulator_invocation(
-    invocation_plan: &AdapterInvocationPlan,
-    invocation: &AdapterInvocation,
-) -> Result<AdapterInvocationLowering, AdapterLoweringError> {
-    let requirements = invocation_plan
-        .allocated
-        .methods
-        .iter()
-        .flat_map(|method| &method.tasks)
-        .flat_map(|task| {
-            task.requirements
-                .iter()
-                .map(move |requirement| (requirement.id.clone(), task))
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut artifacts = ArtifactBundle::new();
-    let mut documents = Vec::new();
-    for (ordinal, requirement_id) in invocation.requirements.iter().enumerate() {
-        let task = requirements
-            .get(requirement_id)
-            .expect("validated invocation requirements belong to exact tasks");
-        let requirement = task
-            .requirements
-            .iter()
-            .find(|requirement| &requirement.id == requirement_id)
-            .expect("the requirement index preserves the owning requirement");
-        let document = SimulationRunDocument {
-            format: SIMULATION_RUN_FORMAT.to_owned(),
-            id: requirement_id.to_string(),
-            title: format!("Simulate {}", task.operation),
-            capability_kind: requirement.capability_kind.to_string(),
-            assumptions: vec![
-                "Semantic simulation only; no physical hardware is contacted.".to_owned(),
-                format!("Allocated Asset: {}", invocation.asset),
-                format!("Procedure operation: {}", task.operation),
-            ],
-        };
-        let path = format!(
-            "requirement-{:03}-{}.simulation.json",
-            ordinal + 1,
-            short_digest(requirement_id.as_str())
-        );
-        let mut contents = serde_json::to_string_pretty(&document).map_err(|error| {
-            AdapterLoweringError::Lowering {
-                driver: invocation.adapter.driver.clone(),
-                message: error.to_string(),
-            }
-        })?;
-        contents.push('\n');
-        artifacts
-            .insert_text(&path, "application/json", contents)
-            .map_err(|error| AdapterLoweringError::Lowering {
-                driver: invocation.adapter.driver.clone(),
-                message: error.to_string(),
-            })?;
-        documents.push(AdapterInvocationDocument {
-            requirements: vec![requirement_id.clone()],
-            path,
-            format: SIMULATION_RUN_FORMAT.to_owned(),
-        });
-    }
-    Ok(AdapterInvocationLowering {
-        artifacts,
-        documents,
-    })
-}
-
-fn short_digest(value: &str) -> String {
-    lab_adapter_api::hex_sha256(value.as_bytes())[..8].to_owned()
-}
-
-fn schema_value<T: JsonSchema>() -> Result<Value, AdapterProfileContractError> {
+pub(in crate::backend) fn schema_value<T: JsonSchema>() -> Result<Value, AdapterProfileContractError>
+{
     let mut schema = serde_json::to_value(schema_for!(T))
         .map_err(|error| AdapterProfileContractError::Contract(error.to_string()))?;
     sanitize_schema_defaults(&mut schema);
@@ -1061,7 +386,7 @@ fn closed_object_properties(
         .map(|properties| properties.keys().cloned().collect())
 }
 
-fn canonical_adapter_profile<T: Serialize>(
+pub(in crate::backend) fn canonical_adapter_profile<T: Serialize>(
     driver: &str,
     name: &str,
     profile: &T,
@@ -1071,14 +396,17 @@ fn canonical_adapter_profile<T: Serialize>(
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct EmptyAdapterProfile {}
+pub(in crate::backend) struct EmptyAdapterProfile {}
 
 fn empty_profile(driver: &str, name: &str) -> ValidatedAdapterProfile {
     canonical_adapter_profile(driver, name, &EmptyAdapterProfile::default())
         .expect("the empty adapter profile has a canonical representation")
 }
 
-fn invalid(driver: &str, error: impl std::fmt::Display) -> AdapterProfileContractError {
+pub(in crate::backend) fn invalid(
+    driver: &str,
+    error: impl std::fmt::Display,
+) -> AdapterProfileContractError {
     AdapterProfileContractError::Invalid {
         driver: driver.to_owned(),
         message: error.to_string(),
@@ -1627,3 +955,17 @@ mod tests {
         assert!(error.contains("unknown field `endpoint`"), "{error}");
     }
 }
+
+#[cfg(test)]
+use crate::backend::byonoy::unsupported_invocation;
+#[cfg(test)]
+use crate::runtime::{AdapterRuntimeRegistrationExt, RuntimeDocumentRegistration};
+#[cfg(test)]
+use lab_compiler::procedure::vocabulary::{
+    IN_WELL_MIXING, LIQUID_LEVEL_AWARE_ASPIRATION, METERED_LIQUID_TRANSFER,
+};
+#[cfg(test)]
+use lab_runfmt::{
+    OPENTRONS_PROTOCOL_DESIGNER_FORMAT, SIMULATION_RUN_FORMAT, STAR_RUN_FORMAT,
+    THERMOCYCLE_RUN_FORMAT,
+};

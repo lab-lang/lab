@@ -3,8 +3,8 @@ use crate::procedure::{
     ThermalStep, Volume,
 };
 
-use super::view::{TaskView, procedure_id};
 use crate::procedure::ProcedureProgramBuildContext;
+use crate::procedure::context::procedure_id;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const DEGREE_CELSIUS: &str = "http://qudt.org/vocab/unit/DEG_C";
@@ -25,24 +25,24 @@ pub(super) fn normalize(
             task.outputs.len()
         ));
     }
-    let view = TaskView::new(task);
+    let view = task;
     view.require_material_roles(&[])?;
-    let sample_count = positive(&view, "assembly_replicates", None)?;
-    let volume_each = positive(&view, "reaction_volume_ul", Some(MICROLITRE))?;
-    let cycles = positive(&view, "cycles", None)?;
+    let sample_count = positive(view, "assembly_replicates", None)?;
+    let volume_each = positive(view, "reaction_volume_ul", Some(MICROLITRE))?;
+    let cycles = positive(view, "cycles", None)?;
     let digest_temperature =
         view.integer_parameter("digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let digest_minutes = positive(&view, "digest_minutes", Some(MINUTE))?;
+    let digest_minutes = positive(view, "digest_minutes", Some(MINUTE))?;
     let ligate_temperature =
         view.integer_parameter("ligate_temperature_c", Some(DEGREE_CELSIUS))?;
-    let ligate_minutes = positive(&view, "ligate_minutes", Some(MINUTE))?;
-    let lid_temperature = positive(&view, "lid_temperature_c", Some(DEGREE_CELSIUS))?;
+    let ligate_minutes = positive(view, "ligate_minutes", Some(MINUTE))?;
+    let lid_temperature = positive(view, "lid_temperature_c", Some(DEGREE_CELSIUS))?;
     let final_digest_temperature =
         view.integer_parameter("final_digest_temperature_c", Some(DEGREE_CELSIUS))?;
-    let final_digest_minutes = positive(&view, "final_digest_minutes", Some(MINUTE))?;
+    let final_digest_minutes = positive(view, "final_digest_minutes", Some(MINUTE))?;
     let heat_inactivation_temperature =
         view.integer_parameter("heat_inactivation_temperature_c", Some(DEGREE_CELSIUS))?;
-    let heat_inactivation_minutes = positive(&view, "heat_inactivation_minutes", Some(MINUTE))?;
+    let heat_inactivation_minutes = positive(view, "heat_inactivation_minutes", Some(MINUTE))?;
     let hold_temperature = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
 
     let program = ThermalProgramV1 {
@@ -87,7 +87,11 @@ pub(super) fn normalize(
     Ok(ProcedureProgram::from_thermal(&program))
 }
 
-fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u32, String> {
+fn positive(
+    view: &ProcedureProgramBuildContext<'_>,
+    name: &str,
+    unit: Option<&str>,
+) -> Result<u32, String> {
     let value = view.integer_parameter(name, unit)?;
     if value == 0 {
         return Err(format!("parameter `{name}` must be greater than zero"));
@@ -109,4 +113,13 @@ fn step(id: &str, celsius: u32, minutes: u32) -> Result<ThermalStep, String> {
         hold: Duration::parse_seconds(seconds.to_string()).map_err(|error| error.to_string())?,
         ramp_rate: None,
     })
+}
+
+pub(super) fn registrations() -> Vec<crate::procedure::ProcedureProgramBuilderRegistration> {
+    use crate::procedure::vocabulary::*;
+    vec![crate::procedure::builder::registration(
+        CYCLE_GOLDEN_GATE_BUILDER_V1,
+        THERMAL_PROGRAM_V1,
+        normalize,
+    )]
 }

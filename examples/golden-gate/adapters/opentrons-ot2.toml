@@ -50,3 +50,16 @@ capacity = 96
 labware = "opentrons_96_filtertiprack_200ul"
 slots = ["6"]
 capacity = 96
+
+# The bulk-liquid and material-surface resources are generic canonical vessel roles.
+[resources.bulk]
+slot = "3"
+labware = "opentrons_15_tuberack_falcon_15ml_conical"
+capacity = 15
+max_volume_each_ul = 15000
+
+[resources.surface]
+slot = "9"
+labware = "corning_96_wellplate_360ul_flat"
+capacity = 96
+max_volume_each_ul = 360

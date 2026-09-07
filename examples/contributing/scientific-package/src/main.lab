@@ -1,0 +1,12 @@
+use std.bio.designs
+use std.lab.plasmid
+use contribution_example.science
+
+buy:
+  medium broth:
+    sbol_identity = "https://example.org/materials/broth"
+
+workflow main() -> Material<Medium>:
+  sample <- provision broth
+  prepared <- homogenize sample
+  return prepared

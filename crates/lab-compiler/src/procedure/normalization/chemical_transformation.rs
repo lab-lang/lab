@@ -5,8 +5,8 @@ use crate::procedure::{
     ThermalStage, ThermalStep, TransferTechnique, Vessel, VesselRole, Volume,
 };
 
-use super::view::{TaskView, material_symbols, procedure_id};
 use crate::procedure::ProcedureProgramBuildContext;
+use crate::procedure::context::{material_symbols, procedure_id};
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 const MILLIMETRE: &str = "http://qudt.org/vocab/unit/MilliM";
@@ -28,7 +28,7 @@ pub(super) fn normalize_prepare(
             task.outputs.len()
         ));
     }
-    let view = TaskView::new(task);
+    let view = task;
     view.require_material_roles(&["dependencies"])?;
     let dependencies = view.text_list_parameter("dependencies")?;
     let plasmids = view.text_list_parameter("plasmids")?;
@@ -39,21 +39,21 @@ pub(super) fn normalize_prepare(
     if material_symbols(&materials) != dependencies {
         return Err("transformation dependencies do not match their material inputs".to_owned());
     }
-    let dna_count = positive(&view, "dna_count", None)?;
+    let dna_count = positive(view, "dna_count", None)?;
     if usize::try_from(dna_count).ok() != Some(materials.len()) {
         return Err(format!(
             "parameter `dna_count` is {dna_count}, but the transformation has {} DNA materials",
             materials.len()
         ));
     }
-    let replicates = positive(&view, "replicates", None)?;
-    let cell_volume = positive(&view, "cell_volume_ul", Some(MICROLITRE))?;
-    let dna_volume = positive(&view, "dna_volume_ul", Some(MICROLITRE))?;
-    let cell_mix_cycles = positive(&view, "cell_mix_cycles", None)?;
-    let cell_mix_volume = positive(&view, "cell_mix_volume_ul", Some(MICROLITRE))?;
-    let dna_mix_cycles = positive(&view, "dna_mix_cycles", None)?;
-    let bubble_clear_cycles = positive(&view, "bubble_clear_cycles", None)?;
-    let bubble_clear_volume = positive(&view, "bubble_clear_volume_ul", Some(MICROLITRE))?;
+    let replicates = positive(view, "replicates", None)?;
+    let cell_volume = positive(view, "cell_volume_ul", Some(MICROLITRE))?;
+    let dna_volume = positive(view, "dna_volume_ul", Some(MICROLITRE))?;
+    let cell_mix_cycles = positive(view, "cell_mix_cycles", None)?;
+    let cell_mix_volume = positive(view, "cell_mix_volume_ul", Some(MICROLITRE))?;
+    let dna_mix_cycles = positive(view, "dna_mix_cycles", None)?;
+    let bubble_clear_cycles = positive(view, "bubble_clear_cycles", None)?;
+    let bubble_clear_volume = positive(view, "bubble_clear_volume_ul", Some(MICROLITRE))?;
     let bubble_offset =
         view.integer_parameter("bubble_clear_dispense_offset_mm", Some(MILLIMETRE))?;
     // Chemically competent cells lose transformation efficiency quickly at bench temperature, so
@@ -63,7 +63,7 @@ pub(super) fn normalize_prepare(
         view.integer_parameter("cell_staging_temperature_c", Some(DEGREE_CELSIUS))?;
     // The aliquot the operator thaws. Stating it lets the compiler prove the reactions this task
     // sets up can actually be drawn from one tube.
-    let cell_aliquot_volume = positive(&view, "cell_aliquot_volume_ul", Some(MICROLITRE))?;
+    let cell_aliquot_volume = positive(view, "cell_aliquot_volume_ul", Some(MICROLITRE))?;
 
     let cells = procedure_id("competent-cells")?;
     let mixture = procedure_id(task.outputs[0].as_str())?;
@@ -125,6 +125,7 @@ pub(super) fn normalize_prepare(
         technique: TransferTechnique::default(),
     });
 
+    let mut dna_sources = Vec::with_capacity(materials.len());
     for (material_index, material) in materials.into_iter().enumerate() {
         let material_id = procedure_id(material.id.as_str())?;
         let source = procedure_id(&format!("dna-source-{material_index:04}"))?;
@@ -142,7 +143,10 @@ pub(super) fn normalize_prepare(
             initial_volume_each: None,
             temperature: None,
         });
-        for (replicate, destination) in destinations.iter().enumerate() {
+        dna_sources.push(source);
+    }
+    for (replicate, destination) in destinations.iter().enumerate() {
+        for (material_index, source) in dna_sources.iter().enumerate() {
             let group = procedure_id(&format!("dna-{material_index:04}-{replicate:04}"))?;
             steps.push(PipettingStep::Mix {
                 id: procedure_id(&format!("mix-dna-{material_index:04}-{replicate:04}"))?,
@@ -216,18 +220,18 @@ pub(super) fn normalize_heat_shock(
             task.outputs.len()
         ));
     }
-    let view = TaskView::new(task);
+    let view = task;
     view.require_material_roles(&[])?;
-    let replicates = positive(&view, "replicates", None)?;
-    let dna_count = positive(&view, "dna_count", None)?;
-    let cell_volume = positive(&view, "cell_volume_ul", Some(MICROLITRE))?;
-    let dna_volume = positive(&view, "dna_volume_ul", Some(MICROLITRE))?;
+    let replicates = positive(view, "replicates", None)?;
+    let dna_count = positive(view, "dna_count", None)?;
+    let cell_volume = positive(view, "cell_volume_ul", Some(MICROLITRE))?;
+    let dna_volume = positive(view, "dna_volume_ul", Some(MICROLITRE))?;
     let cold_temperature = view.integer_parameter("cold_temperature_c", Some(DEGREE_CELSIUS))?;
-    let cold_minutes = positive(&view, "cold_minutes", Some(MINUTE))?;
+    let cold_minutes = positive(view, "cold_minutes", Some(MINUTE))?;
     let shock_temperature =
         view.integer_parameter("heat_shock_temperature_c", Some(DEGREE_CELSIUS))?;
-    let shock_minutes = positive(&view, "heat_shock_minutes", Some(MINUTE))?;
-    let post_shock_minutes = positive(&view, "post_shock_minutes", Some(MINUTE))?;
+    let shock_minutes = positive(view, "heat_shock_minutes", Some(MINUTE))?;
+    let post_shock_minutes = positive(view, "post_shock_minutes", Some(MINUTE))?;
     let hold_temperature = view.integer_parameter("hold_temperature_c", Some(DEGREE_CELSIUS))?;
     let volume_each = dna_volume
         .checked_mul(dna_count)
@@ -262,7 +266,11 @@ pub(super) fn normalize_heat_shock(
     Ok(ProcedureProgram::from_thermal(&program))
 }
 
-fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u32, String> {
+fn positive(
+    view: &ProcedureProgramBuildContext<'_>,
+    name: &str,
+    unit: Option<&str>,
+) -> Result<u32, String> {
     let value = view.integer_parameter(name, unit)?;
     if value == 0 {
         return Err(format!("parameter `{name}` must be greater than zero"));
@@ -288,4 +296,20 @@ fn thermal_step(id: &str, celsius: u32, minutes: u32) -> Result<ThermalStep, Str
         hold: Duration::parse_seconds(seconds.to_string()).map_err(|error| error.to_string())?,
         ramp_rate: None,
     })
+}
+
+pub(super) fn registrations() -> Vec<crate::procedure::ProcedureProgramBuilderRegistration> {
+    use crate::procedure::vocabulary::*;
+    vec![
+        crate::procedure::builder::registration(
+            PREPARE_CHEMICAL_TRANSFORMATION_BUILDER_V1,
+            PIPETTING_PROGRAM_V1,
+            normalize_prepare,
+        ),
+        crate::procedure::builder::registration(
+            HEAT_SHOCK_TRANSFORMATION_BUILDER_V1,
+            THERMAL_PROGRAM_V1,
+            normalize_heat_shock,
+        ),
+    ]
 }

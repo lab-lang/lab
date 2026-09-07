@@ -13,20 +13,22 @@ is a small molecule without being told separately."""
 
 # ruff: noqa
 
+# fmt: off
+
 from typing import Generic, TypeVar
 
 from lab._effects import Action
-from lab._types import LabConstructor, LabRole, LabState, LabType
+from lab._types import DesignReference, LabConstructor, LabRole, LabState, LabType
 from lab._vocabulary import ArtifactKind, Function, Symbol
 from lab._workflows import ImportedWorkflow
 
 _Both_First_1 = TypeVar("_Both_First_1")
 _Both_Second_2 = TypeVar("_Both_Second_2")
-_Competence_T1_1 = TypeVar("_Competence_T1_1")
-_Cultivation_T1_1 = TypeVar("_Cultivation_T1_1")
+_Competence_T1_1 = TypeVar("_Competence_T1_1", covariant=True)
+_Cultivation_T1_1 = TypeVar("_Cultivation_T1_1", covariant=True)
 _Operon_First_1 = TypeVar("_Operon_First_1")
 _Operon_Second_2 = TypeVar("_Operon_Second_2")
-_Pouring_T1_1 = TypeVar("_Pouring_T1_1")
+_Pouring_T1_1 = TypeVar("_Pouring_T1_1", covariant=True)
 
 LAB_MODULE = "std.bio.designs"
 """The exact Lab module these bindings import."""

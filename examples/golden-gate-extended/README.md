@@ -8,7 +8,7 @@ lab build
 lab run .lab/build --dry-run
 ```
 
-`lab build` emits portable experiment artifacts, consumes `inventory/facility.ttl`, binds the reachable requirements across the exact Opentrons OT-2 and manual-workstation offerings, resolves the ordered reference plasmid through its exact MaterialLot, and derives three scheduled OT-2 protocols and the operator PDFs through the Asset's installed adapter. It prints every emitted Asset bundle, protocol, document, and reviewed-plan path.
+`lab build` emits portable experiment artifacts, consumes `inventory/facility.ttl`, binds the reachable requirements across the exact Opentrons OT-2 and manual-workstation offerings, and resolves the ordered reference plasmid through its exact MaterialLot. The Asset's installed adapter emits one reviewed protocol and operator document per automated Procedure. Each file requires the operator to stage the inputs at its documented locations; upstream material provenance does not imply preserved physical well locations between files. The build prints every emitted Asset bundle, protocol, document, and reviewed-plan path.
 
 ## What it shows
 
@@ -25,3 +25,5 @@ lab run .lab/build --dry-run
 **Reacting rather than waiting.** A plate is ready when enough colonies have appeared, not on a schedule, so `await_colonies` images on a timer and finishes on whichever comes first.
 
 **Fetching without asking where it came from.** `provision reference_gfp` takes the ordered plasmid off the shelf the same way `provision BL21` takes competent cells. It does not consult provenance, deliberately: a plasmid this laboratory bought and one it assembled last month are both simply available, and which is which is a question for the inventory rather than for a workflow.
+
+The default entry, `src/programs/build_panel.lab`, plans the static construction phase. `src/programs/panel.lab` retains the full observation example, including its result-dependent `match`. It type-checks, but executable planning rejects that control flow until a runtime can preserve its semantics. The planner does not flatten both outcomes into one unconditional protocol.

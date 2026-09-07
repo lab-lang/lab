@@ -3,6 +3,7 @@
 //! Facility planning selects Methods, capability offerings, Assets, material lots, and explicit adapter bindings before this layer runs. Each adapter receives only the immutable Procedure tasks and requirements assigned to one exact Asset invocation, validates its private operational profile, and emits independently reviewable device documents. Adapters never select scientific methods, traverse source programs, or infer drivers from manufacturer and model metadata.
 
 mod adapters;
+pub mod byonoy;
 mod constraints;
 mod document;
 pub mod hamilton;
@@ -13,6 +14,7 @@ mod procedure;
 mod profile;
 mod resources;
 pub mod run_sheet;
+pub mod simulator;
 mod typst;
 
 pub use adapters::{

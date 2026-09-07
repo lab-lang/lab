@@ -105,9 +105,9 @@ pub(crate) fn compile_module_with_library(
         module_id,
         &SemanticEnvironment::default(),
         &module,
-        library,
+        library.clone(),
     )?;
-    material_flow::verify_module(&checked, &SemanticEnvironment::default())?;
+    material_flow::verify_module_with_library(&checked, &SemanticEnvironment::default(), &library)?;
     Ok(checked)
 }
 

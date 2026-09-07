@@ -18,6 +18,18 @@ import typing
 from collections.abc import Iterator, Sequence
 from typing import Any
 
+_DesignT = typing.TypeVar("_DesignT", covariant=True)
+
+
+class DesignReference(typing.Generic[_DesignT]):
+    """A declaration referring to a design of the stated Lab type.
+
+    Generated call signatures accept this alongside the nominal design type.
+    It preserves the subject of a declaration without treating the declaration
+    wrapper itself as the material produced by an action such as provision.
+    """
+
+
 #: Python's own names for types Lab spells differently.
 _BUILTIN = {
     "list": "List",
@@ -68,26 +80,20 @@ class LabConstructor(LabType):
         if declared is None:
             return Record(cls.__lab_name__ or cls.__name__, **fields)
         by_python_name = {
-            python_name: (lab_name, optional)
-            for python_name, lab_name, optional in declared
+            python_name: (lab_name, optional) for python_name, lab_name, optional in declared
         }
         unknown = [name for name in fields if name not in by_python_name]
         if unknown:
-            raise TypeError(
-                f"{cls.__name__} has no field(s) {', '.join(sorted(unknown))}"
-            )
+            raise TypeError(f"{cls.__name__} has no field(s) {', '.join(sorted(unknown))}")
         missing = [
             python_name
             for python_name, _lab_name, optional in declared
             if not optional and python_name not in fields
         ]
         if missing:
-            raise TypeError(
-                f"{cls.__name__} is missing field(s) {', '.join(missing)}"
-            )
+            raise TypeError(f"{cls.__name__} is missing field(s) {', '.join(missing)}")
         translated = {
-            by_python_name[python_name][0]: value
-            for python_name, value in fields.items()
+            by_python_name[python_name][0]: value for python_name, value in fields.items()
         }
         return Record(cls.__lab_name__ or cls.__name__, **translated)
 

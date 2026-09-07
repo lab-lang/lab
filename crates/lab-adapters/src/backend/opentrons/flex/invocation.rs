@@ -95,6 +95,7 @@ enum FlexTaskExecution {
         title: String,
         program: PipettingProgramV1,
         locations: BTreeMap<ProcedureLocalId, Vec<FlexPhysicalLocation>>,
+        staging_temperatures: BTreeMap<String, f64>,
         sources: Vec<CanonicalSourceReview>,
     },
     ThermalProgram {
@@ -118,6 +119,7 @@ struct FlexPhysicalLocation {
 enum FlexPhysicalResource {
     Sources,
     Work,
+    Bulk,
 }
 
 #[derive(Clone, Serialize)]
@@ -248,30 +250,23 @@ fn plan_pipetting_program(
     let program = validated.as_program();
     let source_wells = plate_wells(profile.resources.sources.capacity);
     let work_wells = plate_wells(profile.resources.work.capacity);
+    let bulk_wells = plate_wells(profile.resources.bulk.capacity);
+    let mut bulk_cursor = 0usize;
     let mut source_cursor = 0usize;
     let mut work_cursor = 0usize;
-    let mut input_locations = BTreeMap::<u32, Vec<FlexPhysicalLocation>>::new();
     let mut locations = BTreeMap::new();
     let mut sources = Vec::new();
 
-    // Procedure input aliases are allocated first. An InputOutput vessel then resolves to the
-    // same wells, which is the physical meaning of an in-place state transition.
-    for vessel in program
-        .vessels
-        .iter()
-        .filter(|vessel| matches!(vessel.role, VesselRole::ProcedureInput { .. }))
-    {
-        let VesselRole::ProcedureInput { input } = vessel.role else {
-            unreachable!()
-        };
+    // Logical vessels may partition an aggregate input. InputOutput owns its
+    // positions directly and does not require a separate input declaration.
+    for vessel in program.vessels.iter().filter(|vessel| {
+        matches!(
+            vessel.role,
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. }
+        )
+    }) {
         let count = usize::try_from(vessel.positions)
             .map_err(|_| format!("Flex task '{}' vessel position count overflows", task.id))?;
-        if input_locations.contains_key(&input) {
-            return Err(format!(
-                "Flex Procedure task '{}' maps input {input} to more than one canonical vessel",
-                task.id
-            ));
-        }
         let physical = take_flex_locations(
             task,
             "thermocycler work wells",
@@ -280,7 +275,6 @@ fn plan_pipetting_program(
             count,
             FlexPhysicalResource::Work,
         )?;
-        input_locations.insert(input, physical.clone());
         locations.insert(vessel.id.clone(), physical);
     }
 
@@ -303,33 +297,42 @@ fn plan_pipetting_program(
                         )
                     })?
                     .clone();
-                let physical = take_flex_locations(
-                    task,
-                    "temperature-module source wells",
-                    &source_wells,
-                    &mut source_cursor,
-                    count,
-                    FlexPhysicalResource::Sources,
-                )?;
+                let loaded = vessel
+                    .initial_volume_each
+                    .as_ref()
+                    .map(|v| v.value().to_string().parse::<f64>().unwrap())
+                    .unwrap_or(0.0);
+                let physical = if loaded > f64::from(profile.resources.sources.max_volume_each_ul) {
+                    take_flex_locations(
+                        task,
+                        "bulk source wells",
+                        &bulk_wells,
+                        &mut bulk_cursor,
+                        count,
+                        FlexPhysicalResource::Bulk,
+                    )?
+                } else {
+                    take_flex_locations(
+                        task,
+                        "temperature-module source wells",
+                        &source_wells,
+                        &mut source_cursor,
+                        count,
+                        FlexPhysicalResource::Sources,
+                    )?
+                };
                 sources.push(CanonicalSourceReview {
                     vessel: vessel.id.clone(),
                     material: material.clone(),
                     binding,
-                    wells: physical.iter().map(|location| location.well.clone()).collect(),
+                    wells: physical
+                        .iter()
+                        .map(|location| location.well.clone())
+                        .collect(),
                 });
                 physical
             }
-            VesselRole::InputOutput { input, .. } => input_locations
-                .get(input)
-                .filter(|locations| locations.len() == count)
-                .cloned()
-                .ok_or_else(|| {
-                    format!(
-                        "Flex Procedure task '{}' InputOutput vessel '{}' has no equally sized ProcedureInput {input}",
-                        task.id, vessel.id
-                    )
-                })?,
-            VesselRole::ProcedureInput { .. } => unreachable!(),
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. } => unreachable!(),
             VesselRole::Product { .. }
             | VesselRole::MaterialProduct { .. }
             | VesselRole::Intermediate => take_flex_locations(
@@ -344,10 +347,26 @@ fn plan_pipetting_program(
         locations.insert(vessel.id.clone(), physical);
     }
 
+    super::super::staging::working_volumes(program, |vessel| {
+        match locations[vessel][0].resource {
+            FlexPhysicalResource::Sources => profile.resources.sources.max_volume_each_ul,
+            FlexPhysicalResource::Work => profile.resources.work.max_volume_each_ul,
+            FlexPhysicalResource::Bulk => profile.resources.bulk.max_volume_each_ul,
+        }
+    })?;
+    let staging_temperatures =
+        super::super::staging::temperatures(program, |vessel| {
+            match locations[vessel][0].resource {
+                FlexPhysicalResource::Sources => "sources",
+                FlexPhysicalResource::Work => "work",
+                FlexPhysicalResource::Bulk => "bulk",
+            }
+        })?;
     validate_flex_canonical_steps(profile, task, program)?;
     Ok(FlexTaskExecution::PipettingProgram {
         title: operation_title(task),
         program: program.clone(),
+        staging_temperatures,
         locations,
         sources,
     })
@@ -760,6 +779,7 @@ fn render_pipetting_program(plan: &FlexTaskPlan) -> Result<String, String> {
     let FlexTaskExecution::PipettingProgram {
         title,
         program,
+        staging_temperatures,
         locations,
         ..
     } = &plan.execution
@@ -780,12 +800,34 @@ fn render_pipetting_program(plan: &FlexTaskPlan) -> Result<String, String> {
     let work = builder
         .load_labware_on_module(&profile.resources.work.labware, thermocycler)
         .map_err(protocol_error)?;
+    let bulk = builder
+        .load_labware(
+            &profile.resources.bulk.labware,
+            slot(&profile.resources.bulk.slot),
+        )
+        .map_err(protocol_error)?;
     let mut small_tips = TipFeeder::load(&mut builder, &profile.resources.small_tips)?;
     let mut large_tips = TipFeeder::load(&mut builder, &profile.resources.large_tips)?;
     let small = load_instrument(&mut builder, &profile.instruments.small)?;
     let large = load_instrument(&mut builder, &profile.instruments.large)?;
     let small_working = small.max_volume.min(small_tips.tip_volume);
     builder.thermocycler_open_lid(thermocycler);
+    if let Some(target) = staging_temperatures.get("sources") {
+        builder
+            .temperature_module_set_target(temperature, *target)
+            .map_err(protocol_error)?;
+        builder
+            .temperature_module_wait_for_temperature(temperature)
+            .map_err(protocol_error)?;
+    }
+    if let Some(target) = staging_temperatures.get("work") {
+        builder
+            .thermocycler_set_block_temperature(thermocycler, *target, None, None)
+            .map_err(protocol_error)?;
+        builder
+            .thermocycler_wait_for_block_temperature(thermocycler)
+            .map_err(protocol_error)?;
+    }
 
     let physical = |at: &Location| -> Result<(LabwareId, String), String> {
         let location = locations
@@ -800,6 +842,7 @@ fn render_pipetting_program(plan: &FlexTaskPlan) -> Result<String, String> {
         let labware = match location.resource {
             FlexPhysicalResource::Sources => sources,
             FlexPhysicalResource::Work => work,
+            FlexPhysicalResource::Bulk => bulk,
         };
         Ok((labware, location.well.clone()))
     };
@@ -1272,6 +1315,7 @@ fn render_manual(plan: &FlexTaskPlan) -> Doc {
         ],
     );
     doc.heading(1, [text("Run this task")]);
+    doc.para_text("Stage every upstream input at the logical-to-physical locations in this task manifest. Each Procedure is a separate run; preceding files may use different well coordinates.");
     doc.para([
         text("Import "),
         code("automation_protocol.json"),
@@ -1293,7 +1337,7 @@ fn render_manual(plan: &FlexTaskPlan) -> Doc {
                     [
                         Column::left("Material"),
                         Column::left("Physical source"),
-                        Column::left("Temperature-rack wells"),
+                        Column::left("Allocated wells"),
                     ],
                     sources.iter().map(|source| {
                         vec![

@@ -40,13 +40,14 @@ from ._types import lab_type, result_types, type_modules
 
 #: The Lab name of the context a workflow body reads its elapsed time from.
 _CONTEXT = "workflow"
+_ResultT = TypeVar("_ResultT")
 
 
 class WorkflowError(TypeError):
     """A workflow that cannot be translated, and why."""
 
 
-class Workflow:
+class Workflow(Generic[_ResultT]):
     """A declared workflow, callable from another workflow as a durable step."""
 
     def __init__(self, declaration: WorkflowDeclaration) -> None:
@@ -54,7 +55,7 @@ class Workflow:
         self.name = declaration.name
         self.results = tuple(name for name, _ in declaration.results)
 
-    def __call__(self, *arguments: object) -> WorkflowCall[object]:
+    def __call__(self, *arguments: object) -> WorkflowCall[_ResultT]:
         expected = len(self.declaration.inputs)
         if len(arguments) != expected:
             raise TypeError(
@@ -94,9 +95,7 @@ class ImportedWorkflow:
         self.inputs = tuple(inputs)
         python_inputs = tuple(python_inputs) or self.inputs
         if len(python_inputs) != len(self.inputs) or len(set(python_inputs)) != len(python_inputs):
-            raise ValueError(
-                f"{self.name} needs one unique Python name for each Lab input"
-            )
+            raise ValueError(f"{self.name} needs one unique Python name for each Lab input")
         self.python_to_input = dict(zip(python_inputs, self.inputs, strict=True))
         self.results = tuple(results)
         self.uses = tuple(uses)
@@ -118,15 +117,10 @@ class ImportedWorkflow:
         missing = [input_name for input_name in self.inputs if input_name not in bound]
         if missing:
             raise TypeError(f"{self.name} is missing input(s) {', '.join(missing)}")
-        return WorkflowCall(
-            self, [expression(bound[input_name]) for input_name in self.inputs]
-        )
+        return WorkflowCall(self, [expression(bound[input_name]) for input_name in self.inputs])
 
     def __repr__(self) -> str:
         return f"<imported Lab workflow {self.definition[0]}.{self.name}>"
-
-
-_ResultT = TypeVar("_ResultT")
 
 
 class WorkflowCall(Generic[_ResultT]):
@@ -135,7 +129,7 @@ class WorkflowCall(Generic[_ResultT]):
     __slots__ = ("arguments", "workflow")
 
     def __init__(
-        self, workflow: Workflow | ImportedWorkflow, arguments: Sequence[Expression]
+        self, workflow: Workflow[Any] | ImportedWorkflow, arguments: Sequence[Expression]
     ) -> None:
         self.workflow = workflow
         self.arguments = list(arguments)
@@ -166,7 +160,9 @@ class Context:
     def elapsed(self) -> Expression:
         return Field(Reference(_CONTEXT), "elapsed")
 
-    def perform(self, step: object) -> Any:  # pragma: no cover - read syntactically
+    def perform(
+        self, step: Effect[_ResultT] | WorkflowCall[_ResultT]
+    ) -> _ResultT:  # pragma: no cover - read syntactically
         raise WorkflowError("wf.perform is only meaningful inside a @lab.workflow function")
 
     def state(self, annotation: object, initial: object) -> Any:  # pragma: no cover
@@ -182,7 +178,7 @@ class Context:
         raise WorkflowError("wf.after is only meaningful inside a @lab.workflow function")
 
 
-def workflow(fn: Callable[..., Any]) -> Workflow:
+def workflow(fn: Callable[..., _ResultT]) -> Workflow[_ResultT]:
     """A workflow, read from the body of a Python function."""
 
     module, _ = declaring_module(depth=2)

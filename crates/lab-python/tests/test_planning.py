@@ -116,7 +116,16 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert setup.program.contract == procedures.PIPETTING_PROGRAM_V1
     assert isinstance(setup.program.body, procedures.PipettingProgramV1)
     assert len(setup.program.body.materials) == 9
-    assert len(setup.program.body.steps) == 18
+    assert len(setup.program.body.steps) == 19
+    clears = [step for step in setup.program.body.steps if step.id.startswith("clear-bubbles")]
+    assert len(clears) == 2
+    assert all(
+        isinstance(step, procedures.Mix)
+        and step.cycles == 1
+        and step.technique.blow_out
+        and step.technique.touch_tip
+        for step in clears
+    )
     assert any(
         isinstance(step, procedures.Mix) and step.volume.value == Decimal("20")
         for step in setup.program.body.steps

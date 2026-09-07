@@ -126,12 +126,8 @@ class Function(Symbol):
         super().__init__(name=name, uses=uses, definition=definition)
         self.inputs = tuple(inputs)
         python_inputs = tuple(python_inputs) or self.inputs
-        if len(python_inputs) != len(self.inputs) or len(set(python_inputs)) != len(
-            python_inputs
-        ):
-            raise ValueError(
-                f"{self.name} needs one unique Python name for each Lab input"
-            )
+        if len(python_inputs) != len(self.inputs) or len(set(python_inputs)) != len(python_inputs):
+            raise ValueError(f"{self.name} needs one unique Python name for each Lab input")
         self.python_to_input = dict(zip(python_inputs, self.inputs, strict=True))
 
     def __call__(self, *arguments: object, **named: object) -> Expression:

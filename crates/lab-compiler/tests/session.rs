@@ -60,7 +60,10 @@ fn allocated_method_ports_must_match_the_retained_source_intent() {
     let mut session = CompilerSession::default();
     session.parse_ir(&tampered).unwrap();
     let error = session.verify().unwrap_err().to_string();
-    assert!(error.contains("not a retained action argument"), "{error}");
+    assert!(
+        error.contains("Intent input port 'other' does not match declared SSA operand 'design'"),
+        "{error}"
+    );
 }
 
 #[test]

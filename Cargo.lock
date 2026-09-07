@@ -1762,6 +1762,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab-example-pipetting"
+version = "0.1.0"
+dependencies = [
+ "lab-capability",
+ "lab-compiler",
+]
+
+[[package]]
+name = "lab-example-preview-adapter"
+version = "0.1.0"
+dependencies = [
+ "lab-adapter-api",
+ "serde_json",
+]
+
+[[package]]
 name = "lab-facility"
 version = "0.1.2"
 dependencies = [
@@ -1864,6 +1880,8 @@ dependencies = [
  "lab-adapters",
  "lab-capability",
  "lab-compiler",
+ "lab-example-pipetting",
+ "lab-example-preview-adapter",
  "lab-facility",
  "lab-inventory",
  "lab-language",
