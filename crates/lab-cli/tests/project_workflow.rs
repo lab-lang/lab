@@ -59,6 +59,39 @@ fn read_text(path: impl AsRef<Path>) -> String {
     std::fs::read_to_string(path).unwrap()
 }
 
+/// Read the review files emitted by the canonical per-Procedure adapter boundary.
+fn task_manifests(root: &Path) -> Vec<(PathBuf, Value)> {
+    let mut paths = walk_files(root)
+        .into_iter()
+        .filter(|p| p.file_name().unwrap() == "invocation_manifest.json")
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+        .into_iter()
+        .map(|p| {
+            let v = read_json(&p);
+            (p, v)
+        })
+        .collect()
+}
+
+fn operation<'a>(manifests: &'a [(PathBuf, Value)], name: &str) -> Vec<&'a Value> {
+    manifests
+        .iter()
+        .filter(|(_, m)| {
+            m["task"]["operation"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("#{name}"))
+        })
+        .map(|(_, m)| m)
+        .collect()
+}
+
+fn quantity(value: &Value) -> f64 {
+    value["value"]["value"].as_str().unwrap().parse().unwrap()
+}
+
 fn with_portable_manual_method_pins(manifest: String) -> String {
     manifest
         .replace(
@@ -222,7 +255,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
 
-    let created = run(&["new", &project_text, "--name", "test-project"]);
+    let created = run(&["new", "project", &project_text, "--name", "test-project"]);
     assert!(
         created.status.success(),
         "{}",
@@ -256,7 +289,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
     let index_path = project.join(".lab/build/package.json");
     let index = read_json(index_path);
-    assert_eq!(index["schema_version"], 7);
+    assert_eq!(index["schema_version"], 8);
     assert_eq!(index["package"], "test-project");
     assert_eq!(index["modules"][0]["module"], "test_project.programs.main");
     assert_eq!(index["compiler"]["refined_lair"], "compiler/refined.lair");
@@ -270,7 +303,7 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     assert!(index.get("facility").is_none());
     assert!(project.join(".lab/build/compiler/refined.lair").is_file());
     let problem = read_json(project.join(".lab/build/compiler/planning-problem.json"));
-    assert_eq!(problem["schema_version"], "lab.planning-problem.v1");
+    assert_eq!(problem["schema_version"], "lab.planning-problem.v2");
     assert_eq!(problem["choices"].as_array().unwrap().len(), 1);
     assert_eq!(
         problem["choices"][0]["source_operation"],
@@ -307,6 +340,186 @@ fn new_check_build_and_metadata_form_one_project_loop() {
     );
 
     std::fs::remove_dir_all(&project).unwrap();
+}
+
+#[test]
+fn the_contribution_example_bindings_are_generated_from_its_checked_package() {
+    let example = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/contributing/scientific-package");
+    let output = tempfile::tempdir().unwrap();
+    let generated = run(&[
+        "bindings",
+        "python",
+        example.to_str().unwrap(),
+        "--out-dir",
+        output.path().to_str().unwrap(),
+    ]);
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let mut count = 0;
+    for path in walk_files(output.path()) {
+        let relative = path.strip_prefix(output.path()).unwrap();
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            fs::read(example.join("bindings/python").join(relative)).unwrap(),
+            "stale binding {}",
+            relative.display()
+        );
+        count += 1;
+    }
+    assert!(count >= 4);
+}
+
+#[test]
+fn focused_scaffolds_expose_their_conformance_paths() {
+    let parent = temporary_project();
+    std::fs::create_dir_all(&parent).unwrap();
+
+    let methods = parent.join("thermal-methods");
+    let methods_text = methods.to_string_lossy().into_owned();
+    let created = run(&[
+        "new",
+        "method-pack",
+        &methods_text,
+        "--name",
+        "thermal-methods",
+    ]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(methods.join("methods/methods.json").is_file());
+    assert!(
+        std::fs::read_to_string(methods.join("methods/methods.json"))
+            .unwrap()
+            .contains("lab.method-catalog.v2")
+    );
+    assert!(
+        std::fs::read_to_string(methods.join("methods/methods.json"))
+            .unwrap()
+            .contains("thermal_methods.vocabulary.prepare")
+    );
+    assert!(
+        std::fs::read_to_string(methods.join("src/vocabulary.lab"))
+            .unwrap()
+            .contains("action prepare <sample> -> prepared:")
+    );
+    assert!(
+        std::fs::read_to_string(methods.join("README.md"))
+            .unwrap()
+            .contains("declarative `template`")
+    );
+    let conformed = run(&["check", &methods_text]);
+    assert!(
+        conformed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&conformed.stderr)
+    );
+
+    let adapter = parent.join("acme-cycler");
+    let adapter_text = adapter.to_string_lossy().into_owned();
+    let created = run(&["new", "adapter", &adapter_text, "--driver", "acme.cycler"]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let source = std::fs::read_to_string(adapter.join("src/lib.rs")).unwrap();
+    let manifest_path = adapter.join("Cargo.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    assert!(manifest.contains(&format!(
+        "lab-adapter-api = {:?}",
+        env!("CARGO_PKG_VERSION")
+    )));
+    assert!(!manifest.contains("lab-adapters ="));
+    assert!(!manifest.contains("lab-compiler ="));
+    assert!(!manifest.contains("lab-capability ="));
+    assert!(source.contains("AdapterRegistration::new("));
+    assert!(source.contains("fn check_program_feasibility("));
+    assert!(source.contains("_task: &PlanningProcedureTask"));
+    assert!(source.contains("fn lower_invocation("));
+    assert!(source.contains("_plan: &AdapterInvocationPlan"));
+    assert!(source.contains("_contracts: &ProcedureContractRegistry"));
+    assert!(source.contains("check_program_feasibility,"));
+    assert!(source.contains("lower_invocation,"));
+    assert!(source.contains("AdapterRegistry::new([super::registration()])"));
+    assert!(source.contains("canonical_adapter_profile(DRIVER, name"));
+    assert!(source.contains("registration_conforms_to_the_adapter_api"));
+
+    // Compile and run the scaffold exactly as an independent crate. Point its sole Lab
+    // dependency at this checkout so the test exercises the generated source against the API
+    // that emitted it instead of requiring a publication first.
+    let adapter_api = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../lab-adapter-api")
+        .canonicalize()
+        .unwrap();
+    std::fs::write(
+        &manifest_path,
+        manifest.replace(
+            &format!("lab-adapter-api = {:?}", env!("CARGO_PKG_VERSION")),
+            &format!("lab-adapter-api = {{ path = {adapter_api:?} }}"),
+        ),
+    )
+    .unwrap();
+    // Reuse the tested dependency versions, including pinned versions that may have been
+    // yanked since this checkout was locked. Cargo adds the scaffold's own package entry.
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Cargo.lock"),
+        adapter.join("Cargo.lock"),
+    )
+    .unwrap();
+    let conformed = Command::new(env!("CARGO"))
+        .args(["test", "--offline", "--quiet", "--manifest-path"])
+        .arg(&manifest_path)
+        .env(
+            "CARGO_TARGET_DIR",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/adapter-scaffold-conformance"),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        conformed.status.success(),
+        "generated adapter did not compile and pass its conformance test:\n{}\n{}",
+        String::from_utf8_lossy(&conformed.stdout),
+        String::from_utf8_lossy(&conformed.stderr),
+    );
+
+    std::fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn python_bindings_are_generated_from_the_checked_package_interface() {
+    let project = temporary_project();
+    let project_text = project.to_string_lossy().into_owned();
+    let created = run(&["new", "project", &project_text, "--name", "binding-fixture"]);
+    assert!(created.status.success());
+
+    let generated = run(&["bindings", "python", &project_text]);
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let runtime = project.join("bindings/python/binding_fixture/programs/main.py");
+    let stub = project.join("bindings/python/binding_fixture/programs/main.pyi");
+    assert!(runtime.is_file());
+    assert!(stub.is_file());
+    assert!(
+        std::fs::read_to_string(runtime)
+            .unwrap()
+            .contains("ImportedWorkflow(")
+    );
+    assert!(
+        std::fs::read_to_string(stub)
+            .unwrap()
+            .contains("-> WorkflowCall[")
+    );
+
+    std::fs::remove_dir_all(project).unwrap();
 }
 
 #[test]
@@ -380,7 +593,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     let solution = read_json(project.join(".lab/plan/compiler/facility-solution.json"));
     assert_eq!(
         solution["schema_version"],
-        "lab.facility-planning-solution.v1"
+        "lab.facility-planning-solution.v3"
     );
     assert_eq!(
         solution["selections"][0]["method"],
@@ -398,7 +611,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     );
     assert!(requirements[0].get("adapter").is_none());
     let plan = read_json(project.join(".lab/plan/plan.execution.json"));
-    assert_eq!(plan["format"], "lab.execution-plan.v2");
+    assert_eq!(plan["format"], "lab.execution-plan.v4");
     assert_eq!(
         plan["planning"]["facility_solution"]["path"],
         "compiler/facility-solution.json"
@@ -415,7 +628,7 @@ ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
     assert_eq!(plan["requirements"].as_array().unwrap().len(), 1);
     assert_eq!(plan["nodes"][0]["action"], "manual");
     assert_eq!(
-        plan["nodes"][0]["requirement"],
+        plan["nodes"][0]["requirements"][0],
         plan["requirements"][0]["requirement_instance"]
     );
     assert!(
@@ -464,7 +677,7 @@ fn run_requires_a_reviewed_facility_plan() {
 fn registry_dependencies_fail_closed_without_being_ignored() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
-    let created = run(&["new", &project_text]);
+    let created = run(&["new", "project", &project_text]);
     assert!(created.status.success());
     let manifest = project.join("lab.toml");
     let mut text = std::fs::read_to_string(&manifest).unwrap();
@@ -482,7 +695,7 @@ fn registry_dependencies_fail_closed_without_being_ignored() {
 fn check_validates_a_configured_sbol_inventory() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
-    let created = run(&["new", &project_text]);
+    let created = run(&["new", "project", &project_text]);
     assert!(created.status.success());
 
     let manifest = project.join("lab.toml");
@@ -517,7 +730,7 @@ fn check_validates_a_configured_sbol_inventory() {
 fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     let project = temporary_project();
     let project_text = project.to_string_lossy().into_owned();
-    let created = run(&["new", &project_text]);
+    let created = run(&["new", "project", &project_text]);
     assert!(created.status.success());
 
     let manifest = project.join("lab.toml");
@@ -529,7 +742,10 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     std::fs::create_dir(project.join("inventory")).unwrap();
     let inventory = format!(
         "{}\n{}",
-        include_str!("fixtures/minimal-inventory.ttl"),
+        include_str!("fixtures/minimal-inventory.ttl").replace(
+            "cap:ThermalCycling",
+            "cap:ProgrammedBlockTemperatureControl"
+        ),
         r#"ex:operator a sbol:TopLevel, fac:Asset ;
     sbol:displayId "operator" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ;
@@ -565,7 +781,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
     );
 
     let index = read_json(project.join(".lab/build/package.json"));
-    assert_eq!(index["schema_version"], 7);
+    assert_eq!(index["schema_version"], 8);
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
     assert_eq!(
         index["compiler"]["facility_solution"],
@@ -580,7 +796,7 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         "https://example.org/sbolinventory/facility"
     );
     let bindings = read_json(project.join(".lab/build/adapter_bindings.json"));
-    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v3");
+    assert_eq!(bindings["schema_version"], "lab.adapter-bindings.v7");
     assert_eq!(
         bindings["facility"],
         "https://example.org/sbolinventory/facility"
@@ -652,6 +868,11 @@ fn a_second_instrument_is_planned_once_the_package_names_which_to_use() {
     )
     .unwrap();
 
+    let manifest_path = project.join("lab.toml");
+    let mut manifest = read_text(&manifest_path);
+    manifest.push_str("\n[[execution.adapters]]\nasset = \"https://example.org/golden-gate/otwo_b\"\ndriver = \"opentrons.ot2\"\nprofile = \"adapters/opentrons-ot2.toml\"\n");
+    fs::write(&manifest_path, manifest).unwrap();
+
     let ambiguous = run(&["build", &project.to_string_lossy()]);
     assert!(!ambiguous.status.success());
     let message = String::from_utf8_lossy(&ambiguous.stderr);
@@ -697,24 +918,35 @@ fn every_shared_source_states_the_volume_the_batch_draws() {
 
     let schedule_root = project.join(".lab/build/assets/opentrons_ot2");
 
-    // Assembly reagent tubes previously carried no load volume at all, so an operator was told
-    // which well to use but not what to put in it.
-    let assembly = read_text(schedule_root.join("assembly_protocol.py"));
+    let manifests = task_manifests(&schedule_root);
+    let mut source_count = 0;
+    for (_, manifest) in &manifests {
+        if manifest["execution"]["kind"] != "pipetting_program" {
+            continue;
+        }
+        let execution = &manifest["execution"];
+        for source in execution["sources"].as_array().unwrap() {
+            let id = source["vessel"].as_str().unwrap();
+            let volumes = execution["initial_volumes_ul"][id].as_array().unwrap();
+            assert_eq!(volumes.len(), source["wells"].as_array().unwrap().len());
+            assert!(volumes.iter().all(|v| v.as_f64().is_some()));
+            source_count += 1;
+        }
+    }
     assert!(
-        !assembly.contains("\"load_volume_ul\": null"),
-        "every assembly reagent states the volume the batch draws"
+        source_count > 20,
+        "all reagent and upstream input loads are reviewed"
     );
-
-    // The dilution medium is drawn by every fused dilution from one tube, so its load is the fold
-    // of all of them rather than whatever one task needed.
-    let plating = read_text(schedule_root.join("plating_protocol.py"));
-    assert!(
-        plating.contains("remaining_ul -="),
-        "the plating run follows the planned medium volume down"
-    );
-    assert!(
-        !plating.contains("\"load_volume_ul\": null"),
-        "the dilution medium states its load"
+    let dilution = operation(&manifests, "SeriallyDiluteCulture")[0];
+    let medium = dilution["execution"]["program"]["vessels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["role"]["kind"] == "material_source")
+        .unwrap();
+    assert_eq!(
+        dilution["execution"]["initial_volumes_ul"][medium["id"].as_str().unwrap()][0],
+        10000.0
     );
 
     let _ = fs::remove_dir_all(&project);
@@ -759,16 +991,30 @@ fn competent_cells_are_staged_on_a_temperature_controlled_position() {
          requirement the facility must satisfy rather than an adapter default"
     );
 
-    // The emitted protocol must draw the aliquot from the labware the temperature module holds,
-    // not from an ambient rack standing beside it.
-    let protocol =
-        read_text(project.join(".lab/build/assets/opentrons_ot2/transformation_protocol.py"));
-    assert!(protocol.contains("cell_rack = temperature.load_labware("));
-    assert!(protocol.contains("source = cell_rack[source_name]"));
-    assert!(
-        protocol.contains("temperature.set_temperature(execution[\"cell_staging_temperature_c\"])"),
-        "the setpoint comes from the reviewed plan rather than a literal in the template"
-    );
+    let manifests = task_manifests(&project.join(".lab/build/assets/opentrons_ot2"));
+    let prepare = operation(&manifests, "PrepareChemicalTransformation")[0];
+    let cells = prepare["execution"]["program"]["vessels"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["temperature"].is_object())
+        .unwrap();
+    let resource = prepare["execution"]["locations"][cells["id"].as_str().unwrap()][0]["resource"]
+        ["kind"]
+        .as_str()
+        .unwrap();
+    assert!(matches!(resource, "sources" | "work"));
+    assert_eq!(prepare["execution"]["staging_temperatures"][resource], 4.0);
+    let path = manifests
+        .iter()
+        .find(|(_, m)| m == prepare)
+        .unwrap()
+        .0
+        .parent()
+        .unwrap();
+    let protocol = read_text(path.join("automation_protocol.py"));
+    assert!(protocol.contains("temperature.set_temperature(staging[\"sources\"])"));
+    assert!(protocol.contains("thermocycler.set_block_temperature(staging[\"work\"])"));
 
     let _ = fs::remove_dir_all(&project);
 }
@@ -794,10 +1040,9 @@ fn a_partly_stated_assembly_recipe_is_a_diagnostic_rather_than_a_manual_fallback
     );
     let message = String::from_utf8_lossy(&output.stderr);
     assert!(
-        message.contains("GVD0011")
-            && message.contains("`restriction_enzyme`")
-            && message.contains("build it by another method"),
-        "the diagnostic names the artifact, the missing property, and the alternative: {message}"
+        message.contains("temperature-staged-golden-gate")
+            && message.contains("not one of its candidates"),
+        "the pinned incomplete Method cannot silently fall back: {message}"
     );
 
     let _ = fs::remove_dir_all(&project);
@@ -841,527 +1086,208 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         "facility plan failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(!out_dir.join("lowerings").exists());
+    assert_eq!(
+        read_text(out_dir.join("lowerings/stale/protocol.py")),
+        "stale",
+        "planning preserves files outside its owned artifact index"
+    );
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(result["status"], "planned");
-    // Planning names the three reviewed device runs produced by the allocated OT-2 schedule.
     let protocols = result["result"]["protocols"].as_array().unwrap();
-    assert_eq!(protocols.len(), 3);
     assert_eq!(
-        protocols
-            .iter()
-            .map(|path| Path::new(path.as_str().unwrap()).file_name().unwrap())
-            .collect::<Vec<_>>(),
-        [
-            "assembly_protocol.py",
-            "plating_protocol.py",
-            "transformation_protocol.py",
-        ]
+        protocols.len(),
+        12,
+        "every automated Procedure has a file, including recovery and plating"
     );
-    let human = Command::new(env!("CARGO_BIN_EXE_lab"))
-        .args([
-            "plan",
-            example.to_str().unwrap(),
-            "--out-dir",
-            out_dir.to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    let printed = String::from_utf8(human.stdout).unwrap();
-    assert!(printed.contains("Automation protocols:"), "{printed}");
-    assert!(printed.contains("assembly_protocol.py"), "{printed}");
-    assert!(printed.contains("transformation_protocol.py"), "{printed}");
-    assert!(printed.contains("plating_protocol.py"), "{printed}");
-
-    let lowering: Value =
-        serde_json::from_slice(&std::fs::read(out_dir.join("facility_lowering.json")).unwrap())
+    for path in protocols {
+        assert!(Path::new(path.as_str().unwrap()).is_file());
+    }
+    let manifests = task_manifests(&out_dir.join("assets/opentrons_ot2"));
+    assert_eq!(manifests.len(), 12);
+    for (_, m) in &manifests {
+        assert_eq!(m["schema_version"], "lab.opentrons-ot2-task.v1");
+        assert!(!m["requirements"].as_array().unwrap().is_empty());
+        assert_eq!(
+            m["deck"]["instruments"]["small"]["model"],
+            regression["hardware"]["p20_model"]
+        );
+        assert_eq!(
+            m["deck"]["instruments"]["large"]["model"],
+            regression["hardware"]["p300_model"]
+        );
+        assert_eq!(
+            m["deck"]["resources"]["sources"]["model"],
+            regression["hardware"]["temperature_module_load_name"]
+        );
+        assert_eq!(
+            m["deck"]["resources"]["work"]["model"],
+            regression["hardware"]["thermocycler_load_name"]
+        );
+    }
+    let setups = operation(&manifests, "SetupGoldenGateReaction");
+    assert_eq!(setups.len(), 3);
+    for setup in setups {
+        assert_eq!(
+            setup["execution"]["staging_temperatures"]["sources"]
+                .as_f64()
+                .unwrap(),
+            number(&regression["assembly"]["source_temperature_c"])
+        );
+        let steps = setup["execution"]["program"]["steps"].as_array().unwrap();
+        let transfers = steps
+            .iter()
+            .filter(|s| s["kind"] == "transfer")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            transfers
+                .iter()
+                .map(|s| quantity(&s["volume"]))
+                .sum::<f64>(),
+            number(&regression["assembly"]["reaction_volume_ul"])
+        );
+        assert!(
+            transfers
+                .iter()
+                .all(|s| s["technique"]["blow_out"] == true && s["technique"]["touch_tip"] == true)
+        );
+        let clears = steps
+            .iter()
+            .filter(|s| s["id"].as_str().unwrap().starts_with("clear-bubbles"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            clears.len() as u64,
+            regression["assembly"]["bubble_clear"]["cycles"]
+                .as_u64()
+                .unwrap()
+        );
+        for clear in clears {
+            assert_eq!(clear["cycles"], 1);
+            assert_eq!(
+                quantity(&clear["volume"]),
+                number(&regression["assembly"]["bubble_clear"]["volume_ul"])
+            );
+            assert_eq!(
+                clear["fluid_path_group"],
+                transfers.last().unwrap()["fluid_path_group"]
+            );
+            assert_eq!(clear["technique"]["blow_out"], true);
+            assert_eq!(clear["technique"]["touch_tip"], true);
+        }
+    }
+    let cycles = operation(&manifests, "ThermalCycleGoldenGateReaction");
+    assert_eq!(cycles.len(), 3);
+    for cycle in cycles {
+        let e = &cycle["execution"];
+        assert_eq!(
+            number(&e["lid_temperature_c"]),
+            number(&regression["assembly"]["thermal"]["lid_temperature_c"])
+        );
+        assert_eq!(
+            number(&e["final_hold_celsius"]),
+            number(&regression["assembly"]["thermal"]["final_hold_c"])
+        );
+        let stages = e["profile"]["stages"].as_array().unwrap();
+        let expected = regression["assembly"]["thermal"]["stages"]
+            .as_array()
             .unwrap();
-    let target_root = out_dir.join(lowering["routes"][0]["output"].as_str().unwrap());
-    assert!(lowering["routes"][0].get("scope").is_none());
-    for path in [
-        "assembly_protocol.py",
-        "transformation_protocol.py",
-        "plating_protocol.py",
-        "execution_schedule.json",
-        "assembly_manifest.json",
-        "transformation_manifest.json",
-        "plating_manifest.json",
-        "plate_map.json",
-        "plate_map.pdf",
-    ] {
-        assert!(target_root.join(path).is_file(), "missing {path}");
+        assert_eq!(stages.len(), expected.len());
+        for (stage, expected) in stages.iter().zip(expected) {
+            assert_eq!(stage["repeats"], expected["repeats"]);
+            let steps = stage["steps"].as_array().unwrap();
+            assert_eq!(steps.len(), expected["steps"].as_array().unwrap().len());
+            for (step, expected) in steps.iter().zip(expected["steps"].as_array().unwrap()) {
+                assert_eq!(number(&step["celsius"]), number(&expected["temperature_c"]));
+                assert_eq!(
+                    number(&step["hold_seconds"]),
+                    number(&expected["hold_seconds"])
+                );
+            }
+        }
     }
-
-    let schedule = read_json(target_root.join("execution_schedule.json"));
-    assert_eq!(
-        schedule["schema_version"],
-        "lab.allocated-procedure-schedule.v1"
-    );
-    assert_eq!(
-        schedule["groups"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|group| group["id"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        ["assembly", "transformation", "plating"]
-    );
-    assert_eq!(
-        schedule["groups"][1]["after"],
-        serde_json::json!(["assembly"])
-    );
-    assert_eq!(
-        schedule["groups"][2]["after"],
-        serde_json::json!(["transformation"])
-    );
-
-    let manifest = read_json(target_root.join("assembly_manifest.json"));
-    assert_eq!(manifest["schema_version"], "lab.opentrons-ot2-run.v1");
-    assert_eq!(manifest["group"]["id"], "assembly");
-    assert_eq!(manifest["execution"]["kind"], "assembly");
-    assert_eq!(manifest["execution"]["setups"].as_array().unwrap().len(), 3);
-    assert_eq!(
-        manifest["deck"]["instruments"]["small"]["model"],
-        regression["hardware"]["p20_model"]
-    );
-    assert_eq!(
-        manifest["deck"]["instruments"]["small"]["mount"],
-        regression["hardware"]["p20_mount"]
-    );
-    assert_eq!(
-        manifest["deck"]["instruments"]["large"]["model"],
-        regression["hardware"]["p300_model"]
-    );
-    assert_eq!(
-        manifest["deck"]["instruments"]["large"]["mount"],
-        regression["hardware"]["p300_mount"]
-    );
-    assert_eq!(
-        manifest["deck"]["deck"]["temperature_module"]["model"],
-        regression["hardware"]["temperature_module_load_name"],
-        "the example selects Temperature Module GEN1"
-    );
-    assert_eq!(
-        manifest["deck"]["deck"]["thermocycler"]["model"], "thermocycler module",
-        "the example's exact OT-2 Asset has a Thermocycler Module GEN1"
-    );
-    assert_eq!(
-        manifest["deck"]["deck"]["thermocycler"]["model"],
-        regression["hardware"]["thermocycler_load_name"]
-    );
-    assert!(
-        manifest["execution"]["setups"][0]["execution"]["additions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|addition| addition["source"]["kind"] == "material_lot")
-    );
-    let setup = &manifest["execution"]["setups"][0]["execution"];
-    assert_eq!(
-        setup["reaction_wells"][0],
-        regression["lineage_exemplar"]["assembly_product_well"]
-    );
-    assert_eq!(
-        number(&setup["source_temperature_c"]),
-        number(&regression["assembly"]["source_temperature_c"])
-    );
-    assert_eq!(
-        number(&manifest["deck"]["techniques"]["aspiration_rate"]),
-        number(&regression["assembly"]["transfer"]["aspiration_rate"])
-    );
-    assert_eq!(
-        number(&manifest["deck"]["techniques"]["dispense_rate"]),
-        number(&regression["assembly"]["transfer"]["dispense_rate"])
-    );
-    let additions = setup["additions"].as_array().unwrap();
-    let mut source_order = Vec::new();
-    for role in additions
+    let prepare = operation(&manifests, "PrepareChemicalTransformation")[0];
+    let steps = prepare["execution"]["program"]["steps"].as_array().unwrap();
+    let cells = steps
         .iter()
-        .map(|addition| addition["role"].as_str().unwrap())
-    {
-        if source_order.last().copied() != Some(role) {
-            source_order.push(role);
-        }
-    }
+        .find(|s| s["id"] == "add-competent-cells")
+        .unwrap();
     assert_eq!(
-        source_order,
-        regression["assembly"]["source_order"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|role| role.as_str().unwrap())
-            .collect::<Vec<_>>()
+        quantity(&cells["volume_each"]),
+        number(&regression["transformation"]["competent_cells"]["volume_ul"])
     );
-    assert_eq!(additions[0]["role"], "water");
-    assert!(additions[0].get("source_mix").is_none());
-    assert!(additions.iter().all(|addition| {
-        addition["transfer_technique"]["blow_out"] == regression["assembly"]["transfer"]["blow_out"]
-            && addition["transfer_technique"]["touch_tip"]
-                == regression["assembly"]["transfer"]["touch_tip"]
-    }));
-    assert!(additions[1..].iter().all(|addition| {
-        addition["source_mix"]["cycles"] == regression["assembly"]["source_mix"]["cycles"]
-            && addition["source_mix"]["volume_ul"] == addition["volume_ul"]
-    }));
-    assert!(
-        additions[..additions.len() - 1]
-            .iter()
-            .all(|addition| addition["reuse_tip_for_final_mix"] == false)
+    assert_eq!(cells["destinations"].as_array().unwrap().len(), 3);
+    assert_eq!(cells["fluid_path_group"], steps[0]["fluid_path_group"]);
+    let dna = steps
+        .iter()
+        .filter(|s| s["kind"] == "transfer")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        dna.len(),
+        9,
+        "three DNA sources for each of three replicates"
+    );
+    assert!(dna.iter().all(
+        |s| quantity(&s["volume"]) == number(&regression["transformation"]["dna"]["volume_ul"])
+    ));
+    let recovery = operation(&manifests, "AddRecoveryMedium")[0];
+    let add = &recovery["execution"]["program"]["steps"][0];
+    assert_eq!(
+        quantity(&add["volume_each"]),
+        number(&regression["transformation"]["recovery"]["medium_volume_ul"])
     );
     assert_eq!(
-        additions.last().unwrap()["reuse_tip_for_final_mix"],
-        regression["assembly"]["bubble_clear"]["reuse_final_addition_tip"]
+        quantity(&add["technique"]["air_gap"]),
+        number(&regression["transformation"]["recovery"]["air_gap_ul"])
     );
+    assert_eq!(add["destinations"].as_array().unwrap().len(), 3);
+    let heat = operation(&manifests, "HeatShockTransformation")[0];
     assert_eq!(
-        setup["final_mix"]["cycles"],
-        regression["assembly"]["bubble_clear"]["cycles"]
-    );
-    assert_eq!(
-        setup["final_mix"]["volume_ul"],
-        regression["assembly"]["bubble_clear"]["volume_ul"]
-    );
-    assert_eq!(
-        setup["final_mix"]["technique"]["aspiration"]["offset"]["value"]["value"],
-        regression["assembly"]["bubble_clear"]["aspiration_bottom_offset_mm"]
-            .as_i64()
-            .unwrap()
-            .to_string()
-    );
-    assert_eq!(
-        setup["final_mix"]["technique"]["dispense"]["offset"]["value"]["value"],
-        regression["assembly"]["bubble_clear"]["dispense_bottom_offset_mm"]
-            .as_i64()
-            .unwrap()
-            .to_string()
-    );
-    assert_eq!(
-        setup["final_mix"]["technique"]["blow_out"],
-        regression["assembly"]["bubble_clear"]["blow_out_each_cycle"]
-    );
-    assert_eq!(
-        setup["final_mix"]["technique"]["touch_tip"],
-        regression["assembly"]["bubble_clear"]["touch_tip_each_cycle"]
-    );
-    let thermal = &manifest["execution"]["thermal_programs"][0]["execution"];
-    assert_eq!(
-        number(&thermal["lid_temperature_c"]),
-        number(&regression["assembly"]["thermal"]["lid_temperature_c"])
-    );
-    assert_eq!(
-        thermal["profile"]["stages"][0]["repeats"],
-        regression["assembly"]["thermal"]["stages"][0]["repeats"]
-    );
-    for stage in 0..2 {
-        for step in 0..2 {
-            assert_eq!(
-                number(&thermal["profile"]["stages"][stage]["steps"][step]["celsius"]),
-                number(
-                    &regression["assembly"]["thermal"]["stages"][stage]["steps"][step]["temperature_c"]
-                )
-            );
-            assert_eq!(
-                number(&thermal["profile"]["stages"][stage]["steps"][step]["hold_seconds"]),
-                number(
-                    &regression["assembly"]["thermal"]["stages"][stage]["steps"][step]["hold_seconds"]
-                )
-            );
-        }
-    }
-    assert_eq!(
-        number(&thermal["final_hold_celsius"]),
-        number(&regression["assembly"]["thermal"]["final_hold_c"])
-    );
-    let assembly_protocol = read_text(target_root.join("assembly_protocol.py"));
-    assert!(
-        assembly_protocol
-            .contains("temperature.set_temperature(execution[\"source_temperature_c\"]"),
-        "{assembly_protocol}"
-    );
-    assert_eq!(
-        assembly_protocol
-            .matches("temperature.set_temperature(execution[\"source_temperature_c\"]")
-            .count(),
-        1,
-        "the shared staging setpoint is programmed once per batch"
-    );
-    assert!(
-        assembly_protocol.contains("_execute_mix(pipette, source, source_mix, techniques)"),
-        "{assembly_protocol}"
-    );
-    let deactivate_sources = assembly_protocol
-        .find("temperature.deactivate()")
-        .expect("source staging ends before cycling");
-    let execute_thermal = assembly_protocol
-        .rfind("_execute_thermal_program(thermocycler, thermal)")
-        .expect("the authored thermal program is rendered");
-    assert!(deactivate_sources < execute_thermal);
-    assert_eq!(
-        manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
-        serde_json::json!(["5"]),
-        "the allocated adapter emits the concrete deck plan"
-    );
-    let transformation = read_json(target_root.join("transformation_manifest.json"));
-    assert_eq!(transformation["execution"]["kind"], "transformation");
-    assert_eq!(
-        transformation["execution"]["preparations"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
-    let first_preparation = &transformation["execution"]["preparations"][0]["execution"];
-    assert_eq!(
-        first_preparation["cell_volume_ul"],
-        regression["transformation"]["competent_cells"]["volume_ul"]
-    );
-    assert_eq!(
-        first_preparation["cell_mix_cycles"],
-        regression["transformation"]["competent_cells"]["source_mix_cycles"]
-    );
-    assert_eq!(
-        first_preparation["cell_mix_volume_ul"],
-        regression["transformation"]["competent_cells"]["source_mix_volume_ul"]
-    );
-    assert_eq!(
-        first_preparation["cell_source_volume_ul"],
-        regression["transformation"]["competent_cells"]["source_volume_ul"]
-    );
-    assert_eq!(first_preparation["cells"]["withdrawn_ul"], 60);
-    assert_eq!(first_preparation["cells"]["required_initial_ul"], 60);
-    assert_eq!(first_preparation["cells"]["stated_initial_ul"], 150);
-    assert_eq!(
-        first_preparation["dna_volume_ul"],
-        regression["transformation"]["dna"]["volume_ul"]
-    );
-    assert_eq!(
-        first_preparation["dna_mix_cycles"],
-        regression["transformation"]["dna"]["source_mix_cycles"]
-    );
-    assert_eq!(
-        first_preparation["dna_mix_volume_ul"],
-        regression["transformation"]["dna"]["source_mix_volume_ul"]
-    );
-    assert_eq!(
-        first_preparation["dna_transfer_technique"]["blow_out"],
-        regression["transformation"]["dna"]["transfer_blow_out"]
-    );
-    assert_eq!(
-        first_preparation["bubble_clear_cycles"],
-        regression["transformation"]["dna"]["bubble_clear_cycles"]
-    );
-    assert_eq!(
-        first_preparation["bubble_clear_volume_ul"],
-        regression["transformation"]["dna"]["bubble_clear_volume_ul"]
-    );
-    assert_eq!(
-        first_preparation["bubble_clear_technique"]["dispense"]["offset"]["value"]["value"],
-        "8"
-    );
-    assert_eq!(
-        first_preparation["bubble_clear_technique"]["touch_tip"],
-        true
-    );
-    assert_eq!(
-        first_preparation["bubble_clear_technique"]["blow_out"],
-        false
-    );
-    assert_eq!(
-        first_preparation["reaction_wells"],
-        regression["lineage_exemplar"]["transformation_wells"]
-    );
-    assert_eq!(
-        first_preparation["dna"][0]["source_well"],
-        manifest["execution"]["setups"][0]["execution"]["reaction_wells"][0],
-        "the assembly product well becomes the exact transformation DNA source"
-    );
-    let transformation_protocol = read_text(target_root.join("transformation_protocol.py"));
-    assert!(
-        transformation_protocol.contains("disposal_volume=0"),
-        "{transformation_protocol}"
-    );
-    assert!(
-        transformation_protocol.contains("for _ in range(preparation[\"bubble_clear_cycles\"]):"),
-        "{transformation_protocol}"
-    );
-    assert!(
-        transformation_protocol.contains("radius=techniques[\"touch_tip_radius\"]"),
-        "{transformation_protocol}"
-    );
-    let transfer_finish = transformation_protocol
-        .find("preparation[\"dna_transfer_technique\"]")
-        .expect("DNA transfer technique is rendered");
-    let bubble_loop = transformation_protocol
-        .find("for _ in range(preparation[\"bubble_clear_cycles\"]):")
-        .expect("bubble clearing is rendered");
-    let final_touch = transformation_protocol
-        .rfind("preparation[\"bubble_clear_technique\"]")
-        .expect("the post-bubble touch is rendered");
-    assert!(transfer_finish < bubble_loop && bubble_loop < final_touch);
-    let heat_shock = &transformation["execution"]["heat_shocks"][0]["execution"];
-    assert_eq!(
-        number(&heat_shock["volume_each_ul"]),
+        heat["execution"]["volume_each_ul"].as_f64().unwrap(),
         number(&regression["transformation"]["heat_shock"]["volume_ul"])
     );
+    let incubation = operation(&manifests, "IncubateRecoveryCulture")[0];
     assert_eq!(
-        number(&heat_shock["profile"]["stages"][0]["steps"][1]["celsius"]),
-        number(&regression["transformation"]["heat_shock"]["steps"][1]["temperature_c"])
-    );
-    assert!(
-        transformation_protocol.contains("block_max_volume=execution[\"volume_each_ul\"]"),
-        "{transformation_protocol}"
-    );
-    assert!(
-        !transformation_protocol.contains("is_simulating"),
-        "thermal work may not disappear during simulation"
-    );
-    let recovery_medium = &transformation["execution"]["recovery_additions"][0]["execution"];
-    assert_eq!(
-        recovery_medium["medium"]["load_volume_ul"],
-        regression["transformation"]["recovery"]["source_volume_ul"]
-    );
-    assert_eq!(
-        recovery_medium["technique"]["dispense"]["kind"],
-        "above_liquid"
-    );
-    assert_eq!(
-        recovery_medium["technique"]["air_gap"]["value"]["value"],
-        regression["transformation"]["recovery"]["air_gap_ul"]
-            .as_i64()
-            .unwrap()
-            .to_string()
-    );
-    let recovery = &transformation["execution"]["recovery_incubations"][0]["execution"];
-    assert_eq!(
-        number(&recovery["volume_each_ul"]),
+        incubation["execution"]["volume_each_ul"].as_f64().unwrap(),
         number(&regression["transformation"]["recovery"]["incubation_volume_ul"])
     );
-
-    let plating = read_json(target_root.join("plating_manifest.json"));
-    assert_eq!(plating["execution"]["kind"], "plating");
-    let dilution = &plating["execution"]["dilutions"][0]["execution"];
-    assert_eq!(dilution["kind"], "serial_dilution");
-    assert_eq!(
-        dilution["medium"]["source"]["material_lot"],
-        "https://example.org/golden-gate/lots/recovery_medium_lot"
-    );
-    assert_eq!(
-        dilution["dilution_wells"],
-        serde_json::json!([
-            {"plate": 0, "well": "A1"},
-            {"plate": 0, "well": "B1"},
-            {"plate": 0, "well": "C1"},
-            {"plate": 0, "well": "A7"},
-            {"plate": 0, "well": "B7"},
-            {"plate": 0, "well": "C7"}
-        ])
-    );
-    assert_eq!(
-        dilution["dilution_wells"],
-        serde_json::json!([
-            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_1_wells"][0]},
-            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_1_wells"][1]},
-            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_1_wells"][2]},
-            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_2_wells"][0]},
-            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_2_wells"][1]},
-            {"plate": 0, "well": regression["lineage_exemplar"]["dilution_2_wells"][2]}
-        ])
-    );
-    assert_eq!(
-        dilution["medium_volume_ul"],
-        regression["plating"]["medium_volume_ul"]
-    );
-    assert_eq!(
-        dilution["culture_volume_ul"],
-        regression["plating"]["culture_volume_ul"]
-    );
-    assert_eq!(dilution["mix_cycles"], regression["plating"]["mix_cycles"]);
-    assert_eq!(
-        dilution["mix_volume_ul"],
-        regression["plating"]["mix_volume_ul"]
-    );
-    assert_eq!(
-        plating["deck"]["techniques"]["distribution_disposal_volume_ul"],
-        regression["plating"]["medium_distribution_disposal_volume_ul"]
-    );
-    assert_eq!(
-        plating["deck"]["techniques"]["tracked_chunk_size"],
-        regression["plating"]["medium_distribution_chunk_size"]
-    );
-    let plating_protocol = read_text(target_root.join("plating_protocol.py"));
+    let dilution = operation(&manifests, "SeriallyDiluteCulture")[0];
+    let dilution_steps = dilution["execution"]["program"]["steps"]
+        .as_array()
+        .unwrap();
+    let mixing = dilution_steps
+        .iter()
+        .filter(|s| s["kind"] == "mix")
+        .collect::<Vec<_>>();
+    assert_eq!(mixing.len(), 6);
     assert!(
-        plating_protocol.contains("remaining_ul / source.max_volume"),
-        "{plating_protocol}"
+        mixing
+            .iter()
+            .all(|s| s["cycles"] == regression["plating"]["mix_cycles"]
+                && quantity(&s["volume"]) == number(&regression["plating"]["mix_volume_ul"]))
     );
-    assert!(
-        plating_protocol.contains("tracked_low_volume_fraction"),
-        "{plating_protocol}"
-    );
-    // The reviewed plan states the source load, so the run follows that number down. Reading the
-    // instrument's own liquid state could put the tip somewhere the reviewer never saw.
-    assert!(
-        !plating_protocol.contains("current_liquid_volume"),
-        "the emitted protocol must not consult live instrument liquid state"
-    );
-    assert!(
-        plating_protocol.contains("remaining_ul -="),
-        "the emitted protocol carries the planned volume forward itself"
-    );
-    assert!(
-        plating_protocol.contains("tracked_chunk_size"),
-        "{plating_protocol}"
-    );
-    let seed_second = plating_protocol
-        .find("p20.mix(dilution[\"mix_cycles\"], dilution[\"mix_volume_ul\"], dilution_2)")
-        .expect("dilution two is seeded and mixed");
-    let plate_first = plating_protocol
-        .find("for entry in _plate_entries(plating, 1")
-        .expect("dilution one is plated");
-    let plate_second = plating_protocol
-        .find("for entry in _plate_entries(plating, 2")
-        .expect("dilution two is plated");
-    assert!(seed_second < plate_first && plate_first < plate_second);
-    let first_plating = &plating["execution"]["platings"][0]["execution"];
-    assert_eq!(first_plating["kind"], "plate_diluted_culture");
-    assert_eq!(first_plating["plate_map"].as_array().unwrap().len(), 6);
-    assert_eq!(
-        first_plating["colony_volume_ul"],
-        regression["plating"]["colony_volume_ul"]
-    );
-    assert_eq!(
-        first_plating["technique"]["dispense"]["kind"],
-        "material_surface"
-    );
-    let plate_map = read_json(target_root.join("plate_map.json"));
-    assert_eq!(plate_map["schema_version"], "lab.batch-plate-map.v1");
-    assert_eq!(plate_map["entries"].as_array().unwrap().len(), 6);
-    assert_eq!(plate_map["entries"][0]["subject"], "GVD_strain");
-    assert_eq!(plate_map["entries"][0]["dilution_ratio"], "1/10");
-    assert_eq!(plate_map["entries"][3]["dilution_ratio"], "1/100");
-    let expected_agar_wells = regression["lineage_exemplar"]["agar_dilution_1_wells"]
+    let plating = operation(&manifests, "PlateDilutedCulture")[0];
+    let spots = plating["execution"]["program"]["steps"].as_array().unwrap();
+    assert!(!spots.is_empty());
+    assert!(spots.iter().all(|s| s["kind"] == "distribute"
+        && quantity(&s["volume_each"]) == number(&regression["plating"]["colony_volume_ul"])
+        && s["technique"]["dispense"]["kind"] == "material_surface"));
+    let allocated = read_json(out_dir.join("compiler/adapter-invocations.json"));
+    let emitted = manifests
+        .iter()
+        .flat_map(|(_, m)| m["requirements"].as_array().unwrap())
+        .map(|r| r["id"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = allocated["methods"]
         .as_array()
         .unwrap()
         .iter()
-        .chain(
-            regression["lineage_exemplar"]["agar_dilution_2_wells"]
-                .as_array()
-                .unwrap(),
-        )
-        .map(|well| well.as_str().unwrap())
-        .collect::<Vec<_>>();
+        .flat_map(|m| m["tasks"].as_array().unwrap())
+        .flat_map(|t| t["requirements"].as_array().unwrap())
+        .filter(|r| r["adapter"].is_object())
+        .map(|r| r["id"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
-        plate_map["entries"].as_array().unwrap()[..6]
-            .iter()
-            .map(|entry| entry["destination"]["well"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        expected_agar_wells
-    );
-    assert!(
-        plating_protocol.contains("destination.top(techniques[\"material_surface_offset_mm\"]"),
-        "{plating_protocol}"
-    );
-    assert!(
-        plating_protocol.contains("p20.blow_out()"),
-        "{plating_protocol}"
+        emitted, expected,
+        "lowering covers every allocated requirement exactly"
     );
 
     std::fs::remove_dir_all(out_dir).unwrap();
@@ -1369,10 +1295,12 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
 
 #[test]
 fn build_emits_facility_selected_protocol_bundles_and_documents() {
-    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/golden-gate")
-        .canonicalize()
-        .unwrap();
+    // `build` updates the package lockfile, so run it against an isolated project.
+    let example = temporary_project();
+    copy_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/golden-gate"),
+        &example,
+    );
     let out_dir = std::env::temp_dir().join(format!(
         "lab-golden-gate-facility-build-{}-{}",
         std::process::id(),
@@ -1417,10 +1345,10 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "https://example.org/golden-gate/facility"
     );
     assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
-    assert_eq!(facility["protocols"].as_array().unwrap().len(), 3);
-    // Four adapter operator documents plus the run sheet for the plan's
+    assert_eq!(facility["protocols"].as_array().unwrap().len(), 12);
+    // Twelve adapter operator documents plus the run sheet for the plan's
     // manual-control steps.
-    assert_eq!(facility["documents"].as_array().unwrap().len(), 5);
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 13);
     for path in facility["protocols"]
         .as_array()
         .unwrap()
@@ -1435,7 +1363,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
     assert!(out_dir.join("package.json").is_file());
     let index = read_json(out_dir.join("package.json"));
     assert_eq!(index["adapter_bindings"], "adapter_bindings.json");
-    assert_eq!(index["schema_version"], 7);
+    assert_eq!(index["schema_version"], 8);
     assert_eq!(
         index["compiler"]["planning_problem"],
         "compiler/planning-problem.json"
@@ -1444,7 +1372,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         index["facility"]["facility_solution"],
         "compiler/facility-solution.json"
     );
-    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 3);
+    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 12);
     assert!(
         index["facility"]["protocols"][0]
             .as_str()
@@ -1452,7 +1380,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .starts_with("assets/opentrons_ot2/")
     );
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
-    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v2");
+    assert_eq!(invocations["schema_version"], "lab.adapter-invocations.v3");
     assert!(invocations.get("material_inventory").is_none());
     let j23101_binding = invocations["methods"]
         .as_array()
@@ -1514,17 +1442,17 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         .find(|node| {
             node["document"]["path"]
                 .as_str()
-                .is_some_and(|path| path.ends_with("/assembly_protocol.py"))
+                .is_some_and(|path| path.ends_with("/001-pipetting-program/automation_protocol.py"))
         })
         .cloned()
         .expect("the allocated assembly group has one reviewed execute node");
     assert_eq!(
         setup_execute_node["document"]["path"],
-        "assets/opentrons_ot2/assembly_protocol.py"
+        "assets/opentrons_ot2/tasks/001-pipetting-program/automation_protocol.py"
     );
     assert_eq!(
         setup_execute_node["requirements"].as_array().unwrap().len(),
-        24
+        6
     );
     assert_eq!(
         setup_execute_node["requirements"]
@@ -1546,7 +1474,6 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .collect::<std::collections::BTreeSet<_>>(),
         std::collections::BTreeSet::from([
             "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1",
-            "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2ThermalV1",
         ])
     );
 
@@ -1588,16 +1515,12 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "{printed}"
     );
     assert!(printed.contains("Automation protocols:"), "{printed}");
-    assert!(printed.contains("assembly_protocol.py"), "{printed}");
-    assert!(printed.contains("transformation_protocol.py"), "{printed}");
-    assert!(printed.contains("plating_protocol.py"), "{printed}");
+    assert!(printed.contains("automation_protocol.py"), "{printed}");
     assert!(printed.contains("Documents:"), "{printed}");
-    assert!(
-        printed.contains("assembly_manual_protocol.pdf"),
-        "{printed}"
-    );
+    assert!(printed.contains("manual_protocol.pdf"), "{printed}");
 
     std::fs::remove_dir_all(out_dir).unwrap();
+    std::fs::remove_dir_all(example).unwrap();
 }
 
 #[test]
@@ -1636,9 +1559,9 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         solution["facility"],
         "https://example.org/golden-gate/facility"
     );
-    assert_eq!(solution["selections"].as_array().unwrap().len(), 9);
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 10);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 43);
+    assert_eq!(requirements.len(), 44);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1701,7 +1624,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         .iter()
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(protocols.len(), 3);
+    assert_eq!(protocols.len(), 12);
     assert!(protocols.iter().all(|artifact| {
         artifact["format"] == "opentrons.python-protocol"
             && artifact["sha256"].as_str().unwrap().len() == 64
@@ -1736,9 +1659,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
                     .as_str()
                     .is_some_and(|requirement| requirement.contains(requirement_fragment))
             })
-        }) || node["requirement"]
-            .as_str()
-            .is_some_and(|requirement| requirement.contains(requirement_fragment))
+        })
     };
     let node_id = |requirement_fragment: &str| {
         execution_nodes
@@ -1755,20 +1676,20 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     let assembly_cycle = node_id(
         "std-bio-build-realize-0::https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate::cycle-reaction",
     );
-    assert_eq!(assembly_setup, assembly_cycle);
+    assert_ne!(assembly_setup, assembly_cycle);
+    assert!(
+        execution_nodes
+            .iter()
+            .find(|n| n["id"] == assembly_cycle)
+            .unwrap()["after"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &assembly_setup)
+    );
     let cell_provisions = (0..1)
         .map(|index| node_id(&format!("std-lab-plasmid-provision-{index}::")))
         .collect::<Vec<_>>();
-    for cell_provision in &cell_provisions {
-        let provision = execution_nodes
-            .iter()
-            .find(|node| node["id"] == *cell_provision)
-            .expect("the competent-cell provisioning task is executable");
-        assert!(
-            provision["after"].as_array().is_none_or(Vec::is_empty),
-            "cell provisioning is independent of plasmid assembly"
-        );
-    }
     let transform = execution_nodes
         .iter()
         .find(|node| node_has_requirement(node, "std-lab-plasmid-transform-0::"))
@@ -1779,19 +1700,24 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         .iter()
         .map(|dependency| dependency.as_str().unwrap())
         .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        transform_dependencies,
-        std::iter::once(assembly_setup.as_str())
-            .chain(cell_provisions.iter().map(String::as_str))
-            .collect::<std::collections::BTreeSet<_>>(),
-        "the fused transformation run must wait for every realized plasmid and provisioned cell input"
+    assert!(transform_dependencies.contains(assembly_cycle.as_str()));
+    assert!(
+        cell_provisions
+            .iter()
+            .all(|id| transform_dependencies.contains(id.as_str()))
     );
+    for index in [2, 4, 6] {
+        assert!(
+            transform_dependencies.contains(format!("execute-{index:04}").as_str()),
+            "transformation waits for all three completed assemblies"
+        );
+    }
     assert!(execution_plan.get("lowerings").is_none());
     let reviewed_protocols = execution_nodes
         .iter()
         .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
-    assert_eq!(reviewed_protocols.len(), 3);
+    assert_eq!(reviewed_protocols.len(), 12);
     assert!(reviewed_protocols.iter().all(|document| {
         document["format"] == "opentrons.python-protocol"
             && document["sha256"].as_str().unwrap().len() == 64
@@ -1874,7 +1800,11 @@ profile = "adapters/inheco-odtc.toml""#;
         manifest.replace(configured_ot2, star_and_odtc_bindings),
     )
     .unwrap();
-    std::fs::write(project.join("adapters/hamilton-star.toml"), "").unwrap();
+    std::fs::write(
+        project.join("adapters/hamilton-star.toml"),
+        include_str!("../../../examples/contributing/hamilton-profile.toml"),
+    )
+    .unwrap();
     std::fs::write(project.join("adapters/inheco-odtc.toml"), "").unwrap();
 
     let inventory_path = project.join("inventory/facility.ttl");
@@ -1998,7 +1928,7 @@ ex:inheco_odtc
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
             artifact["format"].as_str(),
-            Some("lab.star-run.v0" | "lab.thermocycle-run.v0")
+            Some("lab.star-run.v0" | "lab.thermocycle-run.v1")
         ) && artifact["sha256"].as_str().unwrap().len() == 64
     }));
 
@@ -2009,6 +1939,7 @@ ex:inheco_odtc
             .as_array()
             .unwrap()
             .iter()
+            .filter(|node| node["action"] == "execute")
             .filter_map(|node| node["requirements"].as_array())
             .map(Vec::len)
             .sum::<usize>(),
@@ -2032,15 +1963,47 @@ ex:inheco_odtc
                 let run = read_json(out_dir.join(path));
                 assert_eq!(run["format"], "lab.star-run.v0");
                 assert!(!run["steps"].as_array().unwrap().is_empty());
+                let manifest = read_json(
+                    out_dir
+                        .join(path)
+                        .with_file_name("invocation_manifest.json"),
+                );
+                assert_eq!(
+                    manifest["liquid_class_library"]["id"],
+                    "org.example.hamilton.liquid-classes"
+                );
+                assert_eq!(manifest["liquid_class_library"]["version"], "1.0.0");
+                let classes = manifest["liquid_classes"].as_array().unwrap();
+                assert!(!classes.is_empty());
+                let run_text = serde_json::to_string(&run).unwrap();
+                for class in classes {
+                    assert!(
+                        class["identity"]["id"]
+                            .as_str()
+                            .unwrap()
+                            .starts_with("org.example.hamilton.")
+                    );
+                    assert_eq!(class["speeds"]["aspirate_ul_s"], serde_json::json!(17.0));
+                    assert!(
+                        run_text.contains(class["identity"]["content_sha256"].as_str().unwrap())
+                    );
+                }
             }
-            "lab.thermocycle-run.v0" => {
+            "lab.thermocycle-run.v1" => {
                 thermocycle_documents += 1;
                 assert!(path.starts_with("assets/inheco_odtc/"));
-                let run = read_json(out_dir.join(path));
-                assert_eq!(run["format"], "lab.thermocycle-run.v0");
+                let document = read_json(out_dir.join(path));
+                assert_eq!(document["format"], "lab.thermocycle-run.v1");
+                let run = &document["run"];
                 match run["profile"]["stages"][0]["repeats"].as_u64() {
-                    Some(75) => assert_eq!(run["fill_volume_ul"], 25.0),
-                    Some(1) => assert!(matches!(run["fill_volume_ul"].as_f64(), Some(35.0 | 95.0))),
+                    Some(75) => {
+                        assert_eq!(run["sample_count"], 1);
+                        assert_eq!(run["fill_volume_ul"], 25.0);
+                    }
+                    Some(1) => {
+                        assert_eq!(run["sample_count"], 3);
+                        assert!(matches!(run["fill_volume_ul"].as_f64(), Some(35.0 | 95.0)));
+                    }
                     repeats => panic!("unexpected thermocycler repeat count: {repeats:?}"),
                 }
             }
@@ -2072,18 +2035,24 @@ ex:inheco_odtc
     let star_output = out_dir.join(star_route["output"].as_str().unwrap());
     // Three biological replicates through two dilutions each. Reading only the dilution count would
     // silently emit half the experiment and report n=1.
-    let star_dilution =
-        read_json(star_output.join("tasks/004-serial-dilution/invocation_manifest.json"));
-    let star_execution = &star_dilution["execution"];
+    let star_manifests = task_manifests(&star_output);
+    let star_dilution = operation(&star_manifests, "SeriallyDiluteCulture")[0];
+    let vessels = star_dilution["execution"]["program"]["vessels"]
+        .as_array()
+        .unwrap();
     assert_eq!(
-        star_execution["culture_wells"].as_array().unwrap().len(),
-        3,
-        "the STAR adapter stages one culture per biological replicate"
+        vessels
+            .iter()
+            .find(|v| v["role"]["kind"] == "procedure_input")
+            .unwrap()["positions"],
+        3
     );
     assert_eq!(
-        star_execution["dilution_wells"].as_array().unwrap().len(),
-        6,
-        "two dilutions for each of three replicates"
+        vessels
+            .iter()
+            .find(|v| v["role"]["kind"] == "product")
+            .unwrap()["positions"],
+        6
     );
     for manifest in star_route["artifacts"]
         .as_array()
@@ -2150,7 +2119,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         String::from_utf8_lossy(&planned.stderr)
     );
     let result: Value = serde_json::from_slice(&planned.stdout).unwrap();
-    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 3);
+    assert_eq!(result["result"]["protocols"].as_array().unwrap().len(), 28);
 
     let lowering: Value =
         serde_json::from_slice(&std::fs::read(plan_dir.join("facility_lowering.json")).unwrap())
@@ -2175,7 +2144,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
                 .into_iter()
                 .flatten()
         })
-        .find(|binding| binding["symbol"] == "reference_gfp")
+        .find(|binding| binding["symbol"] == "Addgene-#134516")
         .unwrap();
     assert_eq!(
         reference_binding["source"]["component"],
@@ -2187,12 +2156,12 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     );
 
     let solution = read_json(plan_dir.join("compiler/facility-solution.json"));
-    assert_eq!(solution["selections"].as_array().unwrap().len(), 27);
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 32);
     let materials = solution_materials(&solution);
     let reference_input = materials
         .iter()
         .copied()
-        .find(|binding| binding["symbol"] == "reference_gfp")
+        .find(|binding| binding["symbol"] == "Addgene-#134516")
         .expect("the global facility solution allocates the external reference plasmid");
     assert_eq!(
         reference_input["source"]["component"],
@@ -2206,7 +2175,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
         binding["symbol"] == "composite_plasmid_1" && binding["source"]["kind"] == "choice_output"
     }));
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 93);
+    assert_eq!(requirements.len(), 98);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -2228,7 +2197,7 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
     }));
 
     let execution = read_json(plan_dir.join("plan.execution.json"));
-    assert_eq!(execution["format"], "lab.execution-plan.v2");
+    assert_eq!(execution["format"], "lab.execution-plan.v4");
     assert!(
         execution["materials"]
             .as_array()
@@ -2270,12 +2239,14 @@ fn an_ot2_setup_transfers_dependency_dna_from_an_earlier_choice() {
     );
     std::fs::write(assemble_path, assemble).unwrap();
 
-    let panel_path = project.join("src/programs/panel.lab");
-    let panel = std::fs::read_to_string(&panel_path).unwrap().replace(
+    for entry in ["build_panel.lab", "panel.lab"] {
+        let panel_path = project.join("src/programs").join(entry);
+        let panel = std::fs::read_to_string(&panel_path).unwrap().replace(
         "  composite_plasmid_1 <- assemble_composite_plasmid_1\n  composite_plasmid_2 <- assemble_composite_plasmid_2\n\n  // One plasmid goes into two chassis. Material is affine, so a transformation\n  // consumes an aliquot of its own rather than the same value twice.\n  for_cloning, for_expression <- split composite_plasmid_1",
         "  composite_plasmid_1 <- assemble_composite_plasmid_1\n\n  // One plasmid supplies a later assembly and two transformations.\n  for_assembly, for_transformations <- split composite_plasmid_1\n  for_cloning, for_expression <- split for_transformations\n  composite_plasmid_2 <- assemble_composite_plasmid_2 for_assembly",
     );
-    std::fs::write(panel_path, panel).unwrap();
+        std::fs::write(panel_path, panel).unwrap();
+    }
 
     let out_dir = project.join("review");
     let planned = Command::new(env!("CARGO_BIN_EXE_lab"))
@@ -2296,16 +2267,18 @@ fn an_ot2_setup_transfers_dependency_dna_from_an_earlier_choice() {
     let lowering = read_json(out_dir.join("facility_lowering.json"));
     let route = &lowering["routes"][0];
     let target_root = out_dir.join(route["output"].as_str().unwrap());
-    let manifest = read_json(target_root.join("assembly_manifest.json"));
-    let dependency_transfer = manifest["execution"]["setups"]
-        .as_array()
-        .unwrap()
+    let manifests = task_manifests(&target_root);
+    let dependency_transfer = operation(&manifests, "SetupGoldenGateReaction")
         .iter()
-        .flat_map(|setup| setup["execution"]["additions"].as_array().unwrap())
-        .any(|addition| {
-            addition["role"] == "dependency"
-                && addition["symbol"] == "composite_plasmid_1"
-                && addition["source"]["kind"] == "choice_output"
+        .any(|m| {
+            m["execution"]["sources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|source| {
+                    source["binding"]["symbol"] == "composite_plasmid_1"
+                        && source["binding"]["source"]["kind"] == "choice_output"
+                })
         });
     assert!(
         dependency_transfer,
@@ -2387,17 +2360,17 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root
-            .join("tasks/001-setup-golden-gate-reaction/automation_protocol.json")
+            .join("tasks/001-pipetting-program/automation_protocol.json")
             .is_file()
     );
     assert!(
         target_root
-            .join("tasks/002-thermal-cycle-golden-gate-reaction/automation_protocol.json")
+            .join("tasks/002-thermal-program/automation_protocol.json")
             .is_file()
     );
     assert!(
         target_root
-            .join("tasks/007-serial-dilution/automation_protocol.json")
+            .join("tasks/007-pipetting-program/automation_protocol.json")
             .is_file()
     );
     assert!(
@@ -2412,40 +2385,51 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     // reads only the dilution count would emit half the experiment and silently report n=1.
     let dilution: Value = serde_json::from_str(
         &std::fs::read_to_string(
-            target_root.join("tasks/007-serial-dilution/invocation_manifest.json"),
+            target_root.join("tasks/007-pipetting-program/invocation_manifest.json"),
         )
         .unwrap(),
     )
     .unwrap();
     let execution = &dilution["execution"];
+    let vessels = execution["program"]["vessels"].as_array().unwrap();
+    let culture = vessels
+        .iter()
+        .find(|v| v["role"]["kind"] == "procedure_input")
+        .unwrap();
     assert_eq!(
-        execution["culture_replicates"], 3,
-        "the Flex adapter preserves every biological replicate"
+        culture["positions"], 3,
+        "every biological replicate is staged"
     );
-    assert_eq!(execution["serial_dilutions"], 2);
     assert_eq!(
-        execution["culture_wells"].as_array().unwrap().len(),
-        3,
-        "one staged culture per replicate"
+        vessels
+            .iter()
+            .filter(|v| v["role"]["kind"] == "product")
+            .map(|v| v["positions"].as_u64().unwrap())
+            .sum::<u64>(),
+        6
     );
     assert_eq!(
-        execution["dilution_wells"].as_array().unwrap().len(),
-        6,
-        "two dilutions for each of three replicates"
+        execution["program"]["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["kind"] == "mix")
+            .count(),
+        6
     );
 
     let manifest: Value = serde_json::from_str(
         &std::fs::read_to_string(
-            target_root.join("tasks/001-setup-golden-gate-reaction/invocation_manifest.json"),
+            target_root.join("tasks/001-pipetting-program/invocation_manifest.json"),
         )
         .unwrap(),
     )
     .unwrap();
     assert_eq!(manifest["adapter"], "opentrons.flex");
     assert_eq!(
-        manifest["deck"]["stages"]["plating"]["agar_plate"]["slots"],
-        serde_json::json!(["B2", "B3"]),
-        "the emitted plan carries the allocated adapter's deck configuration"
+        manifest["deck"]["resources"]["small_tips"]["slots"],
+        serde_json::json!(["C2"]),
+        "the emitted plan carries the allocated adapter's physical resources"
     );
 
     let invocations = read_json(out_dir.join("compiler/adapter-invocations.json"));
@@ -2464,7 +2448,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
 
     let protocol: Value = serde_json::from_str(
         &std::fs::read_to_string(
-            target_root.join("tasks/001-setup-golden-gate-reaction/automation_protocol.json"),
+            target_root.join("tasks/001-pipetting-program/automation_protocol.json"),
         )
         .unwrap(),
     )

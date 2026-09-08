@@ -1,7 +1,6 @@
 mod adapters;
 mod commands;
 mod execution_run;
-mod facility_lowering;
 mod typeset;
 mod update;
 
@@ -28,13 +27,15 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Create a new Lab project.
+    /// Create a project or focused contribution package.
     New {
-        /// Directory to create.
-        path: PathBuf,
-        /// Package name; defaults to the directory name.
-        #[arg(long)]
-        name: Option<String>,
+        #[command(subcommand)]
+        command: NewCommand,
+    },
+    /// Generate host-language bindings from checked package interfaces.
+    Bindings {
+        #[command(subcommand)]
+        command: BindingsCommand,
     },
     /// Check one source file or every module in a package.
     Check {
@@ -111,6 +112,44 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+enum NewCommand {
+    /// Create a runnable Lab project.
+    Project {
+        path: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Create a package that contributes portable Method definitions.
+    MethodPack {
+        path: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Create an independently registered Rust adapter crate.
+    Adapter {
+        path: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+        /// Stable driver ID, such as `acme.thermocycler`.
+        #[arg(long)]
+        driver: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum BindingsCommand {
+    /// Generate importable `.py` modules and precise `.pyi` stubs.
+    Python {
+        /// Package directory, workspace member, any path inside it, or `std`.
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Output root; defaults to `bindings/python` in the package.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum AdaptersCommand {
     /// Describe every adapter implementation, or one driver in detail.
     Describe {
@@ -170,7 +209,18 @@ fn run() -> Result<()> {
     let cli = Cli::parse();
     let output = Output::new(cli.json);
     match cli.command {
-        Command::New { path, name } => commands::new_project(path, name, &output),
+        Command::New { command } => match command {
+            NewCommand::Project { path, name } => commands::new_project(path, name, &output),
+            NewCommand::MethodPack { path, name } => commands::new_method_pack(path, name, &output),
+            NewCommand::Adapter { path, name, driver } => {
+                commands::new_adapter(path, name, driver, &output)
+            }
+        },
+        Command::Bindings { command } => match command {
+            BindingsCommand::Python { path, out_dir } => {
+                commands::python_bindings(path, out_dir, &output)
+            }
+        },
         Command::Check { path } => commands::check(path, &output),
         Command::Build {
             path,
@@ -221,6 +271,54 @@ mod tests {
             Command::Build { path, out_dir, .. }
                 if path.as_path() == std::path::Path::new("project")
                     && out_dir.as_deref() == Some(std::path::Path::new("dist"))
+        ));
+    }
+
+    #[test]
+    fn parses_focused_contribution_scaffolds() {
+        let method_pack =
+            Cli::try_parse_from(["lab", "new", "method-pack", "thermal-methods"]).unwrap();
+        assert!(matches!(
+            method_pack.command,
+            Command::New {
+                command: NewCommand::MethodPack { path, .. }
+            } if path.as_path() == std::path::Path::new("thermal-methods")
+        ));
+
+        let adapter = Cli::try_parse_from([
+            "lab",
+            "new",
+            "adapter",
+            "acme-cycler",
+            "--driver",
+            "acme.cycler",
+        ])
+        .unwrap();
+        assert!(matches!(
+            adapter.command,
+            Command::New {
+                command: NewCommand::Adapter { driver: Some(driver), .. }
+            } if driver == "acme.cycler"
+        ));
+    }
+
+    #[test]
+    fn parses_python_binding_generation() {
+        let cli = Cli::try_parse_from([
+            "lab",
+            "bindings",
+            "python",
+            "thermal-methods",
+            "--out-dir",
+            "generated",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Bindings {
+                command: BindingsCommand::Python { path, out_dir }
+            } if path.as_path() == std::path::Path::new("thermal-methods")
+                && out_dir.as_deref() == Some(std::path::Path::new("generated"))
         ));
     }
 

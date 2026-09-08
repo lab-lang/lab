@@ -58,7 +58,6 @@ pub(in crate::backend) enum Block {
     /// An admonition set off from the flow, e.g. the generated-concept
     /// disclaimer.
     Notice(Vec<Inline>),
-    Bullets(Vec<Vec<Inline>>),
     Table {
         columns: Vec<Column>,
         rows: Vec<Vec<Vec<Inline>>>,
@@ -144,11 +143,6 @@ impl Doc {
     pub fn notice(&mut self, content: impl IntoIterator<Item = Inline>) {
         self.blocks
             .push(Block::Notice(content.into_iter().collect()));
-    }
-
-    pub fn bullets(&mut self, items: impl IntoIterator<Item = Vec<Inline>>) {
-        self.blocks
-            .push(Block::Bullets(items.into_iter().collect()));
     }
 
     /// A table with no rows is dropped: a bare header rule carries no

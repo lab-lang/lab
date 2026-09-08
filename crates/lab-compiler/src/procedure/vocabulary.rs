@@ -5,6 +5,23 @@ pub const PIPETTING_PROGRAM_V1: &str =
 pub const THERMAL_PROGRAM_V1: &str =
     "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1";
 
+pub const SETUP_GOLDEN_GATE_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#SetupGoldenGateV1";
+pub const SERIAL_DILUTION_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#SerialDilutionV1";
+pub const CYCLE_GOLDEN_GATE_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#GoldenGateThermalCycleV1";
+pub const PREPARE_CHEMICAL_TRANSFORMATION_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#PrepareChemicalTransformationV1";
+pub const HEAT_SHOCK_TRANSFORMATION_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#HeatShockTransformationV1";
+pub const ADD_RECOVERY_MEDIUM_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#AddRecoveryMediumV1";
+pub const INCUBATE_RECOVERY_CULTURE_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#IncubateRecoveryCultureV1";
+pub const PLATE_DILUTED_CULTURE_BUILDER_V1: &str =
+    "https://www.lab-compiler.org/ns/procedure-builder#PlateDilutedCultureV1";
+
 pub const SETUP_GOLDEN_GATE: &str =
     "https://www.lab-compiler.org/ns/procedure#SetupGoldenGateReaction";
 pub const PROVISION_MATERIAL: &str = "https://www.lab-compiler.org/ns/procedure#ProvisionMaterial";

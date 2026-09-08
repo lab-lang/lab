@@ -36,6 +36,7 @@ use crate::planning::{
     PlanningTaskOutput, PlanningValueSource, SelectedCapabilityParameter, SelectedMaterialBinding,
     SelectedMaterialSource,
 };
+use crate::procedure::ProcedureContractRegistry;
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp, semantic_port_type};
 use crate::stage::{IrStage, detect_stage};
 
@@ -142,6 +143,7 @@ struct RequirementDeclaration {
 pub fn extract_allocated_program(
     context: &Context,
     module: ModuleOp,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<AllocatedProgram, AllocatedProgramExtractionError> {
     verify_operation(module.get_operation(), context).map_err(|error| {
         AllocatedProgramExtractionError::InvalidIr(error.disp(context).to_string())
@@ -213,7 +215,7 @@ pub fn extract_allocated_program(
         facility: allocation_context.facility,
         methods: allocated_methods,
     };
-    allocated.validate()?;
+    allocated.validate(contracts)?;
     Ok(allocated)
 }
 
@@ -262,6 +264,7 @@ fn extract_method(
         attribute: "selected_source_operation",
         message: error.to_string(),
     })?;
+    let source_intent = method.source_intent(context);
     let method_id = MethodId::new(required_string(
         method.get_attr_selected_method(context),
         &owner,
@@ -591,6 +594,7 @@ fn extract_method(
     Ok(AllocatedMethod {
         choice,
         source_operation,
+        source_intent,
         method: method_id,
         after: method.after(context),
         inputs,
@@ -834,21 +838,25 @@ mod tests {
         YieldOp,
     };
     use crate::capability::ir::{ConstraintOp, RequirementOp};
-    use crate::design::ir::DesignDnaSequenceOp;
+    use crate::design::ir::DesignArtifactOp;
+    use crate::design::synthetic_artifact_design;
     use crate::method::ProcedureValue;
     use crate::planning::{
-        PlanningMethodCandidate, PlanningMethodChoice, PlanningPort, SelectedAdapter,
-        SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
-        SelectedRequirementBinding,
+        PlanningMethodCandidate, PlanningMethodChoice, PlanningPort, SelectedCapabilityParameter,
+        SelectedMaterialBinding, SelectedMaterialSource, SelectedRequirementBinding,
     };
     use crate::procedure::ir::{MaterialInputOp, MaterialType, ParameterOp, TaskOp};
     use crate::stage::{IrStage, initialize_stage};
+
+    fn contracts() -> &'static ProcedureContractRegistry {
+        crate::procedure::builtin_procedure_contracts()
+    }
 
     #[test]
     fn allocated_semantics_survive_print_parse_without_planning_sidecars() {
         let (context, module) = simple_allocated_module();
         verify_operation(module.get_operation(), &context).unwrap();
-        let expected = extract_allocated_program(&context, module).unwrap();
+        let expected = extract_allocated_program(&context, module, contracts()).unwrap();
         let text = module.get_operation().disp(&context).to_string();
 
         let mut reparsed_context = Context::new();
@@ -860,7 +868,8 @@ mod tests {
         .unwrap();
         let reparsed_module = Operation::get_op::<ModuleOp>(root, &reparsed_context).unwrap();
         verify_operation(reparsed_module.get_operation(), &reparsed_context).unwrap();
-        let actual = extract_allocated_program(&reparsed_context, reparsed_module).unwrap();
+        let actual =
+            extract_allocated_program(&reparsed_context, reparsed_module, contracts()).unwrap();
 
         assert_eq!(actual, expected);
         assert_eq!(actual.problem_sha256, "a".repeat(64));
@@ -876,17 +885,12 @@ mod tests {
             task.materials[0].interchangeable_alternatives,
             ["https://example.org/lot/alternate".to_owned()]
         );
-        let adapter = task.requirements[0].adapter.as_ref().unwrap();
-        assert_eq!(adapter.driver, "example.driver");
-        assert_eq!(
-            adapter.features,
-            ["temperature-control".to_owned()].into_iter().collect()
-        );
+        assert!(task.requirements[0].adapter.is_none());
         assert_eq!(task.requirements[0].parameters.len(), 1);
     }
 
     #[test]
-    fn allocated_lair_revalidates_registered_task_program_provenance() {
+    fn allocated_task_operations_are_descriptive() {
         let (context, module) = simple_allocated_module();
         let module_block = module
             .get_region(&context)
@@ -910,12 +914,7 @@ mod tests {
         );
         verify_operation(module.get_operation(), &context).unwrap();
 
-        let error = extract_allocated_program(&context, module).unwrap_err();
-        assert!(matches!(
-            error,
-            AllocatedProgramExtractionError::InvalidStage(message)
-                if message.contains("cannot be normalized")
-        ));
+        extract_allocated_program(&context, module, contracts()).unwrap();
     }
 
     #[test]
@@ -926,7 +925,7 @@ mod tests {
             Identifier::try_from("forward_method_reference").unwrap(),
         );
         initialize_stage(&mut context, module, IrStage::AllocatedProcedure);
-        let design = DesignDnaSequenceOp::new(&mut context, "template", "ACGT");
+        let design = DesignArtifactOp::new(&mut context, &synthetic_artifact_design("template"));
         module.append_operation(&mut context, design.get_operation(), 0);
         let allocation_context = AllocationContextOp::new(
             &mut context,
@@ -951,6 +950,16 @@ mod tests {
         let producer_choice = PlanningMethodChoice {
             id: producer_id.clone(),
             source_operation: IntentOperationId::new("example.produce").unwrap(),
+            source_intent: crate::workflow::ir::synthetic_intent_with_ports(
+                "example.produce",
+                &[],
+                &[(
+                    "sample".to_owned(),
+                    PortType::Material {
+                        state: state.clone(),
+                    },
+                )],
+            ),
             after: Vec::new(),
             inputs: Vec::new(),
             outputs: vec![PlanningPort {
@@ -998,6 +1007,16 @@ mod tests {
         let consumer_choice = PlanningMethodChoice {
             id: LocalId::new("consumer").unwrap(),
             source_operation: IntentOperationId::new("example.consume").unwrap(),
+            source_intent: crate::workflow::ir::synthetic_intent_with_ports(
+                "example.consume",
+                &[(
+                    "sample".to_owned(),
+                    PortType::Material {
+                        state: state.clone(),
+                    },
+                )],
+                &[],
+            ),
             after: Vec::new(),
             inputs: vec![PlanningPort {
                 name: LocalId::new("sample").unwrap(),
@@ -1046,7 +1065,7 @@ mod tests {
         module.append_operation(&mut context, producer.get_operation(), 0);
         verify_operation(module.get_operation(), &context).unwrap();
 
-        let allocated = extract_allocated_program(&context, module).unwrap();
+        let allocated = extract_allocated_program(&context, module, contracts()).unwrap();
         let consumer = allocated
             .methods
             .iter()
@@ -1068,7 +1087,7 @@ mod tests {
             Identifier::try_from("allocated_extraction").unwrap(),
         );
         initialize_stage(&mut context, module, IrStage::AllocatedProcedure);
-        let design = DesignDnaSequenceOp::new(&mut context, "template", "ACGT");
+        let design = DesignArtifactOp::new(&mut context, &synthetic_artifact_design("template"));
         module.append_operation(&mut context, design.get_operation(), 0);
         let allocation_context = AllocationContextOp::new(
             &mut context,
@@ -1090,6 +1109,7 @@ mod tests {
         let choice = PlanningMethodChoice {
             id: choice_id,
             source_operation: IntentOperationId::new("example.operation").unwrap(),
+            source_intent: crate::workflow::ir::synthetic_intent("example.operation"),
             after: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -1176,15 +1196,7 @@ mod tests {
             observed_qualification: QualificationLevel::Executable.to_string(),
             control_mode: ControlMode::Manual.to_string(),
             parameters: vec![selected_parameter.clone()],
-            adapter: Some(SelectedAdapter {
-                driver: "example.driver".to_owned(),
-                procedure_implementation: None,
-                profile_path: "adapters/example.toml".into(),
-                profile_sha256: "c".repeat(64),
-                features: ["temperature-control".to_owned()].into_iter().collect(),
-                accepted_run_formats: ["application/json".to_owned()].into_iter().collect(),
-                emitted_run_formats: ["text/plain".to_owned()].into_iter().collect(),
-            }),
+            adapter: None,
             rejected_candidates: Vec::new(),
         };
         let binding = BindingOp::new(&mut context, &task_id, &selected);

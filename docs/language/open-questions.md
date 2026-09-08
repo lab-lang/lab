@@ -8,7 +8,7 @@ Durable workflow memory is now explicit with `state`, and ordinary bindings are 
 
 ## Effect action grammar
 
-The parser preserves a phrase-shaped action syntax after `<-`. The module compiler resolves bundled actions through typed contracts that declare stable operation identities, phrase slots, operand ownership, result types, and a dispatch capability. We still need source syntax, visibility rules, and package metadata for declaring non-standard actions through the same registry interface.
+The parser preserves a phrase-shaped action syntax after `<-`. Packages can declare and export actions with stable operation identities, phrase slots, operand ownership, result types, and result-lineage rules. A checked call retains the exact declaration identity and source provenance, and generic Intent lowering does not need an action-specific compiler operation. It remains open whether one scope may overload the same leading action word and, if so, which complete-phrase rules make resolution deterministic and diagnostics intelligible.
 
 ## Effect expressions
 
@@ -18,9 +18,9 @@ The explicit `<-` boundary currently makes durable external work visible and kee
 
 Sequential effects and independent `when` handlers are represented. Syntax for starting several physical actions together, joining them, races, timeouts, and explicit cancellation is not settled. Cancellation must distinguish stopping a subscription from attempting to cancel an already-dispatched physical action.
 
-## Declaring pure functions and action contracts in source
+## Declaring pure functions and dependent actions in source
 
-A standard module written in Lab can declare roles, membership, data types, artifact kinds, and catalogued items; `std.bio.designs`, `std.bio.golden_gate`, and `std.bio.parts` are written that way. Two things have no source declaration form, and a module needing either stays in Rust: pure functions such as `dna` and `sites`, and durable action contracts.
+A standard module written in Lab can declare roles, membership, data types, artifact kinds, catalogued items, and concrete durable action contracts. Pure functions such as `dna` and `sites` still have no source declaration form. Action declarations also cannot yet quantify a type variable or state an open relationship such as “return `Material<T>` for the kind of the supplied design.” A module needing either contract stays in Rust; both are exposed through the same checked module interface as source declarations.
 
 ## Parts and biological catalogs
 
@@ -28,25 +28,25 @@ A catalogued item is declared with `buy` against an imported kind, states the fi
 
 What a kind *is* now travels with it: a role may name an ontology term and a kind plays roles, so `Plasmid` states that it is a nucleic acid and an engineered region ([`0039`](decisions/0039-roles-carry-ontology-terms.md)). A sequence can now be declared as a named `DNA` value and referenced from one or more designs ([`0043`](decisions/0043-sequences-are-first-class-design-values.md)). Exact identity is no longer ambiguous: `sbol_identity` names an SBOL Component and `supplier_identity` names a supplier order line. What remains open is the catalog record around that value: its provenance chain and version, whether its sequence was asserted or derived, and how biological catalogs expose those richer declarations without compiling changing catalog contents into `std`. The intended direction is recorded in [`sbol.md`](sbol.md).
 
-## Adapter lowering contracts
+## Procedure construction contracts
 
-A kind now declares a schema, so the language states which properties an artifact may hold and what each contains. What it still cannot state is which properties a capability-aware adapter consumes: the OT-2 implementation reads `reaction_volume` and `digest_temperature` by name, and a schema gives it something to validate against without telling it what to expect. This is why moving `plasmid` into `std.bio.designs` removes biology from the frontend and not from the toolchain.
+A kind declares the scientific properties an artifact may hold. An exact action identity selects applicable Methods, and each program-producing Method task explicitly names a Procedure construction contract. The builder consumes resolved typed task values and emits a complete canonical program before facility planning. An adapter sees that program, never the source artifact property bag, and compatibility does not depend on the biological action name.
 
-Schema composition is also unresolved. A kind cannot extend or refine another, so an adapter-specific chemistry schema has no way to say that it adds constraints to the design schema.
+Declarative templates cover Procedure programs that can be assembled by substituting checked values. The remaining construction question is how a package distributes and composes an algorithmic builder when the program requires iteration, arithmetic, or another transformation outside the template language, without making arbitrary compiler plugins part of package checking.
 
-Artifact properties are backend-neutral typed expressions, while the initial OT-2 specialization requires a documented property set. Packages still need reusable property schemas, defaults, refinements, and capability-lowering contracts. Such a contract should allow an adapter to state what it consumes without adding experiment-specific property names or diagnostics to the core checker.
+Schema composition is separately unresolved. A kind cannot yet extend or refine another, so packages still need a reusable way to compose scientific property schemas, defaults, and refinements. That composition belongs before Method refinement and must not become an adapter-specific schema.
 
-Reaction chemistry is the sharpest case. A design states `reaction_volume: 20 uL`, and the facility-selected OT-2 adapter interprets it, but nothing in the language says which properties a Golden Gate assembly requires or what their units must be. The unit check lives in adapter lowering rather than a declared schema, so another adapter that wanted the same parameters would restate them.
+Reaction chemistry illustrates the boundary. A design may state `reaction_volume = 20 uL`; the Method signature and Procedure construction validate and preserve it once. OT-2, Flex, and STAR then consume the same versioned program and supply only their device-specific realization.
 
 ## Facility configuration and allocation policy
 
 Independent target profiles and backend selection have been removed from the package workflow. The open composition problem is now sharper: stable physical facts should be represented once in SBOLInventory, while private or runtime-only implementation configuration remains in the exact Asset-to-adapter overlay. The current liquid-handler adapters still accept detailed deck configuration that should move into typed Asset composition, positions, and offering parameters where the profile can represent it efficaciously.
 
-Allocation policy is also unresolved. Deterministic candidate ordering deliberately does not choose between equally eligible offerings, and sites need an explicit, reviewable way to express preferences, reservations, capacity sharing, and scheduling without putting those transient decisions into the persistent facility catalog.
+Method and Asset pins now express exact, reviewable choices between eligible alternatives, while deterministic candidate ordering never acts as policy. Reservations, capacity sharing, scheduling, and optimization objectives remain unresolved and must not be smuggled into persistent facility facts.
 
 ## Inventory identity, availability, and provenance
 
-Design identity and physical availability are now separate. `sbol_identity` names an exact SBOL Component; facility planning loads a validated SBOLInventory document, restricts active MaterialLots to the selected facility, joins them through `sbol:built`, rejects ambiguity, and freezes the selected lot together with the facility and document hash. Quantity, expiration, containment, reservation, allocation policy beyond refusing ambiguity, trust policy, and asynchronous availability remain open.
+Design identity and physical availability are now separate. `sbol_identity` names an exact SBOL Component; facility planning loads a validated SBOLInventory document, restricts active MaterialLots to the selected facility, joins them through `sbol:built`, and freezes the selected lot together with the facility and document hash. Active lots of the same Component are interchangeable: one is selected deterministically and the others remain review evidence. Quantity, expiration, containment, reservation, trust policy, and asynchronous availability remain open.
 
 ## Package resolution
 

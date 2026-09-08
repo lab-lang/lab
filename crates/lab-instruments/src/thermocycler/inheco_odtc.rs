@@ -2,9 +2,11 @@
 
 use crate::{
     ProfileProgress, RunHandle, SensorReading, ThermalLimits, ThermalProfile, ThermalReadings,
-    Thermocycler,
+    ThermalRun, ThermalRunError, Thermocycler,
 };
-use inheco_sila::{ActualTemperatures, MethodRun, Odtc, OdtcError, ThermalProgram};
+use inheco_sila::{
+    ActualTemperatures, MethodRun, MethodSettings, Odtc, OdtcError, OdtcOptions, ThermalProgram,
+};
 use thiserror::Error;
 
 /// The ODTC's envelope in Lab's vocabulary, for validating profiles
@@ -24,35 +26,59 @@ pub fn odtc_thermal_limits() -> ThermalLimits {
 pub enum OdtcStationError {
     #[error(transparent)]
     Device(#[from] OdtcError),
+    #[error(transparent)]
+    InvalidRun(#[from] ThermalRunError),
     #[error("run handle {handle} names no run this adapter started")]
     UnknownRun { handle: u64 },
+    #[error(
+        "this ODTC session was configured for {configured_fill_volume_ul} µL with post-heating {configured_post_heating}, but the requested run needs {requested_fill_volume_ul} µL with post-heating {requested_post_heating}"
+    )]
+    RunSettingsMismatch {
+        configured_fill_volume_ul: f64,
+        configured_post_heating: bool,
+        requested_fill_volume_ul: f64,
+        requested_post_heating: bool,
+    },
 }
 
 /// An ODTC session speaking Lab's [`Thermocycler`] capability.
 pub struct OdtcStation {
     device: Odtc,
+    /// Settings frozen when the vendor session connected. `inheco-sila`
+    /// applies these when it renders every method uploaded by this session.
+    method_settings: MethodSettings,
     /// The run in flight, keyed both ways: Lab's handle and the vendor's.
     active: Option<(RunHandle, MethodRun)>,
 }
 
 impl OdtcStation {
-    /// Wraps a connected vendor session.
-    pub fn new(device: Odtc) -> OdtcStation {
+    fn new(device: Odtc, method_settings: MethodSettings) -> OdtcStation {
         OdtcStation {
             device,
+            method_settings,
             active: None,
         }
     }
 
-    /// Connects to the device at an address and wraps the session.
-    pub fn connect(device: std::net::SocketAddr) -> Result<OdtcStation, OdtcStationError> {
+    /// Connects a fresh vendor session configured for one complete reviewed run.
+    ///
+    /// ODTC method settings are session-scoped in `inheco-sila`. Callers therefore
+    /// open one station per run instead of reusing a session whose fill-volume
+    /// control class may have been selected for a different load.
+    pub fn connect_for_run(
+        device: std::net::SocketAddr,
+        run: &ThermalRun,
+    ) -> Result<OdtcStation, OdtcStationError> {
+        run.validate(&odtc_thermal_limits())?;
+        let method_settings = method_settings_from(run);
         let transport = inheco_sila::HttpSoapTransport::connect(device)
             .map_err(|error| OdtcStationError::Device(OdtcError::Transport(error)))?;
-        let session = Odtc::connect(
-            std::sync::Arc::new(transport),
-            inheco_sila::OdtcOptions::default(),
-        )?;
-        Ok(OdtcStation::new(session))
+        let options = OdtcOptions {
+            method_settings: method_settings.clone(),
+            ..OdtcOptions::default()
+        };
+        let session = Odtc::connect(std::sync::Arc::new(transport), options)?;
+        Ok(OdtcStation::new(session, method_settings))
     }
 
     /// The warnings the device raised since the last call, oldest first.
@@ -64,6 +90,19 @@ impl OdtcStation {
     /// capability trait does not model.
     pub fn device(&mut self) -> &mut Odtc {
         &mut self.device
+    }
+}
+
+/// Maps every run-level value understood by the ODTC MethodSet into the
+/// connection-scoped vendor settings used to render the uploaded method.
+fn method_settings_from(run: &ThermalRun) -> MethodSettings {
+    MethodSettings {
+        fill_volume_ul: run.fill_volume_ul,
+        // A requested final hold is installed explicitly after the finite
+        // method. Keep the last plateau controlled until that command takes
+        // over; otherwise let the finite method end without implicit heating.
+        post_heating: run.final_hold_celsius.is_some(),
+        ..MethodSettings::default()
     }
 }
 
@@ -132,10 +171,20 @@ impl Thermocycler for OdtcStation {
         Ok(self.device.hold(celsius, lid_celsius)?)
     }
 
-    fn run_profile(&mut self, profile: &ThermalProfile) -> Result<RunHandle, OdtcStationError> {
-        let run = self.device.start_method(&program_from(profile))?;
-        let handle = RunHandle::new(u64::from(run.request_id()));
-        self.active = Some((handle, run));
+    fn start_run(&mut self, run: &ThermalRun) -> Result<RunHandle, OdtcStationError> {
+        run.validate(&self.limits())?;
+        let requested = method_settings_from(run);
+        if requested != self.method_settings {
+            return Err(OdtcStationError::RunSettingsMismatch {
+                configured_fill_volume_ul: self.method_settings.fill_volume_ul,
+                configured_post_heating: self.method_settings.post_heating,
+                requested_fill_volume_ul: requested.fill_volume_ul,
+                requested_post_heating: requested.post_heating,
+            });
+        }
+        let method_run = self.device.start_method(&program_from(&run.profile))?;
+        let handle = RunHandle::new(u64::from(method_run.request_id()));
+        self.active = Some((handle, method_run));
         Ok(handle)
     }
 
@@ -215,6 +264,44 @@ mod tests {
             second.slope_c_per_s, None,
             "an unset ramp stays the device default"
         );
+    }
+
+    #[test]
+    fn a_run_configures_the_vendor_session_from_reviewed_physical_values() {
+        let run = ThermalRun {
+            profile: ThermalProfile {
+                stages: vec![ThermalStage {
+                    steps: vec![ThermalStep {
+                        celsius: 37.0,
+                        hold_seconds: 90.0,
+                        ramp_c_per_s: None,
+                        lid_celsius: None,
+                    }],
+                    repeats: 1,
+                }],
+            },
+            sample_count: 8,
+            fill_volume_ul: 82.5,
+            final_hold_celsius: Some(4.0),
+        };
+
+        let settings = method_settings_from(&run);
+        assert_eq!(settings.fill_volume_ul, 82.5);
+        assert!(
+            settings.post_heating,
+            "the last plateau remains controlled until the explicit final hold takes over"
+        );
+        assert_eq!(
+            (settings.start_block_celsius, settings.start_lid_celsius),
+            (25.0, 105.0),
+            "unstated start conditions retain the vendor defaults"
+        );
+
+        let settings_without_hold = method_settings_from(&ThermalRun {
+            final_hold_celsius: None,
+            ..run
+        });
+        assert!(!settings_without_hold.post_heating);
     }
 
     #[test]

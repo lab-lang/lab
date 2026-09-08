@@ -197,7 +197,7 @@ buy:
     digest_temperature = 37 C
 ```
 
-`sbol_identity` is an absolute IRI naming the SBOL Component represented by either a `build` or `buy` declaration. `supplier_identity` is available only on `buy`, defaults to the declaration name, and names something to order. The legacy `identity` spelling remains an alias for `supplier_identity` during migration. The compiler carries both meanings separately, which restores the distinction [0021](decisions/0021-typed-external-identities.md) collapsed.
+`sbol_identity` is an absolute IRI naming the SBOL Component represented by either a `build` or `buy` declaration. `supplier_identity` is available only on `buy`, defaults to the declaration name, and names something to order. The compiler carries both meanings separately, which restores the distinction [0021](decisions/0021-typed-external-identities.md) collapsed.
 
 Where an identity resolves, the local declaration is checkable against the
 registry record. A part declared `Promoter<Tetracycline>` whose SynBioHub record
@@ -500,11 +500,10 @@ several designs; inline `dna("...")` is represented by the same operation with
 a synthetic name.
 
 `design.strain` and most other design relationships still use a flat attribute
-bag. The workflow dialect consumes each design value,
-`workflow.realize` declaring `operands = (design: DesignType)` and
-`workflow.transform` declaring `operands = (design: DesignType, cells: MaterialType)`,
-and those operands carry the use-def edges `MaterialLinearityAnalysis` walks to
-enforce affinity. So the design layer is a source in the dataflow graph.
+bag. The workflow dialect's generic `workflow.perform` operation consumes each
+action's resolved typed operands, including Design and Material values, and
+those operands carry the use-def edges retained through refinement and checked
+for affinity. So the design layer is a source in the dataflow graph.
 
 But the remaining design-to-workflow edge is still rebuilt during lowering from
 a string map:
@@ -1021,15 +1020,14 @@ pub enum Location {
 }
 ```
 
-`Fused` is the interesting one. A single LAIR op is often lowered from more than
-one declaration, a `workflow.transform` combining a strain's declaration site
-with the realizing workflow's action site, and `Fused` expresses exactly that
-rather than forcing a choice between them.
+`Fused` is the interesting one. A single generic `workflow.perform` can combine
+the resolved action definition, an input declaration, and the action call site,
+and `Fused` expresses exactly that rather than forcing a choice between them.
 
 So the shape is: a `BTreeMap<DefinitionId, Span>` side-table on `CheckedModule`,
-threaded through `BuildArtifactIntent` in `program/lowering.rs`, which currently
-carries only a name, and `set_loc` called at roughly fifteen construction sites
-in `program/mod.rs`. No new location machinery.
+threaded through the rooted `IntentAction` source coordinates in
+`program/lowering.rs`, and `set_loc` called at roughly fifteen construction
+sites in `program/mod.rs`. No new location machinery.
 
 That is worth doing for its own sake, and SBOL validation is what makes it pay
 for itself: it is the first pass that produces many precise, structured findings
@@ -1118,7 +1116,7 @@ Ordered so that each step is useful on its own and none depends on a later one.
    IRI identities distinguished from catalog numbers. The dead `name@offset`
    constructor is replaced by SBOL's child-naming convention. One schema bump.
 3. The span side-table. `BTreeMap<DefinitionId, Span>` on `CheckedModule`,
-   threaded through `BuildArtifactIntent`, and `set_loc` populated at the
+   threaded through rooted `IntentAction` values, and `set_loc` populated at the
    fifteen or so LAIR construction sites, using `Location::Fused` where an op
    derives from more than one declaration. Independently useful: it is what lets
    any lowering or backend error be underlined at all.
@@ -1164,7 +1162,7 @@ its omissions report intact. It is a projection of the output, not a peer of it.
 
 ## Open questions and risks
 
-**Portable SBOL identities are strings by design.** `CheckedModule` is serde-serialized under `lab.portable-module.v8`, so pySBOL3 and sbol-rs objects do not ride inside portable compiler IR. `sbol_identity` carries the exact absolute Component IRI as a string, while typed SBOL objects remain behind the authoring and inventory boundaries.
+**Portable SBOL identities are strings by design.** `CheckedModule` is serde-serialized under `lab.portable-module.v13`, so pySBOL3 and sbol-rs objects do not ride inside portable compiler IR. `sbol_identity` carries the exact absolute Component IRI as a string, while typed SBOL objects remain behind the authoring and inventory boundaries.
 
 **No OM unit constants in sbol-rs.** Lab has `Quantity<uL>`, `Quantity<C>`, and
 `Quantity<min>`, and emitting them as OM `Measure` values needs unit IRIs that
@@ -1214,7 +1212,7 @@ and the RDF I/O stack are not obviously fine. This is why the validation pass
 runs from `lab-project` rather than from `compile_parsed_module`, and it needs
 measuring rather than assuming.
 
-**Identity migration crosses versioned boundaries.** `PORTABLE_MODULE_SCHEMA_VERSION` moved to `lab.portable-module.v4` when grounding landed, to `lab.portable-module.v5` when SBOL Component and supplier identities became separate fields, to `lab.portable-module.v6` when action capability names became absolute SBOLInventory capability-kind IRIs, to `lab.portable-module.v7` when durable workflow calls began preserving exact resolved callee identities for package-wide reachability, and to `lab.portable-module.v8` when action parameters began preserving absolute SBOLInventory property-kind IRIs. Facility planning now retains exact Component-to-MaterialLot candidates alongside the inventory digest and freezes the selected binding in allocated LAIR.
+**Identity changes cross a versioned boundary.** The current `lab.portable-module.v13` contract preserves separate SBOL Component and supplier identities, exact artifact-kind, type, and facet definition identities, complete artifact rules, exact resolved action and workflow declaration identities, typed action values, ownership, and result lineage. It carries no action Capability field. Facility planning retains exact Component-to-MaterialLot candidates alongside the inventory digest and freezes the selected binding in allocated LAIR.
 
 The checker's tables are the bulk of the mechanical work: fifteen
 `HashMap<String, _>` and `BTreeSet<String>` fields on `SemanticContext`, plus

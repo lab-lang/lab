@@ -3,20 +3,18 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use lab_capability::{
-    CapabilityKind, ControlMode, OperationId, ProcedureContractId, ProcedureImplementationId,
+use lab_adapter_api::{
+    AdapterDescriptor, AdapterDescriptorRegistry, AdapterServices,
+    ProcedureImplementationDescriptor, ValidatedAdapterProfile,
 };
+use lab_capability::{CapabilityKind, ControlMode, ProcedureContractId, ProcedureImplementationId};
+use lab_compiler::procedure::ProgramFeature;
 use lab_inventory::{FacilityAssetError, FacilityScalarValue, InventorySnapshot};
 use sbol_inventory::vocabulary::Qualification;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use lab_adapters::{
-    AdapterDescriptor, AdapterServices, ProcedureImplementationDescriptor, ValidatedAdapterProfile,
-    adapter_catalog,
-};
-
-pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v3";
+pub const ADAPTER_BINDINGS_SCHEMA_VERSION: &str = "lab.adapter-bindings.v7";
 
 #[derive(Clone, Debug)]
 pub struct AdapterBindingRequest {
@@ -27,6 +25,7 @@ pub struct AdapterBindingRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AdapterBindingSnapshot {
     pub schema_version: String,
     pub inventory_sha256: String,
@@ -38,10 +37,8 @@ impl AdapterBindingSnapshot {
     pub fn resolve(
         inventory: &InventorySnapshot,
         requests: Vec<AdapterBindingRequest>,
+        descriptors: &AdapterDescriptorRegistry,
     ) -> Result<Self, AdapterBindingError> {
-        let catalog = adapter_catalog().map_err(|error| AdapterBindingError::Catalog {
-            message: error.to_string(),
-        })?;
         let mut bindings = Vec::new();
         let mut seen = BTreeSet::new();
         for request in requests {
@@ -58,14 +55,12 @@ impl AdapterBindingSnapshot {
                     driver: request.driver,
                 });
             }
-            let descriptor = catalog
-                .adapters
-                .iter()
-                .find(|adapter| adapter.id == request.driver)
-                .ok_or_else(|| AdapterBindingError::UnknownDriver {
+            let descriptor = descriptors.descriptor(&request.driver).ok_or_else(|| {
+                AdapterBindingError::UnknownDriver {
                     asset: request.asset.clone(),
                     driver: request.driver.clone(),
-                })?;
+                }
+            })?;
             let asset = inventory.facility_asset(&request.asset)?;
             let mut offerings = asset
                 .offerings
@@ -145,22 +140,30 @@ impl AdapterBindingSnapshot {
                 .collect::<Vec<_>>();
             offerings.sort_by(|left, right| left.offering.cmp(&right.offering));
             if offerings.is_empty() {
+                let adapter_capabilities = descriptor
+                    .procedure_implementations
+                    .iter()
+                    .flat_map(|implementation| implementation.capability_kinds.iter().cloned())
+                    .collect::<BTreeSet<_>>();
+                let adapter_control_modes = descriptor
+                    .procedure_implementations
+                    .iter()
+                    .flat_map(|implementation| implementation.control_modes.iter().cloned())
+                    .collect::<BTreeSet<_>>();
                 return Err(AdapterBindingError::NoCompatibleOffering {
                     asset: request.asset,
                     driver: request.driver,
-                    adapter_capabilities: render_set(&descriptor.capabilities),
-                    adapter_control_modes: render_set(&descriptor.control_modes),
+                    adapter_capabilities: render_set(&adapter_capabilities),
+                    adapter_control_modes: render_set(&adapter_control_modes),
                 });
             }
             bindings.push(ResolvedAdapterBinding {
                 asset: asset.identity.as_str().to_owned(),
                 driver: request.driver,
                 profile_path: request.profile_path,
-                profile_sha256: request.profile.sha256,
+                profile_sha256: request.profile.sha256.clone(),
+                profile: request.profile,
                 features: descriptor.features.clone(),
-                accepted_run_formats: descriptor.accepted_run_formats.clone(),
-                emitted_run_formats: descriptor.emitted_run_formats.clone(),
-                services: descriptor.services.clone(),
                 procedure_implementations: descriptor
                     .procedure_implementations
                     .iter()
@@ -181,29 +184,31 @@ impl AdapterBindingSnapshot {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResolvedAdapterBinding {
     pub asset: String,
     pub driver: String,
     pub profile_path: PathBuf,
     pub profile_sha256: String,
+    /// Canonical profile data retained so pure adapter feasibility is reproducible during
+    /// planning. Reviewed plans still bind the selected adapter by its digest.
+    pub profile: ValidatedAdapterProfile,
     pub features: BTreeSet<String>,
-    pub accepted_run_formats: BTreeSet<String>,
-    pub emitted_run_formats: BTreeSet<String>,
-    pub services: AdapterServices,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub procedure_implementations: Vec<BoundProcedureImplementation>,
     pub offerings: Vec<BoundCapabilityOffering>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BoundProcedureImplementation {
     pub id: ProcedureImplementationId,
     pub contract: ProcedureContractId,
-    pub operations: BTreeSet<OperationId>,
     pub capability_kinds: BTreeSet<CapabilityKind>,
     pub control_modes: BTreeSet<ControlMode>,
     pub accepted_run_formats: BTreeSet<String>,
     pub emitted_run_formats: BTreeSet<String>,
+    pub program_features: BTreeSet<ProgramFeature>,
     pub services: AdapterServices,
 }
 
@@ -212,11 +217,11 @@ impl From<&ProcedureImplementationDescriptor> for BoundProcedureImplementation {
         Self {
             id: value.id.clone(),
             contract: value.contract.clone(),
-            operations: value.operations.clone(),
             capability_kinds: value.capability_kinds.clone(),
             control_modes: value.control_modes.clone(),
             accepted_run_formats: value.accepted_run_formats.clone(),
             emitted_run_formats: value.emitted_run_formats.clone(),
+            program_features: value.program_features.clone(),
             services: value.services.clone(),
         }
     }
@@ -227,13 +232,12 @@ fn adapter_supports_capability(
     capability_kind: &str,
     control_mode: &str,
 ) -> bool {
-    legacy_supports(descriptor, capability_kind, control_mode)
-        || descriptor
-            .procedure_implementations
-            .iter()
-            .any(|implementation| {
-                implementation_supports(implementation, capability_kind, control_mode)
-            })
+    descriptor
+        .procedure_implementations
+        .iter()
+        .any(|implementation| {
+            implementation_supports(implementation, capability_kind, control_mode)
+        })
 }
 
 fn supports_service(
@@ -242,29 +246,13 @@ fn supports_service(
     control_mode: &str,
     service: impl Fn(&AdapterServices) -> bool,
 ) -> bool {
-    (legacy_supports(descriptor, capability_kind, control_mode) && service(&descriptor.services))
-        || descriptor
-            .procedure_implementations
-            .iter()
-            .any(|implementation| {
-                implementation_supports(implementation, capability_kind, control_mode)
-                    && service(&implementation.services)
-            })
-}
-
-fn legacy_supports(
-    descriptor: &AdapterDescriptor,
-    capability_kind: &str,
-    control_mode: &str,
-) -> bool {
     descriptor
-        .capabilities
+        .procedure_implementations
         .iter()
-        .any(|kind| kind.as_str() == capability_kind)
-        && descriptor
-            .control_modes
-            .iter()
-            .any(|mode| mode.iri() == control_mode)
+        .any(|implementation| {
+            implementation_supports(implementation, capability_kind, control_mode)
+                && service(&implementation.services)
+        })
 }
 
 fn implementation_supports(
@@ -283,6 +271,7 @@ fn implementation_supports(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BoundCapabilityOffering {
     pub offering: String,
     pub capability_kind: String,
@@ -307,7 +296,7 @@ pub struct BoundCapabilityParameter {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "value_type", rename_all = "snake_case")]
+#[serde(tag = "value_type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum BoundCapabilityParameterValue {
     Text { value: String },
     Integer { value: String },
@@ -318,8 +307,6 @@ pub enum BoundCapabilityParameterValue {
 
 #[derive(Debug, Error)]
 pub enum AdapterBindingError {
-    #[error("failed to load the compiler adapter catalog: {message}")]
-    Catalog { message: String },
     #[error(transparent)]
     Asset(#[from] FacilityAssetError),
     #[error("asset `{asset}` binds unknown adapter driver `{driver}`")]
@@ -366,7 +353,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use lab_adapters::validate_adapter_profile;
+    use lab_adapters::{adapter_catalog, validate_adapter_profile};
 
     use super::*;
 
@@ -386,7 +373,7 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
     fac:capability <https://example.org/facility/star/liquid_handling> .
 <https://example.org/facility/star/liquid_handling>
     a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid_handling" ;
-    fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Plannable ;
+    fac:capabilityKind cap:MeteredLiquidTransfer ; fac:qualification fac:Plannable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true ;
     fac:parameter <https://example.org/facility/star/liquid_handling/plate_wells> .
 <https://example.org/facility/star/liquid_handling/plate_wells>
@@ -410,12 +397,20 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
         }
     }
 
+    fn descriptors() -> AdapterDescriptorRegistry {
+        AdapterDescriptorRegistry::new(adapter_catalog().unwrap().adapters).unwrap()
+    }
+
     #[test]
     fn freezes_exact_asset_offering_and_profile_bindings_without_promoting_qualification() {
         let (_directory, inventory) = inventory(INVENTORY);
 
-        let snapshot =
-            AdapterBindingSnapshot::resolve(&inventory, vec![request("hamilton.star")]).unwrap();
+        let snapshot = AdapterBindingSnapshot::resolve(
+            &inventory,
+            vec![request("hamilton.star")],
+            &descriptors(),
+        )
+        .unwrap();
 
         assert_eq!(snapshot.schema_version, ADAPTER_BINDINGS_SCHEMA_VERSION);
         assert_eq!(snapshot.facility, "https://example.org/facility/facility");
@@ -455,14 +450,26 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
             serde_json::from_str::<AdapterBindingSnapshot>(&json).unwrap(),
             snapshot
         );
+
+        let mut stale = serde_json::to_value(&snapshot).unwrap();
+        stale
+            .as_object_mut()
+            .unwrap()
+            .insert("target".to_owned(), serde_json::json!("star"));
+        let error = serde_json::from_value::<AdapterBindingSnapshot>(stale).unwrap_err();
+        assert!(error.to_string().contains("target"), "{error}");
     }
 
     #[test]
     fn rejects_a_driver_without_an_exact_capability_and_control_mode_match() {
         let (_directory, inventory) = inventory(INVENTORY);
 
-        let error =
-            AdapterBindingSnapshot::resolve(&inventory, vec![request("inheco.odtc")]).unwrap_err();
+        let error = AdapterBindingSnapshot::resolve(
+            &inventory,
+            vec![request("inheco.odtc")],
+            &descriptors(),
+        )
+        .unwrap_err();
 
         assert!(matches!(
             error,

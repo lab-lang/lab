@@ -1,9 +1,15 @@
 //! Requirement-scoped Flex lowering to standalone Protocol Designer JSON documents.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lab_compiler::allocation::{AllocatedProcedureTask, AllocatedRequirementBinding};
 use lab_compiler::method::LocalId;
+use lab_compiler::procedure::ProcedureContractRegistry;
+use lab_compiler::procedure::vocabulary::{PIPETTING_PROGRAM_V1, THERMAL_PROGRAM_V1};
+use lab_compiler::procedure::{
+    AspirationStrategy, DispenseStrategy, FluidPathPolicy, Location, MixTechnique,
+    PipettingProgramV1, PipettingStep, ProcedureLocalId, TransferTechnique, VesselRole,
+};
 use lab_instruments::ThermalProfile;
 use lab_runfmt::OPENTRONS_PROTOCOL_DESIGNER_FORMAT;
 use opentrons_protocol::schema::Metadata;
@@ -20,17 +26,14 @@ use crate::backend::invocation::{ProcedureTaskView, exact_invocation_tasks};
 use crate::backend::opentrons::flex::BACKEND;
 use crate::backend::opentrons::flex::profile::{FlexAdapterProfile, Pipette, TipRacks};
 use crate::backend::procedure::{
-    CYCLE_GOLDEN_GATE, SERIAL_DILUTION, SETUP_GOLDEN_GATE, normalized_golden_gate_setup,
-    normalized_serial_dilution, normalized_thermal_program, require_basic_golden_gate_techniques,
+    canonical_pipetting_program, normalized_thermal_program, volume_microlitres,
 };
-use crate::backend::resources::{
-    PlateAllocator, PlateCapacity, Well, assign_source_wells, plate_wells,
-};
+use crate::backend::resources::{PlateCapacity, plate_wells};
 use crate::backend::typst;
 use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
 use lab_compiler::planning::{
-    PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
-    SelectedCapabilityParameter, SelectedMaterialBinding, SelectedMaterialSource,
+    PlanningProcedureParameter, PlanningTaskInput, PlanningTaskOutput, SelectedCapabilityParameter,
+    SelectedMaterialBinding, SelectedMaterialSource,
 };
 
 const TASK_PLAN_SCHEMA: &str = "lab.opentrons-flex-task.v1";
@@ -86,15 +89,16 @@ struct TaskReview {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum FlexTaskExecution {
-    SetupGoldenGateReaction {
-        artifact: String,
-        reaction_wells: Vec<String>,
-        additions: Vec<MaterialAddition>,
-        reaction_volume_ul: u32,
-        mix_cycles: u32,
-        mix_volume_ul: u32,
+    /// Direct interpretation of the open canonical contract. The operation name is review
+    /// metadata only; every executable action comes from `program.steps`.
+    PipettingProgram {
+        title: String,
+        program: PipettingProgramV1,
+        locations: BTreeMap<ProcedureLocalId, Vec<FlexPhysicalLocation>>,
+        staging_temperatures: BTreeMap<String, f64>,
+        sources: Vec<CanonicalSourceReview>,
     },
-    ThermalCycleGoldenGateReaction {
+    ThermalProgram {
         artifact: String,
         reaction_wells: Vec<String>,
         volume_each_ul: f64,
@@ -102,36 +106,28 @@ enum FlexTaskExecution {
         profile: ThermalProfile,
         final_hold_celsius: Option<f64>,
     },
-    SerialDilution {
-        culture_source: PlanningValueSource,
-        /// One staged culture per biological replicate.
-        culture_wells: Vec<String>,
-        medium: MaterialPlacement,
-        /// Dilution positions in dilution-major order, matching `dilution * replicates + replicate`.
-        dilution_wells: Vec<Well>,
-        culture_replicates: usize,
-        serial_dilutions: usize,
-        medium_volume_ul: u32,
-        culture_volume_ul: u32,
-        mix_cycles: u32,
-        mix_volume_ul: u32,
-    },
 }
 
 #[derive(Clone, Serialize)]
-struct MaterialPlacement {
-    role: String,
-    input: LocalId,
-    symbol: String,
-    source: SelectedMaterialSource,
-    source_well: String,
+struct FlexPhysicalLocation {
+    resource: FlexPhysicalResource,
+    well: String,
 }
 
-#[derive(Serialize)]
-struct MaterialAddition {
-    #[serde(flatten)]
-    placement: MaterialPlacement,
-    volume_ul: u32,
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FlexPhysicalResource {
+    Sources,
+    Work,
+    Bulk,
+}
+
+#[derive(Clone, Serialize)]
+struct CanonicalSourceReview {
+    vessel: ProcedureLocalId,
+    material: ProcedureLocalId,
+    binding: SelectedMaterialBinding,
+    wells: Vec<String>,
 }
 
 /// Lower only the Procedure tasks and requirements allocated to this exact Flex invocation.
@@ -139,13 +135,14 @@ pub(in crate::backend) fn lower_invocation(
     profile: &FlexAdapterProfile,
     invocation_plan: &AdapterInvocationPlan,
     invocation: &AdapterInvocation,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<AdapterInvocationLowering, String> {
     let tasks = exact_invocation_tasks("Flex", invocation_plan, invocation)?;
     let mut artifacts = ArtifactBundle::new();
     let mut documents = Vec::new();
 
     for (ordinal, member) in tasks.into_iter().enumerate() {
-        let (slug, execution) = plan_task(profile, member.task, &member.requirements)?;
+        let (slug, execution) = plan_task(profile, member.task, &member.requirements, contracts)?;
         let directory = format!("tasks/{:03}-{slug}", ordinal + 1);
         let plan = FlexTaskPlan {
             schema_version: TASK_PLAN_SCHEMA.to_owned(),
@@ -215,118 +212,495 @@ fn plan_task(
     profile: &FlexAdapterProfile,
     task: &AllocatedProcedureTask,
     requirements: &[&AllocatedRequirementBinding],
+    contracts: &ProcedureContractRegistry,
 ) -> Result<(&'static str, FlexTaskExecution), String> {
-    match task.operation.as_str() {
-        SETUP_GOLDEN_GATE => Ok((
-            "setup-golden-gate-reaction",
-            plan_setup(profile, task, requirements)?,
-        )),
-        CYCLE_GOLDEN_GATE => Ok((
-            "thermal-cycle-golden-gate-reaction",
-            plan_cycle(profile, task, requirements)?,
-        )),
-        SERIAL_DILUTION => Ok((
-            "serial-dilution",
-            plan_dilution(profile, task, requirements)?,
-        )),
-        operation => Err(format!(
-            "Flex invocation contains unsupported Procedure operation '{operation}' in task '{}'",
-            task.id
-        )),
+    if task
+        .program
+        .as_ref()
+        .is_some_and(|program| program.contract.as_str() == THERMAL_PROGRAM_V1)
+    {
+        return Ok((
+            "thermal-program",
+            plan_cycle(profile, task, requirements, contracts)?,
+        ));
     }
+    if task
+        .program
+        .as_ref()
+        .is_some_and(|program| program.contract.as_str() == PIPETTING_PROGRAM_V1)
+    {
+        return Ok((
+            "pipetting-program",
+            plan_pipetting_program(profile, task, requirements, contracts)?,
+        ));
+    }
+    Err(format!(
+        "Flex invocation does not implement the canonical Procedure program shape in task '{}' (descriptive operation '{}')",
+        task.id, task.operation
+    ))
 }
 
-fn plan_setup(
+fn plan_pipetting_program(
     profile: &FlexAdapterProfile,
     task: &AllocatedProcedureTask,
     requirements: &[&AllocatedRequirementBinding],
+    contracts: &ProcedureContractRegistry,
 ) -> Result<FlexTaskExecution, String> {
-    let procedure = normalized_golden_gate_setup("Flex", task, requirements)?;
-    require_basic_golden_gate_techniques("Flex", task, &procedure)?;
-    let view = ProcedureTaskView::new("Flex", task);
-    known_wells(
-        task,
-        "source rack",
-        profile.deck.temperature_module.capacity,
-    )?;
-    known_wells(
-        task,
-        "assembly tip rack",
-        profile.stages.assembly.small_tips.capacity,
-    )?;
-    let source_keys = procedure
-        .additions
-        .iter()
-        .map(|addition| addition.material.symbol.clone())
-        .collect::<BTreeSet<_>>();
-    let source_wells = assign_source_wells(
-        BACKEND,
-        "setup-golden-gate-reaction",
-        source_keys,
-        profile.deck.temperature_module.capacity,
-    )
-    .map_err(|error| error.to_string())?;
-    let additions = procedure
-        .additions
-        .into_iter()
-        .map(|addition| MaterialAddition {
-            placement: MaterialPlacement {
-                role: addition.role.to_owned(),
-                input: addition.material.input.clone(),
-                symbol: addition.material.symbol.clone(),
-                source: addition.material.source.clone(),
-                source_well: source_wells[&addition.material.symbol].clone(),
-            },
-            volume_ul: addition.volume_ul,
-        })
-        .collect::<Vec<_>>();
-    let reaction_plate = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
-    if procedure.replicates > reaction_plate.len() {
-        return Err(view.capacity_error(
-            "reaction plate",
-            procedure.replicates,
-            reaction_plate.len(),
-        ));
-    }
-    let required_tips = (additions.len() + 1)
-        .checked_mul(procedure.replicates)
-        .ok_or_else(|| format!("Flex Procedure task '{}' tip count overflows", task.id))?;
-    let tip_capacity = profile.stages.assembly.small_tips.total_capacity();
-    if required_tips > tip_capacity {
-        return Err(view.capacity_error("assembly small-tip racks", required_tips, tip_capacity));
-    }
-    let working = working_volume_ul(
-        &profile.instruments.small,
-        &profile.stages.assembly.small_tips,
-    )?;
-    if f64::from(procedure.final_mix.volume_ul) > working {
-        return Err(format!(
-            "Flex Procedure task '{}' requires a {} uL mix, but the configured small pipette and tip provide {working} uL",
-            task.id, procedure.final_mix.volume_ul
-        ));
+    let validated = canonical_pipetting_program("Flex", task, requirements, contracts)?;
+    let program = validated.as_program();
+    let source_wells = plate_wells(profile.resources.sources.capacity);
+    let work_wells = plate_wells(profile.resources.work.capacity);
+    let bulk_wells = plate_wells(profile.resources.bulk.capacity);
+    let mut bulk_cursor = 0usize;
+    let mut source_cursor = 0usize;
+    let mut work_cursor = 0usize;
+    let mut locations = BTreeMap::new();
+    let mut sources = Vec::new();
+
+    // Logical vessels may partition an aggregate input. InputOutput owns its
+    // positions directly and does not require a separate input declaration.
+    for vessel in program.vessels.iter().filter(|vessel| {
+        matches!(
+            vessel.role,
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. }
+        )
+    }) {
+        let count = usize::try_from(vessel.positions)
+            .map_err(|_| format!("Flex task '{}' vessel position count overflows", task.id))?;
+        let physical = take_flex_locations(
+            task,
+            "thermocycler work wells",
+            &work_wells,
+            &mut work_cursor,
+            count,
+            FlexPhysicalResource::Work,
+        )?;
+        locations.insert(vessel.id.clone(), physical);
     }
 
-    Ok(FlexTaskExecution::SetupGoldenGateReaction {
-        artifact: procedure.artifact,
-        reaction_wells: reaction_plate
-            .into_iter()
-            .take(procedure.replicates)
-            .collect(),
-        additions,
-        reaction_volume_ul: procedure.reaction_volume_ul,
-        mix_cycles: procedure.final_mix.cycles,
-        mix_volume_ul: procedure.final_mix.volume_ul,
+    for vessel in &program.vessels {
+        if locations.contains_key(&vessel.id) {
+            continue;
+        }
+        let count = usize::try_from(vessel.positions)
+            .map_err(|_| format!("Flex task '{}' vessel position count overflows", task.id))?;
+        let physical = match &vessel.role {
+            VesselRole::MaterialSource { material } => {
+                let binding = task
+                    .materials
+                    .iter()
+                    .find(|binding| binding.input.as_str() == material.as_str())
+                    .ok_or_else(|| {
+                        format!(
+                            "Flex Procedure task '{}' canonical material '{}' has no exact allocation",
+                            task.id, material
+                        )
+                    })?
+                    .clone();
+                let loaded = vessel
+                    .initial_volume_each
+                    .as_ref()
+                    .map(|v| v.value().to_string().parse::<f64>().unwrap())
+                    .unwrap_or(0.0);
+                let physical = if loaded > f64::from(profile.resources.sources.max_volume_each_ul) {
+                    take_flex_locations(
+                        task,
+                        "bulk source wells",
+                        &bulk_wells,
+                        &mut bulk_cursor,
+                        count,
+                        FlexPhysicalResource::Bulk,
+                    )?
+                } else {
+                    take_flex_locations(
+                        task,
+                        "temperature-module source wells",
+                        &source_wells,
+                        &mut source_cursor,
+                        count,
+                        FlexPhysicalResource::Sources,
+                    )?
+                };
+                sources.push(CanonicalSourceReview {
+                    vessel: vessel.id.clone(),
+                    material: material.clone(),
+                    binding,
+                    wells: physical
+                        .iter()
+                        .map(|location| location.well.clone())
+                        .collect(),
+                });
+                physical
+            }
+            VesselRole::ProcedureInput { .. } | VesselRole::InputOutput { .. } => unreachable!(),
+            VesselRole::Product { .. }
+            | VesselRole::MaterialProduct { .. }
+            | VesselRole::Intermediate => take_flex_locations(
+                task,
+                "thermocycler work wells",
+                &work_wells,
+                &mut work_cursor,
+                count,
+                FlexPhysicalResource::Work,
+            )?,
+        };
+        locations.insert(vessel.id.clone(), physical);
+    }
+
+    super::super::staging::working_volumes(program, |vessel| {
+        match locations[vessel][0].resource {
+            FlexPhysicalResource::Sources => profile.resources.sources.max_volume_each_ul,
+            FlexPhysicalResource::Work => profile.resources.work.max_volume_each_ul,
+            FlexPhysicalResource::Bulk => profile.resources.bulk.max_volume_each_ul,
+        }
+    })?;
+    let staging_temperatures =
+        super::super::staging::temperatures(program, |vessel| {
+            match locations[vessel][0].resource {
+                FlexPhysicalResource::Sources => "sources",
+                FlexPhysicalResource::Work => "work",
+                FlexPhysicalResource::Bulk => "bulk",
+            }
+        })?;
+    validate_flex_canonical_steps(profile, task, program)?;
+    Ok(FlexTaskExecution::PipettingProgram {
+        title: operation_title(task),
+        program: program.clone(),
+        staging_temperatures,
+        locations,
+        sources,
     })
+}
+
+fn take_flex_locations(
+    task: &AllocatedProcedureTask,
+    resource: &str,
+    wells: &[String],
+    cursor: &mut usize,
+    count: usize,
+    physical_resource: FlexPhysicalResource,
+) -> Result<Vec<FlexPhysicalLocation>, String> {
+    let end = cursor.checked_add(count).ok_or_else(|| {
+        format!(
+            "Flex Procedure task '{}' well allocation overflows",
+            task.id
+        )
+    })?;
+    if end > wells.len() {
+        return Err(ProcedureTaskView::new("Flex", task).capacity_error(
+            resource,
+            end,
+            wells.len(),
+        ));
+    }
+    let result = wells[*cursor..end]
+        .iter()
+        .map(|well| FlexPhysicalLocation {
+            resource: physical_resource,
+            well: well.clone(),
+        })
+        .collect();
+    *cursor = end;
+    Ok(result)
+}
+
+fn validate_flex_canonical_steps(
+    profile: &FlexAdapterProfile,
+    task: &AllocatedProcedureTask,
+    program: &PipettingProgramV1,
+) -> Result<(), String> {
+    let small_working =
+        working_volume_ul(&profile.instruments.small, &profile.resources.small_tips)?;
+    let large_working =
+        working_volume_ul(&profile.instruments.large, &profile.resources.large_tips)?;
+    let mut small_tips = 0usize;
+    let mut large_tips = 0usize;
+    let mut open_group: Option<&ProcedureLocalId> = None;
+    let mut group_maximum = 0.0_f64;
+    let mut closed_groups = BTreeSet::new();
+
+    for step in &program.steps {
+        let group = step_group(step);
+        if group != open_group {
+            if let Some(previous) = open_group {
+                closed_groups.insert(previous.clone());
+                count_flex_group_tip(
+                    task,
+                    group_maximum,
+                    small_working,
+                    large_working,
+                    &mut small_tips,
+                    &mut large_tips,
+                )?;
+                group_maximum = 0.0;
+            }
+            if group.is_some_and(|group| closed_groups.contains(group)) {
+                return Err(format!(
+                    "Flex Procedure task '{}' fluid-path group is not contiguous",
+                    task.id
+                ));
+            }
+            open_group = group;
+        }
+
+        let (volume, multiplicity) = match step {
+            PipettingStep::Transfer {
+                volume, technique, ..
+            } => {
+                validate_flex_transfer_technique(task, technique)?;
+                (volume_microlitres("Flex", task, "transfer", volume)?, 1)
+            }
+            PipettingStep::Distribute {
+                destinations,
+                volume_each,
+                fluid_path,
+                technique,
+                ..
+            } => {
+                validate_flex_transfer_technique(task, technique)?;
+                if group.is_some()
+                    && matches!(fluid_path, FluidPathPolicy::IsolatedDestinations)
+                    && destinations.len() > 1
+                {
+                    return Err(format!(
+                        "Flex Procedure task '{}' cannot combine a shared fluid-path group with an isolated multi-destination distribution",
+                        task.id
+                    ));
+                }
+                let volume = volume_microlitres("Flex", task, "distribution", volume_each)?;
+                let working = flex_working_volume(task, volume, small_working, large_working)?;
+                let multiplicity = match fluid_path {
+                    FluidPathPolicy::IsolatedDestinations => destinations.len(),
+                    FluidPathPolicy::SharedSourceNoReentry => {
+                        ((volume * destinations.len() as f64) / working)
+                            .ceil()
+                            .max(1.0) as usize
+                    }
+                };
+                (volume, multiplicity)
+            }
+            PipettingStep::Mix {
+                targets,
+                volume,
+                fluid_path,
+                technique,
+                ..
+            } => {
+                validate_flex_mix_technique(task, technique)?;
+                if group.is_some()
+                    && matches!(fluid_path, FluidPathPolicy::IsolatedDestinations)
+                    && targets.len() > 1
+                {
+                    return Err(format!(
+                        "Flex Procedure task '{}' cannot combine a shared fluid-path group with isolated multi-target mixing",
+                        task.id
+                    ));
+                }
+                (
+                    volume_microlitres("Flex", task, "mix", volume)?,
+                    targets.len(),
+                )
+            }
+            PipettingStep::Barrier { .. } => {
+                return Err(format!(
+                    "Flex Procedure task '{}' contains a Barrier step, which this implementation does not claim",
+                    task.id
+                ));
+            }
+        };
+
+        if group.is_some() {
+            group_maximum = group_maximum.max(volume);
+        } else {
+            add_flex_tips(
+                task,
+                volume,
+                multiplicity,
+                small_working,
+                large_working,
+                &mut small_tips,
+                &mut large_tips,
+            )?;
+        }
+    }
+    if open_group.is_some() {
+        count_flex_group_tip(
+            task,
+            group_maximum,
+            small_working,
+            large_working,
+            &mut small_tips,
+            &mut large_tips,
+        )?;
+    }
+
+    let small_capacity = profile.resources.small_tips.total_capacity();
+    if small_tips > small_capacity {
+        return Err(ProcedureTaskView::new("Flex", task).capacity_error(
+            "small canonical-program tips",
+            small_tips,
+            small_capacity,
+        ));
+    }
+    let large_capacity = profile.resources.large_tips.total_capacity();
+    if large_tips > large_capacity {
+        return Err(ProcedureTaskView::new("Flex", task).capacity_error(
+            "large canonical-program tips",
+            large_tips,
+            large_capacity,
+        ));
+    }
+    Ok(())
+}
+
+fn flex_working_volume(
+    task: &AllocatedProcedureTask,
+    volume: f64,
+    small_working: f64,
+    large_working: f64,
+) -> Result<f64, String> {
+    if volume <= small_working {
+        Ok(small_working)
+    } else if volume <= large_working {
+        Ok(large_working)
+    } else {
+        Err(format!(
+            "Flex Procedure task '{}' operation requires {volume} uL, above the configured {large_working} uL tip capacity",
+            task.id
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_flex_tips(
+    task: &AllocatedProcedureTask,
+    volume: f64,
+    count: usize,
+    small_working: f64,
+    large_working: f64,
+    small_tips: &mut usize,
+    large_tips: &mut usize,
+) -> Result<(), String> {
+    let tips = if volume <= small_working {
+        small_tips
+    } else if volume <= large_working {
+        large_tips
+    } else {
+        return Err(format!(
+            "Flex Procedure task '{}' operation requires {volume} uL, above the configured {large_working} uL tip capacity",
+            task.id
+        ));
+    };
+    *tips = tips
+        .checked_add(count)
+        .ok_or_else(|| format!("Flex Procedure task '{}' tip count overflows", task.id))?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn count_flex_group_tip(
+    task: &AllocatedProcedureTask,
+    maximum: f64,
+    small_working: f64,
+    large_working: f64,
+    small_tips: &mut usize,
+    large_tips: &mut usize,
+) -> Result<(), String> {
+    if maximum == 0.0 {
+        return Ok(());
+    }
+    add_flex_tips(
+        task,
+        maximum,
+        1,
+        small_working,
+        large_working,
+        small_tips,
+        large_tips,
+    )
+}
+fn validate_flex_transfer_technique(
+    task: &AllocatedProcedureTask,
+    technique: &TransferTechnique,
+) -> Result<(), String> {
+    if !matches!(
+        technique.aspiration,
+        AspirationStrategy::Liquid | AspirationStrategy::TrackedLiquidSurface
+    ) || technique.dispense != DispenseStrategy::Liquid
+        || technique.air_gap.is_some()
+        || technique.blow_out
+        || technique.touch_tip
+    {
+        return Err(format!(
+            "Flex Procedure task '{}' requests a transfer technique outside this implementation's declared canonical features",
+            task.id
+        ));
+    }
+    Ok(())
+}
+
+fn validate_flex_mix_technique(
+    task: &AllocatedProcedureTask,
+    technique: &MixTechnique,
+) -> Result<(), String> {
+    if !matches!(
+        technique.aspiration,
+        AspirationStrategy::Liquid | AspirationStrategy::TrackedLiquidSurface
+    ) || technique.dispense != DispenseStrategy::Liquid
+        || technique.blow_out
+        || technique.touch_tip
+    {
+        return Err(format!(
+            "Flex Procedure task '{}' requests a mix technique outside this implementation's declared canonical features",
+            task.id
+        ));
+    }
+    Ok(())
+}
+
+fn step_group(step: &PipettingStep) -> Option<&ProcedureLocalId> {
+    match step {
+        PipettingStep::Transfer {
+            fluid_path_group, ..
+        }
+        | PipettingStep::Distribute {
+            fluid_path_group, ..
+        }
+        | PipettingStep::Mix {
+            fluid_path_group, ..
+        } => fluid_path_group.as_ref(),
+        PipettingStep::Barrier { .. } => None,
+    }
+}
+
+fn operation_title(task: &AllocatedProcedureTask) -> String {
+    task.operation
+        .as_str()
+        .rsplit(['#', '/', '.'])
+        .find(|part| !part.is_empty())
+        .unwrap_or("pipetting program")
+        .replace(['_', '-'], " ")
+}
+
+/// Pure candidate-time check using the same structural dispatcher and profile limits as lowering.
+pub(in crate::backend) fn check_task_feasibility(
+    profile: &FlexAdapterProfile,
+    task: &AllocatedProcedureTask,
+    contracts: &ProcedureContractRegistry,
+) -> Result<(), String> {
+    let requirements = task.requirements.iter().collect::<Vec<_>>();
+    plan_task(profile, task, &requirements, contracts).map(|_| ())
 }
 
 fn plan_cycle(
     profile: &FlexAdapterProfile,
     task: &AllocatedProcedureTask,
     requirements: &[&AllocatedRequirementBinding],
+    contracts: &ProcedureContractRegistry,
 ) -> Result<FlexTaskExecution, String> {
-    let procedure = normalized_thermal_program("Flex", task, requirements)?;
+    let procedure = normalized_thermal_program("Flex", task, requirements, contracts)?;
     let view = ProcedureTaskView::new("Flex", task);
-    let reaction_wells = known_wells(task, "reaction plate", profile.deck.thermocycler.capacity)?;
+    let reaction_wells = known_wells(task, "reaction plate", profile.resources.work.capacity)?;
     if procedure.sample_count > reaction_wells.len() {
         return Err(view.capacity_error(
             "reaction plate",
@@ -381,7 +755,7 @@ fn plan_cycle(
         ));
     }
 
-    Ok(FlexTaskExecution::ThermalCycleGoldenGateReaction {
+    Ok(FlexTaskExecution::ThermalProgram {
         artifact: procedure.artifact,
         reaction_wells: reaction_wells
             .into_iter()
@@ -394,196 +768,452 @@ fn plan_cycle(
     })
 }
 
-fn plan_dilution(
-    profile: &FlexAdapterProfile,
-    task: &AllocatedProcedureTask,
-    requirements: &[&AllocatedRequirementBinding],
-) -> Result<FlexTaskExecution, String> {
-    let procedure = normalized_serial_dilution("Flex", task, requirements)?;
-    let view = ProcedureTaskView::new("Flex", task);
-    known_wells(
-        task,
-        "dilution plate",
-        profile.stages.plating.dilution_plate.capacity,
-    )?;
-    known_wells(
-        task,
-        "dilution small-tip rack",
-        profile.stages.plating.small_tips.capacity,
-    )?;
-    known_wells(
-        task,
-        "dilution large-tip rack",
-        profile.stages.plating.large_tips.capacity,
-    )?;
-    let mut allocator = PlateAllocator::new(
-        BACKEND,
-        "serial-dilution",
-        "dilution_plate",
-        &profile.stages.plating.dilution_plate,
-    );
-    let positions = procedure
-        .serial_dilutions
-        .checked_mul(procedure.culture_replicates)
-        .ok_or_else(|| {
-            format!(
-                "Flex Procedure task '{}' declares more dilution positions than can be addressed",
-                task.id
-            )
-        })?;
-    let dilution_wells = allocator
-        .take(positions)
-        .map_err(|error| error.to_string())?;
-    let staging = known_wells(
-        task,
-        "culture staging plate",
-        profile.deck.thermocycler.capacity,
-    )?;
-    if procedure.culture_replicates > staging.len() {
-        return Err(view.capacity_error(
-            "culture staging plate",
-            procedure.culture_replicates,
-            staging.len(),
-        ));
-    }
-    let culture_wells = staging[..procedure.culture_replicates].to_vec();
-    // One tip carries each replicate's whole dilution chain, so a replicate is one tip.
-    if procedure.culture_replicates > profile.stages.plating.small_tips.total_capacity() {
-        return Err(view.capacity_error(
-            "dilution small-tip racks",
-            procedure.culture_replicates,
-            profile.stages.plating.small_tips.total_capacity(),
-        ));
-    }
-    if profile.stages.plating.large_tips.total_capacity() == 0 {
-        return Err(view.capacity_error("dilution large-tip racks", 1, 0));
-    }
-    let small_working = working_volume_ul(
-        &profile.instruments.small,
-        &profile.stages.plating.small_tips,
-    )?;
-    if f64::from(procedure.mix_volume_ul) > small_working {
-        return Err(format!(
-            "Flex Procedure task '{}' requires a {} uL mix, but the configured small pipette and tip provide {small_working} uL",
-            task.id, procedure.mix_volume_ul
-        ));
-    }
-    if f64::from(procedure.culture_volume_ul) > small_working {
-        return Err(format!(
-            "Flex Procedure task '{}' transfers {} uL of culture, but the configured small pipette and tip provide {small_working} uL",
-            task.id, procedure.culture_volume_ul
-        ));
-    }
-    let large_working = working_volume_ul(
-        &profile.instruments.large,
-        &profile.stages.plating.large_tips,
-    )?;
-    if f64::from(procedure.medium_volume_ul) > large_working {
-        return Err(format!(
-            "Flex Procedure task '{}' requires a {} uL medium dispense, but the configured large pipette and tip provide {large_working} uL",
-            task.id, procedure.medium_volume_ul
-        ));
-    }
-
-    Ok(FlexTaskExecution::SerialDilution {
-        culture_source: procedure.culture_source.clone(),
-        culture_wells,
-        medium: MaterialPlacement {
-            role: "medium".to_owned(),
-            input: procedure.medium.input.clone(),
-            symbol: procedure.medium.symbol.clone(),
-            source: procedure.medium.source.clone(),
-            source_well: profile.stages.plating.media_rack.medium_well.clone(),
-        },
-        dilution_wells,
-        culture_replicates: procedure.culture_replicates,
-        serial_dilutions: procedure.serial_dilutions,
-        medium_volume_ul: procedure.medium_volume_ul,
-        culture_volume_ul: procedure.culture_volume_ul,
-        mix_cycles: procedure.mix_cycles,
-        mix_volume_ul: procedure.mix_volume_ul,
-    })
-}
-
 fn render_protocol(plan: &FlexTaskPlan) -> Result<String, String> {
     match &plan.execution {
-        FlexTaskExecution::SetupGoldenGateReaction { .. } => render_setup(plan),
-        FlexTaskExecution::ThermalCycleGoldenGateReaction { .. } => render_cycle(plan),
-        FlexTaskExecution::SerialDilution { .. } => render_dilution(plan),
+        FlexTaskExecution::PipettingProgram { .. } => render_pipetting_program(plan),
+        FlexTaskExecution::ThermalProgram { .. } => render_cycle(plan),
     }
 }
 
-fn render_setup(plan: &FlexTaskPlan) -> Result<String, String> {
-    let FlexTaskExecution::SetupGoldenGateReaction {
-        reaction_wells,
-        additions,
-        mix_cycles,
-        mix_volume_ul,
+fn render_pipetting_program(plan: &FlexTaskPlan) -> Result<String, String> {
+    let FlexTaskExecution::PipettingProgram {
+        title,
+        program,
+        staging_temperatures,
+        locations,
         ..
     } = &plan.execution
     else {
-        unreachable!("setup renderer receives only a setup plan")
+        unreachable!("canonical renderer receives only a PipettingProgramV1 plan")
     };
     let profile = &plan.deck;
-    let mut builder = stage_builder(profile, "Lab allocated Golden Gate setup");
+    let mut builder = stage_builder(profile, &format!("Lab canonical pipetting: {title}"));
     let temperature = builder
-        .load_module::<TemperatureModule>(slot(&profile.deck.temperature_module.slot))
+        .load_module::<TemperatureModule>(slot(&profile.resources.sources.slot))
         .map_err(protocol_error)?;
     let sources = builder
-        .load_labware_on_module(&profile.deck.temperature_module.labware, temperature)
+        .load_labware_on_module(&profile.resources.sources.labware, temperature)
         .map_err(protocol_error)?;
     let thermocycler = builder
         .load_module::<Thermocycler>(FlexSlot::B1)
         .map_err(protocol_error)?;
-    let reactions = builder
-        .load_labware_on_module(&profile.deck.thermocycler.labware, thermocycler)
+    let work = builder
+        .load_labware_on_module(&profile.resources.work.labware, thermocycler)
         .map_err(protocol_error)?;
-    let mut tips = TipFeeder::load(&mut builder, &profile.stages.assembly.small_tips)?;
-    let pipette = load_instrument(&mut builder, &profile.instruments.small)?;
-    builder
-        .temperature_module_set_target(temperature, 4.0)
+    let bulk = builder
+        .load_labware(
+            &profile.resources.bulk.labware,
+            slot(&profile.resources.bulk.slot),
+        )
         .map_err(protocol_error)?;
-    builder
-        .temperature_module_wait_for_temperature(temperature)
-        .map_err(protocol_error)?;
+    let mut small_tips = TipFeeder::load(&mut builder, &profile.resources.small_tips)?;
+    let mut large_tips = TipFeeder::load(&mut builder, &profile.resources.large_tips)?;
+    let small = load_instrument(&mut builder, &profile.instruments.small)?;
+    let large = load_instrument(&mut builder, &profile.instruments.large)?;
+    let small_working = small.max_volume.min(small_tips.tip_volume);
     builder.thermocycler_open_lid(thermocycler);
+    if let Some(target) = staging_temperatures.get("sources") {
+        builder
+            .temperature_module_set_target(temperature, *target)
+            .map_err(protocol_error)?;
+        builder
+            .temperature_module_wait_for_temperature(temperature)
+            .map_err(protocol_error)?;
+    }
+    if let Some(target) = staging_temperatures.get("work") {
+        builder
+            .thermocycler_set_block_temperature(thermocycler, *target, None, None)
+            .map_err(protocol_error)?;
+        builder
+            .thermocycler_wait_for_block_temperature(thermocycler)
+            .map_err(protocol_error)?;
+    }
 
-    for destination in reaction_wells {
-        for addition in additions {
-            transfer(
-                &mut builder,
-                &mut tips,
-                &pipette,
-                (sources, &addition.placement.source_well),
-                (reactions, destination),
-                f64::from(addition.volume_ul),
-                None,
-            )?;
+    let physical = |at: &Location| -> Result<(LabwareId, String), String> {
+        let location = locations
+            .get(&at.vessel)
+            .and_then(|positions| positions.get(at.position as usize))
+            .ok_or_else(|| {
+                format!(
+                    "Flex canonical location '{}[{}]' was not allocated",
+                    at.vessel, at.position
+                )
+            })?;
+        let labware = match location.resource {
+            FlexPhysicalResource::Sources => sources,
+            FlexPhysicalResource::Work => work,
+            FlexPhysicalResource::Bulk => bulk,
+        };
+        Ok((labware, location.well.clone()))
+    };
+
+    let group_uses_large = |group: &ProcedureLocalId| {
+        program
+            .steps
+            .iter()
+            .filter(|step| step_group(step) == Some(group))
+            .any(|step| rendered_step_volume(step) > small_working)
+    };
+    let mut held_group: Option<ProcedureLocalId> = None;
+    let mut held_tip: Option<bool> = None;
+    let mut withdrawn = BTreeMap::<(ProcedureLocalId, u32), f64>::new();
+    for step in &program.steps {
+        let group = step_group(step).cloned();
+        if held_group != group {
+            if let Some(held_large) = held_tip.take() {
+                let pipette = if held_large { &large } else { &small };
+                builder
+                    .drop_tip_into_trash(pipette.id)
+                    .map_err(protocol_error)?;
+            }
+            held_group = group.clone();
         }
-        let (rack, well) = tips.next();
-        builder
-            .pick_up_tip(pipette.id, rack, &well)
-            .map_err(protocol_error)?;
-        builder
-            .mix(
-                pipette.id,
-                reactions,
+
+        let use_large = group.as_ref().map_or_else(
+            || rendered_step_volume(step) > small_working,
+            &group_uses_large,
+        );
+        let (tips, pipette) = if use_large {
+            (&mut large_tips, &large)
+        } else {
+            (&mut small_tips, &small)
+        };
+        if held_tip.is_some_and(|held_large| held_large != use_large) {
+            return Err("Flex canonical fluid-path group crosses pipette classes".to_owned());
+        }
+
+        match step {
+            PipettingStep::Transfer {
+                source,
                 destination,
-                *mix_cycles,
-                f64::from(*mix_volume_ul),
-                pipette.flow_rate,
-            )
-            .map_err(protocol_error)?;
+                volume,
+                technique,
+                ..
+            } => {
+                if held_tip.is_none() {
+                    pick_up_flex_tip(&mut builder, tips, pipette)?;
+                    held_tip = Some(use_large);
+                }
+                execute_flex_transfer(
+                    &mut builder,
+                    pipette,
+                    physical(source)?,
+                    physical(destination)?,
+                    rendered_volume(volume),
+                    technique,
+                    &profile.techniques,
+                    &mut withdrawn,
+                    source,
+                )?;
+                if group.is_none() {
+                    builder
+                        .drop_tip_into_trash(pipette.id)
+                        .map_err(protocol_error)?;
+                    held_tip = None;
+                }
+            }
+            PipettingStep::Distribute {
+                source,
+                destinations,
+                volume_each,
+                fluid_path,
+                technique,
+                ..
+            } => {
+                let volume = rendered_volume(volume_each);
+                if group.is_some() {
+                    if held_tip.is_none() {
+                        pick_up_flex_tip(&mut builder, tips, pipette)?;
+                        held_tip = Some(use_large);
+                    }
+                    execute_flex_distribution(
+                        &mut builder,
+                        pipette,
+                        tips,
+                        physical(source)?,
+                        destinations,
+                        &physical,
+                        volume,
+                        technique,
+                        &profile.techniques,
+                        &mut withdrawn,
+                        source,
+                        false,
+                    )?;
+                } else if matches!(fluid_path, FluidPathPolicy::IsolatedDestinations) {
+                    for destination in destinations {
+                        pick_up_flex_tip(&mut builder, tips, pipette)?;
+                        execute_flex_transfer(
+                            &mut builder,
+                            pipette,
+                            physical(source)?,
+                            physical(destination)?,
+                            volume,
+                            technique,
+                            &profile.techniques,
+                            &mut withdrawn,
+                            source,
+                        )?;
+                        builder
+                            .drop_tip_into_trash(pipette.id)
+                            .map_err(protocol_error)?;
+                    }
+                } else {
+                    execute_flex_distribution(
+                        &mut builder,
+                        pipette,
+                        tips,
+                        physical(source)?,
+                        destinations,
+                        &physical,
+                        volume,
+                        technique,
+                        &profile.techniques,
+                        &mut withdrawn,
+                        source,
+                        true,
+                    )?;
+                }
+            }
+            PipettingStep::Mix {
+                targets,
+                cycles,
+                volume,
+                technique,
+                ..
+            } => {
+                let volume = rendered_volume(volume);
+                for target in targets {
+                    if held_tip.is_none() {
+                        pick_up_flex_tip(&mut builder, tips, pipette)?;
+                        held_tip = Some(use_large);
+                    }
+                    let (labware, well) = physical(target)?;
+                    execute_flex_mix(
+                        &mut builder,
+                        pipette,
+                        labware,
+                        &well,
+                        *cycles,
+                        volume,
+                        technique,
+                        &profile.techniques,
+                        &mut withdrawn,
+                        target,
+                    )?;
+                    if group.is_none() {
+                        builder
+                            .drop_tip_into_trash(pipette.id)
+                            .map_err(protocol_error)?;
+                        held_tip = None;
+                    }
+                }
+            }
+            PipettingStep::Barrier { reason, .. } => builder.comment(reason),
+        }
+    }
+    if let Some(held_large) = held_tip {
+        let pipette = if held_large { &large } else { &small };
         builder
             .drop_tip_into_trash(pipette.id)
             .map_err(protocol_error)?;
     }
-    builder.comment("Allocated setup complete. Preserve the reaction wells for the separately reviewed thermal-cycling task.");
+    builder.comment("Canonical PipettingProgramV1 complete.");
     render(builder)
 }
 
+// Rendering already has the exact task review but volume diagnostics expect the allocated task.
+// Conversions were proven during planning, so this narrow helper keeps rendering infallible
+// without duplicating decimal parsing logic in the protocol builder.
+fn rendered_volume(volume: &lab_compiler::procedure::Volume) -> f64 {
+    volume
+        .value()
+        .to_string()
+        .parse()
+        .expect("planning accepted this finite canonical volume")
+}
+
+fn rendered_step_volume(step: &PipettingStep) -> f64 {
+    match step {
+        PipettingStep::Transfer { volume, .. } | PipettingStep::Mix { volume, .. } => {
+            rendered_volume(volume)
+        }
+        PipettingStep::Distribute { volume_each, .. } => rendered_volume(volume_each),
+        PipettingStep::Barrier { .. } => 0.0,
+    }
+}
+
+fn pick_up_flex_tip(
+    builder: &mut FlexProtocolBuilder,
+    tips: &mut TipFeeder,
+    pipette: &Instrument,
+) -> Result<(), String> {
+    let (rack, well) = tips.next();
+    builder
+        .pick_up_tip(pipette.id, rack, &well)
+        .map_err(protocol_error)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_flex_transfer(
+    builder: &mut FlexProtocolBuilder,
+    pipette: &Instrument,
+    source: (LabwareId, String),
+    destination: (LabwareId, String),
+    volume: f64,
+    technique: &TransferTechnique,
+    calibration: &crate::backend::opentrons::flex::profile::FlexTechniqueCalibration,
+    withdrawn: &mut BTreeMap<(ProcedureLocalId, u32), f64>,
+    logical_source: &Location,
+) -> Result<(), String> {
+    let withdrawn_before = *withdrawn
+        .get(&(logical_source.vessel.clone(), logical_source.position))
+        .unwrap_or(&0.0);
+    let aspiration = match technique.aspiration {
+        AspirationStrategy::Liquid => None,
+        AspirationStrategy::TrackedLiquidSurface => Some(WellLocation::with_offset(
+            WellOrigin::Bottom,
+            0.0,
+            0.0,
+            calibration.tracked_offset_mm(withdrawn_before),
+        )),
+        _ => unreachable!("planning rejected an unsupported Flex aspiration strategy"),
+    };
+    builder
+        .aspirate(
+            pipette.id,
+            source.0,
+            &source.1,
+            volume,
+            pipette.flow_rate,
+            aspiration,
+        )
+        .map_err(protocol_error)?;
+    builder
+        .dispense(
+            pipette.id,
+            destination.0,
+            &destination.1,
+            volume,
+            pipette.flow_rate,
+            None,
+        )
+        .map_err(protocol_error)?;
+    *withdrawn
+        .entry((logical_source.vessel.clone(), logical_source.position))
+        .or_default() += volume;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_flex_distribution(
+    builder: &mut FlexProtocolBuilder,
+    pipette: &Instrument,
+    tips: &mut TipFeeder,
+    source: (LabwareId, String),
+    destinations: &[Location],
+    physical: &impl Fn(&Location) -> Result<(LabwareId, String), String>,
+    volume: f64,
+    technique: &TransferTechnique,
+    calibration: &crate::backend::opentrons::flex::profile::FlexTechniqueCalibration,
+    withdrawn: &mut BTreeMap<(ProcedureLocalId, u32), f64>,
+    logical_source: &Location,
+    manage_tips: bool,
+) -> Result<(), String> {
+    let working = pipette.max_volume.min(tips.tip_volume);
+    let per_load = (working / volume).floor().max(1.0) as usize;
+    for chunk in destinations.chunks(per_load) {
+        if manage_tips {
+            pick_up_flex_tip(builder, tips, pipette)?;
+        }
+        let withdrawn_before = *withdrawn
+            .get(&(logical_source.vessel.clone(), logical_source.position))
+            .unwrap_or(&0.0);
+        let aspiration = match technique.aspiration {
+            AspirationStrategy::Liquid => None,
+            AspirationStrategy::TrackedLiquidSurface => Some(WellLocation::with_offset(
+                WellOrigin::Bottom,
+                0.0,
+                0.0,
+                calibration.tracked_offset_mm(withdrawn_before),
+            )),
+            _ => unreachable!("planning rejected an unsupported Flex aspiration strategy"),
+        };
+        let load = volume * chunk.len() as f64;
+        builder
+            .aspirate(
+                pipette.id,
+                source.0,
+                &source.1,
+                load,
+                pipette.flow_rate,
+                aspiration,
+            )
+            .map_err(protocol_error)?;
+        for destination in chunk {
+            let (labware, well) = physical(destination)?;
+            builder
+                .dispense(pipette.id, labware, &well, volume, pipette.flow_rate, None)
+                .map_err(protocol_error)?;
+        }
+        *withdrawn
+            .entry((logical_source.vessel.clone(), logical_source.position))
+            .or_default() += load;
+        if manage_tips {
+            builder
+                .drop_tip_into_trash(pipette.id)
+                .map_err(protocol_error)?;
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_flex_mix(
+    builder: &mut FlexProtocolBuilder,
+    pipette: &Instrument,
+    labware: LabwareId,
+    well: &str,
+    cycles: u32,
+    volume: f64,
+    technique: &MixTechnique,
+    calibration: &crate::backend::opentrons::flex::profile::FlexTechniqueCalibration,
+    withdrawn: &mut BTreeMap<(ProcedureLocalId, u32), f64>,
+    logical_target: &Location,
+) -> Result<(), String> {
+    for _ in 0..cycles {
+        let withdrawn_before = *withdrawn
+            .get(&(logical_target.vessel.clone(), logical_target.position))
+            .unwrap_or(&0.0);
+        let aspiration = match technique.aspiration {
+            AspirationStrategy::Liquid => None,
+            AspirationStrategy::TrackedLiquidSurface => Some(WellLocation::with_offset(
+                WellOrigin::Bottom,
+                0.0,
+                0.0,
+                calibration.tracked_offset_mm(withdrawn_before),
+            )),
+            _ => unreachable!("planning rejected an unsupported Flex aspiration strategy"),
+        };
+        builder
+            .aspirate(
+                pipette.id,
+                labware,
+                well,
+                volume,
+                pipette.flow_rate,
+                aspiration,
+            )
+            .map_err(protocol_error)?;
+        builder
+            .dispense(pipette.id, labware, well, volume, pipette.flow_rate, None)
+            .map_err(protocol_error)?;
+    }
+    Ok(())
+}
+
 fn render_cycle(plan: &FlexTaskPlan) -> Result<String, String> {
-    let FlexTaskExecution::ThermalCycleGoldenGateReaction {
+    let FlexTaskExecution::ThermalProgram {
         volume_each_ul,
         lid_temperature_c,
         profile: thermal_profile,
@@ -594,12 +1224,12 @@ fn render_cycle(plan: &FlexTaskPlan) -> Result<String, String> {
         unreachable!("cycle renderer receives only a cycle plan")
     };
     let profile = &plan.deck;
-    let mut builder = stage_builder(profile, "Lab allocated Golden Gate thermal cycle");
+    let mut builder = stage_builder(profile, "Lab canonical thermal program");
     let thermocycler = builder
         .load_module::<Thermocycler>(FlexSlot::B1)
         .map_err(protocol_error)?;
     builder
-        .load_labware_on_module(&profile.deck.thermocycler.labware, thermocycler)
+        .load_labware_on_module(&profile.resources.work.labware, thermocycler)
         .map_err(protocol_error)?;
     builder.thermocycler_close_lid(thermocycler);
     if let Some(lid_temperature_c) = lid_temperature_c {
@@ -632,163 +1262,16 @@ fn render_cycle(plan: &FlexTaskPlan) -> Result<String, String> {
     }
     builder.thermocycler_deactivate_lid(thermocycler);
     builder.thermocycler_open_lid(thermocycler);
-    builder.comment("Allocated thermal cycle complete. Remove and label this reaction before another task reuses the staging wells.");
-    render(builder)
-}
-
-fn render_dilution(plan: &FlexTaskPlan) -> Result<String, String> {
-    let FlexTaskExecution::SerialDilution {
-        culture_wells,
-        dilution_wells,
-        culture_replicates,
-        serial_dilutions,
-        medium_volume_ul,
-        culture_volume_ul,
-        mix_cycles,
-        mix_volume_ul,
-        ..
-    } = &plan.execution
-    else {
-        unreachable!("dilution renderer receives only a dilution plan")
-    };
-    let profile = &plan.deck;
-    let stage = &profile.stages.plating;
-    let mut builder = stage_builder(profile, "Lab allocated serial dilution");
-    let thermocycler = builder
-        .load_module::<Thermocycler>(FlexSlot::B1)
-        .map_err(protocol_error)?;
-    let cultures = builder
-        .load_labware_on_module(&profile.deck.thermocycler.labware, thermocycler)
-        .map_err(protocol_error)?;
-    let dilution_plates = load_plates(
-        &mut builder,
-        &stage.dilution_plate.labware,
-        &stage.dilution_plate.slots,
-    )?;
-    let media = builder
-        .load_labware(&stage.media_rack.labware, slot(&stage.media_rack.slot))
-        .map_err(protocol_error)?;
-    let mut small_tips = TipFeeder::load(&mut builder, &stage.small_tips)?;
-    let mut large_tips = TipFeeder::load(&mut builder, &stage.large_tips)?;
-    let small = load_instrument(&mut builder, &profile.instruments.small)?;
-    let large = load_instrument(&mut builder, &profile.instruments.large)?;
-    builder
-        .thermocycler_set_block_temperature(thermocycler, 4.0, None, None)
-        .map_err(protocol_error)?;
-    builder
-        .thermocycler_wait_for_block_temperature(thermocycler)
-        .map_err(protocol_error)?;
-    builder.thermocycler_open_lid(thermocycler);
-
-    // `SharedSourceNoReentry` lets one loaded path serve several destinations but forbids
-    // returning to the source after a destination is touched, so each aspirate takes a fresh tip.
-    let working = large.max_volume.min(large_tips.tip_volume);
-    let wells_per_aspirate = ((working / f64::from(*medium_volume_ul)).floor() as usize).max(1);
-    // The canonical program requires aspiration to follow the medium's falling surface. The
-    // compiler owns that trajectory: every offset below is computed from the reviewed plan and the
-    // profile's measured geometry, so the run does not consult the instrument for liquid state.
-    let mut withdrawn = 0.0;
-    for chunk in dilution_wells.chunks(wells_per_aspirate) {
-        let (rack, well) = large_tips.next();
-        builder
-            .pick_up_tip(large.id, rack, &well)
-            .map_err(protocol_error)?;
-        let load = f64::from(*medium_volume_ul) * chunk.len() as f64;
-        let offset = plan.deck.techniques.tracked_offset_mm(withdrawn);
-        withdrawn += load;
-        builder
-            .aspirate(
-                large.id,
-                media,
-                &stage.media_rack.medium_well,
-                load,
-                large.flow_rate,
-                Some(WellLocation::with_offset(
-                    WellOrigin::Bottom,
-                    0.0,
-                    0.0,
-                    offset,
-                )),
-            )
-            .map_err(protocol_error)?;
-        for destination in chunk {
-            builder
-                .dispense(
-                    large.id,
-                    dilution_plates[destination.plate],
-                    &destination.well,
-                    f64::from(*medium_volume_ul),
-                    large.flow_rate,
-                    None,
-                )
-                .map_err(protocol_error)?;
-        }
-        builder
-            .drop_tip_into_trash(large.id)
-            .map_err(protocol_error)?;
-    }
-
-    // Each biological replicate is an independent dilution series, and the steps of one series
-    // share a fluid path group, so one tip carries a replicate from its culture to its last
-    // dilution. Replicates never share a tip.
-    for (replicate, culture_well) in culture_wells.iter().enumerate() {
-        let (rack, well) = small_tips.next();
-        builder
-            .pick_up_tip(small.id, rack, &well)
-            .map_err(protocol_error)?;
-        let mut source = (cultures, culture_well.clone());
-        for dilution in 0..*serial_dilutions {
-            let destination = &dilution_wells[dilution * culture_replicates + replicate];
-            let target = (dilution_plates[destination.plate], destination.well.clone());
-            builder
-                .aspirate(
-                    small.id,
-                    source.0,
-                    &source.1,
-                    f64::from(*culture_volume_ul),
-                    small.flow_rate,
-                    None,
-                )
-                .map_err(protocol_error)?;
-            builder
-                .dispense(
-                    small.id,
-                    target.0,
-                    &target.1,
-                    f64::from(*culture_volume_ul),
-                    small.flow_rate,
-                    None,
-                )
-                .map_err(protocol_error)?;
-            builder
-                .mix(
-                    small.id,
-                    target.0,
-                    &target.1,
-                    *mix_cycles,
-                    f64::from(*mix_volume_ul),
-                    small.flow_rate,
-                )
-                .map_err(protocol_error)?;
-            source = target;
-        }
-        builder
-            .drop_tip_into_trash(small.id)
-            .map_err(protocol_error)?;
-    }
-    builder.comment("Allocated dilution complete. This protocol performs no plating; preserve the final dilution for its downstream Procedure task.");
+    builder.comment("Canonical ThermalProgramV1 complete. Remove and label the samples before another task reuses the staging wells.");
     render(builder)
 }
 
 fn render_manual(plan: &FlexTaskPlan) -> Doc {
     let title = match &plan.execution {
-        FlexTaskExecution::SetupGoldenGateReaction { artifact, .. } => {
-            format!("Set up Golden Gate reaction for {artifact}")
+        FlexTaskExecution::PipettingProgram { title, .. } => title.clone(),
+        FlexTaskExecution::ThermalProgram { artifact, .. } => {
+            format!("Run canonical thermal program for {artifact}")
         }
-        FlexTaskExecution::ThermalCycleGoldenGateReaction { artifact, .. } => {
-            format!("Thermal cycle Golden Gate reaction for {artifact}")
-        }
-        FlexTaskExecution::SerialDilution { .. } => "Serially dilute recovered culture".to_owned(),
     };
     let mut doc = Doc::new(DocMeta::new(
         title,
@@ -832,61 +1315,49 @@ fn render_manual(plan: &FlexTaskPlan) -> Doc {
         ],
     );
     doc.heading(1, [text("Run this task")]);
+    doc.para_text("Stage every upstream input at the logical-to-physical locations in this task manifest. Each Procedure is a separate run; preceding files may use different well coordinates.");
     doc.para([
         text("Import "),
         code("automation_protocol.json"),
         text(" into the Opentrons App, inspect its generated deck map and commands, and confirm that the staged material identities match this reviewed task manifest."),
     ]);
     match &plan.execution {
-        FlexTaskExecution::SetupGoldenGateReaction {
-            reaction_wells,
-            additions,
+        FlexTaskExecution::PipettingProgram {
+            program,
+            locations,
+            sources,
             ..
         } => {
             doc.para_text(format!(
-                "Load the exact sources below and preserve reaction wells {} for the separate thermal-cycling node.",
-                reaction_wells.join(", ")
+                "Run the {} canonical liquid operations in manifest order. The operation label is descriptive and does not select a lowering path.",
+                program.steps.len()
             ));
-            doc.table(
-                [
-                    Column::left("Role"),
-                    Column::left("Material"),
-                    Column::left("Physical source"),
-                    Column::left("Well"),
-                    Column::right("Volume / reaction"),
-                ],
-                additions.iter().map(|addition| {
-                    vec![
-                        vec![text(&addition.placement.role)],
-                        vec![code(&addition.placement.symbol)],
-                        vec![code(material_source(&addition.placement.source))],
-                        vec![code(&addition.placement.source_well)],
-                        vec![text(format!("{} µL", addition.volume_ul))],
-                    ]
-                }),
-            );
-        }
-        FlexTaskExecution::ThermalCycleGoldenGateReaction { reaction_wells, .. } => {
+            if !sources.is_empty() {
+                doc.table(
+                    [
+                        Column::left("Material"),
+                        Column::left("Physical source"),
+                        Column::left("Allocated wells"),
+                    ],
+                    sources.iter().map(|source| {
+                        vec![
+                            vec![code(&source.binding.symbol)],
+                            vec![code(material_source(&source.binding.source))],
+                            vec![code(source.wells.join(", "))],
+                        ]
+                    }),
+                );
+            }
             doc.para_text(format!(
-                "Confirm that the upstream setup task left only this reaction in wells {}. Remove and label it after the run.",
-                reaction_wells.join(", ")
+                "The reviewed manifest pins {} logical vessels to {} exact physical vessel mappings.",
+                program.vessels.len(),
+                locations.values().map(Vec::len).sum::<usize>()
             ));
         }
-        FlexTaskExecution::SerialDilution {
-            culture_source,
-            culture_wells,
-            medium,
-            dilution_wells,
-            ..
-        } => {
+        FlexTaskExecution::ThermalProgram { reaction_wells, .. } => {
             doc.para_text(format!(
-                "Stage {} in thermocycler wells {}; load {} from {} in media-rack well {}; preserve dilution wells {} for the downstream task. No agar plate is used.",
-                value_source(culture_source),
-                culture_wells.join(", "),
-                medium.symbol,
-                material_source(&medium.source),
-                medium.source_well,
-                well_list(dilution_wells)
+                "Confirm the canonical program samples are in wells {}. Remove and label them after the run.",
+                reaction_wells.join(", ")
             ));
         }
     }
@@ -991,61 +1462,6 @@ impl TipFeeder {
     }
 }
 
-fn transfer(
-    builder: &mut FlexProtocolBuilder,
-    tips: &mut TipFeeder,
-    instrument: &Instrument,
-    source: (LabwareId, &str),
-    destination: (LabwareId, &str),
-    volume: f64,
-    mix_after: Option<(u32, f64)>,
-) -> Result<(), String> {
-    let (rack, well) = tips.next();
-    builder
-        .pick_up_tip(instrument.id, rack, &well)
-        .map_err(protocol_error)?;
-    let working = instrument.max_volume.min(tips.tip_volume);
-    let chunks = (volume / working).ceil().max(1.0);
-    let chunk_volume = volume / chunks;
-    for _ in 0..chunks as usize {
-        builder
-            .aspirate(
-                instrument.id,
-                source.0,
-                source.1,
-                chunk_volume,
-                instrument.flow_rate,
-                None,
-            )
-            .map_err(protocol_error)?;
-        builder
-            .dispense(
-                instrument.id,
-                destination.0,
-                destination.1,
-                chunk_volume,
-                instrument.flow_rate,
-                None,
-            )
-            .map_err(protocol_error)?;
-    }
-    if let Some((repetitions, mix_volume)) = mix_after {
-        builder
-            .mix(
-                instrument.id,
-                destination.0,
-                destination.1,
-                repetitions,
-                mix_volume,
-                instrument.flow_rate,
-            )
-            .map_err(protocol_error)?;
-    }
-    builder
-        .drop_tip_into_trash(instrument.id)
-        .map_err(protocol_error)
-}
-
 fn working_volume_ul(pipette: &Pipette, tips: &TipRacks) -> Result<f64, String> {
     let name = FlexPipetteName::parse(&pipette.model)
         .expect("profile validation accepted only Flex pipette models");
@@ -1090,24 +1506,4 @@ fn material_source(source: &SelectedMaterialSource) -> String {
             format!("Method choice output {choice}")
         }
     }
-}
-
-fn value_source(source: &PlanningValueSource) -> String {
-    match source {
-        PlanningValueSource::ChoiceInput { input } => format!("choice input {input}"),
-        PlanningValueSource::ChoiceOutput { choice, output } => {
-            format!("Method choice {choice} output {output}")
-        }
-        PlanningValueSource::TaskOutput { task, output } => {
-            format!("Procedure task {task} output {output}")
-        }
-    }
-}
-
-fn well_list(wells: &[Well]) -> String {
-    wells
-        .iter()
-        .map(|well| format!("plate {} {}", well.plate + 1, well.well))
-        .collect::<Vec<_>>()
-        .join(", ")
 }

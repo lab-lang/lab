@@ -1,35 +1,32 @@
 use crate::procedure::{
-    DispenseStrategy, FluidPathPolicy, Location, MaterialInput, MaterialOutput,
-    PipettingConstraints, PipettingProgramV1, PipettingStep, ProcedureProgram, TransferTechnique,
-    Vessel, VesselRole, Volume,
+    DispenseStrategy, FluidPathPolicy, Location, MaterialOutput, PipettingConstraints,
+    PipettingProgramV1, PipettingStep, ProcedureProgram, TransferTechnique, Vessel, VesselRole,
+    Volume,
 };
 
-use super::ProcedureTaskInstance;
-use super::view::{TaskView, procedure_id};
+use crate::procedure::ProcedureProgramBuildContext;
+use crate::procedure::context::procedure_id;
 
 const MICROLITRE: &str = "http://qudt.org/vocab/unit/MicroL";
 
-pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedureProgram, String> {
-    if task.input_count != 1 || task.outputs.len() != 1 {
+pub(super) fn normalize(
+    task: &ProcedureProgramBuildContext<'_>,
+) -> Result<ProcedureProgram, String> {
+    if task.input_count != 2 || task.outputs.len() != 1 {
         return Err(format!(
-            "the selective-plating contract requires one diluted-culture input and one plate output, found {} inputs and {} outputs",
+            "the selective-plating contract requires diluted-culture and poured-medium inputs and one plate output, found {} inputs and {} outputs",
             task.input_count,
             task.outputs.len()
         ));
     }
-    let view = TaskView::new(task);
-    view.require_material_roles(&["selection"])?;
-    let selection = view.text_parameter("selection")?;
-    let selection_material = view.one_material("selection")?;
-    if selection_material.symbol != selection {
-        return Err("parameter `selection` does not match its material input".to_owned());
-    }
-    let plating_replicates = positive(&view, "replicates", None)?;
-    let culture_replicates = positive(&view, "culture_replicates", None)?;
-    let serial_dilutions = positive(&view, "serial_dilutions", None)?;
-    let medium_volume = positive(&view, "medium_volume_ul", Some(MICROLITRE))?;
-    let culture_volume = positive(&view, "culture_volume_ul", Some(MICROLITRE))?;
-    let colony_volume = positive(&view, "colony_volume_ul", Some(MICROLITRE))?;
+    let view = task;
+    view.require_material_roles(&[])?;
+    let plating_replicates = positive(view, "replicates", None)?;
+    let culture_replicates = positive(view, "culture_replicates", None)?;
+    let serial_dilutions = positive(view, "serial_dilutions", None)?;
+    let medium_volume = positive(view, "medium_volume_ul", Some(MICROLITRE))?;
+    let culture_volume = positive(view, "culture_volume_ul", Some(MICROLITRE))?;
+    let colony_volume = positive(view, "colony_volume_ul", Some(MICROLITRE))?;
     let dilution_volume = medium_volume
         .checked_add(culture_volume)
         .ok_or_else(|| "dilution volume arithmetic overflows".to_owned())?;
@@ -51,7 +48,6 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         ));
     }
 
-    let selection_id = procedure_id(selection_material.id.as_str())?;
     let output = procedure_id(task.outputs[0].as_str())?;
     let agar = procedure_id("selective-agar")?;
     let spot_count = culture_replicates
@@ -114,8 +110,8 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     }
     vessels.push(Vessel {
         id: agar,
-        role: VesselRole::MaterialProduct {
-            material: selection_id.clone(),
+        role: VesselRole::InputOutput {
+            input: 1,
             output: output.clone(),
         },
         positions: spot_count,
@@ -125,7 +121,7 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
         temperature: None,
     });
     let program = PipettingProgramV1::new(
-        vec![MaterialInput { id: selection_id }],
+        vec![],
         vec![MaterialOutput { id: output }],
         vessels,
         steps,
@@ -136,7 +132,11 @@ pub(super) fn normalize(task: &ProcedureTaskInstance<'_>) -> Result<ProcedurePro
     Ok(ProcedureProgram::from_pipetting(&program))
 }
 
-fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u32, String> {
+fn positive(
+    view: &ProcedureProgramBuildContext<'_>,
+    name: &str,
+    unit: Option<&str>,
+) -> Result<u32, String> {
     let value = view.integer_parameter(name, unit)?;
     if value == 0 {
         return Err(format!("parameter `{name}` must be greater than zero"));
@@ -146,4 +146,13 @@ fn positive(view: &TaskView<'_, '_>, name: &str, unit: Option<&str>) -> Result<u
 
 fn volume(value: u32) -> Result<Volume, String> {
     Volume::parse_microlitres(value.to_string()).map_err(|error| error.to_string())
+}
+
+pub(super) fn registrations() -> Vec<crate::procedure::ProcedureProgramBuilderRegistration> {
+    use crate::procedure::vocabulary::*;
+    vec![crate::procedure::builder::registration(
+        PLATE_DILUTED_CULTURE_BUILDER_V1,
+        PIPETTING_PROGRAM_V1,
+        normalize,
+    )]
 }

@@ -15,7 +15,7 @@ from lab.units import OD600, C, minutes, mM, rcf
 
 module = lab.Module("competence.protocol", doc=__doc__)
 
-cold_cacl2 = Buffer.buy(identity="SIGMA-C1016", concentration=100 * mM)
+cold_cacl2 = Buffer.buy(supplier_identity="SIGMA-C1016", concentration=100 * mM)
 
 DH5a_competent = Chassis.build(
     doc="A cloning strain grown up and washed into competence.",
@@ -24,7 +24,7 @@ DH5a_competent = Chassis.build(
 
 
 @lab.workflow
-def prepare(wf: lab.Context) -> Material[competent[Chassis]]:
+def main(wf: lab.Context) -> Material[competent[Chassis]]:
     """Grow, chill, pellet, and wash a chassis into competence."""
     cells = wf.perform(lab.realize(DH5a_competent))
     wash = wf.perform(lab.provision(cold_cacl2))

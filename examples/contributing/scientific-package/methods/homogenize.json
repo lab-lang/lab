@@ -1,0 +1,196 @@
+{
+  "schema_version": "lab.method-catalog.v2",
+  "methods": [
+    {
+      "id": "https://example.org/method#homogenize",
+      "refines": "contribution_example.science.homogenize",
+      "inputs": [
+        {
+          "name": "sample",
+          "port_type": {
+            "kind": "material_as_supplied"
+          }
+        }
+      ],
+      "tasks": [
+        {
+          "id": "homogenize",
+          "operation": "https://example.org/procedure#Homogenize",
+          "inputs": [
+            {
+              "kind": "input",
+              "input": "sample"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "prepared",
+              "port_type": {
+                "kind": "material_as_requested"
+              }
+            }
+          ],
+          "parameters": [
+            {
+              "id": "sample_volume",
+              "property_kind": "https://example.org/parameter#sample_volume",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "real",
+                      "value": "30"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "mix_volume",
+              "property_kind": "https://example.org/parameter#mix_volume",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "real",
+                      "value": "10"
+                    },
+                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                  }
+                }
+              }
+            },
+            {
+              "id": "mix_cycles",
+              "property_kind": "https://example.org/parameter#mix_cycles",
+              "value": {
+                "kind": "literal",
+                "value": {
+                  "kind": "scalar",
+                  "value": {
+                    "value": {
+                      "type": "integer",
+                      "value": "3"
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          "execution": {
+            "kind": "template",
+            "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
+            "body": {
+              "outputs": [
+                {
+                  "id": {
+                    "$lab": {
+                      "kind": "output",
+                      "id": "prepared"
+                    }
+                  }
+                }
+              ],
+              "vessels": [
+                {
+                  "id": "sample",
+                  "role": {
+                    "kind": "procedure_input",
+                    "input": 0
+                  },
+                  "positions": 1,
+                  "initial_volume_each": {
+                    "$lab": {
+                      "kind": "scalar",
+                      "id": "sample_volume"
+                    }
+                  }
+                },
+                {
+                  "id": "prepared",
+                  "role": {
+                    "kind": "product",
+                    "output": {
+                      "$lab": {
+                        "kind": "output",
+                        "id": "prepared"
+                      }
+                    }
+                  },
+                  "positions": 1
+                }
+              ],
+              "steps": [
+                {
+                  "kind": "transfer",
+                  "id": "move-sample",
+                  "source": {
+                    "vessel": "sample",
+                    "position": 0
+                  },
+                  "destination": {
+                    "vessel": "prepared",
+                    "position": 0
+                  },
+                  "volume": {
+                    "$lab": {
+                      "kind": "scalar",
+                      "id": "sample_volume"
+                    }
+                  },
+                  "fluid_path": "isolated_destinations",
+                  "fluid_path_group": "sample-path"
+                },
+                {
+                  "kind": "mix",
+                  "id": "mix-sample",
+                  "targets": [
+                    {
+                      "vessel": "prepared",
+                      "position": 0
+                    }
+                  ],
+                  "cycles": {
+                    "$lab": {
+                      "kind": "integer",
+                      "id": "mix_cycles"
+                    }
+                  },
+                  "volume": {
+                    "$lab": {
+                      "kind": "scalar",
+                      "id": "mix_volume"
+                    }
+                  },
+                  "fluid_path": "isolated_destinations",
+                  "fluid_path_group": "sample-path"
+                }
+              ]
+            },
+            "policy": {
+              "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+              "accepted_control_modes": [
+                "https://sbol.io/ns/facility#ReviewedFileControl"
+              ]
+            }
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "prepared",
+          "source": {
+            "kind": "task_output",
+            "task": "homogenize",
+            "output": "prepared"
+          }
+        }
+      ]
+    }
+  ]
+}

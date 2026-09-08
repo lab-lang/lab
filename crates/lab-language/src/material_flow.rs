@@ -69,7 +69,11 @@ impl MaterialShapes {
     /// A record declared elsewhere still has material inside it, and a caller
     /// that cannot see where would either miss a leak or refuse a program that
     /// never had one.
-    fn new(module: &CheckedModule, environment: &SemanticEnvironment) -> Self {
+    fn new(
+        module: &CheckedModule,
+        environment: &SemanticEnvironment,
+        library: &crate::standard_library::StandardLibrary,
+    ) -> Self {
         let mut shapes = Self::from_module(module);
         for import in &module.imports {
             let Some(interface) = environment.module(&import.module) else {
@@ -90,6 +94,31 @@ impl MaterialShapes {
                         })
                         .collect(),
                 );
+            }
+        }
+        // Native records expose the same material ownership as authored records. Read their
+        // declared fields from the catalog instead of special-casing individual result types.
+        for native in library.native_modules().filter(|native| {
+            native.prelude
+                || module
+                    .imports
+                    .iter()
+                    .any(|import| import.module == native.path)
+        }) {
+            for record in &native.types {
+                shapes
+                    .data
+                    .entry(record.name.to_owned())
+                    .or_insert_with(|| {
+                        record
+                            .fields
+                            .iter()
+                            .map(|(name, ty)| CheckedField {
+                                name: (*name).to_owned(),
+                                r#type: crate::type_system::to_checked_type(ty),
+                            })
+                            .collect()
+                    });
             }
         }
         shapes
@@ -194,7 +223,19 @@ pub(crate) fn verify_module(
     module: &CheckedModule,
     environment: &SemanticEnvironment,
 ) -> Result<(), MaterialFlowError> {
-    let shapes = MaterialShapes::new(module, environment);
+    verify_module_with_library(
+        module,
+        environment,
+        &crate::standard_library::StandardLibrary::bundled(),
+    )
+}
+
+pub(crate) fn verify_module_with_library(
+    module: &CheckedModule,
+    environment: &SemanticEnvironment,
+    library: &crate::standard_library::StandardLibrary,
+) -> Result<(), MaterialFlowError> {
+    let shapes = MaterialShapes::new(module, environment, library);
     for declaration in &module.declarations {
         let CheckedDeclaration::Workflow {
             name,
@@ -322,7 +363,8 @@ impl<'a> MaterialFlowAnalyzer<'a> {
                                 &statement_location,
                                 format!(
                                     "action '{}' attempts to copy physical operand '{}'",
-                                    action.operation, argument.name
+                                    action.display_name(),
+                                    argument.name
                                 ),
                             ));
                         }
@@ -741,6 +783,15 @@ mod tests {
                 arguments: Vec::new(),
             }],
         }
+    }
+
+    #[test]
+    fn native_record_fields_preserve_material_ownership() {
+        let source = "use std.bio.designs\nuse std.lab.plasmid\nworkflow check(sample: Material<Plasmid>) -> List<Evidence>:\n  result <- sequence sample\n  <- dispose result.material\n  return result.evidence\n";
+        compile_module(source).unwrap();
+        let error =
+            compile_module(&source.replace("  <- dispose result.material\n", "")).unwrap_err();
+        assert!(error.to_string().contains("result.material"), "{error}");
     }
 
     #[test]

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -15,6 +17,25 @@ SPEC.loader.exec_module(comparison)
 
 
 class ComparisonNormalizationTests(unittest.TestCase):
+    def test_canonical_comparison_requires_all_four_transformation_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for index, name in enumerate(comparison.TRANSFORMATION_OPERATIONS):
+                task = root / "tasks" / str(index)
+                task.mkdir(parents=True)
+                (task / "invocation_manifest.json").write_text(
+                    json.dumps(
+                        {"task": {"operation": "https://example.org/procedure#" + name}}
+                    )
+                )
+            paths = comparison.transformation_manifests(root)
+            self.assertEqual(len(paths), 4)
+            paths[2].unlink()
+            with self.assertRaisesRegex(
+                comparison.ComparisonError, "AddRecoveryMedium"
+            ):
+                comparison.transformation_manifests(root)
+
     def test_sbol2_normalization_removes_only_the_pinned_terminal_version(self) -> None:
         value = {
             "product": "https://SBOL2Build.org/composite_plasmid_1/1",
@@ -178,9 +199,7 @@ Dispensing 2.0 uL into A1 of NEST 96 Well Plate 100 µL PCR Full Skirt on Thermo
         self.assertEqual(
             comparison.trace_hardware(trace),
             {
-                "thermocycler_labware": [
-                    "NEST 96 Well Plate 100 µL PCR Full Skirt"
-                ],
+                "thermocycler_labware": ["NEST 96 Well Plate 100 µL PCR Full Skirt"],
                 "temperature_module_generations": [1],
                 "thermocycler_module_generations": [1],
             },

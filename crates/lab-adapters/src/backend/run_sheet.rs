@@ -9,6 +9,8 @@
 use crate::backend::document::{Block, Column, Doc, DocMeta, code, text};
 use crate::backend::typst;
 
+pub use lab_runfmt::ManualRunStep as RunStep;
+
 /// Everything a manual run sheet says.
 pub struct RunSheet {
     /// The package whose entry workflow the plan runs.
@@ -18,18 +20,6 @@ pub struct RunSheet {
     pub facility: String,
     /// The manual steps, in the order the plan performs them.
     pub steps: Vec<RunStep>,
-}
-
-/// One manual step of the plan.
-pub struct RunStep {
-    /// What the operator does, e.g. "Centrifuge".
-    pub title: String,
-    /// The exact Procedure operation the step performs.
-    pub operation: String,
-    /// The asset the step uses, as display text.
-    pub asset: String,
-    /// Display-ready parameter names and values.
-    pub parameters: Vec<(String, String)>,
 }
 
 /// The style sheet a rendered run sheet imports, written beside the source as

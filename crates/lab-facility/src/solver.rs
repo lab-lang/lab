@@ -3,12 +3,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use lab_adapter_api::{AdapterProgramFeasibility, validate_adapter_profile_record};
 use lab_capability::{
     AbsoluteIri, ControlMode, MethodId, ProcedureImplementationId, PropertyConstraint,
     PropertyValue, QualificationLevel, ScalarValue, UnitIri,
 };
 use lab_compiler::method::LocalId;
-use lab_compiler::procedure::BindingScope;
+use lab_compiler::procedure::{BindingScope, ProcedureContractRegistry};
 use lab_inventory::{
     FacilityAsset, FacilityAssetError, FacilityCapabilityOffering, FacilityCapabilityParameter,
     FacilityScalarValue, InventorySnapshot,
@@ -29,7 +30,8 @@ use lab_compiler::planning::{
 };
 
 use crate::{
-    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, BoundProcedureImplementation,
+    ADAPTER_BINDINGS_SCHEMA_VERSION, AdapterBindingSnapshot, BoundCapabilityOffering,
+    BoundCapabilityParameter, BoundCapabilityParameterValue, BoundProcedureImplementation,
     MaterialLotCandidates, MaterialLotInventory, MaterialLotInventoryValidationError,
     ResolvedAdapterBinding,
 };
@@ -108,6 +110,16 @@ pub enum FacilityPlanningError {
     )]
     WrongAdapterSchema { found: String },
     #[error(
+        "adapter bindings were supplied without the adapter feasibility implementation that validated their concrete Procedure programs"
+    )]
+    MissingAdapterFeasibility,
+    #[error("invalid adapter binding for asset `{asset}` and driver `{driver}`: {message}")]
+    InvalidAdapterBinding {
+        asset: String,
+        driver: String,
+        message: String,
+    },
+    #[error(
         "adapter bindings freeze inventory `{binding_hash}` facility `{binding_facility}`, but planning uses inventory `{inventory_hash}` facility `{inventory_facility}`"
     )]
     AdapterInventoryMismatch {
@@ -157,9 +169,14 @@ pub fn solve_facility_planning(
     inventory: &InventorySnapshot,
     material_inventory: &MaterialLotInventory,
     adapters: Option<&AdapterBindingSnapshot>,
+    adapter_feasibility: Option<&dyn AdapterProgramFeasibility>,
+    contracts: &ProcedureContractRegistry,
     policy: FacilityPlanningPolicy,
 ) -> Result<FacilityPlanningSolution, FacilityPlanningError> {
-    problem.validate()?;
+    problem.validate(contracts)?;
+    if adapters.is_some() && adapter_feasibility.is_none() {
+        return Err(FacilityPlanningError::MissingAdapterFeasibility);
+    }
     validate_adapter_snapshot(inventory, adapters)?;
     validate_material_inventory(inventory, material_inventory)?;
     let pins = resolve_method_pins(problem, &policy)?;
@@ -180,6 +197,8 @@ pub fn solve_facility_planning(
                 material_inventory,
                 &assets,
                 adapters,
+                adapter_feasibility,
+                contracts,
                 policy.adapter_requirement,
                 &policy.asset_pins,
             ) {
@@ -208,6 +227,7 @@ pub fn solve_facility_planning(
                 selection.push(SelectedMethod {
                     choice: choice.id.clone(),
                     source_operation: choice.source_operation.clone(),
+                    source_intent: choice.source_intent.clone(),
                     method: candidate.method.clone(),
                     tasks: candidate.tasks.clone(),
                 });
@@ -262,11 +282,17 @@ struct RequirementCandidate {
     binding: SelectedRequirementBinding,
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "allocation keeps independent policy and capability inputs explicit"
+)]
 fn allocate_method(
     candidate: &PlanningMethodCandidate,
     material_inventory: &MaterialLotInventory,
     assets: &[FacilityAsset],
     adapters: Option<&AdapterBindingSnapshot>,
+    adapter_feasibility: Option<&dyn AdapterProgramFeasibility>,
+    contracts: &ProcedureContractRegistry,
     adapter_requirement: AdapterRequirement,
     asset_pins: &[AssetPin],
 ) -> MethodAllocation {
@@ -287,6 +313,8 @@ fn allocate_method(
                 requirement,
                 assets,
                 adapters,
+                adapter_feasibility,
+                contracts,
                 adapter_requirement,
                 asset_pins,
             );
@@ -563,11 +591,17 @@ fn rejected_material(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "allocation keeps independent policy and capability inputs explicit"
+)]
 fn requirement_candidates(
     task: &PlanningProcedureTask,
     requirement: &PlanningCapabilityRequirement,
     assets: &[FacilityAsset],
     adapters: Option<&AdapterBindingSnapshot>,
+    adapter_feasibility: Option<&dyn AdapterProgramFeasibility>,
+    contracts: &ProcedureContractRegistry,
     adapter_requirement: AdapterRequirement,
     asset_pins: &[AssetPin],
 ) -> (Vec<RequirementCandidate>, Vec<PlanningRejectedOffering>) {
@@ -617,8 +651,10 @@ fn requirement_candidates(
                     Err(reason) => reasons.push(reason),
                 }
             }
-            let adapter_candidates = matching_adapters(
+            let (adapter_candidates, adapter_rejections) = matching_adapters(
                 adapters,
+                adapter_feasibility,
+                contracts,
                 task,
                 &requirement.capability_kind,
                 asset,
@@ -628,7 +664,11 @@ fn requirement_candidates(
                 && offering.control_mode.iri() != ControlMode::Manual.iri()
                 && adapter_candidates.is_empty()
             {
-                reasons.push(PlanningCandidateRejectionReason::MissingPlanningAdapter);
+                if adapter_rejections.is_empty() {
+                    reasons.push(PlanningCandidateRejectionReason::MissingPlanningAdapter);
+                } else {
+                    reasons.extend(adapter_rejections);
+                }
             }
             if reasons.is_empty() {
                 let adapter_candidates = if adapter_candidates.is_empty() {
@@ -798,23 +838,35 @@ fn property_value(parameter: &FacilityCapabilityParameter) -> Option<PropertyVal
 
 fn matching_adapters(
     adapters: Option<&AdapterBindingSnapshot>,
+    adapter_feasibility: Option<&dyn AdapterProgramFeasibility>,
+    contracts: &ProcedureContractRegistry,
     task: &PlanningProcedureTask,
     capability_kind: &lab_capability::CapabilityKind,
     asset: &FacilityAsset,
     offering: &FacilityCapabilityOffering,
-) -> Vec<SelectedAdapter> {
+) -> (Vec<SelectedAdapter>, Vec<PlanningCandidateRejectionReason>) {
     let Some(adapters) = adapters else {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     };
-    let mut candidates = adapters
+    let mut candidates = Vec::new();
+    let mut rejections = Vec::new();
+    for binding in adapters
         .bindings
         .iter()
         .filter(|binding| binding.asset == asset.identity.as_str())
         .filter(|binding| adapter_supports(binding, offering.identity.as_str()))
-        .flat_map(|binding| {
-            selected_adapters(binding, task, capability_kind, offering.control_mode.iri())
-        })
-        .collect::<Vec<_>>();
+    {
+        let (mut selected, mut rejected) = selected_adapters(
+            binding,
+            adapter_feasibility,
+            contracts,
+            task,
+            capability_kind,
+            offering.control_mode.iri(),
+        );
+        candidates.append(&mut selected);
+        rejections.append(&mut rejected);
+    }
     candidates.sort_by(|left, right| {
         (
             &left.driver,
@@ -827,7 +879,7 @@ fn matching_adapters(
                 &right.profile_path,
             ))
     });
-    candidates
+    (candidates, rejections)
 }
 
 fn adapter_supports(binding: &ResolvedAdapterBinding, offering: &str) -> bool {
@@ -839,48 +891,68 @@ fn adapter_supports(binding: &ResolvedAdapterBinding, offering: &str) -> bool {
 
 fn selected_adapters(
     binding: &ResolvedAdapterBinding,
+    adapter_feasibility: Option<&dyn AdapterProgramFeasibility>,
+    contracts: &ProcedureContractRegistry,
     task: &PlanningProcedureTask,
     capability_kind: &lab_capability::CapabilityKind,
     control_mode: &str,
-) -> Vec<SelectedAdapter> {
+) -> (Vec<SelectedAdapter>, Vec<PlanningCandidateRejectionReason>) {
     let Some(program) = &task.program else {
-        return vec![selected_adapter(binding, None)];
+        return (Vec::new(), Vec::new());
     };
-    binding
+    let required_features = program
+        .validate(contracts)
+        .expect("a validated planning problem contains valid Procedure programs")
+        .features();
+    let mut candidates = Vec::new();
+    let mut rejections = Vec::new();
+    for implementation in binding
         .procedure_implementations
         .iter()
         .filter(|implementation| implementation.contract == program.contract)
-        .filter(|implementation| implementation.operations.contains(&task.operation))
         .filter(|implementation| implementation.capability_kinds.contains(capability_kind))
         .filter(|implementation| implementation.services.planning)
+        .filter(|implementation| required_features.is_subset(&implementation.program_features))
         .filter(|implementation| {
             implementation
                 .control_modes
                 .iter()
                 .any(|mode| mode.iri() == control_mode)
         })
-        .map(|implementation| selected_adapter(binding, Some(implementation)))
-        .collect()
+    {
+        if let Some(feasibility) = adapter_feasibility
+            && let Err(message) = feasibility.check_program(
+                &binding.driver,
+                &implementation.id,
+                &binding.profile,
+                task,
+                contracts,
+            )
+        {
+            rejections.push(PlanningCandidateRejectionReason::AdapterProgramInfeasible {
+                adapter: binding.driver.clone(),
+                implementation: implementation.id.clone(),
+                message,
+            });
+            continue;
+        }
+        candidates.push(selected_adapter(binding, implementation));
+    }
+    (candidates, rejections)
 }
 
 fn selected_adapter(
     binding: &ResolvedAdapterBinding,
-    implementation: Option<&BoundProcedureImplementation>,
+    implementation: &BoundProcedureImplementation,
 ) -> SelectedAdapter {
     SelectedAdapter {
         driver: binding.driver.clone(),
-        procedure_implementation: implementation.map(|value| value.id.clone()),
+        procedure_implementation: Some(implementation.id.clone()),
         profile_path: binding.profile_path.clone(),
         profile_sha256: binding.profile_sha256.clone(),
         features: binding.features.clone(),
-        accepted_run_formats: implementation.map_or_else(
-            || binding.accepted_run_formats.clone(),
-            |value| value.accepted_run_formats.clone(),
-        ),
-        emitted_run_formats: implementation.map_or_else(
-            || binding.emitted_run_formats.clone(),
-            |value| value.emitted_run_formats.clone(),
-        ),
+        accepted_run_formats: implementation.accepted_run_formats.clone(),
+        emitted_run_formats: implementation.emitted_run_formats.clone(),
     }
 }
 
@@ -906,7 +978,196 @@ fn validate_adapter_snapshot(
             inventory_facility: inventory.facility().as_str().to_owned(),
         });
     }
+
+    let mut binding_ids = BTreeSet::new();
+    for binding in &adapters.bindings {
+        let invalid = |message: String| FacilityPlanningError::InvalidAdapterBinding {
+            asset: binding.asset.clone(),
+            driver: binding.driver.clone(),
+            message,
+        };
+        if !binding_ids.insert((binding.asset.clone(), binding.driver.clone())) {
+            return Err(invalid(
+                "the asset/driver binding occurs more than once".to_owned(),
+            ));
+        }
+        if binding.driver.is_empty() {
+            return Err(invalid("the driver is empty".to_owned()));
+        }
+        if binding.profile_path.as_os_str().is_empty() {
+            return Err(invalid("the profile path is empty".to_owned()));
+        }
+        if binding.profile.name.is_empty() {
+            return Err(invalid("the profile name is empty".to_owned()));
+        }
+        if binding.profile.driver != binding.driver {
+            return Err(invalid(format!(
+                "profile driver '{}' does not match the binding driver",
+                binding.profile.driver
+            )));
+        }
+        validate_adapter_profile_record(&binding.driver, &binding.profile.name, &binding.profile)
+            .map_err(|error| invalid(error.to_string()))?;
+        if binding.profile_sha256 != binding.profile.sha256 {
+            return Err(invalid(
+                "profile_sha256 does not match the retained profile digest".to_owned(),
+            ));
+        }
+
+        let mut implementation_ids = BTreeSet::new();
+        for implementation in &binding.procedure_implementations {
+            if !implementation_ids.insert(implementation.id.clone()) {
+                return Err(invalid(format!(
+                    "Procedure implementation '{}' occurs more than once in the snapshot",
+                    implementation.id
+                )));
+            }
+        }
+
+        let asset = inventory.facility_asset(&binding.asset)?;
+        let expected_offerings = asset
+            .offerings
+            .iter()
+            .filter(|offering| binding_supports_offering(binding, offering))
+            .map(|offering| (offering.identity.as_str(), offering))
+            .collect::<BTreeMap<_, _>>();
+        let mut offering_ids = BTreeSet::new();
+        for offering in &binding.offerings {
+            if !offering_ids.insert(offering.offering.as_str()) {
+                return Err(invalid(format!(
+                    "capability offering '{}' occurs more than once",
+                    offering.offering
+                )));
+            }
+            let Some(actual) = expected_offerings.get(offering.offering.as_str()).copied() else {
+                return Err(invalid(format!(
+                    "capability offering '{}' is not a compatible offering of the bound asset",
+                    offering.offering
+                )));
+            };
+            validate_bound_offering(binding, offering, actual).map_err(&invalid)?;
+        }
+        let retained_offerings = binding
+            .offerings
+            .iter()
+            .map(|offering| offering.offering.as_str())
+            .collect::<BTreeSet<_>>();
+        let missing = expected_offerings
+            .keys()
+            .copied()
+            .filter(|offering| !retained_offerings.contains(offering))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(invalid(format!(
+                "compatible capability offerings are missing from the snapshot: {}",
+                missing.join(", ")
+            )));
+        }
+    }
     Ok(())
+}
+
+fn binding_supports_offering(
+    binding: &ResolvedAdapterBinding,
+    offering: &FacilityCapabilityOffering,
+) -> bool {
+    binding
+        .procedure_implementations
+        .iter()
+        .any(|implementation| {
+            implementation
+                .capability_kinds
+                .iter()
+                .any(|kind| kind.as_str() == offering.capability_kind.as_str())
+                && implementation
+                    .control_modes
+                    .iter()
+                    .any(|mode| mode.iri() == offering.control_mode.iri())
+        })
+}
+
+fn validate_bound_offering(
+    binding: &ResolvedAdapterBinding,
+    retained: &BoundCapabilityOffering,
+    actual: &FacilityCapabilityOffering,
+) -> Result<(), String> {
+    let parameters = actual
+        .parameters
+        .iter()
+        .map(bound_capability_parameter)
+        .collect::<Vec<_>>();
+    if retained.capability_kind != actual.capability_kind.as_str()
+        || retained.qualification != actual.qualification.iri()
+        || retained.control_mode != actual.control_mode.iri()
+        || retained.parameters != parameters
+        || retained.effectively_active != actual.effectively_active
+    {
+        return Err(format!(
+            "capability offering '{}' does not match the selected inventory",
+            retained.offering
+        ));
+    }
+    let supports = |service: fn(&lab_adapter_api::AdapterServices) -> bool| {
+        binding
+            .procedure_implementations
+            .iter()
+            .any(|implementation| {
+                implementation
+                    .capability_kinds
+                    .iter()
+                    .any(|kind| kind.as_str() == actual.capability_kind.as_str())
+                    && implementation
+                        .control_modes
+                        .iter()
+                        .any(|mode| mode.iri() == actual.control_mode.iri())
+                    && service(&implementation.services)
+            })
+    };
+    let planning_eligible = actual.effectively_active
+        && supports(|services| services.planning)
+        && actual.qualification >= Qualification::Plannable;
+    let simulation_eligible = actual.effectively_active
+        && supports(|services| services.simulation)
+        && actual.qualification >= Qualification::Simulatable;
+    let execution_eligible = actual.effectively_active
+        && supports(|services| services.runtime)
+        && actual.qualification >= Qualification::Executable;
+    if retained.planning_eligible != planning_eligible
+        || retained.simulation_eligible != simulation_eligible
+        || retained.execution_eligible != execution_eligible
+    {
+        return Err(format!(
+            "capability offering '{}' has eligibility flags inconsistent with its implementations and qualification",
+            retained.offering
+        ));
+    }
+    Ok(())
+}
+
+fn bound_capability_parameter(parameter: &FacilityCapabilityParameter) -> BoundCapabilityParameter {
+    let value = match &parameter.value {
+        FacilityScalarValue::Text(value) => BoundCapabilityParameterValue::Text {
+            value: value.clone(),
+        },
+        FacilityScalarValue::Integer(value) => BoundCapabilityParameterValue::Integer {
+            value: value.clone(),
+        },
+        FacilityScalarValue::Real(value) => BoundCapabilityParameterValue::Real {
+            value: value.clone(),
+        },
+        FacilityScalarValue::Boolean(value) => {
+            BoundCapabilityParameterValue::Boolean { value: *value }
+        }
+        FacilityScalarValue::Iri(value) => BoundCapabilityParameterValue::Iri {
+            value: value.as_str().to_owned(),
+        },
+    };
+    BoundCapabilityParameter {
+        parameter: parameter.identity.as_str().to_owned(),
+        property_kind: parameter.property_kind.as_str().to_owned(),
+        value,
+        unit: parameter.unit.as_ref().map(|unit| unit.as_str().to_owned()),
+    }
 }
 
 fn validate_material_inventory(
@@ -1125,7 +1386,8 @@ mod tests {
     };
     use tempfile::TempDir;
 
-    use lab_adapters::validate_adapter_profile;
+    use lab_adapter_api::{AdapterDescriptorRegistry, AdapterRegistry};
+    use lab_adapters::{adapter_catalog, builtin_adapter_registry, validate_adapter_profile};
     use lab_compiler::planning::{
         FacilityPlanningSolutionValidationError, MethodPin, PLANNING_PROBLEM_SCHEMA_VERSION,
         PlanningMethodChoice, PlanningMethodYield, PlanningPort, PlanningProcedureTask,
@@ -1139,6 +1401,10 @@ mod tests {
 
     fn id(value: &str) -> LocalId {
         LocalId::new(value).unwrap()
+    }
+
+    fn contracts() -> &'static ProcedureContractRegistry {
+        lab_compiler::procedure::builtin_procedure_contracts()
     }
 
     fn method(value: &str) -> MethodId {
@@ -1188,6 +1454,9 @@ mod tests {
     }
 
     fn problem() -> PlanningProblem {
+        let product_type = PortType::Data {
+            data_kind: AbsoluteIri::new("https://example.org/data/result").unwrap(),
+        };
         let cycle_constraint = PropertyConstraint {
             property_kind: PropertyKind::new("https://sbol.io/ns/capability#CycleCount").unwrap(),
             relation: ConstraintRelation::AtLeast,
@@ -1200,13 +1469,16 @@ mod tests {
             choices: vec![PlanningMethodChoice {
                 id: id("build-0"),
                 source_operation: IntentOperationId::new("std.bio.build.realize").unwrap(),
+                source_intent: crate::test_source_intent_with_ports(
+                    "std.bio.build.realize",
+                    &[],
+                    &[("product".to_owned(), product_type.clone())],
+                ),
                 after: Vec::new(),
                 inputs: Vec::new(),
                 outputs: vec![PlanningPort {
                     name: id("product"),
-                    port_type: PortType::Data {
-                        data_kind: AbsoluteIri::new("https://example.org/data/result").unwrap(),
-                    },
+                    port_type: product_type,
                     source: None,
                 }],
                 candidates: vec![
@@ -1405,6 +1677,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
     }
 
     fn ot2_bindings(inventory: &InventorySnapshot) -> AdapterBindingSnapshot {
+        let descriptors =
+            AdapterDescriptorRegistry::new(adapter_catalog().unwrap().adapters).unwrap();
         AdapterBindingSnapshot::resolve(
             inventory,
             vec![AdapterBindingRequest {
@@ -1413,31 +1687,18 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
                 profile_path: PathBuf::from("adapters/ot2.toml"),
                 profile: validate_adapter_profile("opentrons.ot2", "ot2", "").unwrap(),
             }],
+            &descriptors,
         )
         .unwrap()
     }
 
-    fn ot2_bindings_with_test_pipetting_operation(
-        inventory: &InventorySnapshot,
-    ) -> AdapterBindingSnapshot {
-        let mut bindings = ot2_bindings(inventory);
-        let implementation = bindings.bindings[0]
-            .procedure_implementations
-            .iter_mut()
-            .find(|implementation| {
-                implementation.contract.as_str()
-                    == lab_compiler::procedure::vocabulary::PIPETTING_PROGRAM_V1
-            })
-            .expect("the OT-2 binding carries its pipetting implementation");
-        implementation
-            .operations
-            .insert(OperationId::new(TEST_PIPETTING_OPERATION).unwrap());
-        bindings
+    fn adapter_registry() -> AdapterRegistry {
+        builtin_adapter_registry().unwrap()
     }
 
     fn normalize_test_task(task: &mut PlanningProcedureTask, operation: &str) {
         let program = pipetting_program();
-        let formula = program.validate().unwrap().capability_formula();
+        let formula = program.validate(contracts()).unwrap().capability_formula();
         let policy = task.requirements[0].clone();
         task.operation = OperationId::new(operation).unwrap();
         task.requirements = formula
@@ -1455,6 +1716,94 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         task.program = Some(program);
     }
 
+    fn normalized_pipetting_problem() -> PlanningProblem {
+        let mut problem = problem();
+        problem.choices[0].candidates.retain(|candidate| {
+            candidate.method.as_str() == "https://example.org/method/automated"
+        });
+        let candidate = &mut problem.choices[0].candidates[0];
+        candidate.tasks.truncate(1);
+        candidate.yields[0].source = PlanningValueSource::TaskOutput {
+            task: id("build-0::automated::handle"),
+            output: id("result"),
+        };
+        normalize_test_task(&mut candidate.tasks[0], TEST_PIPETTING_OPERATION);
+        problem.validate(contracts()).unwrap();
+        problem
+    }
+
+    #[test]
+    fn adapter_bindings_require_their_program_feasibility_implementation() {
+        let (_directory, inventory) = inventory(false);
+        let problem = normalized_pipetting_problem();
+        let adapters = ot2_bindings(&inventory);
+
+        let error = solve_facility_planning(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            Some(&adapters),
+            None,
+            contracts(),
+            FacilityPlanningPolicy::default(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            FacilityPlanningError::MissingAdapterFeasibility
+        ));
+    }
+
+    #[test]
+    fn adapter_snapshot_validation_rejects_internal_tampering() {
+        let (_directory, inventory) = inventory(false);
+        let invalid_message = |snapshot: &AdapterBindingSnapshot| {
+            let error = validate_adapter_snapshot(&inventory, Some(snapshot)).unwrap_err();
+            let FacilityPlanningError::InvalidAdapterBinding { message, .. } = error else {
+                panic!("expected an invalid adapter binding, got {error}")
+            };
+            message
+        };
+
+        let mut digest = ot2_bindings(&inventory);
+        digest.bindings[0].profile_sha256 = "0".repeat(64);
+        assert!(invalid_message(&digest).contains("does not match the retained profile digest"));
+
+        let mut driver = ot2_bindings(&inventory);
+        driver.bindings[0].profile.driver = "different.adapter".to_owned();
+        assert!(invalid_message(&driver).contains("does not match the binding driver"));
+
+        let mut canonical_profile = ot2_bindings(&inventory);
+        canonical_profile.bindings[0].profile.canonical_json =
+            serde_json::json!({"tampered": true});
+        assert!(invalid_message(&canonical_profile).contains("canonical_json"));
+
+        let mut duplicate_binding = ot2_bindings(&inventory);
+        duplicate_binding
+            .bindings
+            .push(duplicate_binding.bindings[0].clone());
+        assert!(invalid_message(&duplicate_binding).contains("occurs more than once"));
+
+        let mut duplicate_implementation = ot2_bindings(&inventory);
+        let implementation =
+            duplicate_implementation.bindings[0].procedure_implementations[0].clone();
+        duplicate_implementation.bindings[0]
+            .procedure_implementations
+            .push(implementation);
+        assert!(invalid_message(&duplicate_implementation).contains("Procedure implementation"));
+
+        let mut offering = ot2_bindings(&inventory);
+        offering.bindings[0].offerings[0].capability_kind =
+            "https://example.org/capability/tampered".to_owned();
+        assert!(invalid_message(&offering).contains("does not match the selected inventory"));
+
+        let mut eligibility = ot2_bindings(&inventory);
+        eligibility.bindings[0].offerings[0].planning_eligible =
+            !eligibility.bindings[0].offerings[0].planning_eligible;
+        assert!(invalid_message(&eligibility).contains("eligibility flags inconsistent"));
+    }
+
     #[test]
     fn facility_feasibility_selects_one_complete_method_graph() {
         let (_directory, inventory) = inventory(false);
@@ -1465,6 +1814,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             &inventory,
             &material_inventory(&inventory),
             None,
+            None,
+            contracts(),
             FacilityPlanningPolicy::default(),
         )
         .unwrap();
@@ -1492,6 +1843,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             &inventory,
             &material_inventory(&inventory),
             None,
+            None,
+            contracts(),
             FacilityPlanningPolicy::default(),
         )
         .unwrap_err();
@@ -1519,6 +1872,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             &inventory,
             &material_inventory(&inventory),
             None,
+            None,
+            contracts(),
             policy,
         )
         .unwrap();
@@ -1533,6 +1888,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             &inventory,
             &material_inventory(&inventory),
             None,
+            None,
+            contracts(),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
                 asset_pins: Vec::new(),
@@ -1555,24 +1912,19 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
     }
 
     #[test]
-    fn normalized_tasks_freeze_an_exact_operation_aware_procedure_implementation() {
+    fn canonical_tasks_freeze_an_exact_contract_implementation() {
         let (_directory, inventory) = inventory(false);
-        let mut problem = problem();
-        problem.choices[0].candidates.retain(|candidate| {
-            candidate.method.as_str() == "https://example.org/method/automated"
-        });
-        normalize_test_task(
-            &mut problem.choices[0].candidates[0].tasks[0],
-            TEST_PIPETTING_OPERATION,
-        );
-        problem.validate().unwrap();
-        let adapters = ot2_bindings_with_test_pipetting_operation(&inventory);
+        let problem = normalized_pipetting_problem();
+        let adapters = ot2_bindings(&inventory);
+        let adapter_registry = adapter_registry();
 
         let solution = solve_facility_planning(
             &problem,
             &inventory,
             &material_inventory(&inventory),
             Some(&adapters),
+            Some(&adapter_registry),
+            contracts(),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
                 asset_pins: Vec::new(),
@@ -1608,24 +1960,64 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
     }
 
     #[test]
-    fn broad_adapter_support_does_not_claim_an_unimplemented_normalized_operation() {
+    fn procedure_contract_support_is_independent_of_biological_operation_names() {
         let (_directory, inventory) = inventory(false);
-        let mut problem = problem();
-        problem.choices[0].candidates.retain(|candidate| {
-            candidate.method.as_str() == "https://example.org/method/automated"
-        });
-        normalize_test_task(
-            &mut problem.choices[0].candidates[0].tasks[0],
-            TEST_PIPETTING_OPERATION,
-        );
-        problem.validate().unwrap();
+        let problem = normalized_pipetting_problem();
         let adapters = ot2_bindings(&inventory);
+        let adapter_registry = adapter_registry();
+
+        let solution = solve_facility_planning(
+            &problem,
+            &inventory,
+            &material_inventory(&inventory),
+            Some(&adapters),
+            Some(&adapter_registry),
+            contracts(),
+            FacilityPlanningPolicy {
+                method_pins: Vec::new(),
+                asset_pins: Vec::new(),
+                adapter_requirement: AdapterRequirement::NonManual,
+            },
+        )
+        .unwrap();
+
+        let task = &solution.selections[0].tasks[0];
+        assert_eq!(task.task.as_str(), "build-0::automated::handle");
+        assert!(task.requirements.iter().all(|requirement| {
+            requirement.adapter.as_ref().is_some_and(|adapter| {
+                adapter
+                    .procedure_implementation
+                    .as_ref()
+                    .is_some_and(|id| id.as_str().ends_with("OpentronsOt2PipettingV1"))
+            })
+        }));
+    }
+
+    #[test]
+    fn normalized_tasks_reject_an_implementation_missing_a_required_program_feature() {
+        let (_directory, inventory) = inventory(false);
+        let problem = normalized_pipetting_problem();
+        let mut adapters = ot2_bindings(&inventory);
+        let adapter_registry = adapter_registry();
+        let implementation = adapters.bindings[0]
+            .procedure_implementations
+            .iter_mut()
+            .find(|implementation| {
+                implementation.contract.as_str()
+                    == lab_compiler::procedure::vocabulary::PIPETTING_PROGRAM_V1
+            })
+            .unwrap();
+        implementation
+            .program_features
+            .remove(&lab_compiler::procedure::ProgramFeature::Mix);
 
         let error = solve_facility_planning(
             &problem,
             &inventory,
             &material_inventory(&inventory),
             Some(&adapters),
+            Some(&adapter_registry),
+            contracts(),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
                 asset_pins: Vec::new(),
@@ -1655,21 +2047,16 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
         use std::os::unix::ffi::OsStringExt;
 
         let (_directory, inventory) = inventory(false);
-        let mut problem = problem();
-        problem.choices[0].candidates.retain(|candidate| {
-            candidate.method.as_str() == "https://example.org/method/automated"
-        });
-        normalize_test_task(
-            &mut problem.choices[0].candidates[0].tasks[0],
-            TEST_PIPETTING_OPERATION,
-        );
-        problem.validate().unwrap();
-        let adapters = ot2_bindings_with_test_pipetting_operation(&inventory);
+        let problem = normalized_pipetting_problem();
+        let adapters = ot2_bindings(&inventory);
+        let adapter_registry = adapter_registry();
         let mut solution = solve_facility_planning(
             &problem,
             &inventory,
             &material_inventory(&inventory),
             Some(&adapters),
+            Some(&adapter_registry),
+            contracts(),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
                 asset_pins: Vec::new(),
@@ -1729,6 +2116,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             &inventory,
             &material_inventory(&inventory),
             None,
+            None,
+            contracts(),
             FacilityPlanningPolicy {
                 method_pins: Vec::new(),
                 asset_pins: vec![AssetPin {
@@ -1803,6 +2192,8 @@ ex:cycles a sbol:Identified, fac:PropertyValue ; sbol:displayId "cycles" ;
             &inventory,
             &materials,
             None,
+            None,
+            contracts(),
             FacilityPlanningPolicy::default(),
         )
         .expect("interchangeable lots do not make a plan ambiguous");

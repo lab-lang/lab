@@ -17,6 +17,8 @@ use crate::events::EventSink;
 #[cfg(feature = "hardware")]
 use crate::events::{ProgramExtent, RunEvent};
 use crate::execution::{DocumentExecutor, LoadedReviewedDocument};
+#[cfg(feature = "hardware")]
+use crate::reviewed_documents::LoadedStarRun;
 
 /// A no-hardware executor for an already validated reviewed document.
 ///
@@ -79,9 +81,11 @@ impl DocumentExecutor for HamiltonStarExecutor {
         loaded: &LoadedReviewedDocument,
         events: &mut dyn EventSink,
     ) -> Result<()> {
-        let LoadedReviewedDocument::Star { document, commands } = loaded else {
-            bail!("the Hamilton STAR executor received a non-STAR document");
-        };
+        let loaded = loaded
+            .require_payload::<LoadedStarRun>()
+            .context("the Hamilton STAR executor received an incompatible document")?;
+        let document = &loaded.document;
+        let commands = &loaded.commands;
         events.emit(RunEvent::ProgramStarted {
             asset: self.asset.clone(),
             title: document.title.clone(),
@@ -108,12 +112,11 @@ impl DocumentExecutor for HamiltonStarExecutor {
     }
 }
 
-/// Runs `lab.thermocycle-run.v0` on one exact network-addressed Inheco ODTC Asset.
+/// Runs `lab.thermocycle-run.v1` on one exact network-addressed Inheco ODTC Asset.
 #[cfg(feature = "hardware")]
 pub struct OdtcExecutor {
     asset: String,
     address: SocketAddr,
-    session: Option<lab_instruments::OdtcStation>,
 }
 
 #[cfg(feature = "hardware")]
@@ -122,32 +125,32 @@ impl OdtcExecutor {
         Self {
             asset: asset.into(),
             address,
-            session: None,
         }
     }
 
-    fn session(&mut self, events: &mut dyn EventSink) -> Result<&mut lab_instruments::OdtcStation> {
-        if self.session.is_none() {
-            events.emit(RunEvent::Connecting {
-                asset: self.asset.clone(),
-                detail: self.address.to_string(),
-            });
-            self.session = Some(
-                lab_instruments::OdtcStation::connect(self.address).with_context(|| {
-                    format!(
-                        "the Inheco ODTC Asset '{}' did not answer at {}",
-                        self.asset, self.address
-                    )
-                })?,
-            );
-            events.emit(RunEvent::Connected {
-                asset: self.asset.clone(),
-            });
-        }
-        Ok(self
-            .session
-            .as_mut()
-            .expect("the Inheco ODTC session was just opened"))
+    fn connect_for_run(
+        &self,
+        run: &lab_instruments::ThermalRun,
+        events: &mut dyn EventSink,
+    ) -> Result<lab_instruments::OdtcStation> {
+        events.emit(RunEvent::Connecting {
+            asset: self.asset.clone(),
+            detail: format!(
+                "{}; {} samples at {} µL each",
+                self.address, run.sample_count, run.fill_volume_ul
+            ),
+        });
+        let session = lab_instruments::OdtcStation::connect_for_run(self.address, run)
+            .with_context(|| {
+                format!(
+                    "the Inheco ODTC Asset '{}' did not answer at {}",
+                    self.asset, self.address
+                )
+            })?;
+        events.emit(RunEvent::Connected {
+            asset: self.asset.clone(),
+        });
+        Ok(session)
     }
 }
 
@@ -158,21 +161,24 @@ impl DocumentExecutor for OdtcExecutor {
         loaded: &LoadedReviewedDocument,
         events: &mut dyn EventSink,
     ) -> Result<()> {
-        let LoadedReviewedDocument::Thermocycle(document) = loaded else {
-            bail!("the Inheco ODTC executor received a non-thermocycle document");
-        };
+        let document = loaded
+            .require_payload::<lab_runfmt::ThermocycleRunDocument>()
+            .context("the Inheco ODTC executor received an incompatible document")?;
         events.emit(RunEvent::ProgramStarted {
             asset: self.asset.clone(),
             title: document.title.clone(),
             extent: ProgramExtent::Plateaus {
-                plateaus: document.profile.total_steps(),
-                final_hold_celsius: document.final_hold_celsius,
+                plateaus: document.run.profile.total_steps(),
+                final_hold_celsius: document.run.final_hold_celsius,
             },
         });
         let asset = self.asset.clone();
-        let session = self.session(events)?;
+        // `inheco-sila` freezes MethodSettings when it connects. One fresh
+        // session per reviewed run makes the document's fill volume the exact
+        // control-class input and prevents settings from leaking across runs.
+        let mut session = self.connect_for_run(&document.run, events)?;
         let handle = session
-            .run_profile(&document.profile)
+            .start_run(&document.run)
             .with_context(|| format!("could not start '{}' on {asset}", document.id))?;
         events.emit(RunEvent::ThermalRunning {
             asset: asset.clone(),
@@ -180,17 +186,20 @@ impl DocumentExecutor for OdtcExecutor {
         session
             .await_completion(handle)
             .with_context(|| format!("'{}' did not complete on {asset}", document.id))?;
+        if let Some(celsius) = document.run.final_hold_celsius {
+            session
+                .hold_block(celsius, None)
+                .with_context(|| format!("could not hold {celsius} C on {asset}"))?;
+            events.emit(RunEvent::ThermalHold {
+                asset: asset.clone(),
+                celsius,
+            });
+        }
         for warning in session.take_warnings() {
             events.emit(RunEvent::ThermalWarning {
                 asset: asset.clone(),
                 warning,
             });
-        }
-        if let Some(celsius) = document.final_hold_celsius {
-            session
-                .hold_block(celsius, None)
-                .with_context(|| format!("could not hold {celsius} C on {asset}"))?;
-            events.emit(RunEvent::ThermalHold { asset, celsius });
         }
         Ok(())
     }

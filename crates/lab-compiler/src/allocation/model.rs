@@ -9,6 +9,7 @@ use crate::planning::{
     PlanningTaskOutput, SelectedCapabilityParameter, SelectedMaterialBinding,
 };
 use crate::procedure::ProcedureProgram;
+use crate::workflow::IntentAction;
 use lab_capability::{
     CapabilityKind, ControlMode, MethodId, ProcedureImplementationId, QualificationLevel,
 };
@@ -17,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// One complete facility allocation, independent of its encoded LAIR representation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AllocatedProgram {
     pub problem_sha256: String,
     pub inventory_sha256: String,
@@ -26,9 +28,13 @@ pub struct AllocatedProgram {
 
 /// One selected Method and its facility-bound Procedure graph.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AllocatedMethod {
     pub choice: LocalId,
     pub source_operation: IntentOperationId,
+    /// The complete checked source action selected for this allocated Method.
+    #[schemars(with = "serde_json::Value")]
+    pub source_intent: IntentAction,
     pub method: MethodId,
     /// Explicit completion dependencies retained from the selected Method choice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -49,6 +55,7 @@ pub struct AllocatedMethod {
 ///
 /// The task remains present even when it is manual and therefore has no adapter invocation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AllocatedProcedureTask {
     pub id: LocalId,
     pub operation: lab_capability::OperationId,
@@ -65,6 +72,7 @@ pub struct AllocatedProcedureTask {
 
 /// The exact catalog and optional implementation binding for one semantic requirement.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct AllocatedRequirementBinding {
     pub id: LocalId,
     pub capability_kind: CapabilityKind,
@@ -87,6 +95,7 @@ pub struct AllocatedRequirementBinding {
 /// Versioned Procedure implementation identities remain on individual requirement bindings so a
 /// single adapter invocation can realize several explicit contracts without splitting the Asset.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InvocationAdapter {
     pub driver: String,
     pub profile_path: PathBuf,

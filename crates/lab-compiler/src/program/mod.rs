@@ -5,7 +5,8 @@ mod lowering;
 use std::collections::BTreeMap;
 
 use crate::method::MethodRegistry;
-use lab_language::CheckedModule;
+use crate::procedure::{ProcedureCompiler, ProcedureContractRegistry};
+use lab_language::{CheckedModule, CheckedType};
 use pliron::builtin::op_interfaces::SingleBlockRegionInterface;
 use pliron::builtin::ops::ModuleOp;
 use pliron::combine::{Parser, eof};
@@ -20,15 +21,12 @@ use pliron::printable::Printable;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-use self::lowering::{BuildArtifactIntent, WorkflowActionIntent, lower_build_intent};
-use crate::design::ir::{
-    DesignDnaSequenceOp, DesignMadeArtifactOp, DesignPlasmidOp, DesignStrainOp,
+use self::lowering::lower_rooted_program_intent;
+use crate::design::ir::DesignArtifactOp;
+use crate::stage::{
+    IrStage, detect_stage, initialize_stage, set_stage, verify_refined_procedure_programs,
 };
-use crate::ir::attributes::quantity_dict;
-use crate::stage::{IrStage, detect_stage, initialize_stage, set_stage};
-use crate::workflow::ir::{
-    DiluteOp, PerformOp, PlateOp, ProvisionOp, RealizeOp, RecoverOp, TransformOp,
-};
+use crate::workflow::ir::{DataType as WorkflowDataType, MaterialType, PerformOp};
 
 pub use self::lowering::SourceLoweringError;
 use crate::planning::PlanningProblemExtractionError;
@@ -63,6 +61,8 @@ pub enum AllocatedLairError {
     Problem(#[from] PlanningProblemExtractionError),
     #[error(transparent)]
     Application(#[from] crate::allocation::AllocationApplicationError),
+    #[error(transparent)]
+    Semantic(#[from] crate::allocation::AllocatedProgramExtractionError),
     #[error("generated allocated LAIR failed verification: {0}")]
     Verification(String),
     #[error("generated allocated LAIR failed material-linearity analysis: {0}")]
@@ -79,107 +79,37 @@ pub struct PortableLairProgram {
 }
 
 impl PortableLairProgram {
-    /// Lower one checked module into verified Design and Workflow LAIR.
-    pub fn lower(module: &CheckedModule) -> Result<Self, PortableLairError> {
-        Self::lower_program(&[module])
-    }
-
-    /// Lower checked, backend-neutral frontend IR into verified Design and
-    /// Workflow LAIR. Method refinement consumes this type; facility planning
-    /// and adapters cannot accept checked modules directly.
+    /// Lower the exact program reached from one entry module's `main` workflow.
     ///
-    /// The modules form one program. An artifact declared in one module may be
-    /// realized by a workflow in another, so a package can separate designs,
-    /// policies, and workflows into their own modules. The caller supplies the
-    /// modules in its own deterministic compilation order.
-    pub fn lower_program(modules: &[&CheckedModule]) -> Result<Self, PortableLairError> {
-        Self::lower_program_rooted(modules, None)
-    }
-
-    /// Lower one program: the build its entry module's `main` reaches.
-    ///
-    /// A workspace declares more than any one run builds. Rooted at an entry,
-    /// the artifacts are the ones `main` reaches through workflow calls, and a
-    /// declaration nothing reaches is a library entry rather than an error.
-    /// Without a root, every declared artifact must be realized by some
-    /// workflow in scope.
-    pub fn lower_program_rooted(
+    /// Workflow calls are expanded in statement order and every reachable
+    /// action becomes Intent. Artifacts are included only when this execution
+    /// reaches their realization workflows.
+    pub fn lower_entry_program(
         modules: &[&CheckedModule],
-        entry: Option<&str>,
+        entry_module: &str,
     ) -> Result<Self, PortableLairError> {
-        let artifacts = lower_build_intent(modules, entry)?;
+        let rooted = lower_rooted_program_intent(modules, entry_module)?;
+        Self::from_rooted_intent(rooted.designs, rooted.actions)
+    }
+
+    fn from_rooted_intent(
+        artifacts: Vec<crate::design::ArtifactDesign>,
+        actions: Vec<crate::workflow::ir::IntentAction>,
+    ) -> Result<Self, PortableLairError> {
         let mut context = Context::new();
         let root = ModuleOp::new(
             &mut context,
             Identifier::try_from("lab_build").expect("static module name is valid"),
         );
         initialize_stage(&mut context, root, IrStage::DesignIntent);
-        let mut sequences = BTreeMap::new();
-        for artifact in &artifacts {
-            let BuildArtifactIntent::Plasmid(intent) = artifact else {
-                continue;
-            };
-            if sequences.contains_key(&intent.sequence.key) {
-                continue;
-            }
-            let operation = DesignDnaSequenceOp::new(
-                &mut context,
-                intent.sequence.name.clone(),
-                intent.sequence.elements.clone(),
-            );
-            let sequence = operation.get_result_sequence(&context);
-            root.append_operation(&mut context, operation.get_operation(), 0);
-            sequences.insert(intent.sequence.key.clone(), sequence);
-        }
         let mut designs = BTreeMap::new();
         for artifact in &artifacts {
-            let design = match artifact {
-                BuildArtifactIntent::Plasmid(intent) => {
-                    let sequence = sequences
-                        .get(&intent.sequence.key)
-                        .copied()
-                        .expect("every plasmid sequence was lowered before its design");
-                    let operation = DesignPlasmidOp::new(
-                        &mut context,
-                        intent.name.clone(),
-                        sequence,
-                        1,
-                        true,
-                        None,
-                        None,
-                    );
-                    let design = operation.get_result_design(&context);
-                    root.append_operation(&mut context, operation.get_operation(), 0);
-                    design
-                }
-                BuildArtifactIntent::Strain(intent) => {
-                    let operation = DesignStrainOp::new(
-                        &mut context,
-                        intent.name.clone(),
-                        intent.chassis.clone(),
-                        intent.plasmids.clone(),
-                        intent.selection.clone(),
-                    );
-                    let design = operation.get_result_design(&context);
-                    root.append_operation(&mut context, operation.get_operation(), 0);
-                    design
-                }
-                BuildArtifactIntent::Made(intent) => {
-                    let operation = DesignMadeArtifactOp::new(
-                        &mut context,
-                        intent.name.clone(),
-                        intent.kind.clone(),
-                    );
-                    let design = operation.get_result_design(&context);
-                    root.append_operation(&mut context, operation.get_operation(), 0);
-                    design
-                }
-            };
-            designs.insert(artifact.name().to_owned(), design);
+            let operation = DesignArtifactOp::new(&mut context, artifact);
+            let design = operation.get_result_design(&context);
+            root.append_operation(&mut context, operation.get_operation(), 0);
+            designs.insert(artifact.definition.clone(), design);
         }
-        for artifact in artifacts {
-            append_workflow(&mut context, root, &designs, artifact)?;
-        }
+        append_actions(&mut context, root, &designs, &actions)?;
         verify_operation(root.get_operation(), &context)
             .map_err(|error| PortableLairError::Verification(error.disp(&context).to_string()))?;
         let stage = detect_stage(&context, root).map_err(PortableLairError::Stage)?;
@@ -202,11 +132,13 @@ impl PortableLairProgram {
     pub fn refine_methods(
         mut self,
         registry: &MethodRegistry,
+        procedures: &ProcedureCompiler,
     ) -> Result<RefinedLairProgram, RefinedLairError> {
         crate::method::refinement::refine_method_alternatives(
             &mut self.context,
             self.module.get_operation(),
             registry,
+            procedures,
         )
         .map_err(|error| RefinedLairError::Conversion(error.disp(&self.context).to_string()))?;
         set_stage(&mut self.context, self.module, IrStage::RefinedAlternatives)
@@ -214,6 +146,8 @@ impl PortableLairProgram {
         verify_operation(self.module.get_operation(), &self.context).map_err(|error| {
             RefinedLairError::Verification(error.disp(&self.context).to_string())
         })?;
+        verify_refined_procedure_programs(&self.context, self.module, procedures.contracts())
+            .map_err(RefinedLairError::Stage)?;
         let stage = detect_stage(&self.context, self.module).map_err(RefinedLairError::Stage)?;
         if stage != IrStage::RefinedAlternatives {
             return Err(RefinedLairError::Stage(format!(
@@ -223,12 +157,8 @@ impl PortableLairProgram {
         Ok(RefinedLairProgram {
             context: self.context,
             module: self.module,
+            contracts: procedures.contracts().clone(),
         })
-    }
-
-    /// Refine with the validated methods bundled into this compiler build.
-    pub fn refine_standard_methods(self) -> Result<RefinedLairProgram, RefinedLairError> {
-        self.refine_methods(crate::method::standard_method_registry())
     }
 }
 
@@ -236,6 +166,7 @@ impl PortableLairProgram {
 pub struct RefinedLairProgram {
     context: Context,
     module: ModuleOp,
+    contracts: ProcedureContractRegistry,
 }
 
 impl RefinedLairProgram {
@@ -243,11 +174,16 @@ impl RefinedLairProgram {
         self.module.get_operation().disp(&self.context).to_string()
     }
 
+    /// The exact Procedure semantics retained from refinement for every later revalidation.
+    pub fn procedure_contracts(&self) -> &ProcedureContractRegistry {
+        &self.contracts
+    }
+
     /// Project immutable, facility-independent constraints for the global planner.
     pub fn planning_problem(
         &self,
     ) -> Result<crate::planning::PlanningProblem, PlanningProblemExtractionError> {
-        crate::planning::extract_planning_problem(&self.context, self.module)
+        crate::planning::extract_planning_problem(&self.context, self.module, &self.contracts)
     }
 
     /// Apply one complete solution to this exact refined module and eliminate every alternative.
@@ -266,11 +202,14 @@ impl RefinedLairProgram {
             .map_err(AllocatedLairError::Stage)?;
         verify_allocated_program(&self.context, self.module)?;
         let source = self.module.get_operation().disp(&self.context).to_string();
-        Ok(AllocatedLairProgram {
+        let allocated = AllocatedLairProgram {
             context: self.context,
             module: self.module,
             source,
-        })
+            contracts: self.contracts,
+        };
+        allocated.allocated_program()?;
+        Ok(allocated)
     }
 }
 
@@ -279,6 +218,7 @@ pub struct AllocatedLairProgram {
     context: Context,
     module: ModuleOp,
     source: String,
+    contracts: ProcedureContractRegistry,
 }
 
 impl AllocatedLairProgram {
@@ -287,7 +227,10 @@ impl AllocatedLairProgram {
     /// The resulting program has no dependency on the planning problem or solution that
     /// originally produced the text; every backend-facing semantic fact is reconstructed from
     /// the allocated IR itself.
-    pub fn parse_ir(source: &str) -> Result<Self, AllocatedLairError> {
+    pub fn parse_ir(
+        source: &str,
+        contracts: &ProcedureContractRegistry,
+    ) -> Result<Self, AllocatedLairError> {
         let mut context = Context::new();
         let root = parse_from_str(
             spaced(Operation::top_level_parser()).skip(eof()),
@@ -299,11 +242,19 @@ impl AllocatedLairProgram {
             AllocatedLairError::ExpectedModule(Operation::get_opid(root, &context).to_string())
         })?;
         verify_allocated_program(&context, module)?;
-        Ok(Self {
+        let allocated = Self {
             context,
             module,
             source: source.to_owned(),
-        })
+            contracts: contracts.clone(),
+        };
+        allocated.allocated_program()?;
+        Ok(allocated)
+    }
+
+    /// The exact Procedure semantics retained from refinement or explicit parsing.
+    pub fn procedure_contracts(&self) -> &ProcedureContractRegistry {
+        &self.contracts
     }
 
     pub fn ir(&self) -> String {
@@ -322,7 +273,7 @@ impl AllocatedLairProgram {
         crate::allocation::AllocatedProgram,
         crate::allocation::AllocatedProgramExtractionError,
     > {
-        crate::allocation::extract_allocated_program(&self.context, self.module)
+        crate::allocation::extract_allocated_program(&self.context, self.module, &self.contracts)
     }
 }
 
@@ -351,324 +302,132 @@ fn verify_allocated_program(context: &Context, module: ModuleOp) -> Result<(), A
     Ok(())
 }
 
-fn append_workflow(
+fn append_actions(
     context: &mut Context,
     root: ModuleOp,
-    designs: &BTreeMap<String, pliron::value::Value>,
-    artifact: BuildArtifactIntent,
+    designs: &BTreeMap<lab_language::DefinitionId, pliron::value::Value>,
+    actions: &[crate::workflow::IntentAction],
 ) -> Result<(), PortableLairError> {
-    let name = artifact.name().to_owned();
-    let design = designs[&name];
-    let dependencies = artifact.dependencies().to_vec();
     let mut values = BTreeMap::new();
-
-    for action in artifact.actions() {
-        match action {
-            WorkflowActionIntent::Realize { product } => {
-                let operation = match &artifact {
-                    BuildArtifactIntent::Plasmid(intent) => match &intent.recipe {
-                        Some(recipe) => RealizeOp::golden_gate(
-                            context,
-                            design,
-                            name.clone(),
-                            recipe.backbone.clone(),
-                            recipe.components.clone(),
-                            dependencies.clone(),
-                            recipe.restriction_enzyme.clone(),
-                            recipe.assembly_replicates,
-                            assembly_chemistry(&recipe.chemistry, context),
-                        ),
-                        None => RealizeOp::new(
-                            context,
-                            design,
-                            name.clone(),
-                            dependencies.clone(),
-                            "PlasmidProduct",
-                        ),
-                    },
-                    BuildArtifactIntent::Made(intent) => RealizeOp::new(
-                        context,
-                        design,
-                        name.clone(),
-                        dependencies.clone(),
-                        &intent.state,
-                    ),
-                    BuildArtifactIntent::Strain(_) => {
-                        return Err(unsupported_realization(&name, "realize", "plasmid"));
-                    }
-                };
-                values.insert(product.clone(), operation.get_result_product(context));
-                root.append_operation(context, operation.get_operation(), 0);
-            }
-            WorkflowActionIntent::Provision { cells, item, state } => {
-                let operation = ProvisionOp::new(context, item.clone(), state);
-                values.insert(cells.clone(), operation.get_result_material(context));
-                root.append_operation(context, operation.get_operation(), 0);
-            }
-            WorkflowActionIntent::Transform {
-                strain,
-                culture,
-                cells,
-            } => {
-                let BuildArtifactIntent::Strain(intent) = &artifact else {
-                    return Err(unsupported_realization(&name, "transform", "strain"));
-                };
-                let operation = TransformOp::new(
-                    context,
-                    design,
-                    workflow_value(&values, cells, &name)?,
-                    name.clone(),
-                    intent.chassis.clone(),
-                    intent.plasmids.clone(),
-                    dependencies.clone(),
-                    intent.transformation_replicates,
-                    strain_chemistry(&intent.chemistry, context),
-                );
-                values.insert(strain.clone(), operation.get_result_strain(context));
-                values.insert(culture.clone(), operation.get_result_culture(context));
-                root.append_operation(context, operation.get_operation(), 0);
-            }
-            WorkflowActionIntent::Recover {
-                culture,
-                input,
-                duration_magnitude,
-                duration_unit,
-            } => {
-                let BuildArtifactIntent::Strain(intent) = &artifact else {
-                    return Err(unsupported_realization(&name, "recover", "strain"));
-                };
-                let transformed_volume = transformed_volume_ul(intent)?;
-                let operation = RecoverOp::new(
-                    context,
-                    workflow_value(&values, input, &name)?,
-                    name.clone(),
-                    duration_magnitude.clone(),
-                    duration_unit.clone(),
-                    intent.transformation_replicates,
-                    transformed_volume,
-                    intent.chemistry.recovery_aliquot_volume_ul,
-                    intent.chemistry.recovery_volume_ul,
-                    intent.chemistry.recovery_temperature_c,
-                );
-                values.insert(culture.clone(), operation.get_result_recovered(context));
-                root.append_operation(context, operation.get_operation(), 0);
-            }
-            WorkflowActionIntent::Dilute { culture, input } => {
-                let BuildArtifactIntent::Strain(intent) = &artifact else {
-                    return Err(unsupported_realization(&name, "dilute", "strain"));
-                };
-                let operation = DiluteOp::new(
-                    context,
-                    workflow_value(&values, input, &name)?,
-                    name.clone(),
-                    intent.serial_dilutions,
-                    intent.transformation_replicates,
-                    recovered_volume_ul(intent)?,
-                    intent.chemistry.medium_volume_ul,
-                    intent.chemistry.culture_volume_ul,
-                );
-                values.insert(culture.clone(), operation.get_result_diluted(context));
-                root.append_operation(context, operation.get_operation(), 0);
-            }
-            WorkflowActionIntent::Plate {
-                plate,
-                culture,
-                selection,
-            } => {
-                let BuildArtifactIntent::Strain(intent) = &artifact else {
-                    return Err(unsupported_realization(&name, "plate", "strain"));
-                };
-                let operation = PlateOp::new(
-                    context,
-                    workflow_value(&values, culture, &name)?,
-                    name.clone(),
-                    selection.clone(),
-                    intent.plating_replicates,
-                    intent.transformation_replicates,
-                    intent.serial_dilutions,
-                    intent.chemistry.medium_volume_ul,
-                    intent.chemistry.culture_volume_ul,
-                    intent.chemistry.colony_volume_ul,
-                );
-                values.insert(plate.clone(), operation.get_result_plate(context));
-                root.append_operation(context, operation.get_operation(), 0);
-            }
-            WorkflowActionIntent::Perform {
-                operation,
-                capability,
-                results,
-                operands,
-                parameters,
-            } => {
-                let operand_values = operands
-                    .iter()
-                    .map(|operand| workflow_value(&values, operand, &name))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let states = results
-                    .iter()
-                    .map(|(_, state)| state.clone())
-                    .collect::<Vec<_>>();
-                let performed = PerformOp::new(
-                    context,
-                    operation.clone(),
-                    name.clone(),
-                    capability.clone(),
-                    parameters.clone(),
-                    operand_values,
-                    &states,
-                );
-                for ((binding, _), result) in results.iter().zip(performed.results(context)) {
-                    values.insert(binding.clone(), result);
+    for intent in actions {
+        let mut operand_names = Vec::new();
+        let mut operands = Vec::new();
+        for name in &intent.ssa_operands {
+            let argument = intent
+                .action
+                .arguments
+                .iter()
+                .find(|argument| argument.name == *name)
+                .expect("validated Intent SSA operands name action arguments");
+            let lab_language::CheckedExpression::Reference { definition, path } =
+                &argument.value.value
+            else {
+                return Err(SourceLoweringError::UnsupportedProjectedOperand {
+                    operation: intent.action.display_name().to_owned(),
+                    argument: argument.name.clone(),
+                    path: Vec::new(),
                 }
-                root.append_operation(context, performed.get_operation(), 0);
-            }
+                .into());
+            };
+            let [binding] = path.as_slice() else {
+                return Err(SourceLoweringError::UnsupportedProjectedOperand {
+                    operation: intent.action.display_name().to_owned(),
+                    argument: argument.name.clone(),
+                    path: path.clone(),
+                }
+                .into());
+            };
+            let value = values
+                .get(definition)
+                .or_else(|| designs.get(definition))
+                .copied()
+                .ok_or_else(|| SourceLoweringError::UnboundSsaOperand {
+                    operation: intent.action.display_name().to_owned(),
+                    argument: argument.name.clone(),
+                    binding: format!("{}::{}", definition.module, binding),
+                })?;
+            operand_names.push(argument.name.clone());
+            operands.push(value);
         }
+        let result_types = intent
+            .result_bindings
+            .iter()
+            .map(|result| workflow_result_type(context, &result.r#type))
+            .collect::<Vec<_>>();
+        let performed = PerformOp::new(context, intent, operand_names, operands, result_types);
+        for (binding, result) in intent
+            .result_bindings
+            .iter()
+            .zip(performed.results(context))
+        {
+            values.insert(
+                lab_language::DefinitionId::exported(&intent.source.module, &binding.name),
+                result,
+            );
+        }
+        root.append_operation(context, performed.get_operation(), 0);
     }
     Ok(())
 }
 
-fn transformed_volume_ul(
-    intent: &lowering::StrainArtifactIntent,
-) -> Result<u32, PortableLairError> {
-    let dna_count = u32::try_from(intent.plasmids.len()).map_err(|_| {
-        PortableLairError::Stage(format!(
-            "strain '{}' has too many plasmids to represent its transformation volume",
-            intent.name
-        ))
-    })?;
-    u32::from(intent.chemistry.dna_volume_ul)
-        .checked_mul(dna_count)
-        .and_then(|dna| dna.checked_add(u32::from(intent.chemistry.cell_volume_ul)))
-        .ok_or_else(|| {
-            PortableLairError::Stage(format!(
-                "strain '{}' transformation volume overflows",
-                intent.name
-            ))
-        })
+fn workflow_result_type(context: &Context, ty: &CheckedType) -> pliron::r#type::TypeHandle {
+    let CheckedType::Named { name, arguments } = ty else {
+        return WorkflowDataType::kind(context, &type_kind_name(ty));
+    };
+    if name != "Material" {
+        return WorkflowDataType::kind(context, &type_kind_name(ty));
+    }
+    let state = match arguments.first() {
+        Some(CheckedType::InState { state, .. }) => state.clone(),
+        Some(subject) => format!("{}Product", subject.subject().display_name()),
+        None => "MaterialProduct".to_owned(),
+    };
+    MaterialType::state(context, &state)
 }
 
-fn recovered_volume_ul(intent: &lowering::StrainArtifactIntent) -> Result<u32, PortableLairError> {
-    transformed_volume_ul(intent)?
-        .checked_add(u32::from(intent.chemistry.recovery_volume_ul))
-        .ok_or_else(|| {
-            PortableLairError::Stage(format!(
-                "strain '{}' recovery volume overflows",
-                intent.name
-            ))
-        })
-}
-
-fn assembly_chemistry(
-    chemistry: &lowering::AssemblyChemistryIntent,
-    context: &Context,
-) -> pliron::builtin::attributes::DictAttr {
-    quantity_dict(
-        &[
-            ("reaction_volume_ul", chemistry.reaction_volume_ul.into()),
-            ("part_volume_ul", chemistry.part_volume_ul.into()),
-            ("enzyme_volume_ul", chemistry.enzyme_volume_ul.into()),
-            ("ligase_volume_ul", chemistry.ligase_volume_ul.into()),
-            ("buffer_volume_ul", chemistry.buffer_volume_ul.into()),
-            ("cycles", chemistry.cycles.into()),
-            (
-                "digest_temperature_c",
-                chemistry.digest_temperature_c.into(),
-            ),
-            ("digest_minutes", chemistry.digest_minutes.into()),
-            (
-                "ligate_temperature_c",
-                chemistry.ligate_temperature_c.into(),
-            ),
-            ("ligate_minutes", chemistry.ligate_minutes.into()),
-            ("lid_temperature_c", chemistry.lid_temperature_c.into()),
-            (
-                "final_digest_temperature_c",
-                chemistry.final_digest_temperature_c.into(),
-            ),
-            (
-                "final_digest_minutes",
-                chemistry.final_digest_minutes.into(),
-            ),
-            (
-                "heat_inactivation_temperature_c",
-                chemistry.heat_inactivation_temperature_c.into(),
-            ),
-            (
-                "heat_inactivation_minutes",
-                chemistry.heat_inactivation_minutes.into(),
-            ),
-            ("hold_temperature_c", chemistry.hold_temperature_c.into()),
-        ],
-        context,
+fn type_kind_name(ty: &CheckedType) -> String {
+    let name = ty.subject().display_name();
+    if name
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        return name;
+    }
+    format!(
+        "type-{}",
+        name.as_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
     )
-}
-
-fn strain_chemistry(
-    chemistry: &lowering::StrainChemistryIntent,
-    context: &Context,
-) -> pliron::builtin::attributes::DictAttr {
-    quantity_dict(
-        &[
-            (
-                "cell_aliquot_volume_ul",
-                chemistry.cell_aliquot_volume_ul.into(),
-            ),
-            ("cell_volume_ul", chemistry.cell_volume_ul.into()),
-            ("dna_volume_ul", chemistry.dna_volume_ul.into()),
-            (
-                "recovery_aliquot_volume_ul",
-                chemistry.recovery_aliquot_volume_ul.into(),
-            ),
-            ("recovery_volume_ul", chemistry.recovery_volume_ul.into()),
-            ("cold_minutes", chemistry.cold_minutes.into()),
-            (
-                "heat_shock_temperature_c",
-                chemistry.heat_shock_temperature_c.into(),
-            ),
-            ("heat_shock_minutes", chemistry.heat_shock_minutes.into()),
-            (
-                "recovery_temperature_c",
-                chemistry.recovery_temperature_c.into(),
-            ),
-            ("recovery_minutes", chemistry.recovery_minutes.into()),
-            ("medium_volume_ul", chemistry.medium_volume_ul.into()),
-            ("culture_volume_ul", chemistry.culture_volume_ul.into()),
-            ("colony_volume_ul", chemistry.colony_volume_ul.into()),
-        ],
-        context,
-    )
-}
-
-fn unsupported_realization(artifact: &str, operation: &str, expected: &str) -> PortableLairError {
-    PortableLairError::Stage(format!(
-        "workflow for artifact '{artifact}' uses '{operation}', which realizes a {expected}"
-    ))
-}
-
-fn workflow_value(
-    values: &BTreeMap<String, pliron::value::Value>,
-    name: &str,
-    artifact: &str,
-) -> Result<pliron::value::Value, PortableLairError> {
-    values.get(name).copied().ok_or_else(|| {
-        PortableLairError::Stage(format!(
-            "workflow for artifact '{artifact}' uses material '{name}' before it is defined"
-        ))
-    })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::method::{ProcedureValue, ScalarType};
-    use crate::procedure::{
-        AspirationStrategy, DispenseStrategy, PipettingStep, ValidatedProcedureProgram, vocabulary,
+    use crate::method::{
+        CapabilityRequirementDefinition, IntentOperationId, LocalId, MethodCatalogDocument,
+        MethodDefinition, MethodInput, MethodOutput, MethodParameter, MethodRegistry,
+        ParameterType, PortType, ProcedureParameterDefinition, ProcedureTaskDefinition,
+        ProcedureTaskExecutionDefinition, ProcedureValue, ProcedureValueExpression, ScalarType,
+        TaskOutput, ValueReference,
     };
-    use lab_capability::ScalarValue;
+    use crate::procedure::{
+        AspirationStrategy, DispenseStrategy, PipettingStep, ProcedureCompiler,
+        ProcedureProgramBuilderRegistry, builtin_procedure_contracts, vocabulary,
+    };
+    use lab_capability::{
+        AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, PropertyKind,
+        QualificationLevel, ScalarValue,
+    };
     use lab_language::{
         ModuleId, SemanticEnvironment, compile_module, compile_module_in_environment,
     };
 
-    use crate::planning::{PlanningProblem, PlanningValueSource};
+    use crate::planning::{
+        FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION, FacilityPlanningPolicy,
+        FacilityPlanningSolution, PlanningProblem, PlanningValueSource, SelectedMethod,
+        SelectedProcedureTask, SelectedRequirementBinding,
+    };
     use crate::session::CompilerSession;
     use crate::stage::IrStage;
 
@@ -754,6 +513,12 @@ workflow build_reporter_host(
   agar <- provision LB_chloramphenicol_agar
   plate <- plate culture on agar
   return strain, plate
+
+workflow main() -> Material<Strain>:
+  plasmid <- assemble_p_gfp
+  strain, plate <- build_reporter_host plasmid
+  <- dispose plate
+  return strain
 "#;
 
     const SHARED_SEQUENCE_PROGRAM: &str = r#"use std.bio.build
@@ -789,6 +554,14 @@ workflow build_second() -> Material<Plasmid>:
   dependencies = []
   product <- realize second from dependencies
   return product
+
+workflow main() -> (
+  first_product: Material<Plasmid>,
+  second_product: Material<Plasmid>,
+):
+  first_product <- build_first
+  second_product <- build_second
+  return first_product, second_product
 "#;
 
     /// Fetching something off a shelf yields what was asked for.
@@ -820,13 +593,22 @@ build medium LB_broth:
 workflow make_LB() -> Material<Medium>:
   product <- realize LB_broth
   return product
+
+workflow main() -> Material<Medium>:
+  product <- make_LB
+  return product
 "#;
         let module = lab_language::compile_module(SOURCE).expect("module checks");
-        let program = PortableLairProgram::lower(&module).expect("program lowers");
+        let program = PortableLairProgram::lower_entry_program(&[&module], module.module.as_str())
+            .expect("program lowers");
         let intent = program.ir();
         assert!(
-            intent.contains("design.made_artifact"),
+            intent.contains("design.define"),
             "a medium has a design of its own: {intent}"
+        );
+        assert!(
+            intent.contains("\\\"artifact\\\":\\\"medium\\\""),
+            "the package-defined artifact kind survives generically: {intent}"
         );
         assert!(
             intent.contains("material-state#MediumProduct"),
@@ -834,7 +616,10 @@ workflow make_LB() -> Material<Medium>:
         );
 
         let refined = program
-            .refine_methods(crate::method::standard_method_registry())
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
             .expect("the manual realization method refines it")
             .ir();
         assert!(
@@ -847,12 +632,10 @@ workflow make_LB() -> Material<Medium>:
         );
     }
 
-    /// A package can declare a verb the compiler has never seen, and a workflow
-    /// that performs it refines to a manual bench method derived from the
-    /// declaration alone: the operand it consumes, the parameter it carries, and
-    /// the state its result arrives in.
+    /// Declaring scientific vocabulary does not silently invent execution semantics. A Method
+    /// must explicitly refine every action that reaches Procedure lowering.
     #[test]
-    fn a_declared_verb_refines_to_a_derived_manual_method() {
+    fn an_action_without_a_registered_method_fails_closed() {
         const SOURCE: &str = r#"use std.bio.designs
 use std.bio.build
 
@@ -864,36 +647,1142 @@ build medium LB_broth:
 action degas <medium> for <duration> -> degassed:
   medium: take Material<Medium>
   duration: Quantity<min>
-  degassed: Material<Medium>
-  requires StaticIncubation
+  degassed: Material<Medium> continues from medium
 
 workflow make_LB() -> Material<Medium>:
   broth <- realize LB_broth
   clear <- degas broth for 5 min
   return clear
+
+workflow main() -> Material<Medium>:
+  product <- make_LB
+  return product
 "#;
         let module = lab_language::compile_module(SOURCE).expect("module checks");
-        let portable = PortableLairProgram::lower(&module).expect("program lowers");
+        let portable = PortableLairProgram::lower_entry_program(&[&module], module.module.as_str())
+            .expect("program lowers");
         let intent = portable.ir();
         assert!(
             intent.contains("workflow.perform"),
             "the declared verb lowers to a perform Intent: {intent}"
         );
 
-        let refined = portable
-            .refine_standard_methods()
-            .expect("the derived manual method refines the declared verb");
-        let problem = refined.planning_problem().expect("problem projects");
+        let error = portable
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
+            .err()
+            .expect("an action with no Method must not acquire implicit execution semantics");
+        assert!(
+            error.to_string().contains("no method definition")
+                && error.to_string().contains("standalone.degas"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn nested_workflow_effects_fail_at_the_control_boundary() {
+        let checked = compile_module(
+            r#"use std.bio.designs
+use std.bio.build
+
+build medium broth:
+  components = [Ingredient { substance: "tryptone", concentration: 10 g/L }]
+
+workflow prepare() -> Material<Medium>:
+  product <- realize broth
+  if 1 == 1:
+    return product
+  return product
+
+workflow main() -> Material<Medium>:
+  product <- prepare
+  return product
+"#,
+        )
+        .expect("the source control flow checks");
+        let error = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+            .err()
+            .expect("Design/Intent LAIR must not flatten a branch");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported control statement 'if'")
+                && error.to_string().contains("statement path [0, 1]"),
+            "{error}"
+        );
+    }
+
+    /// Rooted lowering expands workflow composition instead of treating only
+    /// artifact realization bodies as executable. The sample is created in a
+    /// twice-nested call, then consumed by an action written directly in main.
+    #[test]
+    fn rooted_straight_line_workflows_inline_every_action_and_preserve_ssa() {
+        let checked = compile_module(
+            r#"use std.bio.designs
+
+action create <label> -> sample:
+  label: String
+  sample: Material<Medium> begins
+
+action inspect <sample> -> evidence:
+  sample: take Material<Medium>
+  evidence: Evidence continues from sample
+
+workflow leaf(label: String) -> Material<Medium>:
+  sample <- create label
+  return sample
+
+workflow middle(label: String) -> Material<Medium>:
+  sample <- leaf label
+  return sample
+
+workflow main() -> Evidence:
+  label = "batch-a"
+  sample <- middle label
+  evidence <- inspect sample
+  return evidence
+"#,
+        )
+        .expect("the package-defined straight-line program checks");
+
+        let portable =
+            PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+                .expect("a rooted action-only program lowers without an artifact");
+        let intent = portable.ir();
+        assert_eq!(intent.matches("workflow.perform").count(), 2, "{intent}");
+        assert!(
+            intent.find("standalone.create").unwrap() < intent.find("standalone.inspect").unwrap(),
+            "nested calls retain execution order: {intent}"
+        );
+        assert!(intent.contains("call_2_statement_0_sample"), "{intent}");
+        assert!(
+            intent.contains("\\\"statement_path\\\":[1,0,0]"),
+            "the nested action carries its complete call-site path: {intent}"
+        );
+        assert!(
+            intent.contains("\\\"statement_path\\\":[2]"),
+            "the direct main action retains its root statement path: {intent}"
+        );
+
+        let registry = MethodRegistry::new(vec![
+            straight_line_method("create", None, "sample", PortType::MaterialAsRequested),
+            straight_line_method(
+                "inspect",
+                Some((
+                    "sample",
+                    PortType::Material {
+                        state: AbsoluteIri::new(format!(
+                            "{}MediumProduct",
+                            crate::workflow::ir::STATE_NS
+                        ))
+                        .unwrap(),
+                    },
+                )),
+                "evidence",
+                PortType::Data {
+                    data_kind: AbsoluteIri::new(format!(
+                        "{}Evidence",
+                        crate::workflow::ir::DATA_NS
+                    ))
+                    .unwrap(),
+                },
+            ),
+        ])
+        .expect("the package Methods validate");
+        let problem = portable
+            .refine_methods(&registry, crate::procedure::builtin_procedure_compiler())
+            .expect("both package actions refine explicitly")
+            .planning_problem()
+            .expect("the inlined SSA edge projects to planning");
+        assert_eq!(problem.choices.len(), 2);
+        assert!(matches!(
+            problem.choices[1].inputs[0].source,
+            Some(PlanningValueSource::ChoiceOutput { ref choice, ref output })
+                if choice == &problem.choices[0].id && output.as_str() == "sample"
+        ));
+        assert!(
+            problem
+                .choices
+                .iter()
+                .all(|choice| choice.source_intent.artifact.is_none()),
+            "an action-only workflow must not invent a build artifact"
+        );
+    }
+
+    #[test]
+    fn provisioned_material_identity_survives_local_names_and_continuing_actions() {
+        let checked = compile_module(
+            r#"use std.bio.designs
+use std.lab.plasmid
+
+buy medium stock:
+  sbol_identity = "https://example.org/stock"
+
+action pass <sample> -> product:
+  sample: take Material<Medium>
+  product: Material<Medium> continues from sample
+
+workflow prepare() -> Material<Medium>:
+  renamed <- provision stock
+  aliquot <- pass renamed
+  return aliquot
+
+workflow main() -> Material<Medium>:
+  local <- prepare
+  result <- pass local
+  return result
+"#,
+        )
+        .unwrap();
+        let rooted =
+            super::lower_rooted_program_intent(&[&checked], checked.module.as_str()).unwrap();
+        assert_eq!(rooted.actions.len(), 3);
+        for action in &rooted.actions[1..] {
+            assert_eq!(
+                action.parameters["sample"],
+                crate::method::ProcedureValue::Scalar {
+                    value: lab_capability::PropertyValue::unitless(ScalarValue::Text(
+                        "stock".into()
+                    ))
+                }
+            );
+            assert_eq!(action.ssa_operands, ["sample"]);
+        }
+    }
+
+    #[test]
+    fn repeated_workflow_calls_have_distinct_paths_and_result_bindings() {
+        let checked = compile_module(
+            r#"use std.bio.designs
+
+action create <label> -> sample:
+  label: String
+  sample: Material<Medium> begins
+
+workflow leaf(label: String) -> Material<Medium>:
+  sample <- create label
+  return sample
+
+workflow main() -> (
+  first: Material<Medium>,
+  second: Material<Medium>,
+):
+  first_label = "first"
+  first <- leaf first_label
+  second_label = "second"
+  second <- leaf second_label
+  return first, second
+"#,
+        )
+        .expect("the repeated straight-line calls check");
+
+        let intent = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+            .expect("both call instances lower")
+            .ir();
+        assert_eq!(intent.matches("workflow.perform").count(), 2, "{intent}");
+        assert!(intent.contains("\\\"statement_path\\\":[1,0]"), "{intent}");
+        assert!(intent.contains("\\\"statement_path\\\":[3,0]"), "{intent}");
+        assert!(intent.contains("call_1_statement_0_sample"), "{intent}");
+        assert!(intent.contains("call_2_statement_0_sample"), "{intent}");
+    }
+
+    #[test]
+    fn same_local_artifact_names_remain_module_qualified() {
+        let first = compile_module_in_environment(
+            ModuleId::new("pkg.first"),
+            r#"use std.bio.designs
+use std.bio.build
+
+build medium sample:
+  components = [Ingredient { substance: "first", concentration: 1 g/L }]
+
+workflow build_first() -> Material<Medium>:
+  product <- realize sample
+  return product
+
+workflow main() -> Material<Medium>:
+  product <- build_first
+  return product
+"#,
+            &SemanticEnvironment::default(),
+        )
+        .expect("the first package checks");
+        let second = compile_module_in_environment(
+            ModuleId::new("pkg.second"),
+            r#"use std.bio.designs
+use std.bio.build
+
+build medium sample:
+  components = [Ingredient { substance: "second", concentration: 1 g/L }]
+
+workflow build_second() -> Material<Medium>:
+  product <- realize sample
+  return product
+"#,
+            &SemanticEnvironment::default(),
+        )
+        .expect("the second package checks");
+        let intent =
+            PortableLairProgram::lower_entry_program(&[&first, &second], first.module.as_str())
+                .expect("the unused same-local declaration cannot overwrite the rooted artifact")
+                .ir();
+        assert_eq!(intent.matches(" = design.define ").count(), 1, "{intent}");
+        assert!(
+            intent.contains("\\\"module\\\":\\\"pkg.first\\\",\\\"local\\\":\\\"sample\\\""),
+            "{intent}"
+        );
+        assert!(
+            !intent.contains("\\\"module\\\":\\\"pkg.second\\\",\\\"local\\\":\\\"sample\\\""),
+            "{intent}"
+        );
+    }
+
+    #[test]
+    fn projected_runtime_values_fail_instead_of_losing_the_operand() {
+        let material = PortType::Material {
+            state: AbsoluteIri::new(format!("{}SampleProduct", crate::workflow::ir::STATE_NS))
+                .unwrap(),
+        };
+        let producer = crate::workflow::ir::synthetic_intent_with_ports(
+            "example.produce",
+            &[],
+            &[("sample".to_owned(), material.clone())],
+        );
+        let mut consumer = crate::workflow::ir::synthetic_intent_with_ports(
+            "example.consume",
+            &[("sample".to_owned(), material)],
+            &[],
+        );
+        let lab_language::CheckedExpression::Reference { path, .. } =
+            &mut consumer.action.arguments[0].value.value
+        else {
+            panic!("the synthetic input is a reference")
+        };
+        path.push("projection".to_owned());
+
+        let error = PortableLairProgram::from_rooted_intent(Vec::new(), vec![producer, consumer])
+            .err()
+            .expect("a projected SSA value is not silently omitted");
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported projected SSA operand")
+                && error.to_string().contains("projection"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rooted_lowering_rejects_state_instead_of_erasing_mutation() {
+        let checked = compile_module(
+            r#"workflow main() -> Integer:
+  state count: Integer = 0
+  count = count + 1
+  return count
+"#,
+        )
+        .expect("the stateful workflow checks in the source language");
+        let error = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+            .err()
+            .expect("straight-line Intent lowering cannot erase durable state");
+        assert!(
+            error.to_string().contains("declares durable state"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rooted_artifact_calls_keep_dependencies_and_direct_main_actions() {
+        let source = format!(
+            "{DESIGNS}{WORKFLOWS}\nworkflow main() -> Material<Strain>:\n  plasmid <- assemble_p_gfp\n  retained, aliquot <- split plasmid\n  strain, plate <- build_reporter_host retained\n  <- dispose aliquot\n  <- dispose plate\n  return strain\n"
+        )
+        .replace(
+            "\nworkflow main() -> Material<Strain>:\n  plasmid <- assemble_p_gfp\n  strain, plate <- build_reporter_host plasmid\n  <- dispose plate\n  return strain\n",
+            "",
+        )
+        .replace("use demo.designs\n", "")
+        .replace("use std.bio.designs\nuse std.bio.golden_gate\n", "")
+        .replacen(
+            "use std.bio.build",
+            "use std.bio.designs\nuse std.bio.golden_gate\nuse std.bio.build",
+            1,
+        );
+        let checked = compile_module(&source).expect("the rooted build checks");
+        let portable =
+            PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+                .expect("the complete rooted build lowers");
+        let intent = portable.ir();
+        assert_eq!(
+            intent.matches("workflow.perform").count(),
+            10,
+            "one realize, six build actions, and main's split and disposals all survive: {intent}"
+        );
+        assert!(intent.contains("std.lab.plasmid.split"), "{intent}");
+        assert!(intent.contains("std.lab.plasmid.dispose"), "{intent}");
+
+        let problem = portable
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
+            .expect("the rooted standard actions refine")
+            .planning_problem()
+            .expect("the rooted dependencies project");
+        let plasmid_realization = problem
+            .choices
+            .iter()
+            .find(|choice| {
+                choice.source_operation.as_str() == "std.bio.build.realize"
+                    && choice
+                        .source_intent
+                        .artifact
+                        .as_ref()
+                        .is_some_and(|artifact| artifact.name == "p_gfp")
+            })
+            .expect("the plasmid realization is present");
+        let transformation = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.transform")
+            .expect("the strain transformation is present");
+        assert_eq!(
+            transformation.source_intent.artifact_dependencies,
+            ["standalone::p_gfp"]
+        );
+        assert_eq!(
+            transformation.after.as_slice(),
+            std::slice::from_ref(&plasmid_realization.id)
+        );
+        assert!(matches!(
+            transformation.source_intent.parameters.get("plasmids_count"),
+            Some(ProcedureValue::Scalar { value })
+                if matches!(&value.value, ScalarValue::Integer(value) if value.to_string() == "1")
+        ));
+        assert!(matches!(
+            transformation.source_intent.parameters.get("plasmids"),
+            Some(ProcedureValue::List { values, .. })
+                if matches!(&values[..], [value]
+                    if matches!(&value.value, ScalarValue::Text(value) if value == "p_gfp"))
+        ));
+        let dispose = problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "std.lab.plasmid.dispose")
+            .expect("main's direct action becomes a planning choice");
+        assert!(dispose.source_intent.artifact.is_none());
+        assert!(
+            problem
+                .choices
+                .iter()
+                .any(|choice| choice.source_operation.as_str() == "std.lab.plasmid.split")
+        );
+    }
+
+    fn straight_line_method(
+        operation: &str,
+        input: Option<(&str, PortType)>,
+        output: &str,
+        output_type: PortType,
+    ) -> MethodDefinition {
+        let local = |name: &str| LocalId::new(name).unwrap();
+        let task = local(operation);
+        let inputs = input
+            .as_ref()
+            .map(|(name, port_type)| MethodInput {
+                name: local(name),
+                port_type: port_type.clone(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        let task_inputs = input
+            .as_ref()
+            .map(|(name, _)| ValueReference::Input { input: local(name) })
+            .into_iter()
+            .collect::<Vec<_>>();
+        MethodDefinition {
+            id: MethodId::new(format!("https://example.org/method#{operation}")).unwrap(),
+            refines: IntentOperationId::new(format!("standalone.{operation}")).unwrap(),
+            inputs,
+            parameters: vec![],
+            tasks: vec![ProcedureTaskDefinition {
+                id: task.clone(),
+                operation: OperationId::new(format!("https://example.org/procedure#{operation}"))
+                    .unwrap(),
+                inputs: task_inputs,
+                outputs: vec![TaskOutput {
+                    name: local(output),
+                    port_type: output_type.clone(),
+                }],
+                parameters: vec![],
+                materials: vec![],
+                execution: ProcedureTaskExecutionDefinition::Primitive {
+                    requirements: vec![CapabilityRequirementDefinition {
+                        id: local("execution"),
+                        capability_kind: CapabilityKind::new(format!(
+                            "https://example.org/capability#{operation}"
+                        ))
+                        .unwrap(),
+                        minimum_qualification: QualificationLevel::Plannable,
+                        accepted_control_modes: [ControlMode::Manual].into_iter().collect(),
+                        constraints: vec![],
+                    }],
+                },
+            }],
+            outputs: vec![MethodOutput {
+                name: local(output),
+                source: ValueReference::TaskOutput {
+                    task,
+                    output: local(output),
+                },
+            }],
+        }
+    }
+
+    /// A package adds a typed scientific verb and two alternative Methods
+    /// without adding an operation class or a compiler dispatch arm.
+    #[test]
+    fn a_package_action_reaches_two_registered_methods_through_generic_intent() {
+        let provider = compile_module_in_environment(
+            ModuleId::new("pkg.conditioning"),
+            r#"use std.bio.designs
+
+action condition <sample> named <label> at <temperature> for <cycles> with <flags> -> conditioned, evidence:
+  sample: take Material<Medium>
+  label: String
+  temperature: Quantity<C>
+  cycles: Integer
+  flags: List<String>
+  conditioned: Material<Medium> continues from sample
+  evidence: Evidence continues from sample
+"#,
+            &SemanticEnvironment::default(),
+        )
+        .expect("the package action checks");
+        let mut environment = SemanticEnvironment::default();
+        environment.insert("pkg.conditioning", provider.interface.clone());
+        let consumer = compile_module_in_environment(
+            ModuleId::new("demo.experiment"),
+            r#"use std.bio.designs
+use std.bio.build
+use pkg.conditioning
+
+build medium broth:
+  components = [Ingredient { substance: "tryptone", concentration: 10 g/L }]
+
+workflow prepare() -> Material<Medium>:
+  label = "batch-a"
+  flags = ["alpha", "beta"]
+  sample <- realize broth
+  conditioned, evidence <- condition sample named label at 30 C for 3 with flags
+  return conditioned
+
+workflow main() -> Material<Medium>:
+  product <- prepare
+  return product
+"#,
+            &environment,
+        )
+        .expect("the consumer checks against the package interface");
+
+        let portable = PortableLairProgram::lower_entry_program(
+            &[&provider, &consumer],
+            consumer.module.as_str(),
+        )
+        .expect("the package action lowers through workflow.perform");
+        let intent = portable.ir();
+        assert_eq!(intent.matches("workflow.perform").count(), 2, "{intent}");
+        for preserved in [
+            "pkg.conditioning.condition",
+            "\\\"module\\\":\\\"pkg.conditioning\\\"",
+            "\\\"mode\\\":\\\"take\\\"",
+            "\\\"lineage\\\":{\\\"kind\\\":\\\"continues\\\"",
+            "batch-a",
+            "http://qudt.org/vocab/unit/DEG_C",
+            "\\\"value\\\":\\\"3\\\"",
+            "alpha",
+            "beta",
+            "workflow.data",
+        ] {
+            assert!(intent.contains(preserved), "missing {preserved}: {intent}");
+        }
+
+        let mut methods = crate::method::standard_method_definitions();
+        methods.push(conditioning_method("condition-by-hand"));
+        methods.push(conditioning_method("condition-automatically"));
+        let registry = MethodRegistry::new(methods).expect("the two package Methods validate");
+        let problem = portable
+            .refine_methods(&registry, crate::procedure::builtin_procedure_compiler())
+            .expect("generic refinement uses the package Methods")
+            .planning_problem()
+            .expect("the alternatives project");
         let choice = problem
             .choices
             .iter()
-            .find(|choice| choice.source_operation.as_str() == "standalone.degas")
-            .expect("the declared verb becomes a planning choice");
-        assert_eq!(choice.candidates.len(), 1);
+            .find(|choice| choice.source_operation.as_str() == "pkg.conditioning.condition")
+            .expect("the package action becomes a Method choice");
+        assert_eq!(choice.candidates.len(), 2);
+    }
+
+    /// A package-defined artifact and facet cross every generic compiler
+    /// boundary without teaching the compiler their names.
+    #[test]
+    fn package_artifact_identity_and_semantics_reach_method_planning_losslessly() {
+        let provider = compile_module_in_environment(
+            ModuleId::new("pkg.specimens"),
+            r#"record Specimen
+
+artifact Specimen:
+  label: String
+  score: Integer
+
+facet Readiness on Specimen:
+  raw
+  ready:
+    confidence: Integer
+
+  raw -> ready
+"#,
+            &SemanticEnvironment::default(),
+        )
+        .expect("the package artifact vocabulary checks");
+        let mut environment = SemanticEnvironment::default();
+        environment.insert("pkg.specimens", provider.interface.clone());
+        let consumer = compile_module_in_environment(
+            ModuleId::new("demo.experiment"),
+            r#"use std.bio.build
+use pkg.specimens
+
+build specimen sample:
+  sbol_identity = "https://example.org/design/sample"
+  label = "sample-a"
+  score = 7
+  readiness = ready
+  confidence = 9
+  require score >= 5
+  across 2 biological replicates
+  accept confidence >= 8
+
+workflow main() -> Material<Specimen>:
+  product <- realize sample
+  return product
+"#,
+            &environment,
+        )
+        .expect("the consumer checks against package vocabulary");
+
+        let registry = MethodRegistry::new(vec![generic_artifact_realization_method()])
+            .expect("the generic artifact Method validates");
+        let refined = PortableLairProgram::lower_entry_program(
+            &[&provider, &consumer],
+            consumer.module.as_str(),
+        )
+        .expect("the package artifact lowers")
+        .refine_methods(&registry, crate::procedure::builtin_procedure_compiler())
+        .expect("the package artifact refines without a core kind branch");
+        let problem = refined
+            .planning_problem()
+            .expect("the refined artifact projects to planning");
+        let choice = &problem.choices[0];
+        let design = choice
+            .source_intent
+            .artifact
+            .as_ref()
+            .expect("the full checked artifact remains on its Intent action");
+
+        assert_eq!(design.definition.module.as_str(), "demo.experiment");
+        assert_eq!(design.definition.local, "sample");
+        assert_eq!(design.artifact, "specimen");
+        assert_eq!(design.artifact_definitions.len(), 1);
         assert_eq!(
-            choice.candidates[0].method.as_str(),
-            "https://www.lab-compiler.org/ns/method#derived-standalone-degas"
+            design.artifact_definitions[0].module.as_str(),
+            "pkg.specimens"
         );
+        assert_eq!(design.artifact_definitions[0].local, "specimen");
+        assert_eq!(design.type_definition.module.as_str(), "pkg.specimens");
+        assert_eq!(design.type_definition.local, "Specimen");
+        assert_eq!(design.facets.len(), 1);
+        assert_eq!(design.facets[0].definition.module.as_str(), "pkg.specimens");
+        assert_eq!(design.facets[0].definition.local, "Readiness");
+        assert_eq!(design.facets[0].state, "ready");
+        assert_eq!(
+            design.sbol_identity.as_deref(),
+            Some("https://example.org/design/sample")
+        );
+        assert_eq!(design.properties.len(), 3);
+        assert_eq!(design.requirements.len(), 1);
+        assert_eq!(design.acceptance.len(), 1);
+        assert_eq!(design.acceptance[0].replicates, Some(2));
+
+        let task = &choice.candidates[0].tasks[0];
+        let projected = |name: &str| {
+            task.parameters
+                .iter()
+                .find(|parameter| {
+                    parameter
+                        .id
+                        .as_str()
+                        .ends_with(&format!("::parameter::{name}"))
+                })
+                .map(|parameter| &parameter.value)
+                .unwrap_or_else(|| panic!("Method parameter `{name}` was not projected"))
+        };
+        let artifact_document = match projected("artifact_design") {
+            ProcedureValue::Scalar { value } => match &value.value {
+                ScalarValue::Text(value) => value,
+                other => panic!("artifact_design is not text: {other:?}"),
+            },
+            other => panic!("artifact_design is not scalar: {other:?}"),
+        };
+        let projected_design: crate::design::ArtifactDesign =
+            serde_json::from_str(artifact_document).expect("the projected design is typed JSON");
+        assert_eq!(&projected_design, design);
+        assert!(matches!(
+            projected("score"),
+            ProcedureValue::Scalar { value }
+                if matches!(value.value, ScalarValue::Integer(_))
+        ));
+        assert!(matches!(
+            projected("sbol_identity"),
+            ProcedureValue::Scalar { value }
+                if matches!(value.value, ScalarValue::Iri(_))
+        ));
+        assert_eq!(choice.source_intent.action.arguments[0].name, "design");
+        assert_eq!(
+            choice.source_intent.action.arguments[0].mode,
+            lab_language::OwnershipMode::Copy
+        );
+        assert_eq!(
+            choice.source_intent.action.arguments[1].name,
+            "dependencies"
+        );
+        assert_eq!(
+            choice.source_intent.action.arguments[1].mode,
+            lab_language::OwnershipMode::Take
+        );
+        assert!(matches!(
+            choice.source_intent.action.results[0].lineage,
+            lab_language::ResultLineage::Begins
+        ));
+
+        let candidate = &choice.candidates[0];
+        let requirement = &candidate.tasks[0].requirements[0];
+        let source_intent = choice.source_intent.clone();
+        let solution = FacilityPlanningSolution {
+            schema_version: FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION.to_owned(),
+            problem_sha256: problem.sha256(),
+            inventory_sha256: "a".repeat(64),
+            facility: "https://example.org/facility".to_owned(),
+            policy: FacilityPlanningPolicy::default(),
+            selections: vec![SelectedMethod {
+                choice: choice.id.clone(),
+                source_operation: choice.source_operation.clone(),
+                source_intent: source_intent.clone(),
+                method: candidate.method.clone(),
+                tasks: vec![SelectedProcedureTask {
+                    task: candidate.tasks[0].id.clone(),
+                    materials: vec![],
+                    requirements: vec![SelectedRequirementBinding {
+                        requirement: requirement.id.clone(),
+                        capability_kind: requirement.capability_kind.clone(),
+                        minimum_qualification: requirement.minimum_qualification,
+                        accepted_control_modes: requirement.accepted_control_modes.clone(),
+                        offering: "https://example.org/offering/specimen-realization".to_owned(),
+                        asset: "https://example.org/asset/operator".to_owned(),
+                        observed_qualification: requirement.minimum_qualification.to_string(),
+                        control_mode: ControlMode::Manual.to_string(),
+                        parameters: vec![],
+                        adapter: None,
+                        rejected_candidates: vec![],
+                    }],
+                }],
+            }],
+        };
+        let allocated = refined
+            .allocate(&solution)
+            .expect("the generic Intent allocates")
+            .allocated_program()
+            .expect("the allocated semantic program extracts");
+        assert_eq!(allocated.methods[0].source_intent, source_intent);
+    }
+
+    fn generic_artifact_realization_method() -> MethodDefinition {
+        let local = |name: &str| LocalId::new(name).unwrap();
+        let parameter_types = [
+            ("artifact_kind", ScalarType::Text),
+            ("artifact_definition", ScalarType::Text),
+            ("artifact_kind_definitions", ScalarType::Text),
+            ("artifact_type_definition", ScalarType::Text),
+            ("artifact_facets", ScalarType::Text),
+            ("sbol_identity", ScalarType::Iri),
+            ("label", ScalarType::Text),
+            ("score", ScalarType::Integer),
+            ("confidence", ScalarType::Integer),
+            ("artifact_requirements", ScalarType::Text),
+            ("artifact_acceptance", ScalarType::Text),
+            ("artifact_design", ScalarType::Text),
+        ];
+        let task = local("realize");
+        MethodDefinition {
+            id: MethodId::new("https://example.org/method#generic-specimen-realization").unwrap(),
+            refines: IntentOperationId::new("std.bio.build.realize").unwrap(),
+            inputs: vec![MethodInput {
+                name: local("design"),
+                port_type: PortType::Design,
+            }],
+            parameters: parameter_types
+                .iter()
+                .map(|(name, scalar_type)| MethodParameter {
+                    name: local(name),
+                    source: None,
+                    value_type: if matches!(*name, "artifact_kind_definitions" | "artifact_facets")
+                    {
+                        ParameterType::List {
+                            element_type: *scalar_type,
+                        }
+                    } else {
+                        ParameterType::Scalar {
+                            scalar_type: *scalar_type,
+                        }
+                    },
+                    default: None,
+                })
+                .collect(),
+            tasks: vec![ProcedureTaskDefinition {
+                id: task.clone(),
+                operation: OperationId::new("https://example.org/procedure#RealizeSpecimen")
+                    .unwrap(),
+                inputs: vec![ValueReference::Input {
+                    input: local("design"),
+                }],
+                outputs: vec![TaskOutput {
+                    name: local("product"),
+                    port_type: PortType::MaterialAsRequested,
+                }],
+                parameters: parameter_types
+                    .iter()
+                    .map(|(name, _)| ProcedureParameterDefinition {
+                        id: local(name),
+                        property_kind: PropertyKind::new(format!(
+                            "https://example.org/property#{name}"
+                        ))
+                        .unwrap(),
+                        value: ProcedureValueExpression::IntentParameter {
+                            parameter: local(name),
+                            unit: None,
+                        },
+                    })
+                    .collect(),
+                materials: vec![],
+                execution: ProcedureTaskExecutionDefinition::Primitive {
+                    requirements: vec![CapabilityRequirementDefinition {
+                        id: local("realization"),
+                        capability_kind: CapabilityKind::new(
+                            "https://example.org/capability#SpecimenRealization",
+                        )
+                        .unwrap(),
+                        minimum_qualification: QualificationLevel::Plannable,
+                        accepted_control_modes: [ControlMode::Manual].into_iter().collect(),
+                        constraints: vec![],
+                    }],
+                },
+            }],
+            outputs: vec![MethodOutput {
+                name: local("product"),
+                source: ValueReference::TaskOutput {
+                    task,
+                    output: local("product"),
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn a_catalog_template_lowers_a_complete_thermal_program_without_a_builder() {
+        let provider = compile_module_in_environment(
+            ModuleId::new("pkg.thermal"),
+            r#"use std.bio.designs
+
+action cycle <sample> for <cycles> cycles at <temperature> -> product:
+  sample: take Material<Medium>
+  cycles: Integer
+  temperature: Quantity<C>
+  product: Material<Medium> continues from sample
+"#,
+            &SemanticEnvironment::default(),
+        )
+        .expect("the package action checks");
+        let mut environment = SemanticEnvironment::default();
+        environment.insert("pkg.thermal", provider.interface.clone());
+        let consumer = compile_module_in_environment(
+            ModuleId::new("demo.thermal"),
+            r#"use std.bio.designs
+use std.bio.build
+use pkg.thermal
+
+build medium placeholder:
+  components = [Ingredient { substance: "water", concentration: 1 g/L }]
+
+workflow run() -> Material<Medium>:
+  sample <- realize placeholder
+  product <- cycle sample for 3 cycles at 60 C
+  return product
+
+workflow main() -> Material<Medium>:
+  product <- run
+  return product
+"#,
+            &environment,
+        )
+        .expect("the workflow checks against the package action");
+
+        let document: MethodCatalogDocument = serde_json::from_value(serde_json::json!({
+            "schema_version": "lab.method-catalog.v2",
+            "methods": [{
+                "id": "https://example.org/method#template-thermal-cycle",
+                "refines": "pkg.thermal.cycle",
+                "inputs": [{
+                    "name": "sample",
+                    "port_type": {
+                        "kind": "material",
+                        "state": "https://www.lab-compiler.org/ns/material-state#MediumProduct"
+                    }
+                }],
+                "parameters": [
+                    {"name": "cycles", "value_type": {"kind": "scalar", "scalar_type": "integer"}},
+                    {"name": "temperature", "value_type": {"kind": "scalar", "scalar_type": "real"}}
+                ],
+                "tasks": [{
+                    "id": "cycle",
+                    "operation": "https://example.org/procedure#ThermalCycle",
+                    "inputs": [{"kind": "input", "input": "sample"}],
+                    "outputs": [{
+                        "name": "product",
+                        "port_type": {
+                            "kind": "material",
+                            "state": "https://www.lab-compiler.org/ns/material-state#MediumProduct"
+                        }
+                    }],
+                    "parameters": [
+                        {
+                            "id": "cycles",
+                            "property_kind": "https://example.org/procedure#Cycles",
+                            "value": {"kind": "intent_parameter", "parameter": "cycles"}
+                        },
+                        {
+                            "id": "temperature",
+                            "property_kind": "https://example.org/procedure#Temperature",
+                            "value": {"kind": "intent_parameter", "parameter": "temperature"}
+                        }
+                    ],
+                    "execution": {
+                        "kind": "template",
+                        "contract": "https://www.lab-compiler.org/ns/procedure-contract#ThermalProgramV1",
+                        "body": {
+                            "load": {
+                                "input": {"$lab": {"kind": "input", "index": 0}},
+                                "outputs": [{"$lab": {"kind": "output", "id": "product"}}],
+                                "sample_count": 1,
+                                "volume_each": {
+                                    "value": {"type": "integer", "value": "20"},
+                                    "unit": "http://qudt.org/vocab/unit/MicroL"
+                                }
+                            },
+                            "lid_temperature": {
+                                "value": {"type": "integer", "value": "105"},
+                                "unit": "http://qudt.org/vocab/unit/DEG_C"
+                            },
+                            "stages": [{
+                                "id": "cycle",
+                                "repeats": {"$lab": {"kind": "integer", "id": "cycles"}},
+                                "steps": [{
+                                    "id": "hold",
+                                    "temperature": {"$lab": {"kind": "scalar", "id": "temperature"}},
+                                    "hold": {
+                                        "value": {"type": "integer", "value": "30"},
+                                        "unit": "http://qudt.org/vocab/unit/SEC"
+                                    }
+                                }]
+                            }],
+                            "final_hold": {
+                                "value": {"type": "integer", "value": "4"},
+                                "unit": "http://qudt.org/vocab/unit/DEG_C"
+                            }
+                        },
+                        "policy": {
+                            "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                            "accepted_control_modes": [
+                                "https://sbol.io/ns/facility#ReviewedFileControl"
+                            ]
+                        }
+                    }
+                }],
+                "outputs": [{
+                    "name": "product",
+                    "source": {"kind": "task_output", "task": "cycle", "output": "product"}
+                }]
+            }]
+        }))
+        .expect("the template is ordinary Method catalog data");
+        let mut methods = document.into_methods().unwrap();
+        methods.push(
+            crate::method::standard_method_definitions()
+                .into_iter()
+                .find(|method| {
+                    method.id.as_str()
+                        == "https://www.lab-compiler.org/ns/method#manual-artifact-realization"
+                })
+                .expect("the standard manual realization Method exists"),
+        );
+        let registry = MethodRegistry::new(methods).unwrap();
+        let procedures = ProcedureCompiler::new(
+            builtin_procedure_contracts().clone(),
+            ProcedureProgramBuilderRegistry::default(),
+        )
+        .unwrap();
+        assert!(procedures.builders().builders().next().is_none());
+
+        let problem = PortableLairProgram::lower_entry_program(
+            &[&provider, &consumer],
+            consumer.module.as_str(),
+        )
+        .expect("generic Intent lowers")
+        .refine_methods(&registry, &procedures)
+        .expect("the template renders and contract-validates")
+        .planning_problem()
+        .expect("the rendered program projects");
+        let task = &problem
+            .choices
+            .iter()
+            .find(|choice| choice.source_operation.as_str() == "pkg.thermal.cycle")
+            .expect("the custom action is a Method choice")
+            .candidates[0]
+            .tasks[0];
+        let program = task
+            .program
+            .as_ref()
+            .expect("the template produced a program");
+        assert_eq!(program.body["load"]["input"], 0);
+        assert_eq!(
+            program.body["load"]["outputs"],
+            serde_json::json!(["product"])
+        );
+        assert_eq!(program.body["stages"][0]["repeats"], 3);
+        assert_eq!(
+            program.body["stages"][0]["steps"][0]["temperature"]["unit"],
+            "http://qudt.org/vocab/unit/DEG_C"
+        );
+        assert!(task.requirements.iter().any(|requirement| {
+            requirement
+                .capability_kind
+                .as_str()
+                .ends_with("#ProgrammedBlockTemperatureControl")
+        }));
+    }
+
+    fn conditioning_method(name: &str) -> MethodDefinition {
+        let local = |name: &str| LocalId::new(name).unwrap();
+        let material = |state: &str| PortType::Material {
+            state: AbsoluteIri::new(format!(
+                "https://www.lab-compiler.org/ns/material-state#{state}"
+            ))
+            .unwrap(),
+        };
+        let data = PortType::Data {
+            data_kind: AbsoluteIri::new("https://www.lab-compiler.org/ns/data-kind#Evidence")
+                .unwrap(),
+        };
+        let task = local("condition");
+        MethodDefinition {
+            id: MethodId::new(format!("https://example.org/method#{name}")).unwrap(),
+            refines: IntentOperationId::new("pkg.conditioning.condition").unwrap(),
+            inputs: vec![MethodInput {
+                name: local("sample"),
+                port_type: material("MediumProduct"),
+            }],
+            parameters: [
+                (
+                    "label",
+                    ParameterType::Scalar {
+                        scalar_type: ScalarType::Text,
+                    },
+                ),
+                (
+                    "temperature",
+                    ParameterType::Scalar {
+                        scalar_type: ScalarType::Real,
+                    },
+                ),
+                (
+                    "cycles",
+                    ParameterType::Scalar {
+                        scalar_type: ScalarType::Integer,
+                    },
+                ),
+                (
+                    "flags",
+                    ParameterType::List {
+                        element_type: ScalarType::Text,
+                    },
+                ),
+            ]
+            .into_iter()
+            .map(|(name, value_type)| MethodParameter {
+                name: local(name),
+                source: None,
+                value_type,
+                default: None,
+            })
+            .collect(),
+            tasks: vec![ProcedureTaskDefinition {
+                id: task.clone(),
+                operation: OperationId::new("https://example.org/procedure#Condition").unwrap(),
+                inputs: vec![ValueReference::Input {
+                    input: local("sample"),
+                }],
+                outputs: vec![
+                    TaskOutput {
+                        name: local("conditioned"),
+                        port_type: PortType::MaterialAsRequested,
+                    },
+                    TaskOutput {
+                        name: local("evidence"),
+                        port_type: data,
+                    },
+                ],
+                parameters: vec![],
+                materials: vec![],
+                execution: ProcedureTaskExecutionDefinition::Primitive {
+                    requirements: vec![CapabilityRequirementDefinition {
+                        id: local("conditioning"),
+                        capability_kind: CapabilityKind::new(
+                            "https://example.org/capability#Conditioning",
+                        )
+                        .unwrap(),
+                        minimum_qualification: QualificationLevel::Plannable,
+                        accepted_control_modes: [ControlMode::Manual].into_iter().collect(),
+                        constraints: vec![],
+                    }],
+                },
+            }],
+            outputs: vec![
+                MethodOutput {
+                    name: local("conditioned"),
+                    source: ValueReference::TaskOutput {
+                        task: task.clone(),
+                        output: local("conditioned"),
+                    },
+                },
+                MethodOutput {
+                    name: local("evidence"),
+                    source: ValueReference::TaskOutput {
+                        task,
+                        output: local("evidence"),
+                    },
+                },
+            ],
+        }
     }
 
     #[test]
@@ -921,22 +1810,30 @@ workflow w() -> (
   cells <- provision DH5alpha
   drug <- provision chloramphenicol
   return product, cells, drug
+
+workflow main() -> (
+  product: Material<Plasmid>,
+  cells: Material<Chassis is competent>,
+  drug: Material<Antibiotic>,
+):
+  product, cells, drug <- w
+  return product, cells, drug
 "#;
         let module = lab_language::compile_module(SOURCE).expect("module checks");
-        let ir = PortableLairProgram::lower(&module)
+        let ir = PortableLairProgram::lower_entry_program(&[&module], module.module.as_str())
             .expect("program lowers")
             .ir();
 
         assert!(
-            ir.contains("material-state#CompetentCells"),
-            "a chassis is bought competent: {ir}"
+            ir.contains("material-state#competent"),
+            "the checked in-state is preserved exactly: {ir}"
         );
         assert!(
-            ir.contains("material-state#AntibioticStock"),
+            ir.contains("material-state#AntibioticProduct"),
             "an antibiotic is an antibiotic, not a tube of cells: {ir}"
         );
         assert_eq!(
-            ir.matches("material-state#CompetentCells").count(),
+            ir.matches("material-state#competent").count(),
             1,
             "only the chassis is competent cells: {ir}"
         );
@@ -956,27 +1853,33 @@ workflow w() -> (
             compile_module_in_environment(ModuleId::new("demo.workflows"), WORKFLOWS, &environment)
                 .expect("workflow module checks");
 
-        let program =
-            PortableLairProgram::lower_program(&[&designs, &workflows]).expect("program lowers");
+        let program = PortableLairProgram::lower_entry_program(
+            &[&designs, &workflows],
+            workflows.module.as_str(),
+        )
+        .expect("program lowers");
         let split = program.ir();
 
         // What comes off a shelf is what was asked for. Fetching the chassis
         // yields competent cells; fetching the antibiotic used to yield them
         // too, which was the IR believing an antibiotic was a tube of cells.
         assert!(
-            split.contains("workflow.material <\"https://www.lab-compiler.org/ns/material-state#CompetentCells\">"),
-            "a provisioned chassis is competent cells: {split}"
+            split.contains(
+                "workflow.material <\"https://www.lab-compiler.org/ns/material-state#competent\">"
+            ),
+            "a provisioned chassis retains its checked state: {split}"
         );
         assert!(
             !split.contains("#AntibioticStock"),
             "this program provisions no antibiotic, so no such state appears"
         );
 
-        assert_eq!(split.matches(" = design.dna_sequence ").count(), 1);
-        assert!(split.contains("sequence_name: builtin.string \"gfp_sequence\""));
-        assert!(split.contains("elements: builtin.string \"ACGT\""));
-        assert!(split.contains("<(design.dna_sequence ) -> (design.artifact )>"));
-        assert!(!split.contains("design.plasmid ()"));
+        assert_eq!(split.matches(" = design.define ").count(), 2);
+        assert!(split.contains("\\\"local\\\":\\\"gfp_sequence\\\""));
+        assert!(split.contains("\\\"artifact\\\":\\\"plasmid\\\""));
+        assert!(split.contains("\\\"artifact\\\":\\\"strain\\\""));
+        assert!(!split.contains("design.dna_sequence"));
+        assert!(!split.contains("design.plasmid"));
 
         let combined = compile_module(
             &format!("{DESIGNS}{WORKFLOWS}")
@@ -990,44 +1893,27 @@ workflow w() -> (
                 ),
         )
         .expect("single module checks");
-        let single = PortableLairProgram::lower(&combined)
-            .expect("single module lowers")
-            .ir();
+        let single =
+            PortableLairProgram::lower_entry_program(&[&combined], combined.module.as_str())
+                .expect("single module lowers")
+                .ir();
 
-        assert_eq!(split, single);
-    }
-
-    #[test]
-    fn a_module_without_a_realizing_workflow_is_not_a_program_on_its_own() {
-        let designs = compile_module_in_environment(
-            ModuleId::new("demo.designs"),
-            DESIGNS,
-            &SemanticEnvironment::default(),
-        )
-        .expect("design module checks");
-        let error = PortableLairProgram::lower_program(&[&designs])
-            .err()
-            .expect("an artifact with no realization cannot lower");
-        assert!(
-            error.to_string().contains("std.bio.build.realize"),
-            "{error}"
-        );
+        assert_ne!(split, single, "exact source-module provenance is retained");
+        assert!(split.contains("\\\"module\\\":\\\"demo.workflows\\\""));
+        assert!(single.contains("\\\"module\\\":\\\"standalone\\\""));
     }
 
     #[test]
     fn several_designs_share_one_named_sequence_value() {
         let checked = compile_module(SHARED_SEQUENCE_PROGRAM).expect("shared sequence checks");
-        let ir = PortableLairProgram::lower(&checked)
+        let ir = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
             .expect("shared sequence lowers")
             .ir();
 
-        assert_eq!(ir.matches(" = design.dna_sequence ").count(), 1);
-        assert_eq!(ir.matches(" = design.plasmid ").count(), 2);
-        assert_eq!(
-            ir.matches("sequence_name: builtin.string \"shared_sequence\"")
-                .count(),
-            1
-        );
+        assert_eq!(ir.matches(" = design.define ").count(), 2);
+        assert!(!ir.contains("design.dna_sequence"));
+        assert!(!ir.contains("design.plasmid"));
+        assert!(ir.contains("\\\"local\\\":\\\"shared_sequence\\\""));
     }
 
     #[test]
@@ -1047,16 +1933,21 @@ workflow main() -> Material<Plasmid>:
 "#,
         )
         .expect("generic realization checks");
-        let portable = PortableLairProgram::lower(&checked).expect("generic realization lowers");
+        let portable =
+            PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+                .expect("generic realization lowers");
         let portable_ir = portable.ir();
-        assert!(portable_ir.contains("workflow.realize"), "{portable_ir}");
+        assert!(portable_ir.contains("workflow.perform"), "{portable_ir}");
         assert!(
             !portable_ir.contains("realize_restriction_enzyme"),
             "{portable_ir}"
         );
 
         let refined = portable
-            .refine_standard_methods()
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
             .expect("an applicable manual realization method exists");
         let problem = refined.planning_problem().expect("problem projects");
         let realization = problem
@@ -1071,13 +1962,12 @@ workflow main() -> Material<Plasmid>:
         );
     }
 
-    /// Making competent cells: the whole point of the declared-verb machinery.
+    /// Making competent cells through package-defined actions and explicitly registered Methods.
     ///
     /// Growing cells up to a target optical density, chilling them, spinning
     /// them into a pellet, and washing them into cold buffer are four verbs the
-    /// compiler has no Rust for. They arrive from `std.lab.competence` as
-    /// declarations, lower to perform Intents, and refine to derived manual
-    /// methods, so the protocol reaches a planning problem end to end.
+    /// compiler has no dedicated Intent operation classes for. They arrive from
+    /// `std.lab.competence` as generic actions and refine through ordinary portable Methods.
     #[test]
     fn a_competent_cell_protocol_lowers_and_refines() {
         const SOURCE: &str = r#"use std.bio.designs
@@ -1099,19 +1989,27 @@ workflow prepare() -> Material<Chassis is competent>:
   pellet <- centrifuge chilled at 4000 rcf for 10 min
   competent <- resuspend pellet in wash
   return competent
+
+workflow main() -> Material<Chassis is competent>:
+  competent <- prepare
+  return competent
 "#;
         let module = lab_language::compile_module(SOURCE).expect("the protocol checks");
-        let portable = PortableLairProgram::lower(&module).expect("the protocol lowers");
+        let portable = PortableLairProgram::lower_entry_program(&[&module], module.module.as_str())
+            .expect("the protocol lowers");
         let intent = portable.ir();
         assert_eq!(
             intent.matches("workflow.perform").count(),
-            4,
-            "grow, chill, centrifuge, and resuspend each lower to a perform: {intent}"
+            6,
+            "realize, provision, grow, chill, centrifuge, and resuspend share one operation: {intent}"
         );
 
         let refined = portable
-            .refine_standard_methods()
-            .expect("every declared verb refines to a derived manual method");
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
+            .expect("every competence action has an explicit standard Method");
         let problem = refined.planning_problem().expect("the problem projects");
         for verb in [
             "std.lab.competence.grow",
@@ -1127,7 +2025,7 @@ workflow prepare() -> Material<Chassis is competent>:
             assert_eq!(
                 choice.candidates.len(),
                 1,
-                "'{verb}' has one derived method"
+                "'{verb}' has one explicit Method"
             );
         }
     }
@@ -1169,16 +2067,20 @@ workflow main() -> (
   return a, b
 "#;
         let module = lab_language::compile_module(SOURCE).expect("the program checks");
-        let portable = PortableLairProgram::lower(&module).expect("both instantiations lower");
+        let portable = PortableLairProgram::lower_entry_program(&[&module], module.module.as_str())
+            .expect("both instantiations lower");
         let intent = portable.ir();
         assert_eq!(
-            intent.matches("design.made_artifact").count(),
+            intent.matches(" = design.define ").count(),
             2,
             "each chassis keeps its own design: {intent}"
         );
 
         let problem = portable
-            .refine_standard_methods()
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
             .expect("both instantiations refine")
             .planning_problem()
             .expect("the problem projects");
@@ -1214,10 +2116,14 @@ workflow main() -> (
                 ),
         )
         .expect("program checks");
-        let refined = PortableLairProgram::lower(&checked)
-            .expect("portable LAIR lowers")
-            .refine_standard_methods()
-            .expect("standard methods refine");
+        let refined =
+            PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+                .expect("portable LAIR lowers")
+                .refine_methods(
+                    crate::method::standard_method_registry(),
+                    crate::procedure::builtin_procedure_compiler(),
+                )
+                .expect("standard methods refine");
         let ir = refined.ir();
 
         assert!(ir.contains("lair.stage") && ir.contains("refined-alternatives"));
@@ -1225,10 +2131,7 @@ workflow main() -> (
         assert!(ir.contains("https://www.lab-compiler.org/ns/method#automated-golden-gate"));
         assert!(ir.contains("https://www.lab-compiler.org/ns/method#manual-artifact-realization"));
         assert!(ir.contains("procedure.parameter"));
-        assert!(
-            ir.contains("normalized_program: procedure.program <"),
-            "{ir}"
-        );
+        assert!(ir.contains("program: procedure.program <"), "{ir}");
         assert!(ir.contains("capability.requirement"));
         assert!(ir.contains("capability.constraint"));
         assert!(ir.contains("http://qudt.org/vocab/unit/HR"));
@@ -1241,9 +2144,12 @@ workflow main() -> (
     #[test]
     fn refinement_fails_closed_when_the_registry_has_no_method() {
         let checked = compile_module(SHARED_SEQUENCE_PROGRAM).expect("program checks");
-        let error = PortableLairProgram::lower(&checked)
+        let error = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
             .expect("portable LAIR lowers")
-            .refine_methods(&crate::method::MethodRegistry::default())
+            .refine_methods(
+                &crate::method::MethodRegistry::default(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
             .err()
             .expect("an empty method registry cannot refine reachable Intent");
 
@@ -1265,9 +2171,12 @@ workflow main() -> (
             )
             .replace("recover culture for 1 h", "recover culture for 30 min");
         let checked = compile_module(&source).expect("minute-scale recovery checks");
-        let ir = PortableLairProgram::lower(&checked)
+        let ir = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
             .expect("portable LAIR lowers")
-            .refine_standard_methods()
+            .refine_methods(
+                crate::method::standard_method_registry(),
+                crate::procedure::builtin_procedure_compiler(),
+            )
             .expect("standard methods refine")
             .ir();
 
@@ -1288,10 +2197,14 @@ workflow main() -> (
             )
             .replace("recover culture for 1 h", "recover culture for 30 min");
         let checked = compile_module(&source).expect("minute-scale recovery checks");
-        let refined = PortableLairProgram::lower(&checked)
-            .expect("portable LAIR lowers")
-            .refine_standard_methods()
-            .expect("standard methods refine");
+        let refined =
+            PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
+                .expect("portable LAIR lowers")
+                .refine_methods(
+                    crate::method::standard_method_registry(),
+                    crate::procedure::builtin_procedure_compiler(),
+                )
+                .expect("standard methods refine");
         let problem = refined.planning_problem().expect("problem projects");
 
         let realization = problem
@@ -1321,11 +2234,11 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("Golden Gate setup is normalized before facility planning")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("normalized program validates");
-        let ValidatedProcedureProgram::PipettingV1(program) = program else {
-            panic!("Golden Gate setup must normalize to the pipetting contract")
-        };
+        let program = program
+            .pipetting()
+            .expect("Golden Gate setup must normalize to the pipetting contract");
         assert_eq!(program.as_program().materials.len(), 9);
         assert_eq!(program.as_program().steps.len(), 10);
         let capabilities = program
@@ -1388,11 +2301,11 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("Golden Gate cycling is normalized before facility planning")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("normalized thermal program validates");
-        let ValidatedProcedureProgram::ThermalV1(thermal) = thermal else {
-            panic!("Golden Gate cycling must normalize to the thermal contract")
-        };
+        let thermal = thermal
+            .thermal()
+            .expect("Golden Gate cycling must normalize to the thermal contract");
         let thermal = thermal.as_program();
         assert_eq!(thermal.load.input, 0);
         assert_eq!(thermal.load.outputs.len(), 1);
@@ -1441,14 +2354,14 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("temperature-staged setup is normalized before facility planning")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("temperature-staged setup validates");
-        let ValidatedProcedureProgram::PipettingV1(staged_program) = staged_program else {
-            panic!("temperature-staged setup must normalize to the pipetting contract")
-        };
+        let staged_program = staged_program
+            .pipetting()
+            .expect("temperature-staged setup must normalize to the pipetting contract");
         let staged_program = staged_program.as_program();
         assert_eq!(staged_program.materials.len(), 9);
-        assert_eq!(staged_program.steps.len(), 18);
+        assert_eq!(staged_program.steps.len(), 19);
         let source_temperature =
             crate::procedure::staged_temperature_envelope(&staged_program.vessels)
                 .expect("the Method requires controlled source staging");
@@ -1508,28 +2421,30 @@ workflow main() -> (
         else {
             panic!("the final reagent must be transferred before bubble clearing")
         };
-        let PipettingStep::Mix {
-            cycles,
-            volume,
-            fluid_path_group: final_mix_path,
-            technique,
-            ..
-        } = &staged_program.steps[17]
-        else {
-            panic!("the final operation must clear bubbles")
-        };
-        assert_eq!(*cycles, 2);
-        assert_eq!(volume.value().to_string(), "20");
-        assert_eq!(final_transfer_path, final_mix_path);
-        assert!(technique.blow_out && technique.touch_tip);
-        assert!(matches!(
-            &technique.aspiration,
-            AspirationStrategy::VesselBottom { offset } if offset.value().to_string() == "0"
-        ));
-        assert!(matches!(
-            &technique.dispense,
-            DispenseStrategy::VesselBottom { offset } if offset.value().to_string() == "8"
-        ));
+        for step in &staged_program.steps[17..] {
+            let PipettingStep::Mix {
+                cycles,
+                volume,
+                fluid_path_group: final_mix_path,
+                technique,
+                ..
+            } = step
+            else {
+                panic!("the final operation must clear bubbles")
+            };
+            assert_eq!(*cycles, 1);
+            assert_eq!(volume.value().to_string(), "20");
+            assert_eq!(final_transfer_path, final_mix_path);
+            assert!(technique.blow_out && technique.touch_tip);
+            assert!(matches!(
+                &technique.aspiration,
+                AspirationStrategy::VesselBottom { offset } if offset.value().to_string() == "0"
+            ));
+            assert!(matches!(
+                &technique.dispense,
+                DispenseStrategy::VesselBottom { offset } if offset.value().to_string() == "8"
+            ));
+        }
         assert_eq!(
             temperature_staged.tasks[1].program, automated.tasks[1].program,
             "preparation technique must not rewrite authored thermal intent"
@@ -1545,11 +2460,11 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("serial dilution is normalized before facility planning")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("normalized serial-dilution program validates");
-        let ValidatedProcedureProgram::PipettingV1(dilution_program) = dilution_program else {
-            panic!("serial dilution must normalize to the pipetting contract")
-        };
+        let dilution_program = dilution_program
+            .pipetting()
+            .expect("serial dilution must normalize to the pipetting contract");
         assert!(dilution_program.as_program().vessels.iter().any(|vessel| {
             matches!(
                 &vessel.role,
@@ -1598,11 +2513,11 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("recovery medium addition is normalized")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("recovery medium program validates");
-        let ValidatedProcedureProgram::PipettingV1(add_medium) = add_medium else {
-            panic!("recovery medium addition must be pipetting")
-        };
+        let add_medium = add_medium
+            .pipetting()
+            .expect("recovery medium addition must be pipetting");
         let recovered_location = crate::procedure::Location {
             vessel: crate::procedure::ProcedureLocalId::new("recovery-cultures").unwrap(),
             position: 0,
@@ -1619,11 +2534,11 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("recovery incubation is normalized")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("recovery incubation program validates");
-        let ValidatedProcedureProgram::ThermalV1(incubation) = incubation else {
-            panic!("recovery incubation must be thermal")
-        };
+        let incubation = incubation
+            .thermal()
+            .expect("recovery incubation must be thermal");
         assert_eq!(
             incubation.as_program().load.volume_each.value().to_string(),
             "82"
@@ -1656,11 +2571,11 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("transformation preparation is normalized")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("transformation preparation validates");
-        let ValidatedProcedureProgram::PipettingV1(preparation) = preparation else {
-            panic!("transformation preparation must be pipetting")
-        };
+        let preparation = preparation
+            .pipetting()
+            .expect("transformation preparation must be pipetting");
         assert_eq!(preparation.as_program().steps.len(), 8);
         assert_eq!(automated_transformation.tasks[0].requirements.len(), 6);
         assert!(
@@ -1675,11 +2590,9 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("heat shock is normalized")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("heat shock validates");
-        let ValidatedProcedureProgram::ThermalV1(heat_shock) = heat_shock else {
-            panic!("heat shock must be thermal")
-        };
+        let heat_shock = heat_shock.thermal().expect("heat shock must be thermal");
         assert_eq!(heat_shock.as_program().load.outputs.len(), 2);
         assert_eq!(
             heat_shock.as_program().load.volume_each.value().to_string(),
@@ -1709,18 +2622,20 @@ workflow main() -> (
             .program
             .as_ref()
             .expect("selective plating is normalized")
-            .validate()
+            .validate(builtin_procedure_contracts())
             .expect("selective plating validates");
-        let ValidatedProcedureProgram::PipettingV1(plate_program) = plate_program else {
-            panic!("selective plating must be pipetting")
-        };
+        let plate_program = plate_program
+            .pipetting()
+            .expect("selective plating must be pipetting");
         assert_eq!(plate_program.as_program().steps.len(), 4);
         assert_eq!(plate_program.as_program().vessels.len(), 3);
         assert_eq!(automated_plating.tasks[0].requirements.len(), 3);
 
         let json = serde_json::to_string_pretty(&problem).expect("problem serializes");
         let decoded: PlanningProblem = serde_json::from_str(&json).expect("problem deserializes");
-        decoded.validate().expect("decoded problem revalidates");
+        decoded
+            .validate(builtin_procedure_contracts())
+            .expect("decoded problem revalidates");
         assert_eq!(decoded, problem);
     }
 }

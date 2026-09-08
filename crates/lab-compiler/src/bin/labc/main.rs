@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
+use lab_compiler::method::standard_method_registry;
+use lab_compiler::procedure::builtin_procedure_compiler;
 use lab_compiler::program::PortableLairProgram;
 use lab_language::{compile_module, parse_module, render_checked_module};
 
@@ -54,14 +56,14 @@ fn main() -> Result<()> {
 
     let checked = compile_module(&text)
         .with_context(|| format!("failed to check build module {}", cli.source.display()))?;
-    let lair = PortableLairProgram::lower(&checked)
+    let lair = PortableLairProgram::lower_entry_program(&[&checked], checked.module.as_str())
         .with_context(|| format!("failed to lower LAIR for {}", cli.source.display()))?;
     if matches!(cli.emit, Emit::DesignIntentLair) {
         print!("{}", lair.ir());
         return Ok(());
     }
     let refined = lair
-        .refine_standard_methods()
+        .refine_methods(standard_method_registry(), builtin_procedure_compiler())
         .with_context(|| format!("failed to refine methods for {}", cli.source.display()))?;
     match cli.emit {
         Emit::RefinedLair => print!("{}", refined.ir()),

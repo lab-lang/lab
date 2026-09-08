@@ -33,7 +33,7 @@ use crate::planning::{
     PlanningMethodCandidate, PlanningMethodChoice, SelectedAdapter, SelectedCapabilityParameter,
     SelectedMaterialBinding, SelectedMaterialSource, SelectedRequirementBinding,
 };
-use crate::procedure::ir::is_stable_local_id;
+use crate::procedure::ir::{is_stable_local_id, semantic_port_type};
 
 /// Binds allocated LAIR to the exact immutable planning and facility inputs.
 #[pliron_op(
@@ -104,6 +104,7 @@ impl Verify for ContextOp {
     attributes = (
         selected_choice: StringAttr,
         selected_source_operation: StringAttr,
+        selected_source_intent: StringAttr,
         selected_method: StringAttr,
         selected_after: VecAttr,
         selected_input_names: VecAttr,
@@ -142,6 +143,13 @@ impl MethodOp {
         result.set_attr_selected_source_operation(
             context,
             StringAttr::new(choice.source_operation.to_string()),
+        );
+        result.set_attr_selected_source_intent(
+            context,
+            StringAttr::new(
+                serde_json::to_string(&choice.source_intent)
+                    .expect("typed source Intent serializes infallibly"),
+            ),
         );
         result.set_attr_selected_method(context, StringAttr::new(candidate.method.to_string()));
         result.set_attr_selected_after(
@@ -205,6 +213,15 @@ impl MethodOp {
         )
     }
 
+    pub(crate) fn source_intent(&self, context: &Context) -> crate::workflow::IntentAction {
+        serde_json::from_str(
+            self.get_attr_selected_source_intent(context)
+                .expect("verified allocation.method carries selected_source_intent")
+                .as_str(),
+        )
+        .expect("verified allocation.method carries a typed source Intent")
+    }
+
     #[allow(dead_code, reason = "consumed by the allocated-LAIR extractor")]
     pub(crate) fn input_names(&self, context: &Context) -> Vec<LocalId> {
         local_ids(
@@ -242,6 +259,39 @@ impl Verify for MethodOp {
             return verify_err!(
                 self.loc(context),
                 "allocation.method selected_source_operation must be a stable operation ID"
+            );
+        }
+        let Some(source_intent) = self.get_attr_selected_source_intent(context) else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method is missing selected_source_intent"
+            );
+        };
+        let Ok(source_intent) =
+            serde_json::from_str::<crate::workflow::IntentAction>(source_intent.as_str())
+        else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method selected_source_intent must be a valid Intent action"
+            );
+        };
+        if let Err(message) = source_intent.validate() {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method selected_source_intent is invalid: {}",
+                message
+            );
+        }
+        if source_intent.operation()
+            != Some(
+                self.get_attr_selected_source_operation(context)
+                    .expect("source operation was verified above")
+                    .as_str(),
+            )
+        {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method selected_source_operation must match selected_source_intent"
             );
         }
         if self
@@ -282,6 +332,40 @@ impl Verify for MethodOp {
         }
         self.verify_port_names(context, true)?;
         self.verify_port_names(context, false)?;
+        let input_names = self.input_names(context);
+        let output_names = self.output_names(context);
+        let input_ports = input_names
+            .iter()
+            .zip(self.get_operation().deref(context).operands())
+            .map(|(name, value)| {
+                semantic_port_type(context, value.get_type(context))
+                    .map(|port_type| (name.as_str(), port_type))
+            })
+            .collect::<Option<Vec<_>>>();
+        let output_ports = output_names
+            .iter()
+            .zip(self.get_operation().deref(context).results())
+            .map(|(name, value)| {
+                semantic_port_type(context, value.get_type(context))
+                    .map(|port_type| (name.as_str(), port_type))
+            })
+            .collect::<Option<Vec<_>>>();
+        let (Some(input_ports), Some(output_ports)) = (input_ports, output_ports) else {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method ports must use semantic Design, material, or data types"
+            );
+        };
+        if let Err(message) = source_intent.validate_ports(
+            input_ports.iter().map(|(name, ty)| (*name, ty)),
+            output_ports.iter().map(|(name, ty)| (*name, ty)),
+        ) {
+            return verify_err!(
+                self.loc(context),
+                "allocation.method ports do not match selected_source_intent: {}",
+                message
+            );
+        }
 
         let region = self.body(context);
         let Some(block) = region.deref(context).get_head() else {

@@ -1,11 +1,11 @@
-//! Deserializable shape of OT-2 adapter configuration: protocol options, instruments, deck modules, and the labware each build stage claims.
+//! Deserializable OT-2 configuration for the physical resources consumed by canonical programs.
 
 use schemars::JsonSchema;
 
 use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 
-pub use crate::backend::profile::{MediaRack, Plates, SourceRack, TipRacks};
+pub use crate::backend::profile::TipRacks;
 
 use crate::backend::opentrons::ot2::profile::defaults::*;
 
@@ -15,6 +15,11 @@ use crate::backend::opentrons::ot2::profile::defaults::*;
 pub struct TechniqueCalibration {
     #[serde(default = "default_aspiration_rate")]
     pub aspiration_rate: f64,
+    /// Source mixing and multi-dispense loads have independent calibrated rates.
+    #[serde(default = "default_dispense_rate")]
+    pub mix_aspiration_rate: f64,
+    #[serde(default = "default_dispense_rate")]
+    pub distribution_aspiration_rate: f64,
     #[serde(default = "default_dispense_rate")]
     pub dispense_rate: f64,
     #[serde(default = "default_tracked_source_volume_ul")]
@@ -25,12 +30,6 @@ pub struct TechniqueCalibration {
     pub tracked_usable_depth_offset_mm: f64,
     #[serde(default = "default_tracked_minimum_height_mm")]
     pub tracked_minimum_height_mm: f64,
-    #[serde(default = "default_tracked_low_volume_fraction")]
-    pub tracked_low_volume_fraction: f64,
-    #[serde(default = "default_tracked_chunk_size")]
-    pub tracked_chunk_size: usize,
-    #[serde(default = "default_distribution_disposal_volume_ul")]
-    pub distribution_disposal_volume_ul: u32,
     #[serde(default = "default_above_liquid_offset_mm")]
     pub above_liquid_offset_mm: f64,
     #[serde(default = "default_material_surface_offset_mm")]
@@ -90,25 +89,46 @@ pub struct Pipette {
     pub mount: String,
 }
 
-/// Hardware present for every stage.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Physical resources loaded for one canonical program.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct SharedDeck {
-    #[serde(default = "default_temperature_module")]
-    pub temperature_module: TemperatureModule,
-    #[serde(default = "default_thermocycler")]
-    pub thermocycler: Thermocycler,
+pub struct Ot2Resources {
+    #[serde(default = "default_sources")]
+    pub sources: TemperatureModule,
+    #[serde(default = "default_work")]
+    pub work: Thermocycler,
+    #[serde(default = "default_bulk")]
+    pub bulk: DeckLabware,
+    #[serde(default = "default_surface")]
+    pub surface: DeckLabware,
+    #[serde(default = "default_small_tips")]
+    pub small_tips: TipRacks,
+    #[serde(default = "default_large_tips")]
+    pub large_tips: TipRacks,
+}
+
+impl Default for Ot2Resources {
+    fn default() -> Self {
+        Self {
+            sources: default_sources(),
+            work: default_work(),
+            bulk: default_bulk(),
+            surface: default_surface(),
+            small_tips: default_small_tips(),
+            large_tips: default_large_tips(),
+        }
+    }
 }
 
 impl Default for TemperatureModule {
     fn default() -> Self {
-        default_temperature_module()
+        default_sources()
     }
 }
 
 impl Default for Thermocycler {
     fn default() -> Self {
-        default_thermocycler()
+        default_work()
     }
 }
 
@@ -117,82 +137,33 @@ impl Default for Thermocycler {
 pub struct TemperatureModule {
     pub model: String,
     pub slot: String,
-    /// Rack of chilled source tubes carried on the module.
+    /// Addressable source labware carried on the module.
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_source_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
-/// The thermocycler occupies fixed slots, so it declares no slot of its own.
+/// The thermocycler-backed work area. It occupies fixed slots, so it declares no slot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Thermocycler {
     pub model: String,
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_work_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Stages {
-    #[serde(default = "default_assembly_stage")]
-    pub assembly: AssemblyStage,
-    #[serde(default = "default_transformation_stage")]
-    pub transformation: TransformationStage,
-    #[serde(default = "default_plating_stage")]
-    pub plating: PlatingStage,
-}
-
+/// A passive deck resource for bulk liquids or material-surface dispensing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct AssemblyStage {
-    #[serde(default = "default_assembly_small_tips")]
-    pub small_tips: TipRacks,
-}
-
-impl Default for AssemblyStage {
-    fn default() -> Self {
-        default_assembly_stage()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TransformationStage {
-    /// Plate holding the assembled plasmids a transformation draws from.
-    #[serde(default = "default_transformation_dna_plate")]
-    pub dna_plate: Plates,
-    /// Rack holding competent-cell sources and recovery medium.
-    #[serde(default = "default_transformation_source_rack")]
-    pub source_rack: SourceRack,
-    #[serde(default = "default_transformation_small_tips")]
-    pub small_tips: TipRacks,
-    #[serde(default = "default_transformation_large_tips")]
-    pub large_tips: TipRacks,
-}
-
-impl Default for TransformationStage {
-    fn default() -> Self {
-        default_transformation_stage()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PlatingStage {
-    #[serde(default = "default_dilution_plate")]
-    pub dilution_plate: Plates,
-    #[serde(default = "default_agar_plate")]
-    pub agar_plate: Plates,
-    #[serde(default = "default_media_rack")]
-    pub media_rack: MediaRack,
-    #[serde(default = "default_plating_small_tips")]
-    pub small_tips: TipRacks,
-    #[serde(default = "default_plating_large_tips")]
-    pub large_tips: TipRacks,
-}
-
-impl Default for PlatingStage {
-    fn default() -> Self {
-        default_plating_stage()
-    }
+pub struct DeckLabware {
+    pub slot: String,
+    pub labware: String,
+    pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    pub max_volume_each_ul: u32,
 }

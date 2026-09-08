@@ -18,6 +18,18 @@ import typing
 from collections.abc import Iterator, Sequence
 from typing import Any
 
+_DesignT = typing.TypeVar("_DesignT", covariant=True)
+
+
+class DesignReference(typing.Generic[_DesignT]):
+    """A declaration referring to a design of the stated Lab type.
+
+    Generated call signatures accept this alongside the nominal design type.
+    It preserves the subject of a declaration without treating the declaration
+    wrapper itself as the material produced by an action such as provision.
+    """
+
+
 #: Python's own names for types Lab spells differently.
 _BUILTIN = {
     "list": "List",
@@ -40,6 +52,12 @@ class LabType:
 
     #: The Lab modules a program naming this type has to import.
     __lab_uses__: tuple[str, ...] = ()
+    #: Stable identity of the declaration that exported this nominal type.
+    __lab_definition__: tuple[str, str] | None = None
+    #: Exact Lab spelling when Python had to sanitize the exported name.
+    __lab_name__: str | None = None
+    #: Exact Lab roles retained from the checked public interface.
+    __lab_roles__: tuple[str, ...] = ()
 
 
 class LabConstructor(LabType):
@@ -50,10 +68,34 @@ class LabConstructor(LabType):
     builds the record literal.
     """
 
+    #: Exact Python-name, Lab-name, optional triples generated from the checked record surface.
+    #: ``None`` keeps handwritten subclasses permissive; generated constructors always set this,
+    #: including to an empty tuple for a fieldless constructor.
+    __lab_fields__: tuple[tuple[str, str, bool], ...] | None = None
+
     def __new__(cls, **fields: object) -> Any:
         from ._expressions import Record
 
-        return Record(cls.__name__, **fields)
+        declared = cls.__lab_fields__
+        if declared is None:
+            return Record(cls.__lab_name__ or cls.__name__, **fields)
+        by_python_name = {
+            python_name: (lab_name, optional) for python_name, lab_name, optional in declared
+        }
+        unknown = [name for name in fields if name not in by_python_name]
+        if unknown:
+            raise TypeError(f"{cls.__name__} has no field(s) {', '.join(sorted(unknown))}")
+        missing = [
+            python_name
+            for python_name, _lab_name, optional in declared
+            if not optional and python_name not in fields
+        ]
+        if missing:
+            raise TypeError(f"{cls.__name__} is missing field(s) {', '.join(missing)}")
+        translated = {
+            by_python_name[python_name][0]: value for python_name, value in fields.items()
+        }
+        return Record(cls.__lab_name__ or cls.__name__, **translated)
 
 
 class LabRole(LabType):
@@ -80,6 +122,8 @@ class LabState:
     __lab_state__: str = ""
     #: The Lab modules a program naming this state has to import.
     __lab_uses__: tuple[str, ...] = ()
+    #: Stable identity of the facet declaration that admits this state.
+    __lab_definition__: tuple[str, str] | None = None
 
 
 def state_name(annotation: object) -> str | None:
@@ -168,7 +212,7 @@ def _name_of(annotation: object) -> str | None:
 
     if isinstance(annotation, Expression):
         return str(getattr(annotation, "name", None) or "")
-    for attribute in ("produces", "name", "__name__"):
+    for attribute in ("__lab_name__", "produces", "name", "__name__"):
         found = getattr(annotation, attribute, None)
         if isinstance(found, str):
             return found

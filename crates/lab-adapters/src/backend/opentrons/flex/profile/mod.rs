@@ -18,8 +18,8 @@ pub use crate::backend::opentrons::flex::profile::error::FlexProfileError;
 // These types occur in public profile fields, so they remain nameable without exposing the
 // private source-module layout used to implement the schema.
 pub use crate::backend::opentrons::flex::profile::schema::{
-    AssemblyStage, FlexDeck, FlexTechniqueCalibration, Instruments, MediaRack, Pipette, Plates,
-    PlatingStage, Stages, TemperatureModule, Thermocycler, TipRacks, TransformationStage, Trash,
+    DeckLabware, FlexResources, FlexTechniqueCalibration, Instruments, Pipette, TemperatureModule,
+    Thermocycler, TipRacks, Trash,
 };
 pub use crate::backend::resources::{
     PlateCapacity, UnknownPlateGeometry, supported_plate_capacities,
@@ -39,9 +39,7 @@ pub struct FlexAdapterProfile {
     #[serde(default)]
     pub instruments: Instruments,
     #[serde(default)]
-    pub deck: FlexDeck,
-    #[serde(default)]
-    pub stages: Stages,
+    pub resources: FlexResources,
     #[serde(default)]
     pub techniques: FlexTechniqueCalibration,
 }
@@ -51,9 +49,8 @@ impl Default for FlexAdapterProfile {
         Self {
             name: "opentrons.flex".to_owned(),
             instruments: Instruments::default(),
-            deck: FlexDeck::default(),
+            resources: FlexResources::default(),
             techniques: FlexTechniqueCalibration::default(),
-            stages: Stages::default(),
         }
     }
 }
@@ -69,34 +66,27 @@ impl FlexAdapterProfile {
 
     pub fn validate(&self) -> Result<(), FlexProfileError> {
         self.validate_instruments()?;
-        self.validate_deck()?;
+        self.validate_resources()?;
         self.techniques
             .validate()
             .map_err(|message| FlexProfileError::InvalidTechnique { message })?;
-        for (stage, claims) in [
-            ("assembly", self.assembly_claims()),
-            ("transformation", self.transformation_claims()),
-            ("plating", self.plating_claims()),
-        ] {
-            let mut seen: Vec<(String, String)> = Vec::new();
-            for (context, slots) in claims {
-                if slots.is_empty() {
-                    return Err(FlexProfileError::NoSlots { context });
+        let mut seen: Vec<(String, String)> = Vec::new();
+        for (context, slots) in self.resource_claims() {
+            if slots.is_empty() {
+                return Err(FlexProfileError::NoSlots { context });
+            }
+            for slot in slots {
+                if FlexSlot::parse(&slot).is_none() {
+                    return Err(FlexProfileError::UnknownSlot { context, slot });
                 }
-                for slot in slots {
-                    if FlexSlot::parse(&slot).is_none() {
-                        return Err(FlexProfileError::UnknownSlot { context, slot });
-                    }
-                    if let Some((first, _)) = seen.iter().find(|(_, taken)| taken == &slot) {
-                        return Err(FlexProfileError::SlotConflict {
-                            stage,
-                            slot,
-                            first: first.clone(),
-                            second: context,
-                        });
-                    }
-                    seen.push((context.clone(), slot));
+                if let Some((first, _)) = seen.iter().find(|(_, taken)| taken == &slot) {
+                    return Err(FlexProfileError::SlotConflict {
+                        slot,
+                        first: first.clone(),
+                        second: context,
+                    });
                 }
+                seen.push((context.clone(), slot));
             }
         }
         Ok(())
@@ -128,36 +118,36 @@ impl FlexAdapterProfile {
         Ok(())
     }
 
-    fn validate_deck(&self) -> Result<(), FlexProfileError> {
-        if self.deck.temperature_module.model != "temperatureModuleV2" {
+    fn validate_resources(&self) -> Result<(), FlexProfileError> {
+        if self.resources.sources.model != "temperatureModuleV2" {
             return Err(FlexProfileError::WrongModuleModel {
                 module: "temperature module",
                 expected: "temperatureModuleV2",
-                found: self.deck.temperature_module.model.clone(),
+                found: self.resources.sources.model.clone(),
             });
         }
-        if self.deck.thermocycler.model != "thermocyclerModuleV2" {
+        if self.resources.work.model != "thermocyclerModuleV2" {
             return Err(FlexProfileError::WrongModuleModel {
                 module: "thermocycler",
                 expected: "thermocyclerModuleV2",
-                found: self.deck.thermocycler.model.clone(),
+                found: self.resources.work.model.clone(),
             });
         }
-        if TrashArea::parse(&self.deck.trash.area).is_none() {
+        if TrashArea::parse(&self.resources.trash.area).is_none() {
             return Err(FlexProfileError::UnknownTrashArea {
-                found: self.deck.trash.area.clone(),
+                found: self.resources.trash.area.clone(),
             });
         }
-        match FlexSlot::parse(&self.deck.temperature_module.slot) {
+        match FlexSlot::parse(&self.resources.sources.slot) {
             None => {
                 return Err(FlexProfileError::UnknownSlot {
                     context: "the temperature module".into(),
-                    slot: self.deck.temperature_module.slot.clone(),
+                    slot: self.resources.sources.slot.clone(),
                 });
             }
             Some(slot) if slot.column() == 2 => {
                 return Err(FlexProfileError::TemperatureModuleColumn {
-                    slot: self.deck.temperature_module.slot.clone(),
+                    slot: self.resources.sources.slot.clone(),
                 });
             }
             Some(_) => {}
@@ -168,14 +158,13 @@ impl FlexAdapterProfile {
     /// The trash area this profile places tips in, verified by
     /// [`Self::validate`].
     pub fn trash_area(&self) -> TrashArea {
-        TrashArea::parse(&self.deck.trash.area)
+        TrashArea::parse(&self.resources.trash.area)
             .expect("profile validation accepted only a known trash area")
     }
 
-    /// Deck claims present in every stage: the thermocycler's two slots and
-    /// the trash bin's slot.
-    fn fixed_claims(&self) -> Vec<(String, Vec<String>)> {
-        vec![
+    /// Every addressable resource is present for the complete canonical program.
+    fn resource_claims(&self) -> Vec<(String, Vec<String>)> {
+        let mut claims = vec![
             (
                 "the thermocycler".to_owned(),
                 THERMOCYCLER_SLOTS
@@ -187,61 +176,22 @@ impl FlexAdapterProfile {
                 "the trash bin".to_owned(),
                 vec![self.trash_area().slot().as_str().to_owned()],
             ),
-        ]
-    }
-
-    fn temperature_claim(&self) -> (String, Vec<String>) {
-        (
-            "the temperature module".to_owned(),
-            vec![self.deck.temperature_module.slot.clone()],
-        )
-    }
-
-    fn assembly_claims(&self) -> Vec<(String, Vec<String>)> {
-        let mut claims = self.fixed_claims();
-        claims.push(self.temperature_claim());
+        ];
         claims.push((
-            "assembly small tips".to_owned(),
-            self.stages.assembly.small_tips.slots.clone(),
-        ));
-        claims
-    }
-
-    fn transformation_claims(&self) -> Vec<(String, Vec<String>)> {
-        let stage = &self.stages.transformation;
-        let mut claims = self.fixed_claims();
-        claims.push(self.temperature_claim());
-        claims.push(("the DNA plate".to_owned(), stage.dna_plate.slots.clone()));
-        claims.push((
-            "transformation small tips".to_owned(),
-            stage.small_tips.slots.clone(),
+            "the source module".to_owned(),
+            vec![self.resources.sources.slot.clone()],
         ));
         claims.push((
-            "transformation large tips".to_owned(),
-            stage.large_tips.slots.clone(),
-        ));
-        claims
-    }
-
-    fn plating_claims(&self) -> Vec<(String, Vec<String>)> {
-        let stage = &self.stages.plating;
-        let mut claims = self.fixed_claims();
-        claims.push((
-            "the dilution plate".to_owned(),
-            stage.dilution_plate.slots.clone(),
-        ));
-        claims.push(("the agar plate".to_owned(), stage.agar_plate.slots.clone()));
-        claims.push((
-            "the media rack".to_owned(),
-            vec![stage.media_rack.slot.clone()],
+            "bulk liquids".to_owned(),
+            vec![self.resources.bulk.slot.clone()],
         ));
         claims.push((
-            "plating small tips".to_owned(),
-            stage.small_tips.slots.clone(),
+            "small tips".to_owned(),
+            self.resources.small_tips.slots.clone(),
         ));
         claims.push((
-            "plating large tips".to_owned(),
-            stage.large_tips.slots.clone(),
+            "large tips".to_owned(),
+            self.resources.large_tips.slots.clone(),
         ));
         claims
     }
@@ -249,19 +199,12 @@ impl FlexAdapterProfile {
     /// Labware load names this profile references, for reporting what an
     /// operator must have on hand.
     pub fn labware(&self) -> BTreeSet<String> {
-        let stages = &self.stages;
         BTreeSet::from([
-            self.deck.temperature_module.labware.clone(),
-            self.deck.thermocycler.labware.clone(),
-            stages.assembly.small_tips.labware.clone(),
-            stages.transformation.dna_plate.labware.clone(),
-            stages.transformation.small_tips.labware.clone(),
-            stages.transformation.large_tips.labware.clone(),
-            stages.plating.dilution_plate.labware.clone(),
-            stages.plating.agar_plate.labware.clone(),
-            stages.plating.media_rack.labware.clone(),
-            stages.plating.small_tips.labware.clone(),
-            stages.plating.large_tips.labware.clone(),
+            self.resources.sources.labware.clone(),
+            self.resources.work.labware.clone(),
+            self.resources.bulk.labware.clone(),
+            self.resources.small_tips.labware.clone(),
+            self.resources.large_tips.labware.clone(),
         ])
     }
 }
@@ -274,10 +217,11 @@ mod tests {
     fn an_empty_profile_describes_the_reference_bench() {
         let profile = FlexAdapterProfile::parse("reference-bench", "").unwrap();
         assert_eq!(profile.name, "reference-bench");
-        assert_eq!(profile.deck.temperature_module.slot, "C1");
-        assert_eq!(profile.deck.trash.area, "movableTrashA3");
-        assert_eq!(profile.stages.plating.agar_plate.slots, ["B2", "B3"]);
-        assert_eq!(profile.stages.plating.agar_plate.total_capacity(), 192);
+        assert_eq!(profile.resources.sources.slot, "C1");
+        assert_eq!(profile.resources.work.capacity.get(), 96);
+        assert_eq!(profile.resources.trash.area, "movableTrashA3");
+        assert_eq!(profile.resources.small_tips.slots, ["C2"]);
+        assert_eq!(profile.resources.large_tips.slots, ["D2"]);
     }
 
     #[test]
@@ -285,18 +229,18 @@ mod tests {
         let profile = FlexAdapterProfile::parse(
             "bench-two",
             r#"
-[stages.plating.agar_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+[resources.large_tips]
+labware = "opentrons_flex_96_tiprack_1000ul"
 slots = ["B2"]
 capacity = 96
 "#,
         )
         .unwrap();
-        assert_eq!(profile.stages.plating.agar_plate.slots, ["B2"]);
+        assert_eq!(profile.resources.large_tips.slots, ["B2"]);
         assert_eq!(
-            profile.stages.plating.dilution_plate.slots,
-            ["C2", "C3"],
-            "an unstated stage keeps the reference layout"
+            profile.resources.small_tips.slots,
+            ["C2"],
+            "an unstated resource keeps the reference layout"
         );
     }
 
@@ -323,7 +267,7 @@ capacity = 96
         let error = FlexAdapterProfile::parse(
             "bench-two",
             r#"
-[stages.assembly.small_tips]
+[resources.small_tips]
 labware = "opentrons_flex_96_tiprack_50ul"
 slots = ["A1"]
 capacity = 96
@@ -338,7 +282,7 @@ capacity = 96
         let error = FlexAdapterProfile::parse(
             "bench-two",
             r#"
-[stages.assembly.small_tips]
+[resources.small_tips]
 labware = "opentrons_flex_96_tiprack_50ul"
 slots = ["A3"]
 capacity = 96
@@ -352,7 +296,7 @@ capacity = 96
     fn rejects_a_temperature_module_in_column_2() {
         let error = FlexAdapterProfile::parse(
             "bench-two",
-            "[deck.temperature_module]\nmodel = \"temperatureModuleV2\"\nslot = \"C2\"\nlabware = \"opentrons_24_aluminumblock_nest_1.5ml_snapcap\"\ncapacity = 24\n",
+            "[resources.sources]\nmodel = \"temperatureModuleV2\"\nslot = \"C2\"\nlabware = \"opentrons_24_aluminumblock_nest_1.5ml_snapcap\"\ncapacity = 24\n",
         )
         .expect_err("module caddies exist in columns 1 and 3 only");
         assert!(error.to_string().contains("column 1 or 3"), "{error}");
@@ -363,8 +307,8 @@ capacity = 96
         let error = FlexAdapterProfile::parse(
             "bench-two",
             r#"
-[stages.transformation.dna_plate]
-labware = "nest_96_wellplate_100ul_pcr_full_skirt"
+[resources.small_tips]
+labware = "opentrons_flex_96_tiprack_50ul"
 slots = ["C4"]
 capacity = 96
 "#,
@@ -376,7 +320,7 @@ capacity = 96
     #[test]
     fn rejects_an_unknown_key_rather_than_silently_ignoring_it() {
         let error = FlexAdapterProfile::parse("bench-two", "[stages.plating]\nagar_plates = 2\n")
-            .expect_err("a misspelled key must not fall back to a default");
+            .expect_err("the removed scientific stage schema must not be accepted");
         assert!(error.to_string().contains("parse"), "{error}");
     }
 }

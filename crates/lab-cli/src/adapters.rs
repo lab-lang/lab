@@ -4,15 +4,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use lab_adapters::{
-    AdapterCatalog, AdapterDescriptor, ValidatedAdapterProfile, adapter_catalog,
-    default_adapter_profile, validate_adapter_profile,
-};
+use lab_adapters::{AdapterCatalog, AdapterDescriptor, ValidatedAdapterProfile};
 
 use crate::Output;
 
 pub(crate) fn describe(driver: Option<String>, output: &Output) -> Result<()> {
-    let catalog = adapter_catalog()?;
+    let catalog = lab_project::application_extensions()?.adapters.catalog();
     match driver {
         Some(driver) => {
             let descriptor = catalog
@@ -31,7 +28,9 @@ pub(crate) fn describe(driver: Option<String>, output: &Output) -> Result<()> {
 }
 
 pub(crate) fn default(driver: String, name: String, output: &Output) -> Result<()> {
-    let profile = default_adapter_profile(&driver, &name)?;
+    let profile = lab_project::application_extensions()?
+        .adapters
+        .validate_profile(&driver, &name, "")?;
     let human = profile.canonical_toml.clone();
     output.success("adapter-default", profile, human)
 }
@@ -64,20 +63,39 @@ pub(crate) fn load_and_validate(driver: &str, path: &Path) -> Result<ValidatedAd
         .file_stem()
         .and_then(|name| name.to_str())
         .context("an adapter profile file needs a UTF-8 file name")?;
-    validate_adapter_profile(driver, name, &contents).map_err(Into::into)
+    lab_project::application_extensions()?
+        .adapters
+        .validate_profile(driver, name, &contents)
+        .map_err(Into::into)
 }
 
 fn render_catalog(catalog: &AdapterCatalog) -> String {
     let mut lines = vec![format!(
         "Lab {} adapters ({})",
-        catalog.compiler_version, catalog.profile_schema_version
+        catalog.api_version, catalog.profile_schema_version
     )];
     for adapter in &catalog.adapters {
         let services = [
-            adapter.services.planning.then_some("planning"),
-            adapter.services.lowering.then_some("lowering"),
-            adapter.services.simulation.then_some("simulation"),
-            adapter.services.runtime.then_some("runtime"),
+            adapter
+                .procedure_implementations
+                .iter()
+                .any(|implementation| implementation.services.planning)
+                .then_some("planning"),
+            adapter
+                .procedure_implementations
+                .iter()
+                .any(|implementation| implementation.services.lowering)
+                .then_some("lowering"),
+            adapter
+                .procedure_implementations
+                .iter()
+                .any(|implementation| implementation.services.simulation)
+                .then_some("simulation"),
+            adapter
+                .procedure_implementations
+                .iter()
+                .any(|implementation| implementation.services.runtime)
+                .then_some("runtime"),
         ]
         .into_iter()
         .flatten()
@@ -100,25 +118,34 @@ fn render_descriptor(adapter: &AdapterDescriptor) -> String {
             .iter()
             .map(|implementation| {
                 format!(
-                    "{}\n      contract: {}\n      operations: {}\n      capabilities: {}",
+                    "{}\n      contract: {}\n      program features: {}\n      capabilities: {}\n      control modes: {}\n      accepts: {}\n      emits: {}\n      services: {}",
                     implementation.id,
                     implementation.contract,
-                    join(&implementation.operations),
-                    join(&implementation.capability_kinds)
+                    join(&implementation.program_features),
+                    join(&implementation.capability_kinds),
+                    join(&implementation.control_modes),
+                    join(&implementation.accepted_run_formats),
+                    join(&implementation.emitted_run_formats),
+                    [
+                        implementation.services.planning.then_some("planning"),
+                        implementation.services.lowering.then_some("lowering"),
+                        implementation.services.simulation.then_some("simulation"),
+                        implementation.services.runtime.then_some("runtime"),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join(", ")
                 )
             })
             .collect::<Vec<_>>()
             .join("\n    ")
     };
     format!(
-        "{}\n  driver: {}\n  legacy capabilities: {}\n  features: {}\n  control modes: {}\n  accepts: {}\n  emits: {}\n  Procedure implementations:\n    {}\n\n{}",
+        "{}\n  driver: {}\n  features: {}\n  Procedure implementations:\n    {}\n\n{}",
         adapter.display_name,
         adapter.id,
-        join(&adapter.capabilities),
         join(&adapter.features),
-        join(&adapter.control_modes),
-        join(&adapter.accepted_run_formats),
-        join(&adapter.emitted_run_formats),
         implementations,
         adapter.default_profile.canonical_toml
     )

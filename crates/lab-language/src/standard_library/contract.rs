@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::checked::OwnershipMode;
+use crate::checked::{OwnershipMode, ResultLineage};
 use crate::type_system::Ty;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,29 +90,11 @@ impl PhrasePart {
     }
 }
 
-/// Whether a result is a new biological entity or the same one further along.
-///
-/// This is what separates a technical replicate from a biological one. Picking
-/// two colonies gives two independent transformants; splitting one culture into
-/// two tubes gives one organism measured twice. Averaging the second and
-/// reporting `n = 2` counts pipetting variance as biology.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum Lineage {
-    /// The result carries on the lineage of the material it came from. Diluting,
-    /// recovering, and plating all leave you with the same organism.
-    #[default]
-    Continues,
-    /// The result begins a lineage of its own, independent of its siblings and
-    /// of anything produced by another invocation. Each picked colony is an
-    /// independent transformant; each transformation establishes a new one.
-    Begins,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ResultSpec {
     pub name: String,
     pub r#type: ContractType,
-    pub lineage: Lineage,
+    pub lineage: ResultLineage,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,13 +102,6 @@ pub(crate) struct ActionContractSpec {
     pub operation: String,
     pub phrase: Vec<PhrasePart>,
     pub results: Vec<ResultSpec>,
-    /// Operands whose lineage a result does not carry on.
-    ///
-    /// Lineage answers which samples are the same organism, so only what an
-    /// organism is made of contributes to it. A plate is a culture spread on
-    /// agar: the culture is the organism and the agar is what it sits on, and
-    /// counting the agar would make one plate look like two independent things.
-    pub inert: Vec<String>,
 }
 
 impl ActionContractSpec {
@@ -149,6 +124,7 @@ impl ActionContractSpec {
         }
         let mut argument_names = BTreeSet::new();
         let mut operands = BTreeSet::new();
+        let mut material_operands = BTreeSet::new();
         for part in self.phrase.iter().flat_map(PhrasePart::parts) {
             let (name, units) = match part {
                 PhrasePart::Word(word) => {
@@ -164,6 +140,9 @@ impl ActionContractSpec {
                         return Err(format!(
                             "action argument '{name}' references unknown earlier operand '{reference}'"
                         ));
+                    }
+                    if contract_type_mentions_material(r#type, &material_operands) {
+                        material_operands.insert(name.as_str());
                     }
                     operands.insert(name.as_str());
                     (name.as_str(), None)
@@ -235,8 +214,77 @@ impl ActionContractSpec {
                     ));
                 }
             }
+            let lineage_operands = match &result.lineage {
+                ResultLineage::Begins => continue,
+                ResultLineage::Continues { from } => {
+                    if from.is_empty() {
+                        return Err(format!(
+                            "action result '{}' must continue from at least one material operand",
+                            result.name
+                        ));
+                    }
+                    for source in from {
+                        if !material_operands.contains(source.as_str()) {
+                            return Err(format!(
+                                "action result '{}' continues from '{source}', which is not a material operand",
+                                result.name
+                            ));
+                        }
+                    }
+                    from
+                }
+                ResultLineage::IdentifiedBy { operands } => {
+                    if operands.is_empty() {
+                        return Err(format!(
+                            "action result '{}' must be identified by at least one operand",
+                            result.name
+                        ));
+                    }
+                    for operand in operands {
+                        if !argument_names.contains(operand.as_str()) {
+                            return Err(format!(
+                                "action result '{}' is identified by unknown operand '{operand}'",
+                                result.name
+                            ));
+                        }
+                    }
+                    operands
+                }
+            };
+            let mut seen = BTreeSet::new();
+            for operand in lineage_operands {
+                if !seen.insert(operand) {
+                    return Err(format!(
+                        "action result '{}' names lineage operand '{operand}' more than once",
+                        result.name
+                    ));
+                }
+            }
         }
         Ok(())
+    }
+}
+
+fn contract_type_mentions_material(
+    r#type: &ContractType,
+    material_operands: &BTreeSet<&str>,
+) -> bool {
+    fn ty_mentions_material(ty: &Ty) -> bool {
+        match ty {
+            Ty::Named(name, arguments) => {
+                name == "Material" || arguments.iter().any(ty_mentions_material)
+            }
+            Ty::List(element) => ty_mentions_material(element),
+            Ty::Union(alternatives) => alternatives.iter().any(ty_mentions_material),
+            _ => false,
+        }
+    }
+
+    match r#type {
+        ContractType::Concrete(ty) => ty_mentions_material(ty),
+        ContractType::SameAs(operand) => material_operands.contains(operand.as_str()),
+        ContractType::AnyMaterial | ContractType::MaterialOf(_) => true,
+        ContractType::AnyValue => false,
     }
 }
 
@@ -248,7 +296,6 @@ mod tests {
         ActionContractSpec {
             operation: "test.action".to_owned(),
             phrase,
-            inert: Vec::new(),
             results: Vec::new(),
         }
     }

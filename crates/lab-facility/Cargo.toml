@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Facility evidence, constraint solving, and reviewed execution planning for Lab."
 
 [dependencies]
-lab-adapters.workspace = true
+lab-adapter-api.workspace = true
 lab-capability.workspace = true
 lab-inventory.workspace = true
 lab-compiler.workspace = true
@@ -21,6 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+lab-adapters.workspace = true
 tempfile = "3.27.0"
 
 [lints]

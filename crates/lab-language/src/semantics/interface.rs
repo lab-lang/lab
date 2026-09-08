@@ -49,8 +49,8 @@ pub struct ModuleExport {
     /// one, so the states are as much of the surface as a schema is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet: Option<FacetSurface>,
-    /// For an action export, the phrase, operands, results, and capability an
-    /// importer checks a workflow against and a compiler derives a method from.
+    /// For an action export, the phrase, operands, and lineage-bearing results
+    /// an importer checks a workflow against.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action: Option<ActionSurface>,
     /// Type parameters and their bounds, for a type or a callable alike.
@@ -79,7 +79,18 @@ pub struct ActionSurface {
     pub phrase: Vec<crate::checked::CheckedPhraseToken>,
     pub operands: Vec<crate::checked::CheckedActionOperand>,
     pub results: Vec<crate::checked::CheckedActionResult>,
-    pub capability: String,
+}
+
+/// One exact action declaration exposed across a package boundary.
+///
+/// The operation identifies the scientific Intent that Methods refine, while
+/// `definition` identifies the declaration that owns its typed contract.  Both
+/// identities matter: an operation lookup must not discard the package/module
+/// declaration that supplied the operands and results it is checked against.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionInterface {
+    pub definition: DefinitionId,
+    pub surface: ActionSurface,
 }
 
 /// What a package's facet means to a module that imports it.
@@ -111,7 +122,10 @@ impl TypeParameters {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallableSignature {
-    pub inputs: Vec<CheckedType>,
+    /// Named inputs in declaration order. Names are part of a callable's
+    /// public contract: host-language bindings cannot expose a useful,
+    /// type-safe signature if an interface retains only positional types.
+    pub inputs: Vec<CheckedField>,
     pub outputs: Vec<CheckedField>,
 }
 
@@ -165,5 +179,16 @@ impl ModuleInterface {
             documentation: String::new(),
             exports: BTreeMap::new(),
         }
+    }
+
+    /// Every action contract this module exports, retaining its exact
+    /// declaration identity.
+    pub fn action_interfaces(&self) -> impl Iterator<Item = ActionInterface> + '_ {
+        self.exports.values().filter_map(|export| {
+            export.action.as_ref().map(|surface| ActionInterface {
+                definition: export.definition.clone(),
+                surface: surface.clone(),
+            })
+        })
     }
 }

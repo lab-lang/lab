@@ -28,6 +28,7 @@ HAND_WRITTEN = """\
 
 use std.bio.designs
 use std.bio.golden_gate
+use std.bio.ontology
 
 reporter_sequence: DNA = dna("ACGTACGT")
 

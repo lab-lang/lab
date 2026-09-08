@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from ._declarations import Module
 from ._native import analyze_lab_modules as _analyze_lab_modules
+from ._native import analyze_lab_project_modules as _analyze_lab_project_modules
 from ._source import Origin, SourceMap
 
 
@@ -59,7 +61,7 @@ class Program:
         return cast(list[dict[str, Any]], self.checked[module]["declarations"])
 
 
-def analyze(*modules: Module) -> Program:
+def analyze(*modules: Module, project: str | Path | None = None) -> Program:
     """Emit and check modules, returning diagnostics rather than raising.
 
     Modules are checked in the order given, each against the interfaces of the
@@ -72,19 +74,30 @@ def analyze(*modules: Module) -> Program:
         source, source_map = module.emit()
         sources[module.name] = source
         maps[module.name] = source_map
-    return _analyze(sources, maps)
+    return _analyze(sources, maps, project)
 
 
-def analyze_sources(sources: dict[str, str]) -> Program:
+def analyze_sources(sources: dict[str, str], *, project: str | Path | None = None) -> Program:
     """Check Lab source text that was written rather than emitted."""
 
-    return _analyze(sources, {})
+    return _analyze(sources, {}, project)
 
 
-def _analyze(sources: dict[str, str], maps: dict[str, SourceMap]) -> Program:
+def _analyze(
+    sources: dict[str, str],
+    maps: dict[str, SourceMap],
+    project: str | Path | None,
+) -> Program:
+    serialized = (
+        _analyze_lab_modules([(name, source) for name, source in sources.items()])
+        if project is None
+        else _analyze_lab_project_modules(
+            [(name, source) for name, source in sources.items()], str(project)
+        )
+    )
     analyzed = cast(
         list[dict[str, Any]],
-        json.loads(_analyze_lab_modules([(name, source) for name, source in sources.items()])),
+        json.loads(serialized),
     )
 
     checked: dict[str, dict[str, Any]] = {}
@@ -109,16 +122,16 @@ def _analyze(sources: dict[str, str], maps: dict[str, SourceMap]) -> Program:
     return Program(sources=sources, checked=checked, diagnostics=tuple(diagnostics))
 
 
-def check(*modules: Module) -> Program:
+def check(*modules: Module, project: str | Path | None = None) -> Program:
     """Emit and check modules, raising `LabError` if any of them is rejected."""
 
-    return _raising(analyze(*modules))
+    return _raising(analyze(*modules, project=project))
 
 
-def check_sources(sources: dict[str, str]) -> Program:
+def check_sources(sources: dict[str, str], *, project: str | Path | None = None) -> Program:
     """Check written Lab source, raising `LabError` if any of it is rejected."""
 
-    return _raising(analyze_sources(sources))
+    return _raising(analyze_sources(sources, project=project))
 
 
 def _raising(program: Program) -> Program:

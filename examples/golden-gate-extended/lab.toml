@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2026"
 
 [build]
-entry = "src/programs/panel.lab"
+entry = "src/programs/build_panel.lab"
+
+[planning]
+adapter-requirement = "non-manual"
 
 [[planning.methods]]
 source-operation = "std.bio.build.realize"

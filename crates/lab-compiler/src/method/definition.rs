@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
 
 use lab_capability::{
-    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId, OperationId,
-    PropertyKind, PropertyValue, QualificationLevel, ScalarValue, UnitIri,
+    AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, ExactDecimal, ExactInteger,
+    MethodId, OperationId, ProcedureContractId, PropertyKind, PropertyValue, QualificationLevel,
+    ScalarValue, UnitIri,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::method::{IntentOperationId, LocalId};
+use crate::procedure::ProcedureProgramBuilderId;
 
 /// The semantic type of one method or Procedure port.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -33,13 +35,23 @@ pub enum PortType {
     MaterialAsRequested,
     /// Non-physical information or evidence of an open semantic kind.
     Data { data_kind: AbsoluteIri },
+    /// Physical matter in the exact state supplied by the Intent input.
+    ///
+    /// This is the input-side counterpart of `MaterialAsRequested`. It lets a
+    /// domain action such as disposal accept every checked material state
+    /// without weakening the concrete state carried by the resulting planning
+    /// port. It is meaningful only on a Method input.
+    MaterialAsSupplied,
 }
 
 impl PortType {
     /// Whether this port carries physical matter, in a stated state or in
     /// whichever one the Intent asked for.
     pub fn is_material(&self) -> bool {
-        matches!(self, Self::Material { .. } | Self::MaterialAsRequested)
+        matches!(
+            self,
+            Self::Material { .. } | Self::MaterialAsRequested | Self::MaterialAsSupplied
+        )
     }
 }
 
@@ -59,8 +71,15 @@ pub struct MethodInput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MethodParameter {
+    /// Local name used by this Method and its Procedure tasks.
     pub name: LocalId,
+    /// Intent parameter to read. Omission means the local name, which keeps the common case terse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<LocalId>,
     pub value_type: ParameterType,
+    /// Method-owned value used only when the Intent does not state the source parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
 }
 
 /// The closed structural shape expected from one Intent parameter.
@@ -185,6 +204,68 @@ impl ProcedureValue {
     }
 }
 
+impl MethodParameter {
+    /// Convert the compact JSON default into the same exact typed value carried by Intent.
+    /// Defaults are unitless; a task reference applies and validates its Procedure unit exactly
+    /// as it does for a source-supplied value.
+    pub(crate) fn resolved_default(&self) -> Result<Option<ProcedureValue>, String> {
+        let Some(default) = &self.default else {
+            return Ok(None);
+        };
+        let scalar = |value| ProcedureValue::Scalar {
+            value: PropertyValue::unitless(value),
+        };
+        let convert = |value: &serde_json::Value, expected: ScalarType| {
+            default_scalar(value, expected).map(PropertyValue::unitless)
+        };
+        let value = match &self.value_type {
+            ParameterType::Scalar { scalar_type } => scalar(default_scalar(default, *scalar_type)?),
+            ParameterType::List { element_type } => {
+                let values = default
+                    .as_array()
+                    .ok_or_else(|| format!("default for `{}` must be a JSON array", self.name))?;
+                ProcedureValue::List {
+                    element_type: *element_type,
+                    values: values
+                        .iter()
+                        .map(|value| convert(value, *element_type))
+                        .collect::<Result<Vec<_>, _>>()?,
+                }
+            }
+        };
+        Ok(Some(value))
+    }
+}
+
+fn default_scalar(value: &serde_json::Value, expected: ScalarType) -> Result<ScalarValue, String> {
+    let invalid = || format!("default value does not match {expected:?}");
+    match expected {
+        ScalarType::Text => value
+            .as_str()
+            .map(|value| ScalarValue::Text(value.to_owned()))
+            .ok_or_else(invalid),
+        ScalarType::Integer => value
+            .as_number()
+            .and_then(|value| ExactInteger::parse(value.to_string()).ok())
+            .map(ScalarValue::Integer)
+            .ok_or_else(invalid),
+        ScalarType::Real => value
+            .as_number()
+            .and_then(|value| ExactDecimal::parse(value.to_string()).ok())
+            .map(ScalarValue::Real)
+            .ok_or_else(invalid),
+        ScalarType::Boolean => value
+            .as_bool()
+            .map(ScalarValue::Boolean)
+            .ok_or_else(invalid),
+        ScalarType::Iri => value
+            .as_str()
+            .ok_or_else(invalid)
+            .and_then(|value| AbsoluteIri::new(value).map_err(|_| invalid()))
+            .map(ScalarValue::Iri),
+    }
+}
+
 /// A literal Procedure value or a reference to a value supplied by the refined Intent operation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -252,6 +333,39 @@ pub struct CapabilityRequirementDefinition {
     pub constraints: Vec<CapabilityConstraintDefinition>,
 }
 
+/// The facility policy applied to every capability clause derived from one Procedure program.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionPolicyDefinition {
+    pub minimum_qualification: QualificationLevel,
+    pub accepted_control_modes: BTreeSet<ControlMode>,
+}
+
+/// How one Method task becomes executable Procedure semantics.
+///
+/// A template renders checked Method-task values into a declarative contract body. A builder
+/// names a statically linked construction algorithm. Neither can author capability requirements,
+/// because those are derived from the completed program. A primitive task has no program and
+/// states its capability requirements directly.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(deny_unknown_fields)]
+pub enum ProcedureTaskExecutionDefinition {
+    Template {
+        contract: ProcedureContractId,
+        body: serde_json::Value,
+        policy: ExecutionPolicyDefinition,
+    },
+    Builder {
+        builder: ProcedureProgramBuilderId,
+        contract: ProcedureContractId,
+        policy: ExecutionPolicyDefinition,
+    },
+    Primitive {
+        requirements: Vec<CapabilityRequirementDefinition>,
+    },
+}
+
 /// One task in topological order within a facility-independent Procedure graph.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -266,7 +380,7 @@ pub struct ProcedureTaskDefinition {
     pub parameters: Vec<ProcedureParameterDefinition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<MaterialInputDefinition>,
-    pub requirements: Vec<CapabilityRequirementDefinition>,
+    pub execution: ProcedureTaskExecutionDefinition,
 }
 
 /// A portable method definition that refines one Intent operation without selecting a facility.
@@ -298,7 +412,7 @@ pub struct MethodSignature {
 mod strictness_tests {
     use super::{
         CapabilityRequirementDefinition, MaterialInputDefinition, MaterialSourceExpression,
-        ProcedureTaskDefinition,
+        ProcedureTaskDefinition, ProcedureTaskExecutionDefinition,
     };
 
     /// A misspelled collection key must not silently deserialize as an empty collection. Dropping
@@ -310,7 +424,7 @@ mod strictness_tests {
             "id": "setup",
             "operation": "https://example.org/procedure#Setup",
             "materialz": [{"id": "buffer", "source": {"kind": "literal", "symbol": "T4"}}],
-            "requirements": []
+            "execution": {"kind": "primitive", "requirements": []}
         }"#;
         let error = serde_json::from_str::<ProcedureTaskDefinition>(task).unwrap_err();
         assert!(
@@ -349,6 +463,50 @@ mod strictness_tests {
             MaterialSourceExpression::Literal {
                 symbol: "T4".to_owned()
             }
+        );
+    }
+
+    #[test]
+    fn template_builder_and_primitive_execution_have_disjoint_serialized_shapes() {
+        let builder_with_requirements = r#"{
+            "kind": "builder",
+            "builder": "https://example.org/builder",
+            "contract": "https://example.org/contract",
+            "policy": {
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": ["https://sbol.io/ns/facility#ManualControl"]
+            },
+            "requirements": []
+        }"#;
+        let error =
+            serde_json::from_str::<ProcedureTaskExecutionDefinition>(builder_with_requirements)
+                .unwrap_err();
+        assert!(error.to_string().contains("requirements"), "{error}");
+
+        let primitive_with_builder = r#"{
+            "kind": "primitive",
+            "builder": "https://example.org/builder",
+            "requirements": []
+        }"#;
+        let error =
+            serde_json::from_str::<ProcedureTaskExecutionDefinition>(primitive_with_builder)
+                .unwrap_err();
+        assert!(error.to_string().contains("builder"), "{error}");
+
+        let removed_program_kind = r#"{
+            "kind": "program",
+            "builder": "https://example.org/builder",
+            "contract": "https://example.org/contract",
+            "policy": {
+                "minimum_qualification": "https://sbol.io/ns/facility#Plannable",
+                "accepted_control_modes": ["https://sbol.io/ns/facility#ManualControl"]
+            }
+        }"#;
+        let error = serde_json::from_str::<ProcedureTaskExecutionDefinition>(removed_program_kind)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("unknown variant `program`"),
+            "{error}"
         );
     }
 }

@@ -48,7 +48,7 @@ is a reviewed artifact like every other. The runtime interprets compiled
 plans and never plans: extending 0030, what the reviewer read is what the
 workcell performs.
 
-The instrument formats are device-neutral (`lab.thermocycle-run.v0`,
+The instrument formats are device-neutral (`lab.thermocycle-run.v1`,
 `lab.plate-read.v0`): the document states the program, the station's kind
 selects the executor, and no document names a vendor.
 

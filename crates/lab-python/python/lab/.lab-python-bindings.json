@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "files": [
+    "_prelude.py",
+    "_prelude.pyi",
+    "bio/__init__.py",
+    "bio/__init__.pyi",
+    "bio/backbones.py",
+    "bio/backbones.pyi",
+    "bio/build.py",
+    "bio/build.pyi",
+    "bio/designs.py",
+    "bio/designs.pyi",
+    "bio/golden_gate.py",
+    "bio/golden_gate.pyi",
+    "bio/ontology.py",
+    "bio/ontology.pyi",
+    "bio/parts.py",
+    "bio/parts.pyi",
+    "bio/reporters.py",
+    "bio/reporters.pyi",
+    "competence.py",
+    "competence.pyi",
+    "plasmid.py",
+    "plasmid.pyi"
+  ]
+}

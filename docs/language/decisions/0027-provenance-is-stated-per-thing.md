@@ -43,7 +43,7 @@ buy restriction_enzyme BsaI:
   digest_temperature = 37 C
 ```
 
-`require` and `accept` and a build-graph node attach to `build`; an `identity` to
+`require` and `accept` and a build-graph node attach to `build`; a `supplier_identity` to
 order against attaches to `buy`, and belongs to buying rather than to any one
 kind's schema. Claiming to build something bought is refused.
 

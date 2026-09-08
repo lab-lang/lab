@@ -81,7 +81,7 @@ A declaration may carry an exact biological-design identity independently of how
 
 Design identity is not availability. An `sbol_identity` does not establish a lot, quantity, location, provenance chain, or fitness for use. Those claims require exact MaterialLot resolution against a validated SBOLInventory document and runtime evidence.
 
-During inventory-backed planning, a checked `sbol_identity` is joined only to active MaterialLots in the selected facility whose `sbol:built` names that exact Component IRI. A unique candidate is frozen in the dependency plan together with the facility IRI and source-document hash. No candidate is a missing input; several candidates are an allocation ambiguity requiring policy or review. The compiler never treats candidate ordering as allocation.
+During inventory-backed planning, a checked `sbol_identity` is joined only to active MaterialLots in the selected facility whose `sbol:built` names that exact Component IRI. No candidate is a missing input. Active lots of the same exact Component are interchangeable, so the planner selects one deterministically, freezes it with the facility and source-document hash, and retains the others as review evidence. Distinct Assets and Methods remain explicit ambiguities. Candidate ordering never chooses between scientifically distinct plans.
 
 ## Commands and events
 
@@ -89,7 +89,7 @@ An effect binding records a command and durably waits for the corresponding even
 
 Workflow replay must not repeat completed physical actions. Time, randomness, inventory queries, device interaction, network access, and human decisions are effects rather than ambient language operations.
 
-Every resolved action contract names the capability required to dispatch it as an absolute SBOLInventory capability-kind IRI, the type of each operand and result, and how each operand participates in physical ownership. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action. Capability matching is exact IRI equality; source actions that describe composite biological work retain an explicit refinement boundary rather than pretending to name one instrument operation. The complete standard-action audit is in [`capabilities.md`](capabilities.md).
+Every resolved action contract names an exact operation identity, each operand and result type, each operand's physical ownership mode, and each result's lineage relationship. `copy` is for freely reusable information, `borrow` permits observation without consuming a material, and `take` transfers a material into the action. Actions state scientific intent, not dispatch capability. Applicable Methods produce Procedure tasks and first-class Capability requirements later, and facility matching compares those requirement IRIs exactly. The complete Method and Procedure coverage is in [`capabilities.md`](capabilities.md).
 
 `=` and `<-` therefore have different replay laws. `=` evaluates a deterministic expression or commits an explicit state transition. `<-` creates a durable command boundary and obtains its value from a recorded completion event. The result may look like a local binding, but the physical action must not be repeated merely because a workflow is replayed.
 
@@ -127,7 +127,7 @@ Only the third judgment produces an accepted physical material.
 
 Portable module checking resolves module-provided contracts, types expressions, verifies workflow returns, and checks affine material ownership. It does not choose a facility, Asset, deck, or laboratory schedule.
 
-Method selection may interpret a documented set of checked scientific properties and resolved operations while remaining facility-independent. Facility planning then binds the resulting requirements to exact capability offerings and Assets, and only the adapter bound to that Asset may interpret implementation-specific configuration. Each boundary must fail explicitly when required properties, capabilities, value shapes, capacities, or operation sequences are unsupported. Diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
+Method refinement may interpret a documented set of checked scientific properties from an exact generic action identity while remaining facility-independent. Facility planning then binds the resulting requirements to exact capability offerings, Assets, contract implementations, and validated profiles. The adapter bound to that Asset accepts the canonical Procedure contract and values, not the biological action name. Each boundary must fail explicitly when required properties, capabilities, contract values, capacities, or program sequences are unsupported. Diagnostics should describe generic constraints where possible; experiment names and tutorial-specific sequences do not belong in the core language checker.
 
 ## Reactive execution
 

@@ -9,7 +9,7 @@ circular` describes a comparison instead of performing one.
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from typing import Protocol, runtime_checkable
+from typing import Protocol, overload, runtime_checkable
 
 _STRING_ESCAPES = {'"': '\\"', "\\": "\\\\", "\n": "\\n", "\t": "\\t"}
 
@@ -204,6 +204,12 @@ class Quantity(Expression):
 
     def render(self) -> str:
         return f"{self.magnitude.operand()} {self.unit}"
+
+    @overload
+    def __truediv__(self, other: Unit) -> Quantity: ...
+
+    @overload
+    def __truediv__(self, other: object) -> Expression: ...
 
     def __truediv__(self, other: object) -> Expression:
         if isinstance(other, Unit):

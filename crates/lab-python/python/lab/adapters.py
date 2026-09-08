@@ -8,10 +8,8 @@ validator to canonicalize profiles; it does not maintain a parallel device regis
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import Any, cast
 
 from ._native import lab_adapter_catalog as _lab_adapter_catalog
@@ -32,12 +30,11 @@ class ProcedureImplementation:
 
     id: str
     contract: str
-    operations: tuple[str, ...]
     capability_kinds: tuple[str, ...]
     control_modes: tuple[str, ...]
     accepted_run_formats: tuple[str, ...]
     emitted_run_formats: tuple[str, ...]
-    program_features: Mapping[str, tuple[str, ...]]
+    program_features: tuple[str, ...]
     services: AdapterServices
 
 
@@ -47,7 +44,7 @@ class ValidatedAdapterProfile:
 
     format: str
     schema_version: str
-    compiler_version: str
+    api_version: str
     name: str
     driver: str
     canonical_toml: str
@@ -62,12 +59,7 @@ class AdapterDescriptor:
     id: str
     display_name: str
     manufacturer: str | None
-    capabilities: tuple[str, ...]
     features: tuple[str, ...]
-    control_modes: tuple[str, ...]
-    accepted_run_formats: tuple[str, ...]
-    emitted_run_formats: tuple[str, ...]
-    services: AdapterServices
     procedure_implementations: tuple[ProcedureImplementation, ...]
     profile_schema: dict[str, Any]
     default_profile: ValidatedAdapterProfile
@@ -76,7 +68,7 @@ class AdapterDescriptor:
 @dataclass(frozen=True, slots=True)
 class AdapterCatalog:
     format: str
-    compiler_version: str
+    api_version: str
     profile_schema_version: str
     adapters: tuple[AdapterDescriptor, ...]
 
@@ -93,7 +85,7 @@ def _profile(raw: dict[str, Any]) -> ValidatedAdapterProfile:
     return ValidatedAdapterProfile(
         format=cast(str, raw["format"]),
         schema_version=cast(str, raw["schema_version"]),
-        compiler_version=cast(str, raw["compiler_version"]),
+        api_version=cast(str, raw["api_version"]),
         name=cast(str, raw["name"]),
         driver=cast(str, raw["driver"]),
         canonical_toml=cast(str, raw["canonical_toml"]),
@@ -108,7 +100,6 @@ def catalog() -> AdapterCatalog:
     raw = cast(dict[str, Any], json.loads(_lab_adapter_catalog()))
     descriptors = []
     for item in cast(list[dict[str, Any]], raw["adapters"]):
-        services = cast(dict[str, Any], item["services"])
         implementations = []
         for implementation in cast(list[dict[str, Any]], item.get("procedure_implementations", [])):
             implementation_services = cast(dict[str, Any], implementation["services"])
@@ -116,7 +107,6 @@ def catalog() -> AdapterCatalog:
                 ProcedureImplementation(
                     id=cast(str, implementation["id"]),
                     contract=cast(str, implementation["contract"]),
-                    operations=tuple(cast(list[str], implementation["operations"])),
                     capability_kinds=tuple(cast(list[str], implementation["capability_kinds"])),
                     control_modes=tuple(cast(list[str], implementation["control_modes"])),
                     accepted_run_formats=tuple(
@@ -125,15 +115,7 @@ def catalog() -> AdapterCatalog:
                     emitted_run_formats=tuple(
                         cast(list[str], implementation["emitted_run_formats"])
                     ),
-                    program_features=MappingProxyType(
-                        {
-                            operation: tuple(features)
-                            for operation, features in cast(
-                                dict[str, list[str]],
-                                implementation.get("program_features", {}),
-                            ).items()
-                        }
-                    ),
+                    program_features=tuple(cast(list[str], implementation["program_features"])),
                     services=AdapterServices(
                         planning=cast(bool, implementation_services["planning"]),
                         lowering=cast(bool, implementation_services["lowering"]),
@@ -147,17 +129,7 @@ def catalog() -> AdapterCatalog:
                 id=cast(str, item["id"]),
                 display_name=cast(str, item["display_name"]),
                 manufacturer=cast(str | None, item.get("manufacturer")),
-                capabilities=tuple(cast(list[str], item["capabilities"])),
                 features=tuple(cast(list[str], item["features"])),
-                control_modes=tuple(cast(list[str], item["control_modes"])),
-                accepted_run_formats=tuple(cast(list[str], item["accepted_run_formats"])),
-                emitted_run_formats=tuple(cast(list[str], item["emitted_run_formats"])),
-                services=AdapterServices(
-                    planning=cast(bool, services["planning"]),
-                    lowering=cast(bool, services["lowering"]),
-                    simulation=cast(bool, services["simulation"]),
-                    runtime=cast(bool, services["runtime"]),
-                ),
                 procedure_implementations=tuple(implementations),
                 profile_schema=cast(dict[str, Any], item["profile_schema"]),
                 default_profile=_profile(cast(dict[str, Any], item["default_profile"])),
@@ -165,7 +137,7 @@ def catalog() -> AdapterCatalog:
         )
     return AdapterCatalog(
         format=cast(str, raw["format"]),
-        compiler_version=cast(str, raw["compiler_version"]),
+        api_version=cast(str, raw["api_version"]),
         profile_schema_version=cast(str, raw["profile_schema_version"]),
         adapters=tuple(descriptors),
     )

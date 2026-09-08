@@ -3,15 +3,19 @@
 //! This crate owns filesystem resolution and compilation order. The language
 //! crate remains I/O-free and accepts only explicit semantic environments.
 
+mod application;
+mod artifacts;
+mod extensions;
 mod facility;
+pub use extensions::{ApplicationExtensionError, ApplicationExtensions, application_extensions};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use lab_compiler::method::{
-    MethodCatalogDocument, MethodCatalogError, MethodDefinition, MethodRegistry,
-    MethodRegistryError,
+    MethodActionInterfaceError, MethodCatalogDocument, MethodCatalogError, MethodDefinition,
+    MethodRegistry, MethodRegistryError,
 };
 use lab_language::Grounding;
 use lab_language::{
@@ -28,10 +32,16 @@ use semver::{Version, VersionReq};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use facility::{
-    FacilityPlanningResult, FacilityProjectError, load_package_inventory, plan_modules_for_package,
-    resolve_package_adapter_bindings,
+pub use application::{
+    CompilerRefinement, CompilerRefinementError, ProjectApplicationError, ProjectArtifactError,
+    ProjectArtifactRequest, ProjectBuildError, ProjectBuildRequest, ProjectCompilation,
+    ProjectContext, ProjectModuleAnalysis, ProjectPlanningRequest, ProjectProgram, refine_modules,
 };
+pub use artifacts::{
+    BuildProduct, FacilityArtifactBuild, FacilityArtifactError, FacilityDocumentRenderer,
+    ProjectArtifactBuild, ProjectArtifactBuildError,
+};
+pub use facility::{FacilityPlanningResult, FacilityProjectError};
 
 pub const LOCK_FILE: &str = "lab.lock";
 pub const LOCK_SCHEMA_VERSION: u32 = 2;
@@ -92,6 +102,14 @@ pub enum ProjectError {
         package: String,
         #[source]
         source: Box<MethodRegistryError>,
+    },
+    #[error(
+        "portable Methods reachable from package '{package}' do not implement its action interfaces: {source}"
+    )]
+    InvalidMethodActionInterfaces {
+        package: String,
+        #[source]
+        source: Box<MethodActionInterfaceError>,
     },
     #[error(
         "dependency '{dependency}' of package '{package}' is not a path dependency; registry resolution is intentionally unavailable"
@@ -187,7 +205,7 @@ impl ProjectLock {
 }
 
 impl LabProject {
-    pub fn discover(path: impl AsRef<Path>) -> Result<Self, ProjectError> {
+    pub(crate) fn discover(path: impl AsRef<Path>) -> Result<Self, ProjectError> {
         let (root, members, default_member) = match DiscoveredRoot::discover(path)? {
             DiscoveredRoot::Package(package) => {
                 let root = canonicalize(&package.root)?;
@@ -270,8 +288,7 @@ impl LabProject {
         }
     }
 
-    pub fn compile(&self) -> Result<CompiledProject, ProjectError> {
-        let methods = self.validate_method_registries()?;
+    pub(crate) fn compile(&self) -> Result<CompiledProject, ProjectError> {
         let mut compiled_by_package = BTreeMap::<PathBuf, Vec<CompiledModule>>::new();
         for root in &self.order {
             let resolved = &self.packages[root];
@@ -294,6 +311,7 @@ impl LabProject {
             let compiled = compile_package(&resolved.package, environment)?;
             compiled_by_package.insert(root.clone(), compiled);
         }
+        let methods = self.validate_method_registries(&compiled_by_package)?;
         let modules = self
             .order
             .iter()
@@ -311,25 +329,27 @@ impl LabProject {
         })
     }
 
-    /// Load package-contributed Methods reachable from the default runnable package.
-    ///
-    /// Definitions are returned dependency-first and do not include the compiler's standard
-    /// catalog. Embedders can use this surface to compose package Methods with additional
-    /// frontend-authored definitions under one authoritative `MethodRegistry` validation.
-    pub fn package_method_definitions(&self) -> Result<Vec<MethodDefinition>, ProjectError> {
-        let roots = self.ordered_reachable_roots(&self.default_member);
-        self.load_method_definitions(&roots)
-    }
-
-    /// Build the complete Method registry for the default runnable package.
-    pub fn method_registry(&self) -> Result<MethodRegistry, ProjectError> {
-        self.method_registry_for(&self.default_member)
-    }
-
-    fn validate_method_registries(&self) -> Result<MethodRegistry, ProjectError> {
+    fn validate_method_registries(
+        &self,
+        compiled_by_package: &BTreeMap<PathBuf, Vec<CompiledModule>>,
+    ) -> Result<MethodRegistry, ProjectError> {
         let mut default = None;
         for member in &self.members {
             let registry = self.method_registry_for(member)?;
+            let action_interfaces = lab_language::standard_library_action_interfaces()
+                .into_iter()
+                .chain(
+                    self.ordered_reachable_roots(member)
+                        .into_iter()
+                        .flat_map(|root| &compiled_by_package[root])
+                        .flat_map(|module| module.module.interface.action_interfaces()),
+                );
+            registry
+                .validate_action_interfaces(action_interfaces)
+                .map_err(|source| ProjectError::InvalidMethodActionInterfaces {
+                    package: self.packages[member].package.manifest.package.name.clone(),
+                    source: Box::new(source),
+                })?;
             if member == &self.default_member {
                 default = Some(registry);
             }
@@ -854,7 +874,6 @@ shared = { path = "../shared" }
         );
 
         let project = LabProject::discover(root).unwrap();
-        assert_eq!(project.package_method_definitions().unwrap(), [custom]);
         let compiled = project.compile().unwrap();
         let recovery = compiled.methods.methods_for(
             &lab_compiler::method::IntentOperationId::new("std.lab.plasmid.recover").unwrap(),
@@ -871,6 +890,174 @@ shared = { path = "../shared" }
                 "https://www.lab-compiler.org/ns/method#automated-recovery",
                 "https://example.org/method/custom-recovery",
             ])
+        );
+    }
+
+    #[test]
+    fn rejects_a_method_that_refines_no_reachable_action() {
+        let fixture = TestProject::new();
+        let root = fixture.package(
+            "methods",
+            r#"[package]
+name = "methods"
+version = "0.1.0"
+
+[methods]
+documents = ["methods/methods.json"]
+"#,
+            &[("values.lab", DONOR)],
+        );
+        let mut method = lab_compiler::method::standard_method_definitions()
+            .into_iter()
+            .find(|definition| definition.refines.as_str() == "std.lab.plasmid.recover")
+            .unwrap();
+        method.id = MethodId::new("https://example.org/method/dead").unwrap();
+        method.refines =
+            lab_compiler::method::IntentOperationId::new("methods.vocabulary.typo").unwrap();
+        let catalog = MethodCatalogDocument::new(vec![method]).unwrap();
+        fs::create_dir_all(root.join("methods")).unwrap();
+        fs::write(
+            root.join("methods/methods.json"),
+            serde_json::to_string_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+
+        let error = LabProject::discover(root).unwrap().compile().unwrap_err();
+        let ProjectError::InvalidMethodActionInterfaces { source, .. } = error else {
+            panic!("expected an action-interface error, got {error}");
+        };
+        assert!(matches!(
+            *source,
+            MethodActionInterfaceError::UnknownOperation { operation, .. }
+                if operation.as_str() == "methods.vocabulary.typo"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_method_signature_that_does_not_match_its_exact_action_definition() {
+        let fixture = TestProject::new();
+        let root = fixture.package(
+            "methods",
+            r#"[package]
+name = "methods"
+version = "0.1.0"
+
+[methods]
+documents = ["methods/methods.json"]
+"#,
+            &[(
+                "vocabulary.lab",
+                r#"record Sample
+
+action prepare <sample> -> prepared:
+  sample: take Material<Sample>
+  prepared: Material<Sample> continues from sample
+"#,
+            )],
+        );
+        let mut method = lab_compiler::method::standard_method_definitions()
+            .into_iter()
+            .find(|definition| definition.refines.as_str() == "std.lab.plasmid.recover")
+            .unwrap();
+        method.id = MethodId::new("https://example.org/method/wrong-signature").unwrap();
+        method.refines =
+            lab_compiler::method::IntentOperationId::new("methods.vocabulary.prepare").unwrap();
+        let catalog = MethodCatalogDocument::new(vec![method]).unwrap();
+        fs::create_dir_all(root.join("methods")).unwrap();
+        fs::write(
+            root.join("methods/methods.json"),
+            serde_json::to_string_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+
+        let error = LabProject::discover(root).unwrap().compile().unwrap_err();
+        let ProjectError::InvalidMethodActionInterfaces { source, .. } = error else {
+            panic!("expected an action-interface error, got {error}");
+        };
+        let MethodActionInterfaceError::IncompatibleAction {
+            action, message, ..
+        } = *source
+        else {
+            panic!("expected an incompatible action, got {source}");
+        };
+        assert_eq!(
+            action,
+            lab_language::DefinitionId::exported("methods.vocabulary", "prepare")
+        );
+        assert!(
+            message.contains("input `culture` is not declared"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn application_analyzes_in_memory_entry_against_captured_package_interfaces() {
+        let fixture = TestProject::new();
+        let root = fixture.package(
+            "demo",
+            r#"[package]
+name = "demo"
+version = "0.1.0"
+"#,
+            &[(
+                "flows.lab",
+                r#"workflow provide() -> Integer:
+  return 7
+"#,
+            )],
+        );
+        let application = ProjectCompilation::load(root).unwrap();
+        let analyses = application.analyze_modules(&[(
+            "python.entry".to_owned(),
+            r#"use demo.flows
+
+workflow main() -> Integer:
+  value <- provide
+  return value
+"#
+            .to_owned(),
+        )]);
+
+        assert_eq!(analyses.len(), 1);
+        assert!(analyses[0].analysis.is_valid());
+        assert!(analyses[0].analysis.checked.is_some());
+    }
+
+    #[test]
+    fn explicit_in_memory_entry_plans_with_only_its_relevant_package_method_pins() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/golden-gate");
+        let application = ProjectCompilation::load(root).unwrap();
+        let mut analyses = application.analyze_modules(&[(
+            "embedded.reporter".to_owned(),
+            r#"use golden_gate.workflows.assemble
+
+workflow main() -> Material<Plasmid>:
+  product <- assemble_GVD0011
+  return product
+"#
+            .to_owned(),
+        )]);
+        let checked = analyses
+            .pop()
+            .unwrap()
+            .analysis
+            .checked
+            .expect("the embedded entry resolves against captured package modules");
+        let methods = application.compose_methods(Vec::new(), true).unwrap();
+
+        let planned = application
+            .plan_modules(&[&checked], "embedded.reporter", &methods)
+            .unwrap();
+
+        assert!(planned.problem.choices.iter().all(|choice| {
+            choice.source_operation.as_str() != "std.lab.plasmid.transform"
+                && choice.source_operation.as_str() != "std.lab.plasmid.recover"
+                && choice.source_operation.as_str() != "std.lab.plasmid.plate"
+        }));
+        assert!(
+            planned.solution.selections.iter().any(|selection| {
+                selection.source_operation.as_str() == "std.bio.build.realize"
+            })
         );
     }
 
@@ -1055,11 +1242,8 @@ workflow main() -> Material<Plasmid>:
     #[test]
     fn plans_a_project_through_exact_facility_and_material_allocations() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/golden-gate");
-        let project = LabProject::discover(root).unwrap();
-        let compiled = project.compile().unwrap();
-        let planned = project
-            .plan_facility_with_package_methods(&compiled)
-            .unwrap();
+        let application = ProjectCompilation::load(root).unwrap();
+        let planned = application.plan(ProjectPlanningRequest::default()).unwrap();
 
         assert_eq!(
             planned.inventory.facility().as_str(),
@@ -1071,17 +1255,21 @@ workflow main() -> Material<Plasmid>:
             planned.solution().problem_sha256
         );
         let allocated_ir = planned.allocated.ir();
-        let reparsed =
-            lab_compiler::program::AllocatedLairProgram::parse_ir(&allocated_ir).unwrap();
+        let reparsed = lab_compiler::program::AllocatedLairProgram::parse_ir(
+            &allocated_ir,
+            lab_compiler::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap();
         assert_eq!(
             reparsed.allocated_program().unwrap(),
             planned.allocated.allocated_program().unwrap()
         );
         let reprojected =
-            lab_adapters::AdapterInvocationPlan::from_allocated_lair(&reparsed).unwrap();
+            lab_adapter_api::AdapterInvocationPlan::from_allocated_lair(&reparsed).unwrap();
         lab_facility::validate_allocated_material_inventory(
             &reprojected.allocated,
             &planned.material_inventory,
+            lab_compiler::procedure::builtin_procedure_contracts(),
         )
         .unwrap();
         assert_eq!(reprojected, planned.adapter_invocations);

@@ -13,13 +13,16 @@ use crate::procedure::binding::{
     ProcedureBindingError, ProcedureCapabilityRequirement, ProcedureTaskInterface,
 };
 use crate::procedure::{
-    BindingScope, ProcedureTaskProgramValidationError, ValidatedProcedureProgram,
-    validate_task_program,
+    BindingScope, ProcedureContractRegistry, ProcedureTaskProgramValidationError,
+    ValidatedProcedureProgram, validate_task_program,
 };
 
 impl AllocatedProgram {
     /// Validate the complete facility-bound semantic aggregate without external inventory evidence.
-    pub fn validate(&self) -> Result<(), AllocatedProgramValidationError> {
+    pub fn validate(
+        &self,
+        contracts: &ProcedureContractRegistry,
+    ) -> Result<(), AllocatedProgramValidationError> {
         for (label, digest) in [
             ("planning problem", &self.problem_sha256),
             ("inventory", &self.inventory_sha256),
@@ -56,6 +59,35 @@ impl AllocatedProgram {
                     choice: method.choice.clone(),
                 });
             }
+            method.source_intent.validate().map_err(|message| {
+                AllocatedProgramValidationError::InvalidSourceIntent {
+                    choice: method.choice.clone(),
+                    message,
+                }
+            })?;
+            if method.source_intent.operation() != Some(method.source_operation.as_str()) {
+                return Err(AllocatedProgramValidationError::SourceOperationMismatch {
+                    choice: method.choice.clone(),
+                });
+            }
+            method
+                .source_intent
+                .validate_ports(
+                    method
+                        .inputs
+                        .iter()
+                        .map(|port| (port.name.as_str(), &port.port_type)),
+                    method
+                        .outputs
+                        .iter()
+                        .map(|port| (port.name.as_str(), &port.port_type)),
+                )
+                .map_err(
+                    |message| AllocatedProgramValidationError::SourcePortMismatch {
+                        choice: method.choice.clone(),
+                        message,
+                    },
+                )?;
             if method.tasks.is_empty() {
                 return Err(AllocatedProgramValidationError::EmptyMethod {
                     choice: method.choice.clone(),
@@ -82,23 +114,7 @@ impl AllocatedProgram {
                         );
                     }
                 }
-                let validated = validate_task_program(
-                    &task.id,
-                    &task.operation,
-                    task.inputs.len(),
-                    &task
-                        .outputs
-                        .iter()
-                        .map(|output| output.name.clone())
-                        .collect::<Vec<_>>(),
-                    task.parameters
-                        .iter()
-                        .map(|parameter| (&parameter.id, &parameter.value)),
-                    task.materials
-                        .iter()
-                        .map(|material| (&material.input, material.symbol.as_str())),
-                    task.program.as_ref(),
-                )?;
+                let validated = validate_task_program(&task.id, task.program.as_ref(), contracts)?;
                 if let Some(validated) = validated {
                     validate_program_contract(task, &validated)?;
                 }
@@ -168,16 +184,6 @@ impl AllocatedProgram {
                             });
                         }
                     }
-                    let needs_implementation =
-                        task.program.is_some() && requirement.adapter.is_some();
-                    if requirement.procedure_implementation.is_some() != needs_implementation {
-                        return Err(
-                            AllocatedProgramValidationError::ProcedureImplementationBinding {
-                                task: task.id.clone(),
-                                requirement: requirement.id.clone(),
-                            },
-                        );
-                    }
                     if requirement
                         .adapter
                         .as_ref()
@@ -186,6 +192,21 @@ impl AllocatedProgram {
                         return Err(AllocatedProgramValidationError::InvalidAdapterBinding {
                             requirement: requirement.id.clone(),
                         });
+                    }
+                    if task.program.is_none() && requirement.adapter.is_some() {
+                        return Err(AllocatedProgramValidationError::ProgramlessAdapterBinding {
+                            task: task.id.clone(),
+                            requirement: requirement.id.clone(),
+                        });
+                    }
+                    let needs_implementation = requirement.adapter.is_some();
+                    if requirement.procedure_implementation.is_some() != needs_implementation {
+                        return Err(
+                            AllocatedProgramValidationError::ProcedureImplementationBinding {
+                                task: task.id.clone(),
+                                requirement: requirement.id.clone(),
+                            },
+                        );
                     }
                     if !requirements.insert(requirement.id.clone()) {
                         return Err(AllocatedProgramValidationError::DuplicateRequirement {
@@ -272,7 +293,7 @@ fn map_procedure_binding_error(
         }
         ProcedureBindingError::DuplicateTaskMaterial
         | ProcedureBindingError::UndeclaredMaterial { .. }
-        | ProcedureBindingError::UnexpectedThermalMaterials { .. } => {
+        | ProcedureBindingError::MaterialMismatch { .. } => {
             AllocatedProgramValidationError::ProcedureMaterialBindings { task: task.clone() }
         }
         ProcedureBindingError::BindingScopeMismatch { .. }
@@ -618,6 +639,12 @@ pub enum AllocatedProgramValidationError {
     EmptyMethods,
     #[error("allocated program repeats Method choice `{choice}`")]
     DuplicateChoice { choice: LocalId },
+    #[error("selected Method choice `{choice}` has invalid source Intent: {message}")]
+    InvalidSourceIntent { choice: LocalId, message: String },
+    #[error("selected Method choice `{choice}` source operation does not match its source Intent")]
+    SourceOperationMismatch { choice: LocalId },
+    #[error("selected Method choice `{choice}` ports do not match its source Intent: {message}")]
+    SourcePortMismatch { choice: LocalId, message: String },
     #[error("selected Method choice `{choice}` contains no Procedure tasks")]
     EmptyMethod { choice: LocalId },
     #[error("selected Method choice `{choice}` has an invalid value graph: {message}")]
@@ -648,6 +675,10 @@ pub enum AllocatedProgramValidationError {
         "Procedure task `{task}` requirement `{requirement}` has an inconsistent Procedure implementation binding"
     )]
     ProcedureImplementationBinding { task: LocalId, requirement: LocalId },
+    #[error(
+        "Procedure task `{task}` requirement `{requirement}` selects an adapter without a normalized program"
+    )]
+    ProgramlessAdapterBinding { task: LocalId, requirement: LocalId },
     #[error("capability requirement `{requirement}` has invalid adapter profile data")]
     InvalidAdapterBinding { requirement: LocalId },
     #[error("allocated program repeats Procedure material input `{input}`")]
@@ -693,6 +724,10 @@ mod tests {
         LocalId::new(value).unwrap()
     }
 
+    fn contracts() -> &'static ProcedureContractRegistry {
+        crate::procedure::builtin_procedure_contracts()
+    }
+
     fn adapter() -> InvocationAdapter {
         InvocationAdapter {
             driver: "example.driver".to_owned(),
@@ -726,6 +761,11 @@ mod tests {
         let input = id("input");
         let output = id("output");
         let task_output = id("task-output");
+        let source_intent = crate::workflow::ir::synthetic_intent_with_ports(
+            "example.operation",
+            &[(input.to_string(), PortType::Design)],
+            &[(output.to_string(), PortType::Design)],
+        );
         AllocatedProgram {
             problem_sha256: "a".repeat(64),
             inventory_sha256: "b".repeat(64),
@@ -733,6 +773,7 @@ mod tests {
             methods: vec![AllocatedMethod {
                 choice,
                 source_operation: IntentOperationId::new("example.operation").unwrap(),
+                source_intent,
                 method: MethodId::new("https://example.org/method").unwrap(),
                 after: Vec::new(),
                 inputs: vec![crate::planning::PlanningPort {
@@ -766,10 +807,28 @@ mod tests {
                     }],
                     parameters: Vec::new(),
                     materials: Vec::new(),
-                    requirements: vec![requirement("choice::requirement", Some(adapter()))],
+                    requirements: vec![requirement("choice::requirement", None)],
                 }],
             }],
         }
+    }
+
+    fn synchronize_source_ports(method: &mut AllocatedMethod) {
+        let inputs = method
+            .inputs
+            .iter()
+            .map(|port| (port.name.to_string(), port.port_type.clone()))
+            .collect::<Vec<_>>();
+        let outputs = method
+            .outputs
+            .iter()
+            .map(|port| (port.name.to_string(), port.port_type.clone()))
+            .collect::<Vec<_>>();
+        method.source_intent = crate::workflow::ir::synthetic_intent_with_ports(
+            method.source_operation.as_str(),
+            &inputs,
+            &outputs,
+        );
     }
 
     fn selected_parameter(observed: i64) -> SelectedCapabilityParameter {
@@ -787,19 +846,41 @@ mod tests {
     }
 
     #[test]
-    fn revalidates_registered_task_program_provenance() {
+    fn a_task_operation_is_descriptive_and_does_not_select_a_program_builder() {
         let mut allocated = allocated_program();
-        allocated.validate().unwrap();
+        allocated.validate(contracts()).unwrap();
 
         allocated.methods[0].tasks[0].operation =
             OperationId::new(crate::procedure::vocabulary::PLATE_DILUTED_CULTURE).unwrap();
+        allocated.validate(contracts()).unwrap();
+    }
+
+    #[test]
+    fn allocated_program_rejects_ports_and_results_that_disagree_with_source_intent() {
+        let mut port_tamper = allocated_program();
+        port_tamper.methods[0].inputs[0].name = id("other");
         assert!(matches!(
-            allocated.validate(),
-            Err(
-                AllocatedProgramValidationError::InvalidProcedureTaskProgram(
-                    ProcedureTaskProgramValidationError::CannotNormalize(_)
-                )
-            )
+            port_tamper.validate(contracts()),
+            Err(AllocatedProgramValidationError::SourcePortMismatch { .. })
+        ));
+
+        let mut result_tamper = allocated_program();
+        result_tamper.methods[0].source_intent.result_bindings[0].r#type =
+            lab_language::CheckedType::String;
+        assert!(matches!(
+            result_tamper.validate(contracts()),
+            Err(AllocatedProgramValidationError::InvalidSourceIntent { .. })
+        ));
+    }
+
+    #[test]
+    fn an_adapter_cannot_bind_a_task_without_a_normalized_program() {
+        let mut allocated = allocated_program();
+        allocated.methods[0].tasks[0].requirements[0].adapter = Some(adapter());
+
+        assert!(matches!(
+            allocated.validate(contracts()),
+            Err(AllocatedProgramValidationError::ProgramlessAdapterBinding { .. })
         ));
     }
 
@@ -811,7 +892,7 @@ mod tests {
         self_reference.methods[0].tasks[0].inputs[0].source =
             PlanningValueSource::TaskOutput { task, output };
         assert!(matches!(
-            self_reference.validate(),
+            self_reference.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidMethodGraph { .. })
         ));
 
@@ -821,7 +902,7 @@ mod tests {
             output: id("output"),
         };
         assert!(matches!(
-            direct_choice.validate(),
+            direct_choice.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidMethodGraph { .. })
         ));
     }
@@ -832,7 +913,7 @@ mod tests {
         let duplicate = duplicate_output.methods[0].tasks[0].outputs[0].clone();
         duplicate_output.methods[0].tasks[0].outputs.push(duplicate);
         assert!(matches!(
-            duplicate_output.validate(),
+            duplicate_output.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidMethodGraph { .. })
         ));
 
@@ -842,7 +923,7 @@ mod tests {
             output: id("output"),
         };
         assert!(matches!(
-            direct_choice.validate(),
+            direct_choice.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidMethodGraph { .. })
         ));
     }
@@ -853,14 +934,14 @@ mod tests {
         policy.methods[0].tasks[0].requirements[0].accepted_control_modes =
             BTreeSet::from([ControlMode::Unspecified]);
         assert!(matches!(
-            policy.validate(),
+            policy.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidControlPolicy { .. })
         ));
 
         let mut observation = allocated_program();
         observation.methods[0].tasks[0].requirements[0].parameters = vec![selected_parameter(1)];
         assert!(matches!(
-            observation.validate(),
+            observation.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidParameterBinding { .. })
         ));
 
@@ -869,7 +950,7 @@ mod tests {
         duplicate.methods[0].tasks[0].requirements[0].parameters =
             vec![parameter.clone(), parameter];
         assert!(matches!(
-            duplicate.validate(),
+            duplicate.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidParameterBinding { .. })
         ));
     }
@@ -888,7 +969,7 @@ mod tests {
         };
         allocated.methods[0].tasks[0].parameters = vec![parameter.clone(), parameter];
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::DuplicateProcedureParameter { .. })
         ));
     }
@@ -910,7 +991,7 @@ mod tests {
             });
 
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidMaterialBinding { .. })
         ));
     }
@@ -923,10 +1004,11 @@ mod tests {
         };
         allocated.methods[0].inputs[0].port_type = material.clone();
         allocated.methods[0].tasks[0].inputs[0].port_type = material;
+        synchronize_source_ports(&mut allocated.methods[0]);
         let duplicate = allocated.methods[0].tasks[0].inputs[0].clone();
         allocated.methods[0].tasks[0].inputs.push(duplicate);
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidMethodGraph { .. })
         ));
     }
@@ -939,15 +1021,23 @@ mod tests {
         };
         allocated.methods[0].outputs[0].port_type = material.clone();
         allocated.methods[0].tasks[0].outputs[0].port_type = material.clone();
+        synchronize_source_ports(&mut allocated.methods[0]);
 
         for suffix in ["first", "second"] {
             let choice = id(&format!("consumer-{suffix}"));
             let task = id(&format!("consumer-{suffix}::task"));
             let input = id("input");
+            let source_operation =
+                IntentOperationId::new(format!("example.consume.{suffix}")).unwrap();
+            let source_intent = crate::workflow::ir::synthetic_intent_with_ports(
+                source_operation.as_str(),
+                &[(input.to_string(), material.clone())],
+                &[],
+            );
             allocated.methods.push(AllocatedMethod {
                 choice,
-                source_operation: IntentOperationId::new(format!("example.consume.{suffix}"))
-                    .unwrap(),
+                source_operation,
+                source_intent,
                 method: MethodId::new(format!("https://example.org/method/consume/{suffix}"))
                     .unwrap(),
                 after: Vec::new(),
@@ -984,7 +1074,7 @@ mod tests {
         }
 
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::MaterialLinearity { uses: 2, .. })
         ));
     }
@@ -996,13 +1086,14 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
 
         let mut allocated = allocated_program();
+        allocated.methods[0].tasks[0].requirements[0].adapter = Some(adapter());
         allocated.methods[0].tasks[0].requirements[0]
             .adapter
             .as_mut()
             .unwrap()
             .profile_path = PathBuf::from(OsString::from_vec(b"profiles/\xff.toml".to_vec()));
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidAdapterBinding { .. })
         ));
 
@@ -1012,7 +1103,7 @@ mod tests {
             .unwrap()
             .profile_path = PathBuf::from("../profiles/example.toml");
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidAdapterBinding { .. })
         ));
     }
@@ -1020,6 +1111,7 @@ mod tests {
     #[test]
     fn adapter_bindings_validate_the_complete_profile_shape() {
         let mut allocated = allocated_program();
+        allocated.methods[0].tasks[0].requirements[0].adapter = Some(adapter());
         allocated.methods[0].tasks[0].requirements[0]
             .adapter
             .as_mut()
@@ -1027,22 +1119,24 @@ mod tests {
             .driver
             .clear();
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidAdapterBinding { .. })
         ));
 
         let mut allocated = allocated_program();
+        allocated.methods[0].tasks[0].requirements[0].adapter = Some(adapter());
         allocated.methods[0].tasks[0].requirements[0]
             .adapter
             .as_mut()
             .unwrap()
             .profile_sha256 = "not-a-digest".to_owned();
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidAdapterBinding { .. })
         ));
 
         let mut allocated = allocated_program();
+        allocated.methods[0].tasks[0].requirements[0].adapter = Some(adapter());
         allocated.methods[0].tasks[0].requirements[0]
             .adapter
             .as_mut()
@@ -1050,7 +1144,7 @@ mod tests {
             .accepted_run_formats
             .insert(String::new());
         assert!(matches!(
-            allocated.validate(),
+            allocated.validate(contracts()),
             Err(AllocatedProgramValidationError::InvalidAdapterBinding { .. })
         ));
     }

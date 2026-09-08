@@ -104,10 +104,10 @@ pub struct UseDecl {
 ///
 /// The header is the phrase a workflow writes, with each operand in `<>` and
 /// each result named after `->`. The body types every operand and result, gives
-/// an operand its ownership mode, and names the capability the verb needs. What
-/// the compiler bundles as `centrifuge`, `chill`, and the rest is the same
-/// shape a package supplies, so a new verb is a declaration rather than a
-/// compiler change.
+/// an operand its ownership mode, and states how each result relates to the
+/// lineage of its operands. What the compiler bundles as `centrifuge`, `chill`,
+/// and the rest is the same shape a package supplies, so a new verb is a
+/// declaration rather than a compiler change.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ActionDecl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -118,11 +118,9 @@ pub struct ActionDecl {
     pub phrase: Vec<PhraseToken>,
     /// The names a result binds, in order, listed after `->`.
     pub results: Vec<Identifier>,
-    /// A type, and for an operand an ownership mode, for each named operand and
-    /// result.
+    /// A type, an optional explicit ownership mode for an operand, and an
+    /// explicit lineage for a result.
     pub bindings: Vec<ActionBinding>,
-    /// The capability a facility must offer to run this verb.
-    pub capability: Identifier,
     pub span: Span,
 }
 
@@ -141,7 +139,42 @@ pub struct ActionBinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<OwnershipMode>,
     pub ty: TypeExpr,
+    /// How this result relates to the things the action consumed. Present only
+    /// for names listed after `->`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<ActionResultLineage>,
     pub span: Span,
+}
+
+/// Source-level lineage stated for one action result.
+///
+/// `continues from <operand>` follows physical dataflow. `identified by
+/// <operand>` says repeated calls naming the same declared thing refer to the
+/// same origin, as provisioning the same catalog item twice does.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActionResultLineage {
+    Begins {
+        span: Span,
+    },
+    Continues {
+        from: Vec<Identifier>,
+        span: Span,
+    },
+    IdentifiedBy {
+        operands: Vec<Identifier>,
+        span: Span,
+    },
+}
+
+impl ActionResultLineage {
+    pub fn span(&self) -> Span {
+        match self {
+            Self::Begins { span }
+            | Self::Continues { span, .. }
+            | Self::IdentifiedBy { span, .. } => *span,
+        }
+    }
 }
 
 /// `facet Competence on Chassis` — how a kind's materials are classified by the

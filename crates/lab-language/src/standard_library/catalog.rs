@@ -5,15 +5,27 @@ use std::sync::{Arc, OnceLock};
 
 use thiserror::Error;
 
-use crate::semantics::{ExportKind, ModuleId, ModuleInterface};
+use crate::checked::{
+    CheckedActionOperand, CheckedActionResult, CheckedPhraseToken, CheckedType, OwnershipMode,
+};
+use crate::semantics::{
+    ActionInterface, ActionSurface, DefinitionId, ExportKind, ModuleId, ModuleInterface,
+};
 
-use crate::standard_library::contract::ActionContractSpec;
-use crate::type_system::Ty;
+use crate::standard_library::contract::{ActionContractSpec, ContractType, PhrasePart};
+use crate::type_system::{Ty, to_checked_type};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TypeParameterSpec {
+    pub name: &'static str,
+    pub bound: Option<Ty>,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TypeSpec {
     pub name: &'static str,
-    pub parameters: usize,
+    /// Generic parameters in declaration order.
+    pub parameters: Vec<TypeParameterSpec>,
     pub fields: BTreeMap<&'static str, Ty>,
     pub implements: Vec<&'static str>,
     /// Whether this name classifies types rather than describing values. A role
@@ -28,7 +40,7 @@ impl TypeSpec {
     pub(crate) fn nominal(name: &'static str) -> Self {
         Self {
             name,
-            parameters: 0,
+            parameters: Vec::new(),
             fields: BTreeMap::new(),
             implements: Vec::new(),
             role: false,
@@ -55,8 +67,11 @@ impl TypeSpec {
         }
     }
 
-    pub(crate) fn parameters(mut self, parameters: usize) -> Self {
-        self.parameters = parameters;
+    pub(crate) fn parameters(mut self, parameters: impl IntoIterator<Item = &'static str>) -> Self {
+        self.parameters = parameters
+            .into_iter()
+            .map(|name| TypeParameterSpec { name, bound: None })
+            .collect();
         self
     }
 
@@ -236,6 +251,19 @@ impl StandardModule {
                     name: name.to_owned(),
                 });
             }
+            let mut parameters = BTreeSet::new();
+            for parameter in &spec.parameters {
+                if !valid_export_name(parameter.name) || !parameters.insert(parameter.name) {
+                    return Err(CatalogError::InvalidType {
+                        module: self.path.to_owned(),
+                        name: name.to_owned(),
+                        message: format!(
+                            "type parameter '{}' must be a unique identifier",
+                            parameter.name
+                        ),
+                    });
+                }
+            }
             if spec.implements.iter().any(|contract| contract.is_empty()) {
                 return Err(CatalogError::InvalidType {
                     module: self.path.to_owned(),
@@ -357,6 +385,150 @@ pub(crate) fn authored_interfaces() -> Arc<BTreeMap<&'static str, ModuleInterfac
     authored_modules()
 }
 
+/// Exact action interfaces exported by native and Lab-authored standard
+/// modules.  This is derived from the same catalog the checker imports, so a
+/// Method conformance check cannot drift into a parallel operation allowlist.
+pub(crate) fn action_interfaces() -> Vec<ActionInterface> {
+    let library = StandardLibrary::bundled();
+    let mut interfaces = library
+        .native_modules()
+        .flat_map(|module| {
+            module
+                .actions
+                .iter()
+                .map(|action| native_action_interface(module.path, action))
+        })
+        .chain(
+            library
+                .authored_interfaces()
+                .flat_map(|(_, interface)| interface.action_interfaces()),
+        )
+        .collect::<Vec<_>>();
+    interfaces.sort_by(|left, right| left.definition.cmp(&right.definition));
+    interfaces
+}
+
+fn native_action_interface(module: &str, action: &ActionContractSpec) -> ActionInterface {
+    let source_name = action
+        .source_name()
+        .expect("catalog validation guarantees an action source name");
+    let mut next_generic = 0usize;
+    let mut operand_types = BTreeMap::<String, CheckedType>::new();
+    let mut phrase = Vec::new();
+    let mut operands = Vec::new();
+    for part in action.phrase.iter().flat_map(PhrasePart::parts) {
+        match part {
+            PhrasePart::Word(word) => phrase.push(CheckedPhraseToken::Word(word.clone())),
+            PhrasePart::Operand { name, r#type, mode } => {
+                let r#type = checked_contract_type(
+                    r#type,
+                    &operand_types,
+                    &action.operation,
+                    &mut next_generic,
+                );
+                phrase.push(CheckedPhraseToken::Hole(name.clone()));
+                operand_types.insert(name.clone(), r#type.clone());
+                operands.push(CheckedActionOperand {
+                    name: name.clone(),
+                    r#type,
+                    mode: *mode,
+                });
+            }
+            PhrasePart::Integer { name, .. } => {
+                phrase.push(CheckedPhraseToken::Hole(name.clone()));
+                operand_types.insert(name.clone(), CheckedType::Integer);
+                operands.push(CheckedActionOperand {
+                    name: name.clone(),
+                    r#type: CheckedType::Integer,
+                    mode: OwnershipMode::Copy,
+                });
+            }
+            PhrasePart::Quantity { name, units, .. } => {
+                let r#type = if let [unit] = units.as_slice() {
+                    CheckedType::Quantity { unit: unit.clone() }
+                } else {
+                    CheckedType::Union {
+                        alternatives: units
+                            .iter()
+                            .map(|unit| CheckedType::Quantity { unit: unit.clone() })
+                            .collect(),
+                    }
+                };
+                phrase.push(CheckedPhraseToken::Hole(name.clone()));
+                operand_types.insert(name.clone(), r#type.clone());
+                operands.push(CheckedActionOperand {
+                    name: name.clone(),
+                    r#type,
+                    mode: OwnershipMode::Copy,
+                });
+            }
+            PhrasePart::Optional(_) => {
+                unreachable!("catalog validation rejects nested optional action clauses")
+            }
+        }
+    }
+    let results = action
+        .results
+        .iter()
+        .map(|result| CheckedActionResult {
+            name: result.name.clone(),
+            r#type: checked_contract_type(
+                &result.r#type,
+                &operand_types,
+                &action.operation,
+                &mut next_generic,
+            ),
+            lineage: result.lineage.clone(),
+        })
+        .collect();
+    ActionInterface {
+        definition: DefinitionId::exported(module, source_name),
+        surface: ActionSurface {
+            operation: action.operation.clone(),
+            phrase,
+            operands,
+            results,
+        },
+    }
+}
+
+fn checked_contract_type(
+    r#type: &ContractType,
+    operands: &BTreeMap<String, CheckedType>,
+    operation: &str,
+    next_generic: &mut usize,
+) -> CheckedType {
+    let fresh = |next_generic: &mut usize| {
+        let name = format!("{operation}::T{}", *next_generic);
+        *next_generic += 1;
+        CheckedType::Named {
+            name,
+            arguments: Vec::new(),
+        }
+    };
+    match r#type {
+        ContractType::Concrete(ty) => to_checked_type(ty),
+        ContractType::SameAs(name) => operands
+            .get(name)
+            .cloned()
+            .expect("catalog validation guarantees a prior referenced operand"),
+        ContractType::AnyMaterial => CheckedType::Named {
+            name: "Material".to_owned(),
+            arguments: vec![fresh(next_generic)],
+        },
+        ContractType::AnyValue => fresh(next_generic),
+        ContractType::MaterialOf(name) => CheckedType::Named {
+            name: "Material".to_owned(),
+            arguments: vec![
+                operands
+                    .get(name)
+                    .cloned()
+                    .expect("catalog validation guarantees a prior referenced operand"),
+            ],
+        },
+    }
+}
+
 /// Compile the Lab-written standard modules once for the life of the process.
 ///
 /// A checker is built for every module compiled, so doing this eagerly on each
@@ -476,14 +648,6 @@ impl StandardLibrary {
         self.authored.iter()
     }
 
-    /// Every durable action contract, across modules. The lineage analysis
-    /// reads results from these rather than from any one module.
-    pub(crate) fn action_specs(&self) -> impl Iterator<Item = &ActionContractSpec> {
-        self.modules
-            .values()
-            .flat_map(|module| module.actions.iter())
-    }
-
     pub(crate) fn action_providers(&self, name: &str) -> Vec<&'static str> {
         self.modules
             .values()
@@ -553,8 +717,8 @@ impl StandardLibrary {
                     _ => "type",
                 };
                 output.push_str(&format!("- {kind} `{}`", spec.name));
-                if spec.parameters != 0 {
-                    output.push_str(&format!(" ({} type parameter(s))", spec.parameters));
+                if !spec.parameters.is_empty() {
+                    output.push_str(&format!(" ({} type parameter(s))", spec.parameters.len()));
                 }
                 if !spec.implements.is_empty() {
                     output.push_str(&format!(" implements {}", spec.implements.join(", ")));
@@ -683,6 +847,20 @@ mod tests {
         assert!(library.authored_module("std.bio.parts").is_some());
         assert!(library.module("std.bio.build").is_some());
         let plasmid = library.module("std.lab.plasmid").unwrap();
+        assert!(plasmid.types.iter().any(|spec| {
+            spec.name == "SequenceCheck"
+                && spec.fields.get("material") == Some(&Ty::material(Ty::named("Plasmid")))
+                && spec.fields.get("evidence") == Some(&Ty::List(Box::new(Ty::named("Evidence"))))
+        }));
+        for case in ["Exact", "Mismatch", "Inconclusive"] {
+            let constructor = plasmid
+                .constructors
+                .iter()
+                .find(|constructor| constructor.name == case)
+                .unwrap();
+            assert_eq!(constructor.result, Ty::named("SequenceCheck"));
+            assert_eq!(constructor.fields, plasmid.types[0].fields);
+        }
         assert!(plasmid.actions.iter().any(|action| {
             action.source_name() == Some("transform")
                 && action.operation == "std.lab.plasmid.transform"
@@ -725,7 +903,6 @@ mod tests {
                 ContractType::Concrete(Ty::String),
                 crate::OwnershipMode::Copy,
             )],
-            inert: Vec::new(),
             results: Vec::new(),
         };
         let result = StandardLibrary::from_modules([

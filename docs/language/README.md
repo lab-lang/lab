@@ -6,7 +6,7 @@ The documents have distinct jobs:
 
 - `syntax.md` records accepted surface-language rules;
 - `semantics.md` records the meaning of laboratory values and effects;
-- `capabilities.md` records stable capability IRIs, the standard-action audit, and requirement matching rules;
+- `capabilities.md` records stable capability IRIs, Method and Procedure coverage, and requirement matching rules;
 - `generics.md` records how type parameters, roles, generic kinds, and unit types fit together;
 - `modules.md` records package imports and idiomatic source organization;
 - `open-questions.md` keeps unresolved design choices visible;
@@ -33,7 +33,7 @@ Actual executions are runtime records, not source modules. A program may be run 
 | [`sensor-panel.lab`](specimens/sensor-panel.lab) | roles, inline type parameters, a generic characterization workflow, and a panel that forgets which signal triggers it |
 | [`plasmid-build.lab`](specimens/plasmid-build.lab) | workflow signatures, durable effects, explicit state, reactive handlers, outcomes, and affine materials |
 | [`inventory-plasmid.lab`](specimens/inventory-plasmid.lab) | typed inventory identities, heterogeneous component lists, facility-independent properties, and one realization workflow |
-| [`dependency-build.lab`](specimens/dependency-build.lab) | dependencies expressed as `Material<Plasmid>` workflow inputs and resolved `realize` operands |
+| [`dependency-build.lab`](specimens/dependency-build.lab) | dependencies expressed as `Material<Plasmid>` workflow inputs and resolved generic action operands |
 
 Specimens define provider symbols before declarations that depend on them. This is a readability convention, not an assembly-level system and not a replacement for name resolution.
 
@@ -98,3 +98,4 @@ The latest accepted design records are:
 - [`0052`](decisions/0052-material-states-are-declared-facets.md): a material's state is a declared orthogonal facet of its design kind, not a separate type.
 - [`0053`](decisions/0053-quantities-carry-dimensions-and-compose.md): quantities carry dimensions, convert only where written, and compose under multiplication and division.
 - [`0054`](decisions/0054-every-material-carries-a-quantity.md): every material carries a quantity, and a divisible one is drawn from within ordinary affine ownership.
+- [`0055`](decisions/0055-solving-and-pliron-are-compiler-internals.md): bounded facility solving and Pliron remain internal implementation tools rather than contribution seams.

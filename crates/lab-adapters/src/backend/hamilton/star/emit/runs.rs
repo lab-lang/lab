@@ -107,8 +107,7 @@ pub(in crate::backend::hamilton::star) fn run_steps(
     Ok(steps)
 }
 
-/// The tip the run's operations of a class use, from the profile's stage
-/// racks (every rack of a class feeds one tip type).
+/// The tip the run's operations of a class use from the profile resource.
 fn run_tip(plan: &StarExecutionPlan, run: &StarRunPlan, class: TipClass) -> Option<TipType> {
     let uses_class = run.operations.iter().any(|operation| match operation {
         StarOperation::PickUpTips { tip, .. } => *tip == class,
@@ -128,11 +127,8 @@ fn run_tip(plan: &StarExecutionPlan, run: &StarRunPlan, class: TipClass) -> Opti
         })?;
     let prefix = rack_resource.split('/').next()?;
     let labware = match prefix {
-        "assembly_small_tips" => &plan.deck.stages.assembly.small_tips.labware,
-        "transformation_small_tips" => &plan.deck.stages.transformation.small_tips.labware,
-        "transformation_large_tips" => &plan.deck.stages.transformation.large_tips.labware,
-        "plating_small_tips" => &plan.deck.stages.plating.small_tips.labware,
-        "plating_large_tips" => &plan.deck.stages.plating.large_tips.labware,
+        "small_tips" => &plan.deck.resources.small_tips.labware,
+        "large_tips" => &plan.deck.resources.large_tips.labware,
         _ => return None,
     };
     crate::backend::hamilton::star::catalog::labware(labware)?.tip()
@@ -220,9 +216,13 @@ fn operation_step(
                     channel.liquid_surface = liquid.position_z;
                     channel.minimum_height = liquid.minimum_z;
                     channel.volume = liquid.corrected_volume;
+                    channel.speed = liquid.aspirate_speed;
                     channel.mix_volume = liquid.mix_volume;
                     channel.mix_cycles = liquid.mix_cycles;
-                    channel.lld_mode = lld_mode(profile.run.lld);
+                    channel.mix_speed = liquid.aspirate_mix_speed;
+                    channel.lld_mode = lld_mode(liquid.lld);
+                    channel.gamma_lld_sensitivity = liquid.gamma_lld_sensitivity;
+                    channel.pressure_lld_sensitivity = liquid.pressure_lld_sensitivity;
                     channel
                 })
                 .collect();
@@ -242,8 +242,13 @@ fn operation_step(
                     channel.liquid_surface = liquid.position_z;
                     channel.minimum_height = liquid.minimum_z;
                     channel.volume = liquid.corrected_volume;
+                    channel.speed = liquid.dispense_speed;
                     channel.mix_volume = liquid.mix_volume;
                     channel.mix_cycles = liquid.mix_cycles;
+                    channel.mix_speed = liquid.dispense_mix_speed;
+                    channel.lld_mode = lld_mode(liquid.lld);
+                    channel.gamma_lld_sensitivity = liquid.gamma_lld_sensitivity;
+                    channel.pressure_lld_sensitivity = liquid.pressure_lld_sensitivity;
                     channel
                 })
                 .collect();
@@ -301,11 +306,8 @@ fn run_pickup_tip(
         .resource;
     let prefix = resource.split('/').next().unwrap_or(resource);
     let labware = match prefix {
-        "assembly_small_tips" => &plan.deck.stages.assembly.small_tips.labware,
-        "transformation_small_tips" => &plan.deck.stages.transformation.small_tips.labware,
-        "transformation_large_tips" => &plan.deck.stages.transformation.large_tips.labware,
-        "plating_small_tips" => &plan.deck.stages.plating.small_tips.labware,
-        "plating_large_tips" => &plan.deck.stages.plating.large_tips.labware,
+        "small_tips" => &plan.deck.resources.small_tips.labware,
+        "large_tips" => &plan.deck.resources.large_tips.labware,
         other => {
             return Err(StarEmissionError::Serialization(format!(
                 "operation references unknown tip resource '{other}'"
@@ -357,20 +359,26 @@ fn describe_liquid(verb: &str, channels: &[ChannelLiquid], preposition: &str) ->
             String::new()
         };
         format!(
-            "{verb} {volume}{preposition} {} {} on channel {}{mix}",
+            "{verb} {volume}{preposition} {} {} on channel {}{mix}; liquid class {}@{} sha256:{}",
             liquid.location.resource,
             liquid.location.well,
             liquid.channel + 1,
+            liquid.liquid_class.id,
+            liquid.liquid_class.version,
+            liquid.liquid_class.content_sha256,
         )
     } else {
         let first = &channels[0];
         let last = &channels[channels.len() - 1];
         format!(
-            "{verb} {preposition} {} {}–{} across {} channels",
+            "{verb} {preposition} {} {}–{} across {} channels; liquid class {}@{} sha256:{}",
             first.location.resource,
             first.location.well,
             last.location.well,
             channels.len(),
+            first.liquid_class.id,
+            first.liquid_class.version,
+            first.liquid_class.content_sha256,
         )
     }
 }

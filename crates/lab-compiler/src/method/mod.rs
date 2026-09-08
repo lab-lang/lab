@@ -14,13 +14,16 @@ mod standard;
 
 pub use catalog::{METHOD_CATALOG_SCHEMA_VERSION, MethodCatalogDocument, MethodCatalogError};
 pub use definition::{
-    CapabilityConstraintDefinition, CapabilityRequirementDefinition, MaterialInputDefinition,
-    MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput, MethodParameter,
-    MethodSignature, ParameterType, PortType, ProcedureParameterDefinition,
-    ProcedureTaskDefinition, ProcedureValue, ProcedureValueExpression, ScalarType,
-    ScalarValueExpression, TaskOutput, ValueReference,
+    CapabilityConstraintDefinition, CapabilityRequirementDefinition, ExecutionPolicyDefinition,
+    MaterialInputDefinition, MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput,
+    MethodParameter, MethodSignature, ParameterType, PortType, ProcedureParameterDefinition,
+    ProcedureTaskDefinition, ProcedureTaskExecutionDefinition, ProcedureValue,
+    ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
 };
 pub use id::{IntentOperationId, LocalId, LocalIdError};
-pub use registry::{MethodDefinitionError, MethodRegistry, MethodRegistryError};
-pub(crate) use standard::derived_manual_method;
-pub use standard::{standard_method_definitions, standard_method_registry};
+pub use registry::{
+    MethodActionInterfaceError, MethodDefinitionError, MethodRegistry, MethodRegistryError,
+};
+pub use standard::{
+    standard_method_catalog, standard_method_definitions, standard_method_registry,
+};

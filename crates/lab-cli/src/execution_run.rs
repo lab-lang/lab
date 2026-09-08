@@ -1,21 +1,16 @@
 //! Terminal presentation and live-executor construction for reviewed facility plans.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use lab_adapters::{adapter_catalog, hamilton::star::StarAdapterProfile};
-use lab_runfmt::{STAR_RUN_FORMAT, THERMOCYCLE_RUN_FORMAT};
+use lab_adapters::AdapterRuntimeRegistryExt;
 use lab_runtime::clock::WallClock;
-use lab_runtime::device_executors::{
-    HamiltonStarExecutor, OdtcExecutor, ReviewedDocumentSimulationExecutor,
-};
 use lab_runtime::events::{EventSink, ProgramExtent, RunEvent};
 use lab_runtime::execution::{
-    ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, LoadedExecutionAction,
-    load_execution_directory, render_execution_dry_run, run_execution_plan,
+    ExecutionOutcome, ExecutionRunConfig, load_execution_directory, render_execution_dry_run,
+    run_execution_plan,
 };
 use lab_runtime::mode::ExecutionMode;
 use lab_runtime::operator::StdinOperator;
@@ -32,7 +27,11 @@ pub(crate) fn run_execution_command(
     asset_endpoints: Vec<String>,
     output: &Output,
 ) -> Result<()> {
-    let loaded = load_execution_directory(&directory)?;
+    let adapters = lab_project::application_extensions()
+        .context("failed to compose the adapter registry")?
+        .adapters;
+    let document_loaders = adapters.reviewed_document_loaders()?;
+    let loaded = load_execution_directory(&directory, &document_loaders)?;
     if dry_run {
         return output.success(
             "dry-run",
@@ -59,10 +58,10 @@ pub(crate) fn run_execution_command(
         ExecutionMode::Live
     };
     let mut registry = match mode {
-        ExecutionMode::Simulation => build_simulation_registry(&loaded)?,
+        ExecutionMode::Simulation => adapters.simulation_executors(&loaded)?,
         ExecutionMode::Live => {
             let addresses = parse_asset_endpoints(&asset_endpoints)?;
-            build_hardware_registry(&loaded, &addresses)?
+            adapters.live_executors(&loaded, &addresses)?
         }
     };
     let mut operator = StdinOperator;
@@ -127,89 +126,6 @@ pub(crate) fn run_execution_command(
     }
 }
 
-fn build_simulation_registry(
-    loaded: &lab_runtime::execution::LoadedExecutionPlan,
-) -> Result<ExecutorRegistry> {
-    let catalog = adapter_catalog().context("failed to load the compiler adapter catalog")?;
-    let descriptors = catalog
-        .adapters
-        .iter()
-        .map(|descriptor| (descriptor.id.as_str(), descriptor))
-        .collect::<BTreeMap<_, _>>();
-    let mut keys = BTreeSet::new();
-    let mut registry = ExecutorRegistry::new();
-    for node in &loaded.nodes {
-        let LoadedExecutionAction::Execute {
-            requirements,
-            document: Some(document),
-        } = &node.action
-        else {
-            continue;
-        };
-        let requirement = requirements
-            .first()
-            .context("execute nodes require at least one frozen requirement binding")?;
-        let adapter = requirement
-            .adapter
-            .as_ref()
-            .context("simulation requires a frozen adapter binding")?;
-        let descriptor = descriptors.get(adapter.driver.as_str()).with_context(|| {
-            format!(
-                "adapter '{}' is not present in this compiler build",
-                adapter.driver
-            )
-        })?;
-        if !descriptor.services.simulation {
-            bail!("adapter '{}' does not provide simulation", adapter.driver);
-        }
-        for requirement in requirements {
-            if !descriptor
-                .capabilities
-                .iter()
-                .any(|kind| kind.as_str() == requirement.capability_kind)
-            {
-                bail!(
-                    "adapter '{}' does not simulate capability '{}'",
-                    adapter.driver,
-                    requirement.capability_kind
-                );
-            }
-            if !descriptor
-                .control_modes
-                .iter()
-                .any(|mode| mode.iri() == requirement.control_mode)
-            {
-                bail!(
-                    "adapter '{}' does not accept control mode '{}'",
-                    adapter.driver,
-                    requirement.control_mode
-                );
-            }
-        }
-        if !descriptor.accepted_run_formats.contains(document.format()) {
-            bail!(
-                "adapter '{}' does not simulate reviewed format '{}'",
-                adapter.driver,
-                document.format()
-            );
-        }
-        let key = (
-            requirement.asset.clone(),
-            adapter.driver.clone(),
-            document.format().to_owned(),
-        );
-        if keys.insert(key.clone()) {
-            registry.register(
-                key.0,
-                key.1,
-                key.2,
-                Box::<ReviewedDocumentSimulationExecutor>::default(),
-            )?;
-        }
-    }
-    Ok(registry)
-}
-
 fn parse_asset_endpoints(entries: &[String]) -> Result<BTreeMap<String, SocketAddr>> {
     let mut addresses = BTreeMap::new();
     for entry in entries {
@@ -224,115 +140,6 @@ fn parse_asset_endpoints(entries: &[String]) -> Result<BTreeMap<String, SocketAd
         }
     }
     Ok(addresses)
-}
-
-fn build_hardware_registry(
-    loaded: &lab_runtime::execution::LoadedExecutionPlan,
-    addresses: &BTreeMap<String, SocketAddr>,
-) -> Result<ExecutorRegistry> {
-    let mut bindings = BTreeMap::<(String, String, String), (String, String)>::new();
-    for node in &loaded.nodes {
-        let LoadedExecutionAction::Execute {
-            requirements,
-            document: Some(document),
-        } = &node.action
-        else {
-            continue;
-        };
-        let requirement = requirements
-            .first()
-            .context("execute nodes require at least one frozen requirement binding")?;
-        let Some(adapter) = &requirement.adapter else {
-            continue;
-        };
-        let key = (
-            requirement.asset.clone(),
-            adapter.driver.clone(),
-            document.format().to_owned(),
-        );
-        let profile = (adapter.profile_path.clone(), adapter.profile_sha256.clone());
-        if let Some(prior) = bindings.insert(key.clone(), profile.clone())
-            && prior != profile
-        {
-            bail!(
-                "asset '{}' uses adapter '{}' and format '{}' with two different frozen profiles",
-                key.0,
-                key.1,
-                key.2
-            );
-        }
-    }
-
-    let star_assets = bindings
-        .keys()
-        .filter(|(_, driver, _)| driver == "hamilton.star")
-        .map(|(asset, _, _)| asset)
-        .collect::<BTreeSet<_>>();
-    if star_assets.len() > 1 {
-        bail!(
-            "this runtime can address only one Hamilton STAR over USB, but the reviewed plan binds {}",
-            star_assets
-                .iter()
-                .copied()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-
-    let mut used_addresses = BTreeSet::new();
-    let mut registry = ExecutorRegistry::new();
-    for ((asset, driver, format), (profile_path, _profile_sha256)) in bindings {
-        match (driver.as_str(), format.as_str()) {
-            ("hamilton.star", STAR_RUN_FORMAT) => {
-                let path = loaded.directory.join(&profile_path);
-                let text = fs::read_to_string(&path)
-                    .with_context(|| format!("failed to read {}", path.display()))?;
-                let name = path
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .context("a STAR adapter profile needs a UTF-8 file name")?;
-                let profile = StarAdapterProfile::parse(name, &text).with_context(|| {
-                    format!("failed to parse frozen profile {}", path.display())
-                })?;
-                registry.register(
-                    &asset,
-                    &driver,
-                    &format,
-                    Box::new(HamiltonStarExecutor::new(
-                        &asset,
-                        profile.run.autoload_park_track,
-                    )),
-                )?;
-            }
-            ("inheco.odtc", THERMOCYCLE_RUN_FORMAT) => {
-                let address = addresses.get(&asset).with_context(|| {
-                    format!(
-                        "Inheco ODTC Asset '{asset}' has no runtime address; pass --asset-endpoint '{asset}=<ip:port>'"
-                    )
-                })?;
-                used_addresses.insert(asset.clone());
-                registry.register(
-                    &asset,
-                    &driver,
-                    &format,
-                    Box::new(OdtcExecutor::new(&asset, *address)),
-                )?;
-            }
-            _ => bail!(
-                "this Lab runtime has no live executor for asset '{asset}', adapter '{driver}', format '{format}'"
-            ),
-        }
-    }
-    if let Some(unused) = addresses
-        .keys()
-        .find(|asset| !used_addresses.contains(*asset))
-    {
-        bail!(
-            "--asset-endpoint supplies an address for Asset '{unused}', which the reviewed plan does not use as a networked executor"
-        );
-    }
-    Ok(registry)
 }
 
 struct HumanSink;

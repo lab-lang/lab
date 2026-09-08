@@ -10,12 +10,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use lab_compiler::allocation::{AllocatedMethod, AllocatedProcedureTask, InvocationAdapter};
 use lab_compiler::method::LocalId;
 use lab_compiler::planning::PlanningValueSource;
+use lab_compiler::procedure::ProcedureContractRegistry;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{AdapterInvocation, AdapterInvocationPlan};
-use lab_compiler::procedure::vocabulary::PROVISION_MATERIAL;
 
 pub const ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION: &str = "lab.allocated-procedure-schedule.v1";
 
@@ -67,7 +67,7 @@ impl AllocatedProcedureSchedule {
         let bytes = serde_json::to_vec(self).expect(
             "AllocatedProcedureSchedule contains only infallibly serializable semantic values",
         );
-        crate::invocation::hex_sha256(&bytes)
+        lab_adapter_api::hex_sha256(&bytes)
     }
 
     pub fn new(
@@ -75,6 +75,7 @@ impl AllocatedProcedureSchedule {
         invocation: &AdapterInvocation,
         groups: Vec<AllocatedExecutionGroup>,
         locations: Vec<ScheduledPhysicalLocation>,
+        contracts: &ProcedureContractRegistry,
     ) -> Result<Self, AllocatedProcedureScheduleError> {
         let schedule = Self {
             schema_version: ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION.to_owned(),
@@ -85,7 +86,7 @@ impl AllocatedProcedureSchedule {
             groups,
             locations,
         };
-        schedule.validate_against(plan, invocation)?;
+        schedule.validate_against(plan, invocation, contracts)?;
         Ok(schedule)
     }
 
@@ -94,8 +95,9 @@ impl AllocatedProcedureSchedule {
         &self,
         plan: &AdapterInvocationPlan,
         invocation: &AdapterInvocation,
+        contracts: &ProcedureContractRegistry,
     ) -> Result<(), AllocatedProcedureScheduleError> {
-        plan.validate().map_err(|error| {
+        plan.validate(contracts).map_err(|error| {
             AllocatedProcedureScheduleError::InvalidInvocationPlan {
                 message: error.to_string(),
             }
@@ -446,7 +448,10 @@ fn choice_output_occupant(
             .tasks
             .iter()
             .find(|candidate| &candidate.id == task)
-            .filter(|task| task.operation.as_str() == PROVISION_MATERIAL)
+            // A source task with no value input and one external material simply introduces that
+            // exact allocated material into dataflow. This structural relation is what scheduling
+            // needs; the task's descriptive biological operation identity is irrelevant.
+            .filter(|task| task.inputs.is_empty() && task.outputs.len() == 1)
             .and_then(|task| {
                 let [material] = task.materials.as_slice() else {
                     return None;
@@ -548,7 +553,8 @@ mod tests {
     use std::path::PathBuf;
 
     use lab_capability::{
-        AbsoluteIri, CapabilityKind, ControlMode, MethodId, OperationId, QualificationLevel,
+        AbsoluteIri, ControlMode, MethodId, OperationId, ProcedureImplementationId,
+        QualificationLevel,
     };
     use lab_compiler::method::{IntentOperationId, PortType};
 
@@ -558,12 +564,125 @@ mod tests {
         AllocatedMethod, AllocatedProcedureTask, AllocatedProgram, AllocatedRequirementBinding,
     };
     use lab_compiler::planning::{
-        PlanningPort, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
-        SelectedMaterialBinding, SelectedMaterialSource,
+        PlanningMethodYield, PlanningPort, PlanningTaskInput, PlanningTaskOutput,
+        PlanningValueSource, SelectedCapabilityParameter, SelectedMaterialBinding,
+        SelectedMaterialSource,
     };
+    use lab_compiler::procedure::{
+        FluidPathPolicy, Location, MaterialInput, MaterialOutput, PipettingConstraints,
+        PipettingProgramV1, PipettingStep, ProcedureLocalId, ProcedureProgram, Vessel, VesselRole,
+        Volume,
+    };
+
+    const IMPLEMENTATION: &str =
+        "https://www.lab-compiler.org/ns/adapter-implementation#OpentronsOt2PipettingV1";
 
     fn id(value: &str) -> LocalId {
         LocalId::new(value).unwrap()
+    }
+
+    fn contracts() -> &'static ProcedureContractRegistry {
+        lab_compiler::procedure::builtin_procedure_contracts()
+    }
+
+    fn pipetting_program(materials: &[&str], output: &str) -> ProcedureProgram {
+        let local = |value: &str| ProcedureLocalId::new(value).unwrap();
+        let output = local(output);
+        let program = PipettingProgramV1::new(
+            materials
+                .iter()
+                .map(|material| MaterialInput {
+                    id: local(material),
+                })
+                .collect(),
+            vec![MaterialOutput { id: output.clone() }],
+            vec![
+                Vessel {
+                    id: local("input"),
+                    role: VesselRole::ProcedureInput { input: 0 },
+                    positions: 1,
+                    initial_volume_each: Some(Volume::parse_microlitres("10").unwrap()),
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    temperature: None,
+                },
+                Vessel {
+                    id: local("product"),
+                    role: VesselRole::Product {
+                        output: output.clone(),
+                    },
+                    positions: 1,
+                    initial_volume_each: None,
+                    working_capacity_each: None,
+                    dead_volume_each: None,
+                    temperature: None,
+                },
+            ],
+            vec![PipettingStep::Transfer {
+                id: local("transfer"),
+                source: Location {
+                    vessel: local("input"),
+                    position: 0,
+                },
+                destination: Location {
+                    vessel: local("product"),
+                    position: 0,
+                },
+                volume: Volume::parse_microlitres("1").unwrap(),
+                fluid_path: FluidPathPolicy::IsolatedDestinations,
+                fluid_path_group: None,
+                technique: Default::default(),
+            }],
+            PipettingConstraints::default(),
+        )
+        .validate()
+        .unwrap();
+        ProcedureProgram::from_pipetting(&program)
+    }
+
+    fn requirements(
+        task: &LocalId,
+        program: &ProcedureProgram,
+        adapter: &InvocationAdapter,
+    ) -> Vec<AllocatedRequirementBinding> {
+        program
+            .validate(contracts())
+            .unwrap()
+            .capability_formula()
+            .all_of
+            .into_iter()
+            .map(|clause| {
+                let requirement = id(&format!("{task}::requirement::{}", clause.role));
+                AllocatedRequirementBinding {
+                    id: requirement.clone(),
+                    capability_kind: clause.capability_kind,
+                    minimum_qualification: QualificationLevel::Executable,
+                    accepted_control_modes: BTreeSet::from([ControlMode::ReviewedFile]),
+                    offering: format!("https://example.org/facility/ot2/{requirement}"),
+                    asset: "https://example.org/facility/ot2".to_owned(),
+                    observed_qualification: QualificationLevel::Executable.to_string(),
+                    control_mode: ControlMode::ReviewedFile.to_string(),
+                    parameters: clause
+                        .constraints
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, constraint)| SelectedCapabilityParameter {
+                            property_kind: constraint.property_kind.clone(),
+                            relation: constraint.relation,
+                            required: constraint.required.clone(),
+                            offering_parameter: format!(
+                                "https://example.org/facility/ot2/{requirement}/parameter/{index}"
+                            ),
+                            observed: constraint.required,
+                        })
+                        .collect(),
+                    procedure_implementation: Some(
+                        ProcedureImplementationId::new(IMPLEMENTATION).unwrap(),
+                    ),
+                    adapter: Some(adapter.clone()),
+                }
+            })
+            .collect()
     }
 
     fn fixture() -> (AdapterInvocationPlan, AdapterInvocation) {
@@ -577,27 +696,23 @@ mod tests {
         };
         let first_task = id("method::first");
         let second_task = id("method::second");
-        let first_requirement = id("method::first::requirement::transfer");
-        let second_requirement = id("method::second::requirement::temperature");
-        let requirement = |id: LocalId, capability: &str| AllocatedRequirementBinding {
-            id,
-            capability_kind: CapabilityKind::new(capability).unwrap(),
-            minimum_qualification: QualificationLevel::Executable,
-            accepted_control_modes: BTreeSet::from([ControlMode::ReviewedFile]),
-            offering: "https://example.org/facility/ot2/offering".to_owned(),
-            asset: "https://example.org/facility/ot2".to_owned(),
-            observed_qualification: QualificationLevel::Executable.to_string(),
-            control_mode: ControlMode::ReviewedFile.to_string(),
-            parameters: Vec::new(),
-            procedure_implementation: None,
-            adapter: Some(adapter.clone()),
-        };
         let state = AbsoluteIri::new("https://example.org/material/sample").unwrap();
+        let first_program = pipetting_program(&["buffer", "enzyme", "buffer-a"], "sample");
+        let second_program = pipetting_program(&["buffer-b"], "processed");
+        let first_requirements = requirements(&first_task, &first_program, &adapter);
+        let second_requirements = requirements(&second_task, &second_program, &adapter);
         let first = AllocatedProcedureTask {
             id: first_task.clone(),
             operation: OperationId::new("https://example.org/procedure/first").unwrap(),
-            program: None,
-            inputs: Vec::new(),
+            program: Some(first_program),
+            inputs: vec![PlanningTaskInput {
+                source: PlanningValueSource::ChoiceInput {
+                    input: id("initial"),
+                },
+                port_type: PortType::Material {
+                    state: state.clone(),
+                },
+            }],
             outputs: vec![PlanningTaskOutput {
                 name: id("sample"),
                 port_type: PortType::Material {
@@ -605,36 +720,43 @@ mod tests {
                 },
             }],
             parameters: Vec::new(),
-            materials: Vec::new(),
-            requirements: vec![requirement(
-                first_requirement.clone(),
-                "https://sbol.io/ns/capability#LiquidTransfer",
-            )],
+            materials: vec![
+                material("buffer", "https://example.org/lots/buffer"),
+                material("enzyme", "https://example.org/lots/enzyme"),
+                material("buffer-a", "https://example.org/lots/buffer"),
+            ],
+            requirements: first_requirements.clone(),
         };
         let second = AllocatedProcedureTask {
             id: second_task.clone(),
             operation: OperationId::new("https://example.org/procedure/second").unwrap(),
-            program: None,
+            program: Some(second_program),
             inputs: vec![PlanningTaskInput {
                 source: PlanningValueSource::TaskOutput {
                     task: first_task.clone(),
                     output: id("sample"),
                 },
-                port_type: PortType::Material { state },
+                port_type: PortType::Material {
+                    state: state.clone(),
+                },
             }],
-            outputs: Vec::new(),
+            outputs: vec![PlanningTaskOutput {
+                name: id("processed"),
+                port_type: PortType::Material {
+                    state: state.clone(),
+                },
+            }],
             parameters: Vec::new(),
-            materials: Vec::new(),
-            requirements: vec![requirement(
-                second_requirement.clone(),
-                "https://sbol.io/ns/capability#BlockTemperatureControl",
-            )],
+            materials: vec![material("buffer-b", "https://example.org/lots/buffer")],
+            requirements: second_requirements.clone(),
         };
+        let first_requirement = first_requirements[0].id.clone();
+        let second_requirement = second_requirements[0].id.clone();
         let invocation = AdapterInvocation {
             id: adapter_invocation_id("https://example.org/facility/ot2", &adapter),
             asset: "https://example.org/facility/ot2".to_owned(),
             adapter,
-            tasks: vec![first_task, second_task],
+            tasks: vec![first_task, second_task.clone()],
             requirements: vec![first_requirement, second_requirement],
         };
         let plan = AdapterInvocationPlan {
@@ -646,18 +768,49 @@ mod tests {
                 methods: vec![AllocatedMethod {
                     choice: id("method"),
                     source_operation: IntentOperationId::new("https://example.org/intent").unwrap(),
+                    source_intent: crate::test_source_intent_with_ports(
+                        "https://example.org/intent",
+                        &[(
+                            "initial".to_owned(),
+                            PortType::Material {
+                                state: state.clone(),
+                            },
+                        )],
+                        &[(
+                            "final".to_owned(),
+                            PortType::Material {
+                                state: state.clone(),
+                            },
+                        )],
+                    ),
                     method: MethodId::new("https://example.org/method").unwrap(),
                     after: Vec::new(),
-                    inputs: Vec::new(),
-                    outputs: Vec::new(),
-                    yields: Vec::new(),
+                    inputs: vec![PlanningPort {
+                        name: id("initial"),
+                        port_type: PortType::Material {
+                            state: state.clone(),
+                        },
+                        source: None,
+                    }],
+                    outputs: vec![PlanningPort {
+                        name: id("final"),
+                        port_type: PortType::Material { state },
+                        source: None,
+                    }],
+                    yields: vec![PlanningMethodYield {
+                        output: id("final"),
+                        source: PlanningValueSource::TaskOutput {
+                            task: second_task,
+                            output: id("processed"),
+                        },
+                    }],
                     tasks: vec![first, second],
                 }],
             },
             allocated_lair_sha256: "c".repeat(64),
             invocations: vec![invocation.clone()],
         };
-        plan.validate().unwrap();
+        plan.validate(contracts()).unwrap();
         (plan, invocation)
     }
 
@@ -693,6 +846,7 @@ mod tests {
                 resource: "thermocycler-plate".to_owned(),
                 positions: vec!["A1".to_owned(), "B1".to_owned()],
             }],
+            lab_compiler::procedure::builtin_procedure_contracts(),
         )
         .unwrap();
 
@@ -700,7 +854,13 @@ mod tests {
             schedule.schema_version,
             ALLOCATED_PROCEDURE_SCHEDULE_SCHEMA_VERSION
         );
-        schedule.validate_against(&plan, &invocation).unwrap();
+        schedule
+            .validate_against(
+                &plan,
+                &invocation,
+                lab_compiler::procedure::builtin_procedure_contracts(),
+            )
+            .unwrap();
     }
 
     /// Names a material lot binding for one task input.
@@ -718,17 +878,7 @@ mod tests {
 
     #[test]
     fn rejects_two_different_materials_in_one_position() {
-        let (mut plan, invocation) = fixture();
-        for method in &mut plan.allocated.methods {
-            for task in &mut method.tasks {
-                if task.id == invocation.tasks[0] {
-                    task.materials = vec![
-                        material("buffer", "https://example.org/lots/buffer"),
-                        material("enzyme", "https://example.org/lots/enzyme"),
-                    ];
-                }
-            }
-        }
+        let (plan, invocation) = fixture();
         // One tube cannot hold two different reagents, however the adapter arrived at the layout.
         let collide = |input: &str| ScheduledPhysicalLocation {
             value: ScheduledValueRef::MaterialInput {
@@ -744,6 +894,7 @@ mod tests {
             &invocation,
             groups(&invocation),
             vec![collide("buffer"), collide("enzyme")],
+            lab_compiler::procedure::builtin_procedure_contracts(),
         )
         .unwrap_err();
 
@@ -768,15 +919,16 @@ mod tests {
                 } else {
                     "buffer-b"
                 };
-                task.materials = vec![SelectedMaterialBinding {
-                    input: id(input),
-                    symbol: "buffer".to_owned(),
-                    source: SelectedMaterialSource::MaterialLot {
-                        component: "https://example.org/component/buffer".to_owned(),
-                        material_lot: "https://example.org/lots/buffer".to_owned(),
-                    },
-                    interchangeable_alternatives: Vec::new(),
-                }];
+                let binding = task
+                    .materials
+                    .iter_mut()
+                    .find(|material| material.input == id(input))
+                    .unwrap();
+                binding.symbol = "buffer".to_owned();
+                binding.source = SelectedMaterialSource::MaterialLot {
+                    component: "https://example.org/component/buffer".to_owned(),
+                    material_lot: "https://example.org/lots/buffer".to_owned(),
+                };
             }
         }
         let shared = |task: usize, input: &str| ScheduledPhysicalLocation {
@@ -793,16 +945,23 @@ mod tests {
             &invocation,
             groups(&invocation),
             vec![shared(0, "buffer-a"), shared(1, "buffer-b")],
+            lab_compiler::procedure::builtin_procedure_contracts(),
         )
         .expect("one reagent shared by two tasks occupies one tube");
 
-        schedule.validate_against(&plan, &invocation).unwrap();
+        schedule
+            .validate_against(
+                &plan,
+                &invocation,
+                lab_compiler::procedure::builtin_procedure_contracts(),
+            )
+            .unwrap();
     }
 
     #[test]
     fn rejects_two_different_choice_inputs_in_one_position() {
         let (mut plan, invocation) = fixture();
-        plan.allocated.methods[0].inputs = vec![
+        plan.allocated.methods[0].inputs.extend([
             PlanningPort {
                 name: id("cells-a"),
                 port_type: PortType::Material {
@@ -817,8 +976,24 @@ mod tests {
                 },
                 source: None,
             },
-        ];
-        plan.validate().unwrap();
+        ]);
+        let method = &mut plan.allocated.methods[0];
+        let inputs = method
+            .inputs
+            .iter()
+            .map(|port| (port.name.to_string(), port.port_type.clone()))
+            .collect::<Vec<_>>();
+        let outputs = method
+            .outputs
+            .iter()
+            .map(|port| (port.name.to_string(), port.port_type.clone()))
+            .collect::<Vec<_>>();
+        method.source_intent = crate::test_source_intent_with_ports(
+            method.source_operation.as_str(),
+            &inputs,
+            &outputs,
+        );
+        plan.validate(contracts()).unwrap();
         let collide = |input: &str| ScheduledPhysicalLocation {
             value: ScheduledValueRef::ChoiceInput {
                 choice: plan.allocated.methods[0].choice.clone(),
@@ -833,6 +1008,7 @@ mod tests {
             &invocation,
             groups(&invocation),
             vec![collide("cells-a"), collide("cells-b")],
+            lab_compiler::procedure::builtin_procedure_contracts(),
         )
         .unwrap_err();
 
@@ -845,15 +1021,24 @@ mod tests {
     #[test]
     fn rejects_requirement_membership_that_splits_tasks() {
         let (plan, invocation) = fixture();
-        let mut schedule =
-            AllocatedProcedureSchedule::new(&plan, &invocation, groups(&invocation), Vec::new())
-                .unwrap();
+        let mut schedule = AllocatedProcedureSchedule::new(
+            &plan,
+            &invocation,
+            groups(&invocation),
+            Vec::new(),
+            lab_compiler::procedure::builtin_procedure_contracts(),
+        )
+        .unwrap();
         let first = schedule.groups[0].requirements[0].clone();
         schedule.groups[0].requirements[0] = schedule.groups[1].requirements[0].clone();
         schedule.groups[1].requirements[0] = first;
 
         assert!(matches!(
-            schedule.validate_against(&plan, &invocation),
+            schedule.validate_against(
+                &plan,
+                &invocation,
+                lab_compiler::procedure::builtin_procedure_contracts(),
+            ),
             Err(AllocatedProcedureScheduleError::SplitTask { .. })
         ));
     }
@@ -874,7 +1059,11 @@ mod tests {
         };
 
         assert_eq!(
-            schedule.validate_against(&plan, &invocation),
+            schedule.validate_against(
+                &plan,
+                &invocation,
+                lab_compiler::procedure::builtin_procedure_contracts(),
+            ),
             Err(AllocatedProcedureScheduleError::CyclicGroups)
         );
     }

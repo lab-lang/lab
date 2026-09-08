@@ -1,45 +1,50 @@
 //! Lower canonical thermal programs into reviewed Inheco ODTC run documents.
 
+use lab_compiler::procedure::ProcedureContractRegistry;
 use lab_runfmt::{THERMOCYCLE_RUN_FORMAT, ThermocycleRunDocument};
 
 use crate::backend::adapters::{AdapterInvocationDocument, AdapterInvocationLowering};
 use crate::backend::invocation::exact_invocation_tasks;
-use crate::backend::procedure::{CYCLE_GOLDEN_GATE, normalized_thermal_program};
+use crate::backend::procedure::normalized_thermal_program;
 use crate::{AdapterInvocation, AdapterInvocationPlan, ArtifactBundle, GeneratedArtifact};
 use lab_compiler::planning::PlanningValueSource;
+use lab_instruments::ThermalRun;
 
 pub(in crate::backend) fn lower_invocation(
     invocation_plan: &AdapterInvocationPlan,
     invocation: &AdapterInvocation,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<AdapterInvocationLowering, String> {
     let tasks = exact_invocation_tasks("Inheco ODTC", invocation_plan, invocation)?;
     let mut artifacts = ArtifactBundle::new();
     let mut documents = Vec::new();
     for (ordinal, member) in tasks.into_iter().enumerate() {
-        if member.task.operation.as_str() != CYCLE_GOLDEN_GATE {
-            return Err(format!(
-                "Inheco ODTC invocation contains unsupported Procedure operation '{}' in task '{}'",
-                member.task.operation, member.task.id
-            ));
-        }
-        let program = normalized_thermal_program("Inheco ODTC", member.task, &member.requirements)?;
+        let program = normalized_thermal_program(
+            "Inheco ODTC",
+            member.task,
+            &member.requirements,
+            contracts,
+        )?;
         let limits = lab_instruments::odtc_thermal_limits();
-        program.profile.validate(&limits).map_err(|error| {
+        let sample_count = u32::try_from(program.sample_count).map_err(|_| {
             format!(
-                "Inheco ODTC Procedure task '{}' is outside the device envelope: {error}",
+                "Inheco ODTC Procedure task '{}' addresses more samples than a portable thermal run can represent",
+                member.task.id,
+            )
+        })?;
+        let title = format!("Thermal cycle {}", program.artifact);
+        let run = ThermalRun {
+            profile: program.profile,
+            sample_count,
+            fill_volume_ul: program.volume_each_ul,
+            final_hold_celsius: program.final_hold_celsius,
+        };
+        run.validate(&limits).map_err(|error| {
+            format!(
+                "Inheco ODTC Procedure task '{}' is outside the device run contract: {error}",
                 member.task.id
             )
         })?;
-        // The profile check walks the finite stages only. An indefinite hold is the temperature the
-        // block sits at once the run ends, and it has to be reachable too.
-        if let Some(hold) = program.final_hold_celsius
-            && (hold < limits.block_min_celsius || hold > limits.block_max_celsius)
-        {
-            return Err(format!(
-                "Inheco ODTC Procedure task '{}' holds at {hold} C after cycling, outside the device block range {} C to {} C",
-                member.task.id, limits.block_min_celsius, limits.block_max_celsius
-            ));
-        }
         let input = member
             .task
             .inputs
@@ -48,11 +53,9 @@ pub(in crate::backend) fn lower_invocation(
         let document = ThermocycleRunDocument {
             format: THERMOCYCLE_RUN_FORMAT.to_owned(),
             id: member.task.id.to_string(),
-            title: format!("Thermal cycle {}", program.artifact),
+            title,
             plate: render_value_source(&input.source),
-            profile: program.profile,
-            final_hold_celsius: program.final_hold_celsius,
-            fill_volume_ul: program.volume_each_ul,
+            run,
         };
         let path = format!("tasks/{:03}-thermal-program/thermocycle.json", ordinal + 1);
         let mut contents = serde_json::to_string_pretty(&document).map_err(|error| {
@@ -95,3 +98,6 @@ fn render_value_source(source: &PlanningValueSource) -> String {
         }
     }
 }
+
+mod registration;
+pub use registration::registration;

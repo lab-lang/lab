@@ -7,14 +7,21 @@ license.workspace = true
 repository.workspace = true
 description = "Concrete laboratory adapter contracts, schedules, and artifact lowering for Lab."
 
+[features]
+default = []
+hardware = ["lab-runtime/hardware"]
+
 [dependencies]
+anyhow.workspace = true
 # Adapter lowering uses only the pure protocol layer; the workspace dependency
 # keeps the native USB feature disabled.
 hamilton-star.workspace = true
+lab-adapter-api.workspace = true
 lab-capability.workspace = true
 lab-instruments.workspace = true
 lab-compiler.workspace = true
 lab-runfmt.workspace = true
+lab-runtime.workspace = true
 opentrons-protocol.workspace = true
 sbol-inventory.workspace = true
 schemars.workspace = true
@@ -25,6 +32,7 @@ thiserror.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+lab-language.workspace = true
 tempfile = "3.27.0"
 
 [lints]

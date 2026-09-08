@@ -54,6 +54,6 @@ One plasmid feeding several strains is ordinary dataflow: each strain workflow
 takes the plasmid material as a typed input, and the compiler derives the wave
 ordering from that. Nothing needs to duplicate a material.
 
-Action dispatch resolves on the first word of a phrase, so a single `transform`
-contract exists at a time. Replacing it was a breaking change to every workflow
-that used the two-operand form.
+Source action resolution begins with the declared first word of a phrase, so a
+single `transform` contract exists in one scope at a time. Replacing it was a
+breaking change to every workflow that used the two-operand form.

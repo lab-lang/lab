@@ -510,10 +510,11 @@ def _typed_kind(candidate: object | None) -> type[ArtifactKind] | None:
     word = cast(str | None, read()) if callable(read) else None
     if word is None:
         return None
-    return {
+    kinds: dict[str, type[ArtifactKind]] = {
         "backbone": designs.Backbone,
         "cds": designs.CDS,
         "part": designs.Part,
         "plasmid": designs.Plasmid,
         "promoter": designs.Promoter,
-    }.get(word)
+    }
+    return kinds.get(word)

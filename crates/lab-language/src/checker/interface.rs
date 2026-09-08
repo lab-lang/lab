@@ -83,7 +83,6 @@ pub(super) fn build_interface(
                 phrase,
                 operands,
                 results,
-                capability,
             } => {
                 insert(
                     &mut interface,
@@ -103,7 +102,6 @@ pub(super) fn build_interface(
                     phrase: phrase.clone(),
                     operands: operands.clone(),
                     results: results.clone(),
-                    capability: capability.clone(),
                 });
             }
             CheckedDeclaration::Facet {
@@ -163,7 +161,7 @@ pub(super) fn build_interface(
                     ExportKind::Function,
                     Some(output),
                     Some(CallableSignature {
-                        inputs: inputs.iter().map(|field| field.r#type.clone()).collect(),
+                        inputs: inputs.clone(),
                         outputs: vec![crate::checked::CheckedField {
                             name: "output".to_owned(),
                             r#type: output.clone(),
@@ -290,7 +288,7 @@ pub(super) fn build_interface(
                         .filter(|_| outputs.len() == 1)
                         .map(|field| &field.r#type),
                     Some(CallableSignature {
-                        inputs: inputs.iter().map(|field| field.r#type.clone()).collect(),
+                        inputs: inputs.clone(),
                         outputs: outputs.clone(),
                     }),
                     BTreeMap::new(),

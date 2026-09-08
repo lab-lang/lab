@@ -37,13 +37,6 @@ pub(crate) struct MaterialType {
     state: StringAttr,
 }
 
-impl MaterialType {
-    /// The absolute IRI of the state this material is in.
-    pub(crate) fn state(&self) -> &str {
-        self.state.as_str()
-    }
-}
-
 impl Verify for MaterialType {
     fn verify(&self, _context: &Context) -> Result<()> {
         if AbsoluteIri::new(self.state.as_str()).is_err() {
@@ -72,8 +65,8 @@ impl Verify for DataType {
 /// The versioned, device-neutral program carried by one Procedure task.
 ///
 /// The document remains the same portable serialization used by package and Python APIs. This
-/// nominal Pliron attribute gives that document an intrinsic verifier without making the portable
-/// [`ProcedureProgram`] model depend on Pliron.
+/// nominal Pliron attribute verifies only the serialized envelope. Contract semantics belong to
+/// the explicit Procedure compiler composition used at a stage boundary.
 #[pliron_attr(name = "procedure.program", format = "`<` $document `>`")]
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ProcedureProgramAttr {
@@ -97,16 +90,12 @@ impl ProcedureProgramAttr {
 
 impl Verify for ProcedureProgramAttr {
     fn verify(&self, _context: &Context) -> Result<()> {
-        let program = match self.program() {
-            Ok(program) => program,
+        match self.program() {
+            Ok(_) => Ok(()),
             Err(error) => {
-                return verify_err_noloc!("procedure.program has an invalid document: {error}");
+                verify_err_noloc!("procedure.program has an invalid document: {error}")
             }
-        };
-        if let Err(error) = program.validate() {
-            return verify_err_noloc!("procedure.program is invalid: {error}");
         }
-        Ok(())
     }
 }
 
@@ -118,7 +107,7 @@ impl Verify for ProcedureProgramAttr {
         node_id: StringAttr,
         operation: StringAttr,
         task_output_names: VecAttr,
-        normalized_program: ProcedureProgramAttr
+        program: ProcedureProgramAttr
     )
 )]
 pub(crate) struct TaskOp;
@@ -187,11 +176,11 @@ impl TaskOp {
     }
 
     pub(crate) fn set_semantic_program(&self, context: &mut Context, program: &ProcedureProgram) {
-        self.set_attr_normalized_program(context, ProcedureProgramAttr::new(program));
+        self.set_attr_program(context, ProcedureProgramAttr::new(program));
     }
 
     pub(crate) fn semantic_program(&self, context: &Context) -> Option<ProcedureProgram> {
-        self.get_attr_normalized_program(context).map(|program| {
+        self.get_attr_program(context).map(|program| {
             program
                 .program()
                 .expect("verified procedure.task carries a valid normalized program")
@@ -269,58 +258,26 @@ impl Verify for TaskOp {
         let program = match operation
             .attributes
             .0
-            .get(&*task_op_attr_names::ATTR_KEY_NORMALIZED_PROGRAM)
+            .get(&*task_op_attr_names::ATTR_KEY_PROGRAM)
         {
             Some(program) => {
                 let Some(program) = program.downcast_ref::<ProcedureProgramAttr>() else {
                     return verify_err!(
                         self.loc(context),
-                        "procedure.task normalized_program must be a procedure.program attribute"
+                        "procedure.task program must be a procedure.program attribute"
                     );
                 };
                 Some(program)
             }
             None => None,
         };
-        if let Some(program) = program {
-            let parsed = match program.program() {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    return verify_err!(
-                        self.loc(context),
-                        "procedure.task has an invalid normalized program document: {error}"
-                    );
-                }
-            };
-            let validated = match parsed.validate() {
-                Ok(validated) => validated,
-                Err(error) => {
-                    return verify_err!(
-                        self.loc(context),
-                        "procedure.task has an invalid normalized program: {error}"
-                    );
-                }
-            };
-            let semantic_outputs = output_names
-                .0
-                .iter()
-                .map(|name| {
-                    LocalId::new(
-                        name.downcast_ref::<StringAttr>()
-                            .expect("output names were verified above")
-                            .as_str(),
-                    )
-                    .expect("output identities were verified above")
-                })
-                .collect::<Vec<_>>();
-            if let Err(error) =
-                validated.validate_task_ports(operation.get_num_operands(), &semantic_outputs)
-            {
-                return verify_err!(
-                    self.loc(context),
-                    "procedure.task normalized program does not bind its ports: {error}"
-                );
-            }
+        if let Some(program) = program
+            && let Err(error) = program.program()
+        {
+            return verify_err!(
+                self.loc(context),
+                "procedure.task has an invalid program document: {error}"
+            );
         }
         Ok(())
     }
@@ -607,29 +564,27 @@ mod tests {
     }
 
     #[test]
-    fn a_present_normalized_program_must_use_the_procedure_program_attribute() {
+    fn a_present_program_must_use_the_procedure_program_attribute() {
         let mut context = Context::new();
         let task = empty_external_task(&mut context);
         task.get_operation().deref_mut(&context).attributes.set(
-            task_op_attr_names::ATTR_KEY_NORMALIZED_PROGRAM.clone(),
+            task_op_attr_names::ATTR_KEY_PROGRAM.clone(),
             StringAttr::new(r#"{"contract":"https://example.org/contract"}"#.to_owned()),
         );
 
         let error = verify_operation(task.get_operation(), &context).unwrap_err();
         let diagnostic = error.disp(&context).to_string();
         assert!(
-            diagnostic.contains(
-                "procedure.task normalized_program must be a procedure.program attribute"
-            ),
+            diagnostic.contains("procedure.task program must be a procedure.program attribute"),
             "{diagnostic}"
         );
     }
 
     #[test]
-    fn procedure_program_attributes_validate_their_document_and_contract() {
+    fn procedure_program_attributes_validate_their_document_but_not_a_global_contract_set() {
         let mut context = Context::new();
         let task = empty_external_task(&mut context);
-        task.set_attr_normalized_program(
+        task.set_attr_program(
             &context,
             ProcedureProgramAttr {
                 document: StringAttr::new("not JSON".to_owned()),
@@ -643,7 +598,7 @@ mod tests {
             "{diagnostic}"
         );
 
-        task.set_attr_normalized_program(
+        task.set_attr_program(
             &context,
             ProcedureProgramAttr {
                 document: StringAttr::new(
@@ -652,12 +607,6 @@ mod tests {
                 ),
             },
         );
-        let error = verify_operation(task.get_operation(), &context).unwrap_err();
-        let diagnostic = error.disp(&context).to_string();
-        assert!(
-            diagnostic.contains("Procedure contract")
-                && diagnostic.contains("is not registered in this build"),
-            "{diagnostic}"
-        );
+        verify_operation(task.get_operation(), &context).unwrap();
     }
 }

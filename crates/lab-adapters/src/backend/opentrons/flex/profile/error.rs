@@ -38,9 +38,8 @@ pub enum FlexProfileError {
     TemperatureModuleColumn { slot: String },
     #[error("{context} names deck slot '{slot}', which a Flex does not address")]
     UnknownSlot { context: String, slot: String },
-    #[error("deck slot '{slot}' is claimed by both {first} and {second} during {stage}")]
+    #[error("deck slot '{slot}' is claimed by both {first} and {second}")]
     SlotConflict {
-        stage: &'static str,
         slot: String,
         first: String,
         second: String,

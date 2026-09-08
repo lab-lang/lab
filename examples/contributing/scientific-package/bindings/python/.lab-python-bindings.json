@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "files": [
+    "contribution_example/__init__.py",
+    "contribution_example/__init__.pyi",
+    "contribution_example/main.py",
+    "contribution_example/main.pyi",
+    "contribution_example/science.py",
+    "contribution_example/science.pyi"
+  ]
+}

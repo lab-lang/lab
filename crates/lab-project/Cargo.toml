@@ -8,6 +8,8 @@ repository.workspace = true
 description = "Package-aware project loading and compilation for Lab."
 
 [dependencies]
+anyhow.workspace = true
+lab-adapter-api.workspace = true
 lab-adapters.workspace = true
 lab-capability.workspace = true
 lab-facility.workspace = true
@@ -15,13 +17,20 @@ lab-compiler.workspace = true
 lab-inventory.workspace = true
 lab-language.workspace = true
 lab-package.workspace = true
+lab-runfmt.workspace = true
 lab-sbol.workspace = true
 sbol3.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+
+[dev-dependencies]
+lab-example-preview-adapter = { path = "../../examples/contributing/preview-adapter" }
+lab-example-pipetting = { path = "../../examples/contributing/pipetting-extension" }
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

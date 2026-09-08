@@ -12,12 +12,13 @@ use lab_runtime::clock::Clock;
 use lab_runtime::device_executors::ReviewedDocumentSimulationExecutor;
 use lab_runtime::events::{RecordingSink, RunEvent};
 use lab_runtime::execution::{
-    ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, load_execution_directory,
-    render_execution_dry_run, run_execution_plan,
+    ExecutionOutcome, ExecutionRunConfig, ExecutorRegistry, ReviewedDocumentLoaderRegistry,
+    load_execution_directory, render_execution_dry_run, run_execution_plan,
 };
 use lab_runtime::mode::ExecutionMode;
 use lab_runtime::operator::AutoOperator;
 use lab_runtime::provenance::{SIMULATION_INVENTORY_RESULT_FILE, write_inventory_result};
+use lab_runtime::reviewed_documents::load_simulation_run;
 use sbol_inventory::InventoryDocument;
 use sbol_inventory::vocabulary::{
     ABSORBANCE_MEASUREMENT, ControlMode, INCUBATION, LIQUID_HANDLING, PROV_ENTITY,
@@ -34,6 +35,7 @@ const SIMULATED_EPOCH: &str = "https://example.org/ebef-acceptance/epoch_2_simul
 const ASSAY_COMPONENT: &str = "https://example.org/ebef-acceptance/assay_plate_design";
 const ASSAY_LOT: &str = "https://example.org/ebef-acceptance/assay_plate_lot";
 const SIMULATOR: &str = "lab.simulator";
+const SIMULATOR_IMPLEMENTATION: &str = "https://example.org/implementation/semantic-simulator-v1";
 
 struct FixedClock;
 
@@ -48,7 +50,16 @@ fn ebef_derived_facility_composes_three_capabilities_without_claiming_hardware_c
     let directory = materialize_reviewed_simulation();
     let source_path = directory.path().join("inventory-source.ttl");
     let source_before = fs::read(&source_path).unwrap();
-    let loaded = load_execution_directory(directory.path()).unwrap();
+    let mut document_loaders = ReviewedDocumentLoaderRegistry::new();
+    document_loaders
+        .register(
+            SIMULATOR,
+            SIMULATOR_IMPLEMENTATION,
+            SIMULATION_RUN_FORMAT,
+            load_simulation_run,
+        )
+        .unwrap();
+    let loaded = load_execution_directory(directory.path(), &document_loaders).unwrap();
 
     for asset in [PHYSICAL_MICROLAB, PHYSICAL_EPOCH] {
         let physical = loaded.inventory.facility_asset(asset).unwrap();
@@ -344,7 +355,7 @@ fn requirement(
         minimum_qualification: Qualification::Simulatable.iri().to_owned(),
         observed_qualification: Qualification::Simulatable.iri().to_owned(),
         control_mode: ControlMode::ReviewedFile.iri().to_owned(),
-        procedure_implementation: None,
+        procedure_implementation: Some(SIMULATOR_IMPLEMENTATION.to_owned()),
         parameters: Vec::new(),
         adapter: Some(ExecutionAdapterBinding {
             driver: SIMULATOR.to_owned(),
@@ -377,6 +388,7 @@ fn simulation_registry() -> ExecutorRegistry {
             .register(
                 asset,
                 SIMULATOR,
+                SIMULATOR_IMPLEMENTATION,
                 SIMULATION_RUN_FORMAT,
                 Box::<ReviewedDocumentSimulationExecutor>::default(),
             )

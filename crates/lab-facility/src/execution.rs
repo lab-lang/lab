@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_adapters::AdapterInvocationPlan;
+use lab_adapter_api::AdapterInvocationPlan;
 use lab_capability::{ControlMode, ScalarValue};
 use lab_compiler::allocation::{
     AllocatedMethod, AllocatedProcedureTask, AllocatedRequirementBinding,
@@ -10,6 +10,7 @@ use lab_compiler::allocation::{
 use lab_compiler::method::ProcedureValue;
 use lab_compiler::planning::{PlanningValueSource, SelectedMaterialSource};
 use lab_compiler::procedure::BindingScope;
+use lab_compiler::procedure::ProcedureContractRegistry;
 use lab_runfmt::{
     EXECUTION_PLAN_FORMAT, ExecutionAdapterBinding, ExecutionInventoryReference,
     ExecutionMaterialBinding, ExecutionParameterBinding, ExecutionParameterValue,
@@ -48,10 +49,12 @@ impl Default for ExecutionPlanOptions {
 /// Build a reviewed plan from the exact selected Method graph and adapter invocations.
 pub fn build_execution_plan_from_invocations(
     invocations: &AdapterInvocationPlan,
-    mut options: ExecutionPlanOptions,
+    contracts: &ProcedureContractRegistry,
+    options: ExecutionPlanOptions,
 ) -> Result<ExecutionPlanDocument, ExecutionPlanBuildError> {
+    let mut options = options;
     invocations
-        .validate()
+        .validate(contracts)
         .map_err(|error| ExecutionPlanBuildError::InvalidInvocations(error.to_string()))?;
     let planning = options
         .planning
@@ -70,6 +73,8 @@ pub fn build_execution_plan_from_invocations(
             (
                 method.choice.as_str(),
                 method.source_operation.as_str(),
+                serde_json::to_value(&method.source_intent)
+                    .expect("typed source Intent serializes infallibly"),
                 method.method.as_str(),
                 method
                     .tasks
@@ -86,6 +91,7 @@ pub fn build_execution_plan_from_invocations(
             (
                 method.choice.as_str(),
                 method.source_operation.as_str(),
+                method.source_intent.clone(),
                 method.method.as_str(),
                 method.tasks.iter().map(String::as_str).collect::<Vec<_>>(),
             )
@@ -133,7 +139,7 @@ pub fn build_execution_plan_from_invocations(
                     .as_ref()
                     .map_or(BindingScope::Independent, |program| {
                         program
-                            .validate()
+                            .validate(contracts)
                             .expect("adapter invocation validation checked the Procedure program")
                             .capability_formula()
                             .binding_scope
@@ -213,15 +219,40 @@ pub fn build_execution_plan_from_invocations(
             }
 
             if binding_scope == BindingScope::AtomicAssetAssembly {
-                if task_requirements
+                let has_manual = task_requirements
                     .iter()
-                    .any(|(_, _, is_manual, _)| *is_manual)
-                {
+                    .any(|(_, _, is_manual, _)| *is_manual);
+                let all_manual = !task_requirements.is_empty()
+                    && task_requirements
+                        .iter()
+                        .all(|(_, _, is_manual, _)| *is_manual);
+                if has_manual && !all_manual {
                     return Err(ExecutionPlanBuildError::UnsupportedAtomicExecution {
                         task: task.id.to_string(),
-                        message: "atomic manual-control requirement sets are not yet representable"
+                        message: "one atomic task mixes manual and adapter-controlled requirements"
                             .to_owned(),
                     });
+                }
+                if all_manual {
+                    let id = format!("manual-{:04}", nodes.len() + 1);
+                    nodes.push(ExecutionPlanNode {
+                        id: id.clone(),
+                        after: Vec::new(),
+                        action: ExecutionPlanAction::Manual {
+                            requirements: task_requirements
+                                .iter()
+                                .map(|(requirement, _, _, _)| requirement.clone())
+                                .collect(),
+                            title: format!("Perform {}", task.operation),
+                            instructions: manual_instructions(
+                                task,
+                                task_requirements.iter().map(|(_, binding, _, _)| *binding),
+                            ),
+                        },
+                    });
+                    node_tasks.push(BTreeSet::from([task.id.clone()]));
+                    task_nodes.entry(task.id.clone()).or_default().push(id);
+                    continue;
                 }
                 let document = task_requirements
                     .first()
@@ -321,9 +352,9 @@ pub fn build_execution_plan_from_invocations(
                     (
                         format!("manual-{:04}", nodes.len() + 1),
                         ExecutionPlanAction::Manual {
-                            requirement,
+                            requirements: vec![requirement],
                             title: format!("Perform {}", task.operation),
-                            instructions: manual_instructions(task, binding),
+                            instructions: manual_instructions(task, std::iter::once(binding)),
                         },
                     )
                 } else {
@@ -604,9 +635,7 @@ fn semantic_value(value: &lab_capability::ScalarValue) -> ExecutionParameterValu
 /// A step an instrument runs arrives with its own operator document, rendered
 /// by the adapter that lowered it. These are the ones a person performs,
 /// projected as display-ready text for the run sheet the CLI typesets.
-pub fn manual_run_steps(
-    invocations: &AdapterInvocationPlan,
-) -> Vec<lab_adapters::run_sheet::RunStep> {
+pub fn manual_run_steps(invocations: &AdapterInvocationPlan) -> Vec<lab_runfmt::ManualRunStep> {
     let mut steps = Vec::new();
     for method in &invocations.allocated.methods {
         for task in &method.tasks {
@@ -614,7 +643,7 @@ pub fn manual_run_steps(
                 if binding.control_mode != ControlMode::Manual.iri() {
                     continue;
                 }
-                steps.push(lab_adapters::run_sheet::RunStep {
+                steps.push(lab_runfmt::ManualRunStep {
                     title: spaced_words(local_fragment(task.operation.as_str())),
                     operation: task.operation.to_string(),
                     asset: local_fragment(&binding.asset).to_owned(),
@@ -687,13 +716,23 @@ fn display_property_value(value: &lab_capability::PropertyValue) -> String {
     }
 }
 
-fn manual_instructions(
+fn manual_instructions<'a>(
     task: &AllocatedProcedureTask,
-    binding: &AllocatedRequirementBinding,
+    bindings: impl IntoIterator<Item = &'a AllocatedRequirementBinding>,
 ) -> String {
+    let resources = bindings
+        .into_iter()
+        .map(|binding| {
+            format!(
+                "CapabilityOffering '{}' on Asset '{}'",
+                binding.offering, binding.asset
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut instructions = format!(
-        "Use CapabilityOffering '{}' on Asset '{}' to perform Procedure operation '{}'. Follow the facility's reviewed local SOP for this operation and confirm completion.",
-        binding.offering, binding.asset, task.operation
+        "Use {resources} to perform Procedure operation '{}'. Follow the facility's reviewed local SOP for this operation and confirm completion.",
+        task.operation
     );
     if !task.parameters.is_empty() {
         let parameters = task
@@ -789,6 +828,7 @@ mod tests {
         AllocatedMethod {
             choice: id(name),
             source_operation: IntentOperationId::new("example.intent").unwrap(),
+            source_intent: crate::test_source_intent("example.intent"),
             method: MethodId::new(format!("https://example.org/method/{name}")).unwrap(),
             after: Vec::new(),
             inputs: Vec::new(),

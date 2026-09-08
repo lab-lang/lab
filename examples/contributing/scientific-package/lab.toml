@@ -1,0 +1,10 @@
+[package]
+name = "contribution-example"
+version = "0.1.0"
+edition = "2026"
+
+[methods]
+documents = ["methods/homogenize.json"]
+
+[build]
+entry = "src/main.lab"

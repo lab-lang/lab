@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lab_capability::{ConstraintRelation, ControlMode, MethodId};
+use lab_capability::{AbsoluteIri, ConstraintRelation, ControlMode, MethodId};
+use lab_language::{ActionInterface, CheckedType, DefinitionId};
 use thiserror::Error;
 
 use crate::method::{
     IntentOperationId, LocalId, MaterialSourceExpression, MethodDefinition, MethodSignature,
-    ParameterType, PortType, ProcedureValueExpression, ScalarType, ScalarValueExpression,
-    TaskOutput, ValueReference,
+    ParameterType, PortType, ProcedureTaskExecutionDefinition, ProcedureValueExpression,
+    ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
 };
+use crate::workflow::ir::{DATA_NS, STATE_NS};
 
 /// A malformed portable method definition.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
@@ -20,12 +22,21 @@ decided by the Intent"
     )]
     RequestedInput { id: LocalId },
     #[error(
+        "method output `{id}` asks to inherit an input material state, but only an input may use material_as_supplied"
+    )]
+    SuppliedOutput { id: LocalId },
+    #[error(
         "Procedure task `{task}` output `{output}` asks the Intent for its state, but no method \
 output exports it, so there is no Intent result to read it from"
     )]
     UnexportedRequestedOutput { task: LocalId, output: LocalId },
     #[error("method parameter `{id}` occurs more than once")]
     DuplicateParameter { id: LocalId },
+    #[error("method parameter `{id}` has a default that does not match `{value_type:?}`")]
+    InvalidParameterDefault {
+        id: LocalId,
+        value_type: ParameterType,
+    },
     #[error("Procedure task `{id}` occurs more than once")]
     DuplicateTask { id: LocalId },
     #[error("Procedure task `{task}` output `{output}` occurs more than once")]
@@ -47,8 +58,14 @@ output exports it, so there is no Intent result to read it from"
     },
     #[error("Capability requirement `{id}` occurs more than once")]
     DuplicateRequirement { id: LocalId },
-    #[error("Procedure task `{task}` has no Capability requirements")]
+    #[error("primitive Procedure task `{task}` has no Capability requirements")]
     MissingRequirement { task: LocalId },
+    #[error("template or builder Procedure task `{task}` has no accepted execution control mode")]
+    MissingDerivedControlMode { task: LocalId },
+    #[error("template or builder Procedure task `{task}` accepts descriptive UnspecifiedControl")]
+    UnspecifiedDerivedControlMode { task: LocalId },
+    #[error("Procedure task `{task}` has an invalid declarative template: {message}")]
+    InvalidProcedureTemplate { task: LocalId, message: String },
     #[error("Capability requirement `{requirement}` has no concrete accepted control mode")]
     MissingControlMode { requirement: LocalId },
     #[error("Capability requirement `{requirement}` accepts descriptive UnspecifiedControl")]
@@ -108,6 +125,32 @@ pub enum MethodRegistryError {
     },
 }
 
+/// A Method registry that does not implement the action interfaces in its
+/// package scope.
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
+pub enum MethodActionInterfaceError {
+    #[error("Intent operation `{operation}` is exported by both `{first}` and `{second}`")]
+    DuplicateOperation {
+        operation: String,
+        first: DefinitionId,
+        second: DefinitionId,
+    },
+    #[error("method `{method}` refines unknown Intent operation `{operation}`")]
+    UnknownOperation {
+        method: MethodId,
+        operation: IntentOperationId,
+    },
+    #[error(
+        "method `{method}` does not implement action `{action}` for Intent operation `{operation}`: {message}"
+    )]
+    IncompatibleAction {
+        method: MethodId,
+        operation: IntentOperationId,
+        action: DefinitionId,
+        message: String,
+    },
+}
+
 /// A validated, deterministically ordered set of portable method definitions.
 #[derive(Clone, Debug, Default)]
 pub struct MethodRegistry {
@@ -154,6 +197,12 @@ impl MethodDefinition {
                     id: parameter.name.clone(),
                 });
             }
+            if parameter.resolved_default().is_err() {
+                return Err(MethodDefinitionError::InvalidParameterDefault {
+                    id: parameter.name.clone(),
+                    value_type: parameter.value_type.clone(),
+                });
+            }
         }
 
         let mut task_ids = BTreeSet::new();
@@ -172,49 +221,110 @@ impl MethodDefinition {
                     });
                 }
             }
-            if task.requirements.is_empty() {
-                return Err(MethodDefinitionError::MissingRequirement {
-                    task: task.id.clone(),
-                });
-            }
-            for requirement in &task.requirements {
-                if !requirement_ids.insert(requirement.id.clone()) {
-                    return Err(MethodDefinitionError::DuplicateRequirement {
-                        id: requirement.id.clone(),
-                    });
-                }
-                if requirement.accepted_control_modes.is_empty() {
-                    return Err(MethodDefinitionError::MissingControlMode {
-                        requirement: requirement.id.clone(),
-                    });
-                }
-                if requirement
-                    .accepted_control_modes
-                    .contains(&ControlMode::Unspecified)
-                {
-                    return Err(MethodDefinitionError::UnspecifiedControlMode {
-                        requirement: requirement.id.clone(),
-                    });
-                }
-                for constraint in &requirement.constraints {
-                    let scalar_type = match &constraint.required {
-                        ScalarValueExpression::Literal { value } => ScalarType::of(&value.value),
-                        ScalarValueExpression::IntentParameter { parameter, unit } => {
-                            parameter_scalar_type(
-                                &parameter_types,
-                                &requirement.id,
-                                parameter,
-                                unit.is_some(),
-                            )?
-                        }
-                    };
-                    if !matches!(constraint.relation, ConstraintRelation::Exact)
-                        && !scalar_type.is_numeric()
-                    {
-                        return Err(MethodDefinitionError::NonNumericOrderedConstraint {
-                            requirement: requirement.id.clone(),
-                            scalar_type,
+            match &task.execution {
+                ProcedureTaskExecutionDefinition::Template { body, policy, .. } => {
+                    if policy.accepted_control_modes.is_empty() {
+                        return Err(MethodDefinitionError::MissingDerivedControlMode {
+                            task: task.id.clone(),
                         });
+                    }
+                    if policy
+                        .accepted_control_modes
+                        .contains(&ControlMode::Unspecified)
+                    {
+                        return Err(MethodDefinitionError::UnspecifiedDerivedControlMode {
+                            task: task.id.clone(),
+                        });
+                    }
+                    crate::procedure::template::validate_procedure_template_shape(
+                        body,
+                        task.inputs.len(),
+                        &task
+                            .outputs
+                            .iter()
+                            .map(|output| output.name.clone())
+                            .collect::<Vec<_>>(),
+                        &task
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.id.clone())
+                            .collect::<Vec<_>>(),
+                        &task
+                            .materials
+                            .iter()
+                            .map(|material| material.id.clone())
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(|error| {
+                        MethodDefinitionError::InvalidProcedureTemplate {
+                            task: task.id.clone(),
+                            message: error.to_string(),
+                        }
+                    })?;
+                }
+                ProcedureTaskExecutionDefinition::Builder { policy, .. } => {
+                    if policy.accepted_control_modes.is_empty() {
+                        return Err(MethodDefinitionError::MissingDerivedControlMode {
+                            task: task.id.clone(),
+                        });
+                    }
+                    if policy
+                        .accepted_control_modes
+                        .contains(&ControlMode::Unspecified)
+                    {
+                        return Err(MethodDefinitionError::UnspecifiedDerivedControlMode {
+                            task: task.id.clone(),
+                        });
+                    }
+                }
+                ProcedureTaskExecutionDefinition::Primitive { requirements } => {
+                    if requirements.is_empty() {
+                        return Err(MethodDefinitionError::MissingRequirement {
+                            task: task.id.clone(),
+                        });
+                    }
+                    for requirement in requirements {
+                        if !requirement_ids.insert(requirement.id.clone()) {
+                            return Err(MethodDefinitionError::DuplicateRequirement {
+                                id: requirement.id.clone(),
+                            });
+                        }
+                        if requirement.accepted_control_modes.is_empty() {
+                            return Err(MethodDefinitionError::MissingControlMode {
+                                requirement: requirement.id.clone(),
+                            });
+                        }
+                        if requirement
+                            .accepted_control_modes
+                            .contains(&ControlMode::Unspecified)
+                        {
+                            return Err(MethodDefinitionError::UnspecifiedControlMode {
+                                requirement: requirement.id.clone(),
+                            });
+                        }
+                        for constraint in &requirement.constraints {
+                            let scalar_type = match &constraint.required {
+                                ScalarValueExpression::Literal { value } => {
+                                    ScalarType::of(&value.value)
+                                }
+                                ScalarValueExpression::IntentParameter { parameter, unit } => {
+                                    parameter_scalar_type(
+                                        &parameter_types,
+                                        &requirement.id,
+                                        parameter,
+                                        unit.is_some(),
+                                    )?
+                                }
+                            };
+                            if !matches!(constraint.relation, ConstraintRelation::Exact)
+                                && !scalar_type.is_numeric()
+                            {
+                                return Err(MethodDefinitionError::NonNumericOrderedConstraint {
+                                    requirement: requirement.id.clone(),
+                                    scalar_type,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -336,6 +446,11 @@ impl MethodDefinition {
                     reference: output.source.clone(),
                 });
             };
+            if matches!(port_type, PortType::MaterialAsSupplied) {
+                return Err(MethodDefinitionError::SuppliedOutput {
+                    id: output.name.clone(),
+                });
+            }
             outputs.push(TaskOutput {
                 name: output.name.clone(),
                 port_type: port_type.clone(),
@@ -449,9 +564,250 @@ impl MethodRegistry {
         self.by_operation.values().flatten()
     }
 
+    /// Check every Method against one closed set of reachable action
+    /// interfaces.
+    ///
+    /// Registry construction proves that alternative Methods agree with each
+    /// other.  This second gate proves that their shared value signature is the
+    /// signature of a real action declaration, while allowing candidate-owned
+    /// parameters that come from an artifact or a declared default.
+    pub fn validate_action_interfaces(
+        &self,
+        interfaces: impl IntoIterator<Item = ActionInterface>,
+    ) -> Result<(), MethodActionInterfaceError> {
+        let mut by_operation = BTreeMap::<String, ActionInterface>::new();
+        for interface in interfaces {
+            let operation = interface.surface.operation.clone();
+            if let Some(previous) = by_operation.insert(operation.clone(), interface.clone()) {
+                return Err(MethodActionInterfaceError::DuplicateOperation {
+                    operation,
+                    first: previous.definition,
+                    second: interface.definition,
+                });
+            }
+        }
+        for method in self.definitions() {
+            let Some(action) = by_operation.get(method.refines.as_str()) else {
+                return Err(MethodActionInterfaceError::UnknownOperation {
+                    method: method.id.clone(),
+                    operation: method.refines.clone(),
+                });
+            };
+            validate_method_action_signature(method, action).map_err(|message| {
+                MethodActionInterfaceError::IncompatibleAction {
+                    method: method.id.clone(),
+                    operation: method.refines.clone(),
+                    action: action.definition.clone(),
+                    message,
+                }
+            })?;
+        }
+        Ok(())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.by_operation.is_empty()
     }
+}
+
+fn validate_method_action_signature(
+    method: &MethodDefinition,
+    action: &ActionInterface,
+) -> Result<(), String> {
+    let signature = method
+        .validate()
+        .expect("a MethodRegistry contains only validated definitions");
+    let operands = &action.surface.operands;
+    let mut covered = BTreeSet::<&str>::new();
+    let mut previous_input = None;
+    for input in &signature.inputs {
+        let Some((position, operand)) = operands
+            .iter()
+            .enumerate()
+            .find(|(_, operand)| operand.name == input.name.as_str())
+        else {
+            return Err(format!(
+                "input `{}` is not declared by the action",
+                input.name
+            ));
+        };
+        if previous_input.is_some_and(|previous| position <= previous) {
+            return Err(format!(
+                "input `{}` is out of action-operand order",
+                input.name
+            ));
+        }
+        previous_input = Some(position);
+        if !port_matches_checked_type(&input.port_type, &operand.r#type, true) {
+            return Err(format!(
+                "input `{}` has Method type `{:?}`, but the action declares `{}`",
+                input.name, input.port_type, operand.r#type
+            ));
+        }
+        covered.insert(operand.name.as_str());
+    }
+
+    for parameter in &method.parameters {
+        let source = parameter.source.as_ref().unwrap_or(&parameter.name);
+        let Some(operand) = operands
+            .iter()
+            .find(|operand| operand.name == source.as_str())
+        else {
+            // Parameters may deliberately come from the artifact document or a
+            // candidate-owned default instead of the action phrase.
+            continue;
+        };
+        if !parameter_matches_checked_type(&parameter.value_type, &operand.r#type) {
+            return Err(format!(
+                "parameter `{}` reads action operand `{source}` as `{:?}`, but the action declares `{}`",
+                parameter.name, parameter.value_type, operand.r#type
+            ));
+        }
+        covered.insert(operand.name.as_str());
+    }
+
+    if let Some(operand) = operands
+        .iter()
+        .find(|operand| !covered.contains(operand.name.as_str()))
+    {
+        return Err(format!(
+            "action operand `{}` is not represented by a Method input or parameter",
+            operand.name
+        ));
+    }
+
+    if signature.outputs.len() != action.surface.results.len() {
+        return Err(format!(
+            "the Method yields {} outputs, but the action declares {}",
+            signature.outputs.len(),
+            action.surface.results.len()
+        ));
+    }
+    for (output, result) in signature.outputs.iter().zip(&action.surface.results) {
+        if output.name.as_str() != result.name {
+            return Err(format!(
+                "output `{}` does not match action result `{}`",
+                output.name, result.name
+            ));
+        }
+        if !port_matches_checked_type(&output.port_type, &result.r#type, false) {
+            return Err(format!(
+                "output `{}` has Method type `{:?}`, but the action declares `{}`",
+                output.name, output.port_type, result.r#type
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn port_matches_checked_type(port: &PortType, ty: &CheckedType, input: bool) -> bool {
+    match port {
+        PortType::Design => is_design_type(ty),
+        PortType::Material { state } => material_state_matches(ty, state.as_str()),
+        PortType::MaterialAsRequested => !input && is_material_type(ty),
+        PortType::MaterialAsSupplied => input && is_material_type(ty),
+        PortType::Data { data_kind } => data_kind_for(ty) == data_kind.as_str(),
+    }
+}
+
+fn is_design_type(ty: &CheckedType) -> bool {
+    matches!(ty.subject(), CheckedType::Named { name, .. } if name != "Material")
+        || matches!(ty.subject(), CheckedType::Any { .. })
+}
+
+fn is_material_type(ty: &CheckedType) -> bool {
+    match ty {
+        CheckedType::Union { alternatives } => {
+            !alternatives.is_empty() && alternatives.iter().all(is_material_type)
+        }
+        CheckedType::Named { name, .. } => name == "Material",
+        _ => false,
+    }
+}
+
+fn material_state_matches(ty: &CheckedType, expected: &str) -> bool {
+    match ty {
+        CheckedType::Union { alternatives } => alternatives
+            .iter()
+            .any(|alternative| material_state_matches(alternative, expected)),
+        CheckedType::Named { name, arguments } if name == "Material" => {
+            let Some(subject) = arguments.first() else {
+                return true;
+            };
+            // `any Role` and the synthetic type variables used by native
+            // standard actions are intentionally open input domains. A Method
+            // may implement one concrete specialization of such an action.
+            if matches!(subject.subject(), CheckedType::Any { .. })
+                || matches!(subject.subject(), CheckedType::Named { name, .. } if name.contains("::T"))
+            {
+                return true;
+            }
+            let state = match subject {
+                CheckedType::InState { state, .. } if AbsoluteIri::new(state).is_ok() => {
+                    state.clone()
+                }
+                CheckedType::InState { state, .. } => {
+                    format!("{STATE_NS}{state}")
+                }
+                subject => format!("{}{}Product", STATE_NS, subject.subject().display_name()),
+            };
+            state == expected
+        }
+        _ => false,
+    }
+}
+
+fn parameter_matches_checked_type(parameter: &ParameterType, ty: &CheckedType) -> bool {
+    match parameter {
+        ParameterType::Scalar { scalar_type } => scalar_matches_checked_type(*scalar_type, ty),
+        ParameterType::List { element_type } => match ty {
+            CheckedType::List { element } => scalar_matches_checked_type(*element_type, element),
+            _ => false,
+        },
+    }
+}
+
+fn scalar_matches_checked_type(scalar: ScalarType, ty: &CheckedType) -> bool {
+    match ty {
+        CheckedType::Union { alternatives } => {
+            !alternatives.is_empty()
+                && alternatives
+                    .iter()
+                    .all(|alternative| scalar_matches_checked_type(scalar, alternative))
+        }
+        CheckedType::Integer => scalar == ScalarType::Integer,
+        CheckedType::Decimal | CheckedType::Quantity { .. } | CheckedType::Measuring { .. } => {
+            scalar == ScalarType::Real
+        }
+        CheckedType::String => scalar == ScalarType::Text,
+        CheckedType::Bool => scalar == ScalarType::Boolean,
+        CheckedType::Named { .. } | CheckedType::Any { .. } | CheckedType::InState { .. } => {
+            scalar == ScalarType::Text
+        }
+        CheckedType::List { .. } | CheckedType::None => false,
+    }
+}
+
+fn data_kind_for(ty: &CheckedType) -> String {
+    let name = ty.subject().display_name();
+    if AbsoluteIri::new(&name).is_ok() {
+        return name;
+    }
+    let name = if name
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    {
+        name
+    } else {
+        format!(
+            "type-{}",
+            name.as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        )
+    };
+    format!("{DATA_NS}{name}")
 }
 
 #[cfg(test)]
@@ -464,11 +820,11 @@ mod tests {
     };
 
     use crate::method::{
-        CapabilityConstraintDefinition, CapabilityRequirementDefinition, MaterialInputDefinition,
-        MaterialSourceExpression, MethodDefinition, MethodInput, MethodOutput, MethodParameter,
-        ParameterType, PortType, ProcedureParameterDefinition, ProcedureTaskDefinition,
-        ProcedureValue, ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput,
-        ValueReference,
+        CapabilityConstraintDefinition, CapabilityRequirementDefinition, ExecutionPolicyDefinition,
+        MaterialInputDefinition, MaterialSourceExpression, MethodDefinition, MethodInput,
+        MethodOutput, MethodParameter, ParameterType, PortType, ProcedureParameterDefinition,
+        ProcedureTaskDefinition, ProcedureTaskExecutionDefinition, ProcedureValue,
+        ProcedureValueExpression, ScalarType, ScalarValueExpression, TaskOutput, ValueReference,
     };
 
     use super::*;
@@ -493,9 +849,11 @@ mod tests {
             }],
             parameters: vec![MethodParameter {
                 name: id("duration"),
+                source: None,
                 value_type: ParameterType::Scalar {
                     scalar_type: ScalarType::Real,
                 },
+                default: None,
             }],
             tasks: vec![ProcedureTaskDefinition {
                 id: id("incubate"),
@@ -509,29 +867,34 @@ mod tests {
                 }],
                 parameters: vec![],
                 materials: vec![],
-                requirements: vec![CapabilityRequirementDefinition {
-                    id: id("environment"),
-                    capability_kind: CapabilityKind::new(
-                        "https://sbol.io/ns/capability#Incubation",
-                    )
-                    .unwrap(),
-                    minimum_qualification: QualificationLevel::Plannable,
-                    accepted_control_modes: BTreeSet::from([ControlMode::Manual, ControlMode::Api]),
-                    constraints: vec![CapabilityConstraintDefinition {
-                        property_kind: lab_capability::PropertyKind::new(
-                            "https://sbol.io/ns/capability#Duration",
+                execution: ProcedureTaskExecutionDefinition::Primitive {
+                    requirements: vec![CapabilityRequirementDefinition {
+                        id: id("environment"),
+                        capability_kind: CapabilityKind::new(
+                            "https://sbol.io/ns/capability#Incubation",
                         )
                         .unwrap(),
-                        relation: ConstraintRelation::Exact,
-                        required: ScalarValueExpression::IntentParameter {
-                            parameter: id("duration"),
-                            unit: Some(
-                                lab_capability::UnitIri::new("http://qudt.org/vocab/unit/HR")
-                                    .unwrap(),
-                            ),
-                        },
+                        minimum_qualification: QualificationLevel::Plannable,
+                        accepted_control_modes: BTreeSet::from([
+                            ControlMode::Manual,
+                            ControlMode::Api,
+                        ]),
+                        constraints: vec![CapabilityConstraintDefinition {
+                            property_kind: lab_capability::PropertyKind::new(
+                                "https://sbol.io/ns/capability#Duration",
+                            )
+                            .unwrap(),
+                            relation: ConstraintRelation::Exact,
+                            required: ScalarValueExpression::IntentParameter {
+                                parameter: id("duration"),
+                                unit: Some(
+                                    lab_capability::UnitIri::new("http://qudt.org/vocab/unit/HR")
+                                        .unwrap(),
+                                ),
+                            },
+                        }],
                     }],
-                }],
+                },
             }],
             outputs: vec![MethodOutput {
                 name: id("product"),
@@ -541,6 +904,16 @@ mod tests {
                 },
             }],
         }
+    }
+
+    fn primitive_requirements(
+        task: &mut ProcedureTaskDefinition,
+    ) -> &mut Vec<CapabilityRequirementDefinition> {
+        let ProcedureTaskExecutionDefinition::Primitive { requirements } = &mut task.execution
+        else {
+            panic!("test fixture is a primitive task")
+        };
+        requirements
     }
 
     #[test]
@@ -617,7 +990,7 @@ mod tests {
             "https://example.org/method/static-incubation",
             "https://example.org/state/incubated",
         );
-        definition.tasks[0].requirements[0].constraints[0].required =
+        primitive_requirements(&mut definition.tasks[0])[0].constraints[0].required =
             ScalarValueExpression::IntentParameter {
                 parameter: id("missing"),
                 unit: None,
@@ -627,7 +1000,7 @@ mod tests {
             Err(MethodDefinitionError::UnavailableIntentParameter { .. })
         ));
 
-        definition.tasks[0].requirements[0].constraints[0].required =
+        primitive_requirements(&mut definition.tasks[0])[0].constraints[0].required =
             ScalarValueExpression::IntentParameter {
                 parameter: id("duration"),
                 unit: None,
@@ -635,7 +1008,8 @@ mod tests {
         definition.parameters[0].value_type = ParameterType::Scalar {
             scalar_type: ScalarType::Text,
         };
-        definition.tasks[0].requirements[0].constraints[0].relation = ConstraintRelation::AtLeast;
+        primitive_requirements(&mut definition.tasks[0])[0].constraints[0].relation =
+            ConstraintRelation::AtLeast;
         assert!(matches!(
             definition.validate(),
             Err(MethodDefinitionError::NonNumericOrderedConstraint { .. })
@@ -648,13 +1022,40 @@ mod tests {
             "https://example.org/method/static-incubation",
             "https://example.org/state/incubated",
         );
-        definition.tasks[0].requirements[0]
+        primitive_requirements(&mut definition.tasks[0])[0]
             .accepted_control_modes
             .insert(ControlMode::Unspecified);
 
         assert!(matches!(
             definition.validate(),
             Err(MethodDefinitionError::UnspecifiedControlMode { .. })
+        ));
+    }
+
+    #[test]
+    fn declarative_template_references_are_checked_when_the_catalog_loads() {
+        let mut definition = definition(
+            "https://example.org/method/static-incubation",
+            "https://example.org/state/incubated",
+        );
+        definition.tasks[0].execution = ProcedureTaskExecutionDefinition::Template {
+            contract: lab_capability::ProcedureContractId::new(
+                "https://example.org/procedure/temperature-program.v1",
+            )
+            .unwrap(),
+            body: serde_json::json!({
+                "product": {"$lab": {"kind": "output", "id": "misspelled"}}
+            }),
+            policy: ExecutionPolicyDefinition {
+                minimum_qualification: QualificationLevel::Plannable,
+                accepted_control_modes: BTreeSet::from([ControlMode::Manual]),
+            },
+        };
+
+        assert!(matches!(
+            definition.validate(),
+            Err(MethodDefinitionError::InvalidProcedureTemplate { task, message })
+                if task == id("incubate") && message.contains("output `misspelled` is not declared")
         ));
     }
 
@@ -687,9 +1088,11 @@ mod tests {
         );
         second.parameters.push(MethodParameter {
             name: id("shaking_speed"),
+            source: None,
             value_type: ParameterType::Scalar {
                 scalar_type: ScalarType::Integer,
             },
+            default: None,
         });
 
         let registry = MethodRegistry::new([first, second]).unwrap();
@@ -709,11 +1112,13 @@ mod tests {
         );
         definition.parameters.push(MethodParameter {
             name: id("samples"),
+            source: None,
             value_type: ParameterType::List {
                 element_type: ScalarType::Text,
             },
+            default: None,
         });
-        definition.tasks[0].requirements[0].constraints[0].required =
+        primitive_requirements(&mut definition.tasks[0])[0].constraints[0].required =
             ScalarValueExpression::IntentParameter {
                 parameter: id("samples"),
                 unit: None,
@@ -723,7 +1128,9 @@ mod tests {
             Err(MethodDefinitionError::NonScalarConstraintParameter { .. })
         ));
 
-        definition.tasks[0].requirements[0].constraints.clear();
+        primitive_requirements(&mut definition.tasks[0])[0]
+            .constraints
+            .clear();
         definition.tasks[0]
             .parameters
             .push(ProcedureParameterDefinition {

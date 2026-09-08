@@ -14,6 +14,7 @@ Python-emitted programs.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from decimal import Decimal
@@ -29,7 +30,7 @@ _INTEGER = re.compile(r"^[+-]?[0-9]+$")
 _REAL = re.compile(r"^[+-]?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))$")
 _SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*$")
 _FORBIDDEN_IRI = frozenset('<>"{}|\\^`')
-METHOD_CATALOG_SCHEMA_VERSION = "lab.method-catalog.v1"
+METHOD_CATALOG_SCHEMA_VERSION = "lab.method-catalog.v2"
 
 
 def _local(value: str, field: str) -> str:
@@ -138,6 +139,11 @@ class Port:
         if self.kind == "design":
             if self.state is not None or self.data_kind is not None:
                 raise ValueError("a design port cannot carry a state or data kind")
+        elif self.kind in {"material_as_requested", "material_as_supplied"}:
+            if self.state is not None or self.data_kind is not None:
+                raise ValueError(
+                    "an inherited-material port cannot carry a fixed state or data kind"
+                )
         elif self.kind == "material":
             if self.state is None or self.data_kind is not None:
                 raise ValueError("a material port requires exactly one state IRI")
@@ -152,6 +158,18 @@ class Port:
     @classmethod
     def design(cls) -> Self:
         return cls(kind="design")
+
+    @classmethod
+    def material_as_requested(cls) -> Self:
+        """Use the material state required by the refined Intent port."""
+
+        return cls(kind="material_as_requested")
+
+    @classmethod
+    def material_as_supplied(cls) -> Self:
+        """Use the material state supplied by the refined Intent input."""
+
+        return cls(kind="material_as_supplied")
 
     @classmethod
     def material(cls, state: str) -> Self:
@@ -185,20 +203,107 @@ class MethodInput:
 class MethodParameter:
     name: str
     value_type: ParameterType
+    source: str | None = None
+    default: str | int | float | bool | tuple[str | int | float | bool, ...] | None = None
 
     def __post_init__(self) -> None:
         _local(self.name, "Method parameter name")
+        if self.source is not None:
+            _local(self.source, "Intent parameter source")
+        _method_parameter_default(self.default, self.value_type)
 
     def to_dict(self) -> dict[str, object]:
-        return {"name": self.name, "value_type": self.value_type.to_dict()}
+        result: dict[str, object] = {
+            "name": self.name,
+            "value_type": self.value_type.to_dict(),
+        }
+        if self.source is not None:
+            result["source"] = self.source
+        if self.default is not None:
+            result["default"] = (
+                list(self.default) if isinstance(self.default, tuple) else self.default
+            )
+        return result
 
     @classmethod
-    def scalar(cls, name: str, scalar_type: ScalarType) -> Self:
-        return cls(name=name, value_type=ParameterType.scalar(scalar_type))
+    def scalar(
+        cls,
+        name: str,
+        scalar_type: ScalarType,
+        *,
+        source: str | None = None,
+        default: str | int | float | bool | None = None,
+    ) -> Self:
+        return cls(
+            name=name,
+            value_type=ParameterType.scalar(scalar_type),
+            source=source,
+            default=default,
+        )
 
     @classmethod
-    def list(cls, name: str, element_type: ScalarType) -> Self:
-        return cls(name=name, value_type=ParameterType.list(element_type))
+    def list(
+        cls,
+        name: str,
+        element_type: ScalarType,
+        *,
+        source: str | None = None,
+        default: tuple[str | int | float | bool, ...] | None = None,
+    ) -> Self:
+        return cls(
+            name=name,
+            value_type=ParameterType.list(element_type),
+            source=source,
+            default=default,
+        )
+
+
+def _method_parameter_default(
+    value: str | int | float | bool | tuple[str | int | float | bool, ...] | None,
+    value_type: ParameterType,
+) -> None:
+    """Reject defaults that cannot satisfy the authoritative Rust value type."""
+
+    if value is None:
+        return
+    if value_type.kind == "list":
+        if not isinstance(value, tuple):
+            raise TypeError("a list Method parameter default must be a tuple")
+        expected = value_type.element_type
+        values = value
+    else:
+        if isinstance(value, tuple):
+            raise TypeError("a scalar Method parameter default cannot be a tuple")
+        expected = value_type.scalar_type
+        values = (value,)
+    assert expected is not None
+    for item in values:
+        if expected is ScalarType.TEXT:
+            valid = isinstance(item, str)
+        elif expected is ScalarType.INTEGER:
+            valid = isinstance(item, int) and not isinstance(item, bool)
+            if (
+                isinstance(item, int)
+                and not isinstance(item, bool)
+                and not (-(2**63) <= item <= 2**64 - 1)
+            ):
+                raise ValueError(
+                    "an integer Method parameter default is outside JSON's exact range"
+                )
+        elif expected is ScalarType.REAL:
+            valid = isinstance(item, (int, float)) and not isinstance(item, bool)
+            if valid and isinstance(item, float) and not math.isfinite(item):
+                raise ValueError("a real Method parameter default must be finite")
+        elif expected is ScalarType.BOOLEAN:
+            valid = isinstance(item, bool)
+        else:
+            valid = isinstance(item, str)
+            if isinstance(item, str):
+                _iri(item, "IRI Method parameter default")
+        if not valid:
+            raise TypeError(
+                f"a {expected.value} Method parameter default has the wrong Python type"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -549,10 +654,81 @@ class Requirement:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionPolicy:
+    """Facility policy applied to capabilities derived from a Procedure program."""
+
+    accepted_control_modes: tuple[ControlMode, ...]
+    minimum_qualification: Qualification = Qualification.PLANNABLE
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "minimum_qualification": self.minimum_qualification.value,
+            "accepted_control_modes": sorted(mode.value for mode in self.accepted_control_modes),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class BuilderExecution:
+    """Build and validate a canonical Procedure program, then derive its capabilities."""
+
+    builder: str
+    contract: str
+    policy: ExecutionPolicy
+
+    def __post_init__(self) -> None:
+        _iri(self.builder, "Procedure program builder")
+        _iri(self.contract, "Procedure contract")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "builder",
+            "builder": self.builder,
+            "contract": self.contract,
+            "policy": self.policy.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateExecution:
+    """Render a declarative JSON body, validate its contract, and derive capabilities."""
+
+    contract: str
+    body: object
+    policy: ExecutionPolicy
+
+    def __post_init__(self) -> None:
+        _iri(self.contract, "Procedure contract")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "template",
+            "contract": self.contract,
+            "body": self.body,
+            "policy": self.policy.to_dict(),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class PrimitiveExecution:
+    """Execute a primitive task whose capabilities are stated directly."""
+
+    requirements: tuple[Requirement, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": "primitive",
+            "requirements": [requirement.to_dict() for requirement in self.requirements],
+        }
+
+
+TaskExecution = TemplateExecution | BuilderExecution | PrimitiveExecution
+
+
+@dataclass(frozen=True, slots=True)
 class Task:
     id: str
     operation: str
-    requirements: tuple[Requirement, ...]
+    execution: TaskExecution
     inputs: tuple[ValueReference, ...] = ()
     outputs: tuple[TaskOutput, ...] = ()
     parameters: tuple[ProcedureParameter, ...] = ()
@@ -570,7 +746,7 @@ class Task:
             "outputs": [output.to_dict() for output in self.outputs],
             "parameters": [parameter.to_dict() for parameter in self.parameters],
             "materials": [material.to_dict() for material in self.materials],
-            "requirements": [requirement.to_dict() for requirement in self.requirements],
+            "execution": self.execution.to_dict(),
         }
 
 
@@ -653,17 +829,23 @@ class RefinedProgram:
 def refine(
     program: Program,
     *,
+    entry_module: str,
+    project: str | Path | None = None,
     methods: tuple[Method, ...] = (),
     include_standard: bool = True,
 ) -> RefinedProgram:
-    """Refine a checked Python or Lab-source program through the shared compiler pipeline."""
+    """Refine the exact ``entry_module.main`` execution through the shared compiler pipeline."""
 
     catalog = MethodCatalog(methods=methods, include_standard=include_standard)
     raw = cast(
         dict[str, Any],
         json.loads(
             _refine_lab_modules(
-                list(program.sources.items()), catalog.to_json(), catalog.include_standard
+                list(program.sources.items()),
+                entry_module,
+                catalog.to_json(),
+                catalog.include_standard,
+                None if project is None else str(project),
             )
         ),
     )
@@ -675,9 +857,11 @@ def refine(
 
 __all__ = [
     "METHOD_CATALOG_SCHEMA_VERSION",
+    "BuilderExecution",
     "CapabilityConstraint",
     "ConstraintRelation",
     "ControlMode",
+    "ExecutionPolicy",
     "MaterialInput",
     "MaterialSource",
     "Method",
@@ -687,6 +871,7 @@ __all__ = [
     "MethodParameter",
     "ParameterType",
     "Port",
+    "PrimitiveExecution",
     "ProcedureParameter",
     "ProcedureValue",
     "ProcedureValueExpression",
@@ -698,6 +883,7 @@ __all__ = [
     "ScalarType",
     "Task",
     "TaskOutput",
+    "TemplateExecution",
     "ValueExpression",
     "ValueReference",
     "refine",

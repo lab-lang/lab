@@ -10,6 +10,8 @@ from pathlib import Path
 
 from lab import codegen
 from lab.bio import designs, golden_gate
+from lab.bio.designs import Ingredient
+from lab.units import L, g
 
 ROOT = Path(codegen.__file__).resolve().parent
 
@@ -23,7 +25,12 @@ class CodegenTests(unittest.TestCase):
             or (ROOT / module.path).read_text() != module.source
         ]
 
-        self.assertEqual(stale, [], "run `python -m lab.codegen` to regenerate the mirror")
+        self.assertEqual(
+            stale,
+            [],
+            "run `lab bindings python std --out-dir crates/lab-python/python/lab` "
+            "to regenerate the mirror",
+        )
 
     def test_a_kind_carries_the_word_its_declarations_are_written_with(self) -> None:
         self.assertEqual(designs.RestrictionEnzyme.word, "restriction_enzyme")
@@ -32,12 +39,26 @@ class CodegenTests(unittest.TestCase):
     def test_a_kind_carries_every_module_using_it_has_to_import(self) -> None:
         # Golden Gate contributes reaction chemistry to a plasmid declared by
         # `std.bio.designs`, so a design built this way imports both.
-        self.assertEqual(designs.Plasmid.uses, ("std.bio.designs",))
+        self.assertEqual(designs.Plasmid.uses, ("std.bio.ontology", "std.bio.designs"))
         self.assertEqual(golden_gate.Plasmid.uses, ("std.bio.designs", "std.bio.golden_gate"))
 
     def test_a_kind_knows_the_properties_its_module_contributes(self) -> None:
         self.assertIn("sequence", designs.Plasmid.properties)
         self.assertIn("reaction_volume", golden_gate.Plasmid.properties)
+
+    def test_a_generated_record_has_a_checked_runtime_constructor(self) -> None:
+        ingredient = Ingredient(substance="tryptone", concentration=1 * g / L)
+
+        self.assertEqual(
+            ingredient.render(),  # type: ignore[attr-defined]
+            'Ingredient{substance: "tryptone", concentration: 1 g/L}',
+        )
+        with self.assertRaisesRegex(TypeError, "missing field.*concentration"):
+            Ingredient(substance="tryptone")  # type: ignore[call-arg]
+        with self.assertRaisesRegex(TypeError, "no field.*unknown"):
+            Ingredient(  # type: ignore[call-arg]
+                substance="tryptone", concentration=1 * g / L, unknown=True
+            )
 
 
 if __name__ == "__main__":

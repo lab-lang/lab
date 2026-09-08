@@ -14,10 +14,14 @@ mod prelude;
 pub(crate) use catalog::{
     ConstructorSpec, PureFunctionSpec, StandardLibrary, StandardModule, TypeSpec,
 };
-pub(crate) use contract::{ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec};
+pub(crate) use contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 
 pub(crate) fn manifest() -> manifest::Library {
     manifest::library()
+}
+
+pub(crate) fn action_interfaces() -> Vec<crate::semantics::ActionInterface> {
+    catalog::action_interfaces()
 }
 
 pub(crate) fn render_markdown() -> String {

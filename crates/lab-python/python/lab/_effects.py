@@ -24,11 +24,14 @@ dependencies` two spellings of the same action.
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from typing import Generic, TypeVar
 
 from ._expressions import Expression, expression
 
+_ResultT = TypeVar("_ResultT")
 
-class Effect:
+
+class Effect(Generic[_ResultT]):
     """One action applied to its operands, ready to be written as a phrase."""
 
     __slots__ = ("action", "operands")
@@ -69,22 +72,42 @@ class Action:
     `<-` and why nothing here can be used where a value belongs.
     """
 
-    __slots__ = ("clauses", "name", "phrase", "required", "results", "slots", "uses")
+    __slots__ = (
+        "clauses",
+        "definition",
+        "name",
+        "operation",
+        "phrase",
+        "python_to_slot",
+        "required",
+        "results",
+        "slots",
+        "uses",
+    )
 
     def __init__(
         self,
         *,
         name: str,
+        definition: tuple[str, str] | None = None,
+        operation: str | None = None,
         phrase: Sequence[str],
+        python_slots: Sequence[str] = (),
         results: Sequence[str] = (),
         optional: Sequence[Sequence[str]] = (),
         uses: Sequence[str] = (),
     ) -> None:
         self.name = name
+        self.definition = definition
+        self.operation = operation
         self.phrase = tuple(phrase)
         self.results = tuple(results)
         self.uses = tuple(uses)
         self.slots = tuple(slot for slot in map(_slot, self.phrase) if slot)
+        python_slots = tuple(python_slots) or self.slots
+        if len(python_slots) != len(self.slots) or len(set(python_slots)) != len(python_slots):
+            raise ValueError(f"{self.name} needs one unique Python name for each Lab operand")
+        self.python_to_slot = dict(zip(python_slots, self.slots, strict=True))
         #: Each optional clause, as the phrase positions it occupies and the
         #: operands it carries.
         self.clauses = tuple(self._locate(tuple(clause)) for clause in optional)
@@ -111,17 +134,19 @@ class Action:
             for position in positions
         }
 
-    def __call__(self, *positional: object, **named: object) -> Effect:
+    def __call__(self, *positional: object, **named: object) -> Effect[object]:
         if len(positional) > len(self.slots):
             raise TypeError(
                 f"{self.name} takes {len(self.slots)} operand(s), "
                 f"{', '.join(self.slots)}; {len(positional)} were given positionally"
             )
         bound: dict[str, object] = dict(zip(self.slots, positional, strict=False))
-        for slot, value in named.items():
-            if slot not in self.slots:
+        for python_name, value in named.items():
+            slot = self.python_to_slot.get(python_name)
+            if slot is None:
                 raise TypeError(
-                    f"{self.name} has no operand '{slot}'; it is written '{' '.join(self.phrase)}'"
+                    f"{self.name} has no Python operand '{python_name}'; it is written "
+                    f"'{' '.join(self.phrase)}'"
                 )
             if slot in bound:
                 raise TypeError(f"{self.name} got operand '{slot}' twice")

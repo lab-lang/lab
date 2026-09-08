@@ -25,7 +25,7 @@ use pliron::value::Value;
 use pliron::verify_err;
 
 use crate::ir::attributes::string_vec;
-use crate::procedure::ir::is_stable_local_id;
+use crate::procedure::ir::{is_stable_local_id, semantic_port_type};
 
 /// One refinable source action with one single-block region per candidate method.
 #[pliron_op(
@@ -38,7 +38,8 @@ use crate::procedure::ir::is_stable_local_id;
         choice_input_names: VecAttr,
         choice_output_names: VecAttr,
         choice_artifact: StringAttr,
-        choice_dependencies: VecAttr
+        choice_dependencies: VecAttr,
+        choice_intent: StringAttr
     ),
     interfaces = [IsolatedFromAboveInterface, SingleBlockRegionInterface]
 )]
@@ -50,6 +51,7 @@ pub(crate) struct ChoicePorts {
 }
 
 impl ChoiceOp {
+    #[cfg(test)]
     pub(crate) fn new(
         context: &mut Context,
         choice_id: impl Into<String>,
@@ -58,6 +60,57 @@ impl ChoiceOp {
         ports: ChoicePorts,
         artifact: Option<&str>,
         dependencies: &[String],
+    ) -> Self {
+        let source_operation = source_operation.into();
+        let input_contract = ports
+            .inputs
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.to_string(),
+                    semantic_port_type(context, value.get_type(context))
+                        .expect("test choices use semantic Procedure ports"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let output_contract = ports
+            .outputs
+            .iter()
+            .map(|(name, ty)| {
+                (
+                    name.to_string(),
+                    semantic_port_type(context, *ty)
+                        .expect("test choices use semantic Procedure ports"),
+                )
+            })
+            .collect::<Vec<_>>();
+        let intent = crate::workflow::ir::synthetic_intent_with_ports(
+            &source_operation,
+            &input_contract,
+            &output_contract,
+        );
+        Self::new_with_intent(
+            context,
+            choice_id,
+            source_operation,
+            candidates,
+            ports,
+            artifact,
+            dependencies,
+            &intent,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_intent(
+        context: &mut Context,
+        choice_id: impl Into<String>,
+        source_operation: impl Into<String>,
+        candidates: &[MethodId],
+        ports: ChoicePorts,
+        artifact: Option<&str>,
+        dependencies: &[String],
+        intent: &crate::workflow::IntentAction,
     ) -> Self {
         let (input_names, operands): (Vec<_>, Vec<_>) = ports.inputs.into_iter().unzip();
         let (output_names, result_types): (Vec<_>, Vec<_>) = ports.outputs.into_iter().unzip();
@@ -89,6 +142,12 @@ impl ChoiceOp {
             StringAttr::new(artifact.unwrap_or_default().to_owned()),
         );
         result.set_attr_choice_dependencies(context, string_vec(dependencies.to_vec()));
+        result.set_attr_choice_intent(
+            context,
+            StringAttr::new(
+                serde_json::to_string(intent).expect("checked Intent actions serialize infallibly"),
+            ),
+        );
         let argument_types = result
             .get_operation()
             .deref(context)
@@ -124,6 +183,15 @@ impl ChoiceOp {
                 .as_str(),
         )
         .expect("verified method.choice carries a stable source operation")
+    }
+
+    pub(crate) fn source_intent(&self, context: &Context) -> crate::workflow::IntentAction {
+        serde_json::from_str(
+            self.get_attr_choice_intent(context)
+                .expect("verified method.choice carries choice_intent")
+                .as_str(),
+        )
+        .expect("verified method.choice carries a typed Intent action")
     }
 
     pub(crate) fn candidate_ids(&self, context: &Context) -> Vec<MethodId> {
@@ -252,7 +320,85 @@ impl Verify for ChoiceOp {
                 "method.choice is missing choice_dependencies"
             );
         };
+        let Some(intent) = self.get_attr_choice_intent(context) else {
+            return verify_err!(self.loc(context), "method.choice is missing choice_intent");
+        };
+        let Ok(intent) = serde_json::from_str::<crate::workflow::ir::IntentAction>(intent.as_str())
+        else {
+            return verify_err!(
+                self.loc(context),
+                "method.choice choice_intent must be a valid Intent action"
+            );
+        };
+        if let Err(message) = intent.validate() {
+            return verify_err!(
+                self.loc(context),
+                "method.choice choice_intent is invalid: {}",
+                message
+            );
+        }
+        if intent.operation() != Some(self.source_operation(context).as_str()) {
+            return verify_err!(
+                self.loc(context),
+                "method.choice source_operation must match choice_intent"
+            );
+        }
+        let input_names = self.input_names(context);
+        let output_names = self.output_names(context);
+        let input_ports = input_names
+            .iter()
+            .zip(self.get_operation().deref(context).operands())
+            .map(|(name, value)| {
+                semantic_port_type(context, value.get_type(context))
+                    .map(|port_type| (name.as_str(), port_type))
+            })
+            .collect::<Option<Vec<_>>>();
+        let output_ports = output_names
+            .iter()
+            .zip(self.get_operation().deref(context).results())
+            .map(|(name, value)| {
+                semantic_port_type(context, value.get_type(context))
+                    .map(|port_type| (name.as_str(), port_type))
+            })
+            .collect::<Option<Vec<_>>>();
+        let (Some(input_ports), Some(output_ports)) = (input_ports, output_ports) else {
+            return verify_err!(
+                self.loc(context),
+                "method.choice ports must use semantic Design, material, or data types"
+            );
+        };
+        if let Err(message) = intent.validate_ports(
+            input_ports.iter().map(|(name, ty)| (*name, ty)),
+            output_ports.iter().map(|(name, ty)| (*name, ty)),
+        ) {
+            return verify_err!(
+                self.loc(context),
+                "method.choice ports do not match choice_intent: {}",
+                message
+            );
+        }
+        let expected_artifact = intent
+            .action
+            .results
+            .iter()
+            .any(|result| result.lineage == lab_language::ResultLineage::Begins)
+            .then(|| {
+                intent.artifact.as_ref().map(|artifact| {
+                    format!(
+                        "{}::{}",
+                        artifact.definition.module, artifact.definition.local
+                    )
+                })
+            })
+            .flatten();
+        if self.artifact_name(context).as_deref() != expected_artifact.as_deref() {
+            return verify_err!(
+                self.loc(context),
+                "method.choice choice_artifact must match Begins lineage in choice_intent"
+            );
+        }
         let mut dependency_names = BTreeSet::new();
+        let mut dependency_values = Vec::new();
         for dependency in &dependencies.0 {
             let Some(dependency) = dependency.downcast_ref::<StringAttr>() else {
                 return verify_err!(
@@ -266,6 +412,13 @@ impl Verify for ChoiceOp {
                     "method.choice choice_dependencies must be non-empty and unique"
                 );
             }
+            dependency_values.push(dependency.as_str());
+        }
+        if dependency_values != intent.artifact_dependencies {
+            return verify_err!(
+                self.loc(context),
+                "method.choice choice_dependencies must match choice_intent"
+            );
         }
         let mut seen = BTreeSet::new();
         for candidate in &candidates.0 {
@@ -435,7 +588,8 @@ mod tests {
     use pliron::operation::verify_operation;
     use pliron::r#type::Typed;
 
-    use crate::design::ir::DesignDnaSequenceOp;
+    use crate::design::ir::DesignArtifactOp;
+    use crate::design::synthetic_artifact_design;
     use crate::method::LocalId;
 
     use super::{ChoiceOp, ChoicePorts, YieldOp};
@@ -443,8 +597,8 @@ mod tests {
     #[test]
     fn aliased_choice_inputs_receive_distinct_candidate_arguments() {
         let context = &mut Context::new();
-        let sequence = DesignDnaSequenceOp::new(context, "sequence", "ACGT");
-        let input = sequence.get_result_sequence(context);
+        let design = DesignArtifactOp::new(context, &synthetic_artifact_design("design"));
+        let input = design.get_result_design(context);
         let choice = ChoiceOp::new(
             context,
             "aliased-inputs",

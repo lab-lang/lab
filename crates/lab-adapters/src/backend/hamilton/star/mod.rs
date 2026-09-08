@@ -1,10 +1,12 @@
 //! Hamilton STAR/STARlet lowering for exact facility-allocated Procedure invocations.
 //!
-//! The emitted `lab.star-run.v0` document is the review boundary: `lab run` replays its frames verbatim, adding only command ids.
+//! The emitted `lab.star-run.v0` document is the review boundary: `lab run` replays its frames verbatim, adding only command ids. Operational liquid knowledge lives in the versioned, data-defined [`liquid_classes`] extension surface; reviewed plans pin every selected class by ID, version, and content digest.
 
 pub mod catalog;
 mod emit;
 mod invocation;
+pub mod liquid_classes;
+pub mod liquid_handling;
 mod plan;
 pub mod profile;
 
@@ -13,4 +15,7 @@ pub(in crate::backend::hamilton::star) const BACKEND: &str = "hamilton.star";
 
 pub use crate::backend::hamilton::star::profile::{StarAdapterProfile, StarProfileError};
 
-pub(in crate::backend) use invocation::lower_invocation;
+pub(in crate::backend) use invocation::{check_task_feasibility, lower_invocation};
+
+mod registration;
+pub use registration::registration;

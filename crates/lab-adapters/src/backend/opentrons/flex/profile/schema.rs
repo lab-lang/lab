@@ -1,11 +1,11 @@
-//! Deserializable shape of Flex adapter configuration: instruments, deck modules, the trash bin, and the labware each build stage claims.
+//! Deserializable Flex configuration for the physical resources consumed by canonical programs.
 
 use schemars::JsonSchema;
 
 use crate::backend::resources::PlateCapacity;
 use serde::{Deserialize, Serialize};
 
-pub use crate::backend::profile::{MediaRack, Plates, TipRacks};
+pub use crate::backend::profile::TipRacks;
 
 use crate::backend::opentrons::flex::profile::defaults::*;
 
@@ -34,28 +34,46 @@ pub struct Pipette {
     pub mount: String,
 }
 
-/// Hardware present for every stage: the two installed modules and the
-/// movable trash bin.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Physical resources loaded for one canonical program.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct FlexDeck {
-    #[serde(default = "default_temperature_module")]
-    pub temperature_module: TemperatureModule,
-    #[serde(default = "default_thermocycler")]
-    pub thermocycler: Thermocycler,
+pub struct FlexResources {
+    #[serde(default = "default_sources")]
+    pub sources: TemperatureModule,
+    #[serde(default = "default_work")]
+    pub work: Thermocycler,
+    #[serde(default = "default_bulk")]
+    pub bulk: DeckLabware,
+    #[serde(default = "default_small_tips")]
+    pub small_tips: TipRacks,
+    #[serde(default = "default_large_tips")]
+    pub large_tips: TipRacks,
     #[serde(default = "default_trash")]
     pub trash: Trash,
 }
 
+impl Default for FlexResources {
+    fn default() -> Self {
+        Self {
+            sources: default_sources(),
+            work: default_work(),
+            bulk: default_bulk(),
+            small_tips: default_small_tips(),
+            large_tips: default_large_tips(),
+            trash: default_trash(),
+        }
+    }
+}
+
 impl Default for TemperatureModule {
     fn default() -> Self {
-        default_temperature_module()
+        default_sources()
     }
 }
 
 impl Default for Thermocycler {
     fn default() -> Self {
-        default_thermocycler()
+        default_work()
     }
 }
 
@@ -70,19 +88,24 @@ impl Default for Trash {
 pub struct TemperatureModule {
     pub model: String,
     pub slot: String,
-    /// Rack of chilled source tubes carried on the module.
+    /// Addressable source labware carried on the module.
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_source_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
-/// The thermocycler installs across slots A1 and B1, so it declares no slot
-/// of its own and nothing else may claim those.
+/// The thermocycler-backed work area. It occupies slots A1 and B1 and declares no slot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Thermocycler {
     pub model: String,
     pub labware: String,
     pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    #[serde(default = "default_work_volume_limit")]
+    pub max_volume_each_ul: u32,
 }
 
 /// The movable trash bin, named by its addressable area. The bin occupies its
@@ -91,69 +114,6 @@ pub struct Thermocycler {
 #[serde(deny_unknown_fields)]
 pub struct Trash {
     pub area: String,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct Stages {
-    #[serde(default = "default_assembly_stage")]
-    pub assembly: AssemblyStage,
-    #[serde(default = "default_transformation_stage")]
-    pub transformation: TransformationStage,
-    #[serde(default = "default_plating_stage")]
-    pub plating: PlatingStage,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct AssemblyStage {
-    #[serde(default = "default_assembly_small_tips")]
-    pub small_tips: TipRacks,
-}
-
-impl Default for AssemblyStage {
-    fn default() -> Self {
-        default_assembly_stage()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct TransformationStage {
-    /// Plate holding the assembled plasmids a transformation draws from.
-    #[serde(default = "default_transformation_dna_plate")]
-    pub dna_plate: Plates,
-    #[serde(default = "default_transformation_small_tips")]
-    pub small_tips: TipRacks,
-    #[serde(default = "default_transformation_large_tips")]
-    pub large_tips: TipRacks,
-}
-
-impl Default for TransformationStage {
-    fn default() -> Self {
-        default_transformation_stage()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct PlatingStage {
-    #[serde(default = "default_dilution_plate")]
-    pub dilution_plate: Plates,
-    #[serde(default = "default_agar_plate")]
-    pub agar_plate: Plates,
-    #[serde(default = "default_media_rack")]
-    pub media_rack: MediaRack,
-    #[serde(default = "default_plating_small_tips")]
-    pub small_tips: TipRacks,
-    #[serde(default = "default_plating_large_tips")]
-    pub large_tips: TipRacks,
-}
-
-impl Default for PlatingStage {
-    fn default() -> Self {
-        default_plating_stage()
-    }
 }
 
 /// Calibrated Flex realization policy for canonical liquid-access techniques.
@@ -216,4 +176,15 @@ impl FlexTechniqueCalibration {
         }
         Ok(())
     }
+}
+
+/// Passive deck resource for the reference bulk-liquid geometry.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeckLabware {
+    pub slot: String,
+    pub labware: String,
+    pub capacity: PlateCapacity,
+    /// Reviewed working volume for one physical position, in microlitres.
+    pub max_volume_each_ul: u32,
 }

@@ -24,7 +24,7 @@ def custom_recovery() -> method_types.Method:
         refines="std.lab.plasmid.recover",
         inputs=(
             method_types.MethodInput(
-                "culture", method_types.Port.material(f"{MATERIAL_STATE}TransformedCulture")
+                "culture", method_types.Port.material(f"{MATERIAL_STATE}transformed")
             ),
         ),
         parameters=(method_types.MethodParameter.scalar("duration", method_types.ScalarType.REAL),),
@@ -34,9 +34,7 @@ def custom_recovery() -> method_types.Method:
                 operation=f"{PROCEDURE}RecoverCulture",
                 inputs=(method_types.ValueReference.method_input("culture"),),
                 outputs=(
-                    method_types.TaskOutput(
-                        "recovered", method_types.Port.material(f"{MATERIAL_STATE}RecoveredCulture")
-                    ),
+                    method_types.TaskOutput("culture", method_types.Port.material_as_requested()),
                 ),
                 parameters=(
                     method_types.ProcedureParameter(
@@ -50,16 +48,20 @@ def custom_recovery() -> method_types.Method:
                         "medium", method_types.MaterialSource.constant("recovery_medium")
                     ),
                 ),
-                requirements=(
-                    method_types.Requirement(
-                        id="incubation",
-                        capability_kind=f"{CAPABILITY}Incubation",
-                        accepted_control_modes=(method_types.ControlMode.MANUAL,),
-                        constraints=(
-                            method_types.CapabilityConstraint(
-                                property_kind=f"{CAPABILITY}Duration",
-                                relation=method_types.ConstraintRelation.EXACT,
-                                required=method_types.ValueExpression.intent_parameter("duration"),
+                execution=method_types.PrimitiveExecution(
+                    requirements=(
+                        method_types.Requirement(
+                            id="incubation",
+                            capability_kind=f"{CAPABILITY}Incubation",
+                            accepted_control_modes=(method_types.ControlMode.MANUAL,),
+                            constraints=(
+                                method_types.CapabilityConstraint(
+                                    property_kind=f"{CAPABILITY}Duration",
+                                    relation=method_types.ConstraintRelation.EXACT,
+                                    required=method_types.ValueExpression.intent_parameter(
+                                        "duration"
+                                    ),
+                                ),
                             ),
                         ),
                     ),
@@ -68,7 +70,7 @@ def custom_recovery() -> method_types.Method:
         ),
         outputs=(
             method_types.MethodOutput(
-                "recovered", method_types.ValueReference.task_output("recover", "recovered")
+                "culture", method_types.ValueReference.task_output("recover", "culture")
             ),
         ),
     )
@@ -81,7 +83,7 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert planned.schema_version == "lab.python-facility-plan.v2"
     assert planned.inventory.facility == "https://example.org/golden-gate/facility"
     assert planned.solution.problem_sha256 == planned.invocation_plan["problem_sha256"]
-    assert planned.adapter_invocations.schema_version == "lab.adapter-invocations.v2"
+    assert planned.adapter_invocations.schema_version == "lab.adapter-invocations.v3"
     assert "material_inventory" not in planned.invocation_plan
     assert any(invocation.asset == OT2 for invocation in planned.invocations)
     assert any(
@@ -114,7 +116,16 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
     assert setup.program.contract == procedures.PIPETTING_PROGRAM_V1
     assert isinstance(setup.program.body, procedures.PipettingProgramV1)
     assert len(setup.program.body.materials) == 9
-    assert len(setup.program.body.steps) == 18
+    assert len(setup.program.body.steps) == 19
+    clears = [step for step in setup.program.body.steps if step.id.startswith("clear-bubbles")]
+    assert len(clears) == 2
+    assert all(
+        isinstance(step, procedures.Mix)
+        and step.cycles == 1
+        and step.technique.blow_out
+        and step.technique.touch_tip
+        for step in clears
+    )
     assert any(
         isinstance(step, procedures.Mix) and step.volume.value == Decimal("20")
         for step in setup.program.body.steps
@@ -159,21 +170,51 @@ def test_a_file_backed_project_returns_typed_facility_decisions() -> None:
         planned.task("not-a-task")
 
 
-def test_a_python_program_uses_the_packages_inventory_and_adapter_context() -> None:
-    sources = {
-        module: (GOLDEN_GATE / relative).read_text()
-        for module, relative in (
-            ("golden_gate.designs.inventory", "src/designs/inventory.lab"),
-            ("golden_gate.designs.plasmids", "src/designs/plasmids.lab"),
-            ("golden_gate.designs.strains", "src/designs/strains.lab"),
-            ("golden_gate.workflows.assemble", "src/workflows/assemble.lab"),
-            ("golden_gate.workflows.build_strains", "src/workflows/build_strains.lab"),
-            ("golden_gate.programs.reporter_panel", "src/programs/reporter_panel.lab"),
-        )
-    }
-    program = lab.check_sources(sources)
+def test_file_backed_planning_runs_build_generate(tmp_path: Path) -> None:
+    project = tmp_path / "golden-gate"
+    shutil.copytree(GOLDEN_GATE, project)
+    manifest_path = project / "lab.toml"
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    manifest_path.write_text(
+        manifest_text.replace(
+            'entry = "src/programs/reporter_panel.lab"',
+            'entry = "src/programs/reporter_panel.lab"\ngenerate = "touch generated-by-python"',
+        ),
+        encoding="utf-8",
+    )
 
-    planned = lab.plan(program, project=GOLDEN_GATE)
+    lab.plan_project(project)
+
+    assert (project / "generated-by-python").is_file()
+
+
+def test_a_python_program_uses_the_packages_inventory_and_adapter_context() -> None:
+    source = """\
+use golden_gate.workflows.assemble
+
+workflow main() -> Material<Plasmid>:
+  product <- assemble_GVD0011
+  return product
+"""
+    program = lab.check_sources(
+        {"python.reporter": source},
+        project=GOLDEN_GATE,
+    )
+    refined = lab.refine(
+        program,
+        entry_module="python.reporter",
+        project=GOLDEN_GATE,
+    )
+    assert any(
+        choice["source_operation"] == "std.bio.build.realize"
+        for choice in refined.planning_problem["choices"]
+    )
+
+    planned = lab.plan(
+        program,
+        entry_module="python.reporter",
+        project=GOLDEN_GATE,
+    )
 
     assert planned.package == "golden-gate"
     assert planned.solution.facility == planned.inventory.facility

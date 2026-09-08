@@ -1,10 +1,8 @@
 //! `std.lab.plasmid` durable action contracts.
 
-use crate::checked::OwnershipMode;
-use crate::standard_library::catalog::StandardModule;
-use crate::standard_library::contract::{
-    ActionContractSpec, ContractType, Lineage, PhrasePart, ResultSpec,
-};
+use crate::checked::{OwnershipMode, ResultLineage};
+use crate::standard_library::catalog::{ConstructorSpec, StandardModule, TypeSpec};
+use crate::standard_library::contract::{ActionContractSpec, ContractType, PhrasePart, ResultSpec};
 use crate::type_system::Ty;
 
 pub(in crate::standard_library::lab) fn module() -> StandardModule {
@@ -15,19 +13,35 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
     // Most results are the same material further along. The two that are not
     // say so: a transformation establishes an organism, and each picked colony
     // is an independent transformant.
-    let result = |name: &str, r#type| ResultSpec {
+    let continues = |name: &str, r#type, from: &[&str]| ResultSpec {
         name: name.to_owned(),
         r#type,
-        lineage: Lineage::Continues,
+        lineage: ResultLineage::Continues {
+            from: from.iter().map(|operand| (*operand).to_owned()).collect(),
+        },
     };
     let begins = |name: &str, r#type| ResultSpec {
         name: name.to_owned(),
         r#type,
-        lineage: Lineage::Begins,
+        lineage: ResultLineage::Begins,
+    };
+    let identified_by = |name: &str, r#type, operands: &[&str]| ResultSpec {
+        name: name.to_owned(),
+        r#type,
+        lineage: ResultLineage::IdentifiedBy {
+            operands: operands
+                .iter()
+                .map(|operand| (*operand).to_owned())
+                .collect(),
+        },
     };
     let concrete = ContractType::Concrete;
     let named = Ty::named;
     let material = Ty::material;
+    let sequence_check_fields = [
+        ("material", material(named("Plasmid"))),
+        ("evidence", Ty::List(Box::new(named("Evidence")))),
+    ];
     // A culture and a picked colony are one organism at different points in
     // being grown, and a plate is a medium that has been poured. Each was a
     // fieldless type of its own, which is why none could name what it was made
@@ -45,8 +59,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("of"),
                 operand("plate", concrete(plate("inoculated")), borrow),
             ],
-            inert: Vec::new(),
-            results: vec![result("image", concrete(named("Image")))],
+            results: vec![continues("image", concrete(named("Image")), &["plate"])],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.synthesize".to_owned(),
@@ -54,10 +67,10 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("synthesize"),
                 operand("design", concrete(named("Plasmid")), copy),
             ],
-            inert: Vec::new(),
-            results: vec![result(
+            results: vec![identified_by(
                 "fragments",
                 concrete(Ty::List(Box::new(named("Fragment")))),
+                &["design"],
             )],
         },
         ActionContractSpec {
@@ -70,8 +83,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     take,
                 ),
             ],
-            inert: Vec::new(),
-            results: vec![result("construct", concrete(material(named("Plasmid"))))],
+            results: vec![begins("construct", concrete(material(named("Plasmid"))))],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.provision".to_owned(),
@@ -82,10 +94,10 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
             // Whether this laboratory bought the thing or made it last month is
             // not provision's business: it says what to fetch, and whether one
             // is available is a question for the plan.
-            inert: Vec::new(),
-            results: vec![result(
+            results: vec![identified_by(
                 "material",
                 ContractType::MaterialOf("item".to_owned()),
+                &["item"],
             )],
         },
         ActionContractSpec {
@@ -112,7 +124,6 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                     take,
                 ),
             ],
-            inert: Vec::new(),
             results: vec![
                 begins("strain", concrete(material(named("Strain")))),
                 begins("culture", concrete(strain("transformed"))),
@@ -126,8 +137,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("for"),
                 PhrasePart::quantity("duration", false, &["min", "h"]),
             ],
-            inert: Vec::new(),
-            results: vec![result("culture", concrete(strain("recovered")))],
+            results: vec![continues(
+                "culture",
+                concrete(strain("recovered")),
+                &["culture"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.dilute".to_owned(),
@@ -135,8 +149,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("dilute"),
                 operand("culture", concrete(strain("recovered")), take),
             ],
-            inert: Vec::new(),
-            results: vec![result("culture", concrete(strain("diluted")))],
+            results: vec![continues(
+                "culture",
+                concrete(strain("diluted")),
+                &["culture"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.plate".to_owned(),
@@ -156,8 +173,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 // than a name nobody checked.
                 operand("medium", concrete(plate("poured")), take),
             ],
-            inert: vec!["medium".to_owned()],
-            results: vec![result("plate", concrete(plate("inoculated")))],
+            results: vec![continues(
+                "plate",
+                concrete(plate("inoculated")),
+                &["culture"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.pick".to_owned(),
@@ -169,7 +189,6 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("from"),
                 operand("plate", concrete(plate("inoculated")), borrow),
             ],
-            inert: Vec::new(),
             results: vec![begins(
                 "candidates",
                 concrete(Ty::List(Box::new(strain("isolated")))),
@@ -187,8 +206,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("against"),
                 operand("design", concrete(named("Plasmid")), copy),
             ],
-            inert: Vec::new(),
-            results: vec![result("screening", concrete(named("Screening")))],
+            results: vec![continues(
+                "screening",
+                concrete(named("Screening")),
+                &["candidates"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.culture".to_owned(),
@@ -200,8 +222,7 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("for"),
                 PhrasePart::quantity("duration", false, &["h"]),
             ],
-            inert: Vec::new(),
-            results: vec![result("culture", concrete(strain("grown")))],
+            results: vec![continues("culture", concrete(strain("grown")), &["clone"])],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.purify".to_owned(),
@@ -209,8 +230,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("purify"),
                 operand("culture", concrete(strain("grown")), take),
             ],
-            inert: Vec::new(),
-            results: vec![result("plasmid", concrete(material(named("Plasmid"))))],
+            results: vec![continues(
+                "plasmid",
+                concrete(material(named("Plasmid"))),
+                &["culture"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.split".to_owned(),
@@ -218,10 +242,17 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("split"),
                 operand("material", concrete(material(named("Plasmid"))), take),
             ],
-            inert: Vec::new(),
             results: vec![
-                result("retained", ContractType::SameAs("material".to_owned())),
-                result("aliquot", ContractType::SameAs("material".to_owned())),
+                continues(
+                    "retained",
+                    ContractType::SameAs("material".to_owned()),
+                    &["material"],
+                ),
+                continues(
+                    "aliquot",
+                    ContractType::SameAs("material".to_owned()),
+                    &["material"],
+                ),
             ],
         },
         ActionContractSpec {
@@ -230,8 +261,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("sequence"),
                 operand("aliquot", concrete(material(named("Plasmid"))), take),
             ],
-            inert: Vec::new(),
-            results: vec![result("result", concrete(named("SequenceCheck")))],
+            results: vec![continues(
+                "result",
+                concrete(named("SequenceCheck")),
+                &["aliquot"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.quantify".to_owned(),
@@ -239,8 +273,11 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("quantify"),
                 operand("material", concrete(material(named("Plasmid"))), borrow),
             ],
-            inert: Vec::new(),
-            results: vec![result("evidence", concrete(named("Evidence")))],
+            results: vec![continues(
+                "evidence",
+                concrete(named("Evidence")),
+                &["material"],
+            )],
         },
         ActionContractSpec {
             operation: "std.lab.plasmid.store".to_owned(),
@@ -250,10 +287,10 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("at"),
                 PhrasePart::quantity("temperature", true, &["C"]),
             ],
-            inert: Vec::new(),
-            results: vec![result(
+            results: vec![continues(
                 "material",
                 ContractType::SameAs("material".to_owned()),
+                &["material"],
             )],
         },
         ActionContractSpec {
@@ -262,10 +299,41 @@ pub(in crate::standard_library::lab) fn module() -> StandardModule {
                 PhrasePart::word("dispose"),
                 operand("material", ContractType::AnyMaterial, take),
             ],
-            inert: Vec::new(),
             results: Vec::new(),
         },
     ];
 
-    StandardModule::new("std.lab.plasmid").with_actions(actions)
+    let sequence_check = TypeSpec::nominal("SequenceCheck")
+        .with_fields(sequence_check_fields.clone())
+        .documented("A sequenced plasmid material together with the evidence used to judge it.");
+    let sequence_check_case = |name, operation, documentation| {
+        ConstructorSpec::new(
+            name,
+            operation,
+            sequence_check_fields.clone(),
+            named("SequenceCheck"),
+        )
+        .documented(documentation)
+    };
+
+    StandardModule::new("std.lab.plasmid")
+        .with_type_specs([sequence_check])
+        .with_constructors([
+            sequence_check_case(
+                "Exact",
+                "std.lab.plasmid.sequence.Exact",
+                "A sequence that exactly matches the intended plasmid.",
+            ),
+            sequence_check_case(
+                "Mismatch",
+                "std.lab.plasmid.sequence.Mismatch",
+                "A sequence that does not match the intended plasmid.",
+            ),
+            sequence_check_case(
+                "Inconclusive",
+                "std.lab.plasmid.sequence.Inconclusive",
+                "Evidence that is insufficient to judge the plasmid sequence.",
+            ),
+        ])
+        .with_actions(actions)
 }

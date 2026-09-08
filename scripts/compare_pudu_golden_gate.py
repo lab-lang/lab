@@ -187,6 +187,8 @@ def normalize_location(
         material_key = f"temperature-module:{well}"
     elif "Tube Rack" in description:
         material_key = f"tube-rack:{slot}:{well}"
+    elif "Thermocycler Module" in description:
+        material_key = f"thermocycler:{well}"
     elif stage == "transformation" and slot == "2":
         material_key = f"dna:{well}"
     if material_key in staging:
@@ -514,41 +516,90 @@ def manifest_thermal_stage(stage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def lab_configuration(manifest_path: Path, module_root: Path) -> dict[str, Any]:
-    manifest = read_json(manifest_path)
-    execution = manifest["execution"]
-    preparation = execution["preparations"][0]["execution"]
-    recovery = execution["recovery_additions"][0]["execution"]
-    deck = manifest["deck"]
-    dna_loads = {item["load_volume_ul"] for item in preparation["dna"]}
+TRANSFORMATION_OPERATIONS = (
+    "PrepareChemicalTransformation",
+    "HeatShockTransformation",
+    "AddRecoveryMedium",
+    "IncubateRecoveryCulture",
+)
+
+
+def transformation_manifests(bundle: Path) -> list[Path]:
+    paths = sorted(bundle.glob("tasks/*/invocation_manifest.json"))
+    by_operation = {}
+    for path in paths:
+        operation = read_json(path)["task"]["operation"].rsplit("#", 1)[-1]
+        if operation in TRANSFORMATION_OPERATIONS:
+            if operation in by_operation:
+                raise ComparisonError(f"multiple transformation tasks for {operation}")
+            by_operation[operation] = path
+    missing = set(TRANSFORMATION_OPERATIONS) - by_operation.keys()
+    if missing:
+        raise ComparisonError(f"missing transformation tasks: {sorted(missing)}")
+    return [by_operation[name] for name in TRANSFORMATION_OPERATIONS]
+
+
+def quantity(value: dict[str, Any]) -> int | float:
+    return normalize_number(value["value"]["value"])
+
+
+def lab_configuration(bundle: Path, module_root: Path) -> dict[str, Any]:
+    prepare, heat, recovery, incubation = [
+        read_json(p) for p in transformation_manifests(bundle)
+    ]
+    execution = prepare["execution"]
+    steps = execution["program"]["steps"]
+    cells = next(s for s in steps if s["id"] == "add-competent-cells")
+    dna = [s for s in steps if s["kind"] == "transfer"]
+    add_medium = recovery["execution"]["program"]["steps"][0]
+    dna_loads = {execution["initial_volumes_ul"][s["source"]["vessel"]][0] for s in dna}
     if len(dna_loads) != 1:
         raise ComparisonError(
             f"Golden Gate DNA sources have different load volumes: {dna_loads}"
         )
+    deck = prepare["deck"]
     return {
         "api_level": deck["protocol"]["api_level"],
         "transformation_data": [project_lab_design(module_root)],
-        "replicates": len(preparation["reaction_wells"]),
+        "replicates": len(cells["destinations"]),
         "dna_source_volume_ul": next(iter(dna_loads)),
-        "cell_source_volume_ul": preparation["cell_source_volume_ul"],
-        "recovery_source_volume_ul": recovery["medium"]["load_volume_ul"],
-        "dna_transfer_volume_ul": preparation["dna_volume_ul"],
-        "cell_transfer_volume_ul": preparation["cell_volume_ul"],
-        "recovery_transfer_volume_ul": recovery["recovery_volume_ul"],
+        "cell_source_volume_ul": execution["initial_volumes_ul"][
+            cells["source"]["vessel"]
+        ][0],
+        "recovery_source_volume_ul": recovery["execution"]["initial_volumes_ul"][
+            add_medium["source"]["vessel"]
+        ][0],
+        "dna_transfer_volume_ul": quantity(dna[0]["volume"]),
+        "cell_transfer_volume_ul": quantity(cells["volume_each"]),
+        "recovery_transfer_volume_ul": quantity(add_medium["volume_each"]),
         "starting_well": 0,
-        "heat_shock": manifest_thermal_stage(
-            execution["heat_shocks"][0]["execution"]["profile"]["stages"][0]
-        ),
+        "heat_shock": manifest_thermal_stage(heat["execution"]["profile"]["stages"][0]),
         "recovery": manifest_thermal_stage(
-            execution["recovery_incubations"][0]["execution"]["profile"]["stages"][0]
+            incubation["execution"]["profile"]["stages"][0]
         ),
         "instruments": deck["instruments"],
         "labware": {
-            "temperature_module": deck["deck"]["temperature_module"],
-            "thermocycler": deck["deck"]["thermocycler"],
-            "source_rack": deck["stages"]["transformation"]["source_rack"],
-            "small_tips": deck["stages"]["transformation"]["small_tips"],
-            "large_tips": deck["stages"]["transformation"]["large_tips"],
+            "temperature_module": {
+                k: v
+                for k, v in deck["resources"]["sources"].items()
+                if k != "max_volume_each_ul"
+            },
+            "thermocycler": {
+                k: v
+                for k, v in deck["resources"]["work"].items()
+                if k != "max_volume_each_ul"
+            },
+            "source_rack": {
+                k: v
+                for k, v in deck["resources"][
+                    recovery["execution"]["locations"][add_medium["source"]["vessel"]][
+                        0
+                    ]["resource"]["kind"]
+                ].items()
+                if k not in {"model", "max_volume_each_ul"}
+            },
+            "small_tips": deck["resources"]["small_tips"],
+            "large_tips": deck["resources"]["large_tips"],
         },
     }
 
@@ -581,16 +632,30 @@ def pudu_material_map(trace: str) -> dict[str, str]:
 
 
 def lab_material_map(manifest_path: Path, module_root: Path) -> dict[str, str]:
-    manifest = read_json(manifest_path)["execution"]
-    preparation = manifest["preparations"][0]["execution"]
+    manifest = read_json(manifest_path)
+    execution = manifest["execution"]
+    if execution["kind"] != "pipetting_program":
+        return {}
     design = project_lab_design(module_root)
-    result = {
-        f"temperature-module:{preparation['cell_source_well']}": design["Chassis"]
-    }
-    for dna in preparation["dna"]:
-        result[f"dna:{dna['source_well']}"] = dna["symbol"]
-    medium = manifest["recovery_additions"][0]["execution"]["medium"]
-    result[f"tube-rack:3:{medium['source_well']}"] = medium["symbol"]
+    result = {}
+    for source in execution["sources"]:
+        binding = source["binding"]
+        if binding is not None:
+            symbol = binding["symbol"]
+        elif source["vessel"] == "competent-cells":
+            symbol = design["Chassis"]
+        else:
+            continue
+        for location in source["wells"]:
+            resource = location["resource"]["kind"]
+            if resource == "sources":
+                key = f"temperature-module:{location['well']}"
+            elif resource == "work":
+                key = f"thermocycler:{location['well']}"
+            else:
+                slot = manifest["deck"]["resources"][resource]["slot"]
+                key = f"tube-rack:{slot}:{location['well']}"
+            result[key] = symbol
     return result
 
 
@@ -684,17 +749,21 @@ def run_lab(output: Path, lab: Path, simulator: Path) -> tuple[Path, Path]:
     if len(bundles) != 1:
         raise ComparisonError(f"Lab build emitted {len(bundles)} bundles, expected one")
     bundle = Path(bundles[0])
-    protocol = bundle / "transformation_protocol.py"
     config = output / ".opentrons-comparison-config"
     config.mkdir()
-    simulation = run_command(
-        (simulator, protocol),
-        cwd=bundle,
-        environment={"OT_API_CONFIG_DIR": str(config)},
-    )
+    traces = []
+    for manifest in transformation_manifests(bundle):
+        protocol = manifest.parent / "automation_protocol.py"
+        simulation = run_command(
+            (simulator, protocol),
+            cwd=bundle,
+            environment={"OT_API_CONFIG_DIR": str(config)},
+        )
+        (manifest.parent / "simulation_trace.txt").write_text(simulation.stdout)
+        (manifest.parent / "simulation.stderr.txt").write_text(simulation.stderr)
+        traces.append(simulation.stdout)
     trace = output / "transformation_trace.txt"
-    trace.write_text(simulation.stdout)
-    (output / "transformation_simulate.stderr.txt").write_text(simulation.stderr)
+    trace.write_text("\n".join(traces))
     return bundle, trace
 
 
@@ -718,7 +787,7 @@ def comparison_observations(
             "classification": "lineage-and-staging-realization",
             "pudu": pudu_materials,
             "lab": lab_materials,
-            "explanation": "The liquid actions are identical by material identity. The standalone entrypoint stages DNA tubes on the temperature module and cells in a passive rack; the end-to-end Golden Gate workflow preserves assembly-product wells and stages competent cells at its required 4 C setpoint.",
+            "explanation": "The robot-action facet compares commands by material identity. Lab emits separately staged canonical Procedure files; upstream values must be loaded into each manifest location at the reviewed handoff. It stages competent cells at the required 4 C setpoint. This report does not establish automatic physical continuity across files.",
         },
         {
             "id": "simulation-thermal-path",
@@ -752,10 +821,9 @@ def compare(*, pudu_repository: Path, lab_binary: Path, output: Path) -> dict[st
     normalized = output / "normalized"
     pudu_trace_path = run_pudu(pudu_output, simulator, entrypoint)
     lab_bundle, lab_trace_path = run_lab(lab_output, lab_binary, simulator)
-    manifest = lab_bundle / "transformation_manifest.json"
     module_root = lab_output / "modules" / "golden_gate" / "designs"
     pudu_config = pudu_configuration(python, entrypoint)
-    lab_config = lab_configuration(manifest, module_root)
+    lab_config = lab_configuration(lab_bundle, module_root)
 
     facets = [
         compare_facet(
@@ -769,15 +837,24 @@ def compare(*, pudu_repository: Path, lab_binary: Path, output: Path) -> dict[st
     pudu_trace = pudu_trace_path.read_text()
     lab_trace = lab_trace_path.read_text()
     pudu_materials = pudu_material_map(pudu_trace)
-    lab_materials = lab_material_map(manifest, module_root)
+    lab_materials = {}
+    lab_events = []
+    for manifest in transformation_manifests(lab_bundle):
+        material_map = lab_material_map(manifest, module_root)
+        lab_materials[manifest.parent.name] = material_map
+        lab_events.extend(
+            normalize_liquid_trace(
+                (manifest.parent / "simulation_trace.txt").read_text(),
+                stage="transformation",
+                staging=material_map,
+            )
+        )
     pudu_actions = robot_action_semantics(
         normalize_liquid_trace(
             pudu_trace, stage="transformation", staging=pudu_materials
         )
     )
-    lab_actions = robot_action_semantics(
-        normalize_liquid_trace(lab_trace, stage="transformation", staging=lab_materials)
-    )
+    lab_actions = robot_action_semantics(lab_events)
     facets.append(
         compare_robot_facet(pudu_actions, lab_actions, normalized_root=normalized)
     )

@@ -21,6 +21,7 @@ use crate::planning::{
     PlanningPort, PlanningProblem, PlanningProblemValidationError, PlanningProcedureParameter,
     PlanningProcedureTask, PlanningTaskInput, PlanningTaskOutput, PlanningValueSource,
 };
+use crate::procedure::ProcedureContractRegistry;
 use crate::procedure::ir::{MaterialInputOp, ParameterOp, TaskOp, semantic_port_type};
 use crate::stage::{IrStage, detect_stage};
 
@@ -58,6 +59,7 @@ pub enum PlanningProblemExtractionError {
 pub(crate) fn extract_planning_problem(
     context: &Context,
     module: ModuleOp,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<PlanningProblem, PlanningProblemExtractionError> {
     let stage =
         detect_stage(context, module).map_err(PlanningProblemExtractionError::InvalidStage)?;
@@ -99,26 +101,51 @@ pub(crate) fn extract_planning_problem(
         })
         .collect::<Vec<_>>();
     let mut artifact_choices = BTreeMap::new();
+    let mut artifact_aliases = BTreeMap::<String, Option<LocalId>>::new();
     for choice in &choice_operations {
         let Some(artifact) = choice.artifact_name(context) else {
             continue;
         };
+        let choice_id = choice.semantic_choice_id(context);
         if artifact_choices
-            .insert(artifact.clone(), choice.semantic_choice_id(context))
+            .insert(artifact.clone(), choice_id.clone())
             .is_some()
         {
             return Err(PlanningProblemExtractionError::DuplicateArtifactChoice { artifact });
         }
+        if let Some(local) = choice
+            .source_intent(context)
+            .artifact
+            .map(|design| design.name)
+        {
+            artifact_aliases
+                .entry(local)
+                .and_modify(|alias| *alias = None)
+                .or_insert(Some(choice_id));
+        }
+    }
+    for (local, choice) in artifact_aliases {
+        if let Some(choice) = choice {
+            artifact_choices.entry(local).or_insert(choice);
+        }
     }
     let choices = choice_operations
         .iter()
-        .map(|choice| extract_choice(context, choice, &choice_outputs, &artifact_choices))
+        .map(|choice| {
+            extract_choice(
+                context,
+                choice,
+                &choice_outputs,
+                &artifact_choices,
+                contracts,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let problem = PlanningProblem {
         schema_version: PLANNING_PROBLEM_SCHEMA_VERSION.to_owned(),
         choices,
     };
-    problem.validate()?;
+    problem.validate(contracts)?;
     Ok(problem)
 }
 
@@ -127,6 +154,7 @@ fn extract_choice(
     choice: &ChoiceOp,
     choice_outputs: &[(Value, PlanningValueSource)],
     artifact_choices: &BTreeMap<String, LocalId>,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<PlanningMethodChoice, PlanningProblemExtractionError> {
     let choice_id = choice.semantic_choice_id(context);
     let operation = choice.get_operation().deref(context);
@@ -179,12 +207,14 @@ fn extract_choice(
                 candidate,
                 method,
                 artifact_choices,
+                contracts,
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(PlanningMethodChoice {
         id: choice_id,
         source_operation: choice.source_operation(context),
+        source_intent: choice.source_intent(context),
         after,
         inputs,
         outputs,
@@ -199,6 +229,7 @@ fn extract_candidate(
     candidate_index: usize,
     method: lab_capability::MethodId,
     artifact_choices: &BTreeMap<String, LocalId>,
+    contracts: &ProcedureContractRegistry,
 ) -> Result<PlanningMethodCandidate, PlanningProblemExtractionError> {
     let block = choice
         .candidate_region(context, candidate_index)
@@ -269,7 +300,7 @@ fn extract_candidate(
                 .as_ref()
                 .map(|program| {
                     program
-                        .validate()
+                        .validate(contracts)
                         .expect("verified Procedure program revalidates during planning projection")
                         .capability_formula()
                         .binding_scope

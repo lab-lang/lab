@@ -3,12 +3,14 @@
 use std::path::Path;
 
 use lab_compiler::method::{MethodDefinition, MethodRegistry, standard_method_definitions};
-use lab_compiler::program::PortableLairProgram;
 use lab_language::{
     CheckedModule, Diagnostic, ModuleId, SemanticEnvironment, SourceId,
     analyze_module_in_environment, compile_module, render_diagnostic, standard_library_manifest,
 };
-use lab_project::{FacilityPlanningResult, LabProject, plan_modules_for_package};
+use lab_project::{
+    FacilityPlanningResult, ProjectCompilation, ProjectModuleAnalysis, ProjectPlanningRequest,
+    ProjectProgram, refine_modules,
+};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use serde::Serialize;
@@ -96,6 +98,49 @@ fn analyze_lab_modules(modules: Vec<(String, String)>) -> PyResult<String> {
     serde_json::to_string(&analyzed).map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
+/// Analyze in-memory modules against the exact interfaces captured by one compiled project.
+#[pyfunction]
+fn analyze_lab_project_modules(
+    modules: Vec<(String, String)>,
+    project_path: &str,
+) -> PyResult<String> {
+    let application = ProjectCompilation::load(project_path)
+        .map_err(|error| py_error("failed to compile Lab project", &error))?;
+    serialize_project_analyses(&modules, application.analyze_modules(&modules))
+}
+
+fn serialize_project_analyses(
+    modules: &[(String, String)],
+    analyses: Vec<ProjectModuleAnalysis>,
+) -> PyResult<String> {
+    let sources = modules
+        .iter()
+        .map(|(module, source)| (module.as_str(), source.as_str()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let analyzed = analyses
+        .into_iter()
+        .map(|item| {
+            let source = sources
+                .get(item.module.as_str())
+                .expect("application analyses preserve requested module identities");
+            AnalyzedModule {
+                module: item.module,
+                diagnostics: item
+                    .analysis
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| AnalyzedDiagnostic {
+                        rendered: render_diagnostic(source, diagnostic),
+                        diagnostic: diagnostic.clone(),
+                    })
+                    .collect(),
+                checked: item.analysis.checked,
+            }
+        })
+        .collect::<Vec<_>>();
+    serde_json::to_string(&analyzed).map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 /// Describe the bundled standard library: every module, and the words it
 /// supplies. The Python mirror of the standard library is generated from this,
 /// so the two cannot disagree about what a package exports.
@@ -105,10 +150,20 @@ fn lab_standard_library() -> PyResult<String> {
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }
 
+/// Render the bundled Python modules and stubs through the same pure generator
+/// used by `lab bindings python` for ordinary packages.
+#[pyfunction]
+fn lab_python_standard_bindings() -> PyResult<String> {
+    let generated = lab_python_bindings::generate_standard_library(&standard_library_manifest())
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    serde_json::to_string(&generated).map_err(|error| PyValueError::new_err(error.to_string()))
+}
+
 /// Describe every adapter implementation and profile schema in this compiler build.
 #[pyfunction]
 fn lab_adapter_catalog() -> PyResult<String> {
-    let catalog = lab_adapters::adapter_catalog()
+    let catalog = lab_project::application_extensions()
+        .map(|extensions| extensions.adapters.catalog())
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&catalog).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -116,7 +171,11 @@ fn lab_adapter_catalog() -> PyResult<String> {
 /// Validate and canonicalize one operational adapter profile through its explicit driver.
 #[pyfunction]
 fn validate_lab_adapter_profile(driver: &str, name: &str, contents: &str) -> PyResult<String> {
-    let profile = lab_adapters::validate_adapter_profile(driver, name, contents)
+    let extensions = lab_project::application_extensions()
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+    let profile = extensions
+        .adapters
+        .validate_profile(driver, name, contents)
         .map_err(|error| PyValueError::new_err(error.to_string()))?;
     serde_json::to_string(&profile).map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -130,8 +189,13 @@ fn validate_method_catalog(
     mut definitions: Vec<MethodDefinition>,
 ) -> PyResult<Vec<MethodDefinition>> {
     definitions.sort_by(|left, right| left.id.cmp(&right.id));
-    MethodRegistry::new(definitions.clone())
+    let registry = MethodRegistry::new(definitions.clone())
         .map_err(|error| py_error("invalid Method catalog", &error))?;
+    lab_project::application_extensions()
+        .map_err(|error| py_error("invalid application extensions", &error))?
+        .procedures
+        .validate_methods(&registry)
+        .map_err(|error| py_error("invalid Method and Procedure composition", &error))?;
     Ok(definitions)
 }
 
@@ -150,26 +214,6 @@ fn method_definitions(
 
 fn method_registry(definitions_json: &str, include_standard: bool) -> PyResult<MethodRegistry> {
     MethodRegistry::new(method_definitions(definitions_json, include_standard)?)
-        .map_err(|error| py_error("invalid Method catalog", &error))
-}
-
-fn project_method_registry(
-    project: &LabProject,
-    definitions_json: &str,
-    include_standard: bool,
-) -> PyResult<MethodRegistry> {
-    let mut definitions = if include_standard {
-        standard_method_definitions()
-    } else {
-        Vec::new()
-    };
-    definitions.extend(
-        project
-            .package_method_definitions()
-            .map_err(|error| py_error("failed to load package Method catalogs", &error))?,
-    );
-    definitions.extend(parse_method_definitions(definitions_json)?);
-    MethodRegistry::new(validate_method_catalog(definitions)?)
         .map_err(|error| py_error("invalid Method catalog", &error))
 }
 
@@ -207,6 +251,32 @@ fn compile_named_modules(modules: &[(String, String)]) -> PyResult<Vec<CheckedMo
     Ok(checked)
 }
 
+fn compile_project_modules(
+    application: &ProjectCompilation,
+    modules: &[(String, String)],
+) -> PyResult<Vec<CheckedModule>> {
+    application
+        .analyze_modules(modules)
+        .into_iter()
+        .zip(modules)
+        .map(|(item, (_name, source))| {
+            item.analysis.checked.ok_or_else(|| {
+                let diagnostics = item
+                    .analysis
+                    .diagnostics
+                    .iter()
+                    .map(|diagnostic| render_diagnostic(source, diagnostic))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                PyValueError::new_err(format!(
+                    "Lab module '{}' did not check:\n\n{diagnostics}",
+                    item.module
+                ))
+            })
+        })
+        .collect()
+}
+
 #[derive(Serialize)]
 struct RefinedProgram {
     schema_version: &'static str,
@@ -218,23 +288,43 @@ struct RefinedProgram {
 #[pyfunction]
 fn refine_lab_modules(
     modules: Vec<(String, String)>,
+    entry_module: &str,
     definitions_json: &str,
     include_standard: bool,
+    project_path: Option<&str>,
 ) -> PyResult<String> {
-    let registry = method_registry(definitions_json, include_standard)?;
-    let checked = compile_named_modules(&modules)?;
-    let module_refs = checked.iter().collect::<Vec<_>>();
-    let refined = PortableLairProgram::lower_program(&module_refs)
-        .map_err(|error| py_error("failed to lower Lab Intent", &error))?
-        .refine_methods(&registry)
-        .map_err(|error| py_error("failed to refine Lab Intent", &error))?;
-    let planning_problem = refined
-        .planning_problem()
-        .map_err(|error| py_error("failed to project planning", &error))?;
+    let refined = if let Some(project_path) = project_path {
+        let application = ProjectCompilation::load(project_path)
+            .map_err(|error| py_error("failed to compile Lab project", &error))?;
+        let registry = application
+            .compose_methods(
+                parse_method_definitions(definitions_json)?,
+                include_standard,
+            )
+            .map_err(|error| py_error("failed to compose project Methods", &error))?;
+        let checked = compile_project_modules(&application, &modules)?;
+        let module_refs = checked.iter().collect::<Vec<_>>();
+        application
+            .refine_modules(&module_refs, entry_module, &registry)
+            .map_err(|error| py_error("failed to refine Lab program", &error))?
+    } else {
+        let registry = method_registry(definitions_json, include_standard)?;
+        let checked = compile_named_modules(&modules)?;
+        let module_refs = checked.iter().collect::<Vec<_>>();
+        refine_modules(
+            &module_refs,
+            entry_module,
+            &registry,
+            &lab_project::application_extensions()
+                .map_err(|error| py_error("invalid application extensions", &error))?
+                .procedures,
+        )
+        .map_err(|error| py_error("failed to refine Lab program", &error))?
+    };
     serde_json::to_string(&RefinedProgram {
         schema_version: "lab.python-refinement.v1",
-        refined_lair: refined.ir(),
-        planning_problem,
+        refined_lair: refined.refined_lair,
+        planning_problem: refined.planning_problem,
     })
     .map_err(|error| PyValueError::new_err(error.to_string()))
 }
@@ -289,14 +379,19 @@ fn plan_lab_project(
     definitions_json: &str,
     include_standard: bool,
 ) -> PyResult<String> {
-    let project = LabProject::discover(path)
-        .map_err(|error| py_error("failed to load Lab project", &error))?;
-    let compiled = project
-        .compile()
+    let application = ProjectCompilation::load(path)
         .map_err(|error| py_error("failed to compile Lab project", &error))?;
-    let registry = project_method_registry(&project, definitions_json, include_standard)?;
-    let planned = project
-        .plan_facility(&compiled, &registry)
+    let registry = application
+        .compose_methods(
+            parse_method_definitions(definitions_json)?,
+            include_standard,
+        )
+        .map_err(|error| py_error("failed to compose project Methods", &error))?;
+    let planned = application
+        .plan(ProjectPlanningRequest {
+            program: ProjectProgram::Default,
+            methods: Some(&registry),
+        })
         .map_err(|error| py_error("failed to plan Lab project", &error))?;
     serialize_facility_plan(&planned)
 }
@@ -305,16 +400,23 @@ fn plan_lab_project(
 #[pyfunction]
 fn plan_lab_modules(
     modules: Vec<(String, String)>,
+    entry_module: &str,
     package_path: &str,
     definitions_json: &str,
     include_standard: bool,
 ) -> PyResult<String> {
-    let checked = compile_named_modules(&modules)?;
+    let application = ProjectCompilation::load(package_path)
+        .map_err(|error| py_error("failed to compile Lab project", &error))?;
+    let checked = compile_project_modules(&application, &modules)?;
     let module_refs = checked.iter().collect::<Vec<_>>();
-    let project = LabProject::discover(package_path)
-        .map_err(|error| py_error("failed to load Lab project", &error))?;
-    let registry = project_method_registry(&project, definitions_json, include_standard)?;
-    let planned = plan_modules_for_package(project.default_package(), &module_refs, &registry)
+    let registry = application
+        .compose_methods(
+            parse_method_definitions(definitions_json)?,
+            include_standard,
+        )
+        .map_err(|error| py_error("failed to compose project Methods", &error))?;
+    let planned = application
+        .plan_modules(&module_refs, entry_module, &registry)
         .map_err(|error| py_error("failed to plan Lab program", &error))?;
     serialize_facility_plan(&planned)
 }
@@ -323,7 +425,9 @@ fn plan_lab_modules(
 pub fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(compile_lab_module, module)?)?;
     module.add_function(wrap_pyfunction!(analyze_lab_modules, module)?)?;
+    module.add_function(wrap_pyfunction!(analyze_lab_project_modules, module)?)?;
     module.add_function(wrap_pyfunction!(lab_standard_library, module)?)?;
+    module.add_function(wrap_pyfunction!(lab_python_standard_bindings, module)?)?;
     module.add_function(wrap_pyfunction!(lab_adapter_catalog, module)?)?;
     module.add_function(wrap_pyfunction!(validate_lab_adapter_profile, module)?)?;
     module.add_function(wrap_pyfunction!(validate_method_definitions, module)?)?;

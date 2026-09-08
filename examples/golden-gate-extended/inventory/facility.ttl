@@ -260,6 +260,7 @@ ex:manual_workstation
     fac:isActive true ;
     fac:capability ex:manual_artifact_realization,
         ex:manual_material_provisioning,
+        ex:manual_pipetting,
         ex:manual_chemical_transformation,
         ex:manual_incubation,
         ex:manual_antibiotic_selection,
@@ -270,6 +271,14 @@ ex:manual_artifact_realization
     a sbol:Identified, fac:CapabilityOffering ;
     sbol:displayId "artifact_realization" ;
     fac:capabilityKind cap:ArtifactRealization ;
+    fac:qualification fac:Plannable ;
+    fac:controlMode fac:ManualControl ;
+    fac:isActive true .
+
+ex:manual_pipetting
+    a sbol:Identified, fac:CapabilityOffering ;
+    sbol:displayId "manual_pipetting" ;
+    fac:capabilityKind cap:ManualPipetting ;
     fac:qualification fac:Plannable ;
     fac:controlMode fac:ManualControl ;
     fac:isActive true .

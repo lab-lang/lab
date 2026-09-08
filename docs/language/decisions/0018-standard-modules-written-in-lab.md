@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, partially implemented.
+Accepted and implemented. Later source action and catalog declarations narrowed the original Rust-only boundary.
 
 ## Context
 
@@ -41,18 +41,12 @@ record Fluorescence is Reporter
 
 ## Boundary
 
-Three things have no source declaration form, and a module needing any of them
-stays in Rust:
-
-- **pure functions** — `dna`, `sites`, `detect_colonies`, and every inventory
-  constructor;
-- **durable action contracts** — operand ownership, capability, and phrase slots;
-- **typed external identities** — `part("pTet")` returns `Part`, so a catalogue
-  entry such as `pTet: Promoter<Tetracycline>` cannot be written.
-
-That last one is why `std.bio.parts` has not moved. Three of its five values are
-expressible as ordinary constructor calls; the two typed promoters and coding
-sequences are not.
+Pure functions such as `dna`, `sites`, and `detect_colonies` still have no
+source declaration form, so a module needing one stays in Rust. Durable actions
+can now declare phrase slots, operand ownership, result types, and lineage in
+Lab. Typed external catalog items use `buy`, with distinct SBOL and supplier
+identities. Neither extension carries a facility Capability requirement; Methods
+introduce those after generic Intent lowering.
 
 ## Consequences
 

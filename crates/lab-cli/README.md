@@ -13,7 +13,7 @@ This installs `lab` into Cargo's binary directory, normally `~/.cargo/bin`. Rein
 The initial project loop is:
 
 ```sh
-lab new tet-reporter
+lab new project tet-reporter
 cd tet-reporter
 lab check
 lab build
@@ -40,7 +40,18 @@ Packages extend persistent Method coverage through versioned documents rather th
 documents = ["methods/site-methods.json"]
 ```
 
-`lab check` loads the default package's reachable path dependencies in dependency-first order, verifies every `lab.method-catalog.v1` document, and validates the contributed definitions together with the standard Method registry. `lab build` and `lab plan` use that same registry; `[[planning.methods]]` can pin an exact alternative but does not define one.
+`lab check` loads the default package's reachable path dependencies in dependency-first order, verifies every `lab.method-catalog.v2` document, and validates the contributed definitions together with the standard Method registry. `lab build` and `lab plan` use that same registry; `[[planning.methods]]` can pin an exact alternative but does not define one.
+
+Focused contributors can start at the extension point they own:
+
+```sh
+lab new method-pack thermal-methods
+lab new adapter acme-cycler --driver acme.cycler
+lab bindings python thermal-methods
+lab bindings python std --out-dir crates/lab-python/python/lab
+```
+
+The Method-pack scaffold is conformed by `lab check`; the adapter scaffold contains a registration and composition test against the adapter API. `lab bindings python` compiles a package and emits importable runtime modules plus `.pyi` stubs from its checked `ModuleInterface` values. The generated signatures preserve named function, action, and workflow inputs, result types, facet states, package-qualified nominal types, and stable definition identities. Python-safe aliases map back to exact Lab names at runtime. A generated-file manifest safely removes stale modules on later runs. Bundled standard-library bindings go through the same renderer.
 
 ## Facility-derived lowering
 
@@ -60,7 +71,7 @@ driver = "hamilton.star"
 profile = "adapters/star-1.toml"
 ```
 
-Each adapter declaration binds an implementation to one exact catalog Asset. Facility facts remain in RDF, driver selection is never inferred from product metadata, and endpoints and credentials remain local runtime configuration. The old symbolic `materials` and `artifacts` arrays are accepted only as a mutually exclusive migration form.
+Each adapter declaration binds an implementation to one exact catalog Asset. Facility facts remain in RDF, driver selection is never inferred from product metadata, and endpoints and credentials remain local runtime configuration.
 
 The facility is the lowering surface. The facility phase shared by `lab build` and `lab plan` resolves exact MaterialLots, selects Methods, allocates requirements to CapabilityOfferings and their owning Assets, and invokes only the adapters attached to those selected Assets. The reviewed plan freezes the inventory, compiler evidence, staged adapter profiles, and every emitted device and support artifact by SHA-256. Each independently executable child document is projected from one exact allocated Procedure task and names the complete non-empty Requirement set it realizes.
 
@@ -69,7 +80,7 @@ lab build
 lab run .lab/build --dry-run
 ```
 
-`lab adapters describe` is the discovery authority for the exact compiler binary. Its `lab.adapter-catalog.v2` output keeps semantic SBOLInventory capability IRIs separate from implementation features and declares versioned Procedure implementations by stable implementation ID, exact contract, supported operations, capability kinds, control modes, run-document formats, and truthful planning, lowering, simulation, and runtime services. Broad adapter capability declarations remain only as a compatibility path for Procedure operations that have not yet been normalized. The explicit driver argument selects validation code; neither an adapter profile nor an Asset's manufacturer or model can select another implementation. `lab.adapter-profile.v2` contains no backend or Asset selector, rejects the removed `[target]` table, and places OT-2 API-version configuration under `[protocol]`.
+`lab adapters describe` is the discovery authority for the exact compiler binary. Its `lab.adapter-catalog.v4` output declares versioned Procedure implementations by stable implementation ID, exact contract, feature set, capability kinds, control modes, run-document formats, and truthful planning, lowering, simulation, and runtime services. Adapter-level data contains product facts only; every semantic and runtime claim belongs to an exact Procedure implementation. The explicit driver argument selects validation code; neither an adapter profile nor an Asset's manufacturer or model can select another implementation. `lab.adapter-profile.v2` contains no backend or Asset selector, rejects the removed `[target]` table, and places OT-2 API-version configuration under `[protocol]`.
 
 ```sh
 lab adapters describe

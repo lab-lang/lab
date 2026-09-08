@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::method::{IntentOperationId, LocalId};
 use crate::procedure::BindingScope;
+use crate::workflow::IntentAction;
 use lab_capability::{
     AbsoluteIri, CapabilityKind, ConstraintRelation, ControlMode, MethodId,
     ProcedureImplementationId, PropertyKind, PropertyValue, QualificationLevel,
@@ -15,10 +16,11 @@ use thiserror::Error;
 
 use super::{PlanningMaterialSource, PlanningProblem};
 
-pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v1";
+pub const FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION: &str = "lab.facility-planning-solution.v3";
 
 /// Explicit choices that are allowed to turn an otherwise ambiguous solution space into a plan.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FacilityPlanningPolicy {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub method_pins: Vec<MethodPin>,
@@ -41,7 +43,7 @@ pub struct AssetPin {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "scope", rename_all = "snake_case")]
+#[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AssetPinSelector {
     /// Every requirement the named Asset can satisfy binds it.
     AnyRequirement,
@@ -59,7 +61,7 @@ pub struct MethodPin {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "scope", rename_all = "snake_case")]
+#[serde(tag = "scope", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MethodPinSelector {
     Choice { choice: LocalId },
     SourceOperation { source_operation: IntentOperationId },
@@ -78,6 +80,7 @@ pub enum AdapterRequirement {
 
 /// One complete, reviewable solution to the facility-wide constraint problem.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FacilityPlanningSolution {
     pub schema_version: String,
     pub problem_sha256: String,
@@ -88,14 +91,19 @@ pub struct FacilityPlanningSolution {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectedMethod {
     pub choice: LocalId,
     pub source_operation: IntentOperationId,
+    /// Exact checked source semantics selected by the facility solver.
+    #[schemars(with = "serde_json::Value")]
+    pub source_intent: IntentAction,
     pub method: MethodId,
     pub tasks: Vec<SelectedProcedureTask>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectedProcedureTask {
     pub task: LocalId,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -105,6 +113,7 @@ pub struct SelectedProcedureTask {
 
 /// One exact physical input selected for a Procedure task.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectedMaterialBinding {
     pub input: LocalId,
     pub symbol: String,
@@ -119,7 +128,7 @@ pub struct SelectedMaterialBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SelectedMaterialSource {
     MaterialLot {
         component: String,
@@ -131,6 +140,7 @@ pub enum SelectedMaterialSource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectedRequirementBinding {
     pub requirement: LocalId,
     pub capability_kind: CapabilityKind,
@@ -149,6 +159,7 @@ pub struct SelectedRequirementBinding {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectedCapabilityParameter {
     pub property_kind: PropertyKind,
     pub relation: ConstraintRelation,
@@ -158,6 +169,7 @@ pub struct SelectedCapabilityParameter {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct SelectedAdapter {
     pub driver: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -170,6 +182,7 @@ pub struct SelectedAdapter {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanningRejectedOffering {
     pub offering: String,
     pub asset: String,
@@ -179,7 +192,7 @@ pub struct PlanningRejectedOffering {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "reason", rename_all = "snake_case")]
+#[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PlanningCandidateRejectionReason {
     /// No Asset in the facility offers this capability kind at all.
     NoOfferingOfKind {
@@ -217,6 +230,13 @@ pub enum PlanningCandidateRejectionReason {
         pinned_asset: String,
     },
     MissingPlanningAdapter,
+    /// The adapter implements the canonical contract in general, but its exact validated profile
+    /// cannot realize this task's program.
+    AdapterProgramInfeasible {
+        adapter: String,
+        implementation: ProcedureImplementationId,
+        message: String,
+    },
 }
 
 impl FacilityPlanningSolution {
@@ -243,6 +263,7 @@ impl FacilityPlanningSolution {
         for (selection, choice) in self.selections.iter().zip(&problem.choices) {
             if selection.choice != choice.id
                 || selection.source_operation != choice.source_operation
+                || selection.source_intent != choice.source_intent
             {
                 return Err(FacilityPlanningSolutionValidationError::ChoiceSet);
             }

@@ -12,21 +12,23 @@ checked modules
     -> Method alternatives containing Procedure tasks and Capability requirements
     -> one graph-wide Method, MaterialLot, offering, Asset, and adapter solution (`lab-facility`)
     -> Allocated Procedure LAIR
-    -> immutable adapter invocations (`lab-adapters`)
+    -> immutable adapter invocations (`lab-adapter-api`)
     -> independently reviewed device and operator documents
     -> one facility-wide execution plan
 ```
 
-`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_compiler::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `lab-facility` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `lab-adapters` projects immutable adapter invocations exclusively from that allocated program.
+`PortableLairProgram` owns the Pliron context and verifier-valid `design-intent` module. `refine_methods` consumes a validated `lab_compiler::method::MethodRegistry` and returns a `RefinedLairProgram` whose candidate regions preserve exact Procedure parameters, typed material dataflow, and first-class Capability requirements. `planning_problem` projects that IR into a purpose-built global constraint model. `lab-facility` selects Methods and exact resources together. `RefinedLairProgram::allocate` applies that complete solution back to the same stable identities, erases unselected candidates, and returns verifier-valid `allocated-procedure` LAIR. `lab-adapter-api` projects immutable adapter invocations exclusively from that allocated program; concrete registrations in `lab-adapters` consume them.
+
+Every entry point that parses or revalidates a `ProcedureProgram`, `PlanningProblem`, or `AllocatedProgram` takes the exact `ProcedureContractRegistry` for the application composition. There is no implicit fallback to the built-in contracts; applications opt into those contracts by composing `builtin_procedure_contracts()` explicitly.
 
 Verifier-valid Allocated Procedure LAIR is the only input device lowering is projected from. Material linearity is checked over Allocated Procedure SSA before invocation projection. Current adapters therefore cannot recover a biological recipe from source IR, traverse the whole experiment, or select another Method, MaterialLot, offering, Asset, or adapter.
 
 The source tree follows semantic ownership and dependency direction:
 
 - `src/method/` owns portable Method definitions and registries together with `method.choice`, bundled methods, and the refinement pass that constructs candidate regions;
-- `src/procedure/` owns `procedure.task` and its typed ports together with canonical pipetting and thermal bodies, task normalization, validation, capability derivation, exact quantities, and whole-program material-linearity analysis;
+- `src/procedure/` owns `procedure.task` and its typed ports together with strict declarative templates, explicit builder and contract registries, canonical pipetting and thermal bodies, validation, capability derivation, exact quantities, and whole-program material-linearity analysis;
 - `src/design/` owns reusable biological design identities and their LAIR operations;
-- `src/workflow/` owns method-neutral Workflow/Intent operations;
+- `src/workflow/` owns the generic method-neutral `workflow.perform` operation;
 - `src/program/lowering.rs` translates checked Lab modules into the coupled Design and Workflow portions of a LAIR program;
 - `src/capability/` owns Capability requirement operations and exact scalar attribute codecs;
 - `src/allocation/` owns exact binding operations and application of complete facility decisions to LAIR;
@@ -36,19 +38,22 @@ The source tree follows semantic ownership and dependency direction:
 - `src/pipeline.rs` and `src/session.rs` own textual pass orchestration and a reusable Pliron compiler session;
 - `src/planning/` owns planning-problem extraction and the RDF-independent constraint and solution contracts;
 - `lab-facility` owns exact MaterialLot evidence, its construction and allocation cross-validation, adapter-to-inventory binding, graph-wide solving and explanations, and reviewed execution-plan construction;
-- `lab-adapters` owns adapter discovery, operational-profile validation, immutable invocation and scheduling contracts, shared typed views over exact allocated Procedure tasks, concrete device implementations, and generated files independently of persistence;
+- `lab-adapter-api` owns adapter descriptors, operational-profile validation, planning feasibility, immutable invocation records, collision-checked artifact bundles, and the injected registry contract;
+- `lab-adapters` owns the concrete built-in device registrations, private schedules, optional runtime integration, and generated device files independently of persistence;
 - `lab-runfmt` owns the versioned reviewed documents interpreted by the runtime; and
 - `src/bin/labc/` and `src/bin/lab-opt/` own developer-facing command orchestration.
 
 The dependency direction follows semantic authority rather than implementation concealment: `lab-language` feeds LAIR, while `lab-facility` and `lab-adapters` consume LAIR contracts and `lab-project` composes them. LAIR has no dependency on facility inventory, device libraries, adapter profiles, generated-artifact formats, or run-document formats. Application crates own filesystems, SBOLInventory loading, and output writes.
 
-`lab.adapter-catalog.v2` is the machine-readable implementation contract. Each stable adapter ID declares implementation features and private configuration schema. Its versioned Procedure implementations separately declare a stable implementation IRI, exact Procedure contract and operation set, required capability kinds, accepted control modes, run-document formats, and truthful planning, lowering, simulation, and runtime services. Broad adapter capability declarations are a compatibility surface for operations that have not yet been normalized and are not authority for a normalized Procedure program. A driver is selected only by an explicit manifest binding to an exact Asset IRI, never by manufacturer or model inference.
+`lab.adapter-catalog.v4` is the machine-readable implementation contract. Each stable adapter ID declares product features and a private configuration schema, but no broad semantic support surface. Its versioned Procedure implementations declare the stable implementation IRI, exact Procedure contract and feature set, required capability kinds, accepted control modes, run-document formats, and truthful planning, lowering, simulation, and runtime services. A biological operation name is never an adapter allowlist: compatibility follows from the canonical program contract, required features, facility capability, and exact validated profile. A driver is selected only by an explicit manifest binding to an exact Asset IRI, never by manufacturer or model inference.
 
-`lab-adapters`' `AdapterInvocationPlan` freezes every selected Method and Procedure task, canonical program, exact parameter and material value, requirement-to-offering-to-Asset binding, Procedure implementation, adapter identity, operational-profile digest, inventory digest, and allocated-LAIR digest. Invocations group only the tasks and requirements assigned to one exact Asset and adapter. One independently lowered task owns a non-empty requirement set; a canonical program may require that complete set to bind atomically to one Asset, adapter, and Procedure implementation.
+`lab-adapter-api`'s `AdapterInvocationPlan` freezes every selected Method and Procedure task, canonical program, exact parameter and material value, requirement-to-offering-to-Asset binding, Procedure implementation, adapter identity, operational-profile digest, inventory digest, and allocated-LAIR digest. Invocations group only the tasks and requirements assigned to one exact Asset and adapter. One independently lowered task owns a non-empty requirement set; a canonical program may require that complete set to bind atomically to one Asset, adapter, and Procedure implementation.
 
 In `lab-adapters`, OT-2, Flex, and STAR lower through the same invocation boundary. Shared Procedure views validate stable operation and parameter identities, canonical QUDT units, material roles, exact selected material sources, capability kinds, and adapter capacity. Device-specific deck allocation, run-document construction, protocol rendering, and implementation constraints remain within the concrete adapter. Manual work and offerings without lowering services remain present in the semantic Procedure and reviewed facility plan without being misrepresented as device output.
 
 `labc --emit` exposes source AST, checked module IR, `design-intent` LAIR, `refined-alternatives` LAIR, or the global planning problem for one self-contained source file. It deliberately has no device or adapter flag. `lab-opt` parses, verifies, transforms, and prints textual LAIR without acting as another source frontend. Multi-module package compilation, inventory selection, global allocation, adapter invocation, artifact persistence, and runtime plans belong to `lab` through the shared `lab-project` service.
+
+[Decision 0055](../../docs/language/decisions/0055-solving-and-pliron-are-compiler-internals.md) records why the bounded facility solver and Pliron remain justified implementation tools and why neither is a contribution interface.
 
 For the complete package path, exact SBOLInventory facility, adapter binding, allocated Procedure evidence, and emitted OT-2 protocols, see the [Golden Gate example](../../examples/golden-gate/README.md).
 
