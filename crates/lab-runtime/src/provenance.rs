@@ -13,8 +13,8 @@ use anyhow::{Context, Result, bail};
 use lab_runfmt::{EXECUTION_PLAN_FILE, ExecutionMaterialOutput, ExecutionPlanAction};
 use sbol_inventory::InventoryDocument;
 use sbol_inventory::vocabulary::{
-    DERIVED_FROM_MATERIAL, FACILITY_PROPERTY, IS_ACTIVE, LOCATED_IN, MATERIAL_KIND, POSITION,
-    RUN_ASSET, RUN_INPUT_MATERIAL, XSD_BOOLEAN, XSD_STRING,
+    DERIVED_FROM_MATERIAL, FOR_COMPONENT, IS_ACTIVE, LOCATED_IN, MATERIAL_KIND, POSITION,
+    RUN_ASSET, RUN_COMPONENT, RUN_INPUT_MATERIAL, SBOL_HAS_ATTACHMENT, XSD_BOOLEAN, XSD_STRING,
 };
 use sbol3::{
     Activity, Agent, Association, Attachment, ExperimentalData, HashAlgorithm, Implementation, Iri,
@@ -188,6 +188,30 @@ pub fn write_inventory_result(
                 .build()?,
         );
     }
+    // Every design used to select input lots or realize outputs is informational
+    // input. These Components already exist in the frozen inventory; creating a
+    // physical lot does not generate its design a second time.
+    let components = loaded
+        .plan
+        .materials
+        .iter()
+        .map(|material| material.component.as_str())
+        .chain(
+            loaded
+                .plan
+                .outputs
+                .iter()
+                .map(|output| output.component.as_str()),
+        )
+        .collect::<BTreeSet<_>>();
+    for (index, component) in components.iter().enumerate() {
+        usages.push(
+            Usage::builder(&run_resource, format!("component_{:04}", index + 1))?
+                .entity(iri_resource(*component)?)
+                .had_role([Iri::from_static(RUN_COMPONENT)])
+                .build()?,
+        );
+    }
     let association = Association::builder(&run_resource, "responsibility")?
         .agent(agent.identity.clone())
         .had_plan(plan.identity.clone())
@@ -232,6 +256,22 @@ pub fn write_inventory_result(
         .build()?;
     extend(&mut triples, &evidence)?;
 
+    for component in &components {
+        let component = iri_resource(*component)?;
+        triples.insert(Triple {
+            subject: evidence.identity.clone(),
+            predicate: Iri::from_static(FOR_COMPONENT),
+            object: Term::Resource(component.clone()),
+        });
+        for attachment in &attachments {
+            triples.insert(Triple {
+                subject: component.clone(),
+                predicate: Iri::from_static(SBOL_HAS_ATTACHMENT),
+                object: Term::Resource(attachment.identity.clone()),
+            });
+        }
+    }
+
     let inputs = loaded
         .plan
         .materials
@@ -245,12 +285,7 @@ pub fn write_inventory_result(
         .collect::<BTreeMap<_, _>>();
     let mut output_materials = Vec::new();
     for output in &loaded.plan.outputs {
-        let material = build_output_material(
-            output,
-            &loaded.plan.inventory.facility,
-            &activity.identity,
-            &inputs,
-        )?;
+        let material = build_output_material(output, &activity.identity, &inputs)?;
         if loaded
             .inventory
             .document()
@@ -316,7 +351,6 @@ fn build_attachment(namespace: &Namespace, file: &EvidenceFile) -> Result<Attach
 
 fn build_output_material(
     output: &ExecutionMaterialOutput,
-    facility: &str,
     activity: &Resource,
     inputs: &BTreeMap<&str, (&str, &str)>,
 ) -> Result<Implementation> {
@@ -359,10 +393,6 @@ fn build_output_material(
         .extension(
             Iri::from_static(MATERIAL_KIND),
             Term::Resource(iri_resource(&output.material_kind)?),
-        )
-        .extension(
-            Iri::from_static(FACILITY_PROPERTY),
-            Term::Resource(iri_resource(facility)?),
         )
         .extension(
             Iri::from_static(IS_ACTIVE),
@@ -547,6 +577,43 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert!(usage_roles.contains(RUN_ASSET));
         assert!(usage_roles.contains(RUN_INPUT_MATERIAL));
+        assert!(usage_roles.contains(RUN_COMPONENT));
+        assert!(
+            output
+                .as_object()
+                .values(sbol_inventory::vocabulary::FACILITY_PROPERTY)
+                .is_empty()
+        );
+        let component = Resource::iri("https://example.org/facility/design");
+        assert_eq!(
+            document
+                .retrieval_database_ids(&component)
+                .collect::<Vec<_>>(),
+            vec![&Resource::iri("https://example.org/facility/registry")]
+        );
+        assert_eq!(
+            output.facility_id(),
+            Some(&Resource::iri("https://example.org/facility/facility"))
+        );
+        assert!(
+            document
+                .evidence_component_ids(&Resource::iri(result.evidence.clone()))
+                .any(|value| value == &component)
+        );
+        assert!(
+            graph
+                .get(&component)
+                .unwrap()
+                .values(PROV_WAS_GENERATED_BY)
+                .is_empty()
+        );
+        assert!(
+            !graph
+                .get(&component)
+                .unwrap()
+                .values(SBOL_HAS_ATTACHMENT)
+                .is_empty()
+        );
         assert!(
             graph
                 .objects()

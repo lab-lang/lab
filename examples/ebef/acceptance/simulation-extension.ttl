@@ -6,7 +6,6 @@
 	<http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/ebef/microlab_prep> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef-acceptance/microlab_prep_simulator/liquid_handling> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> .
 
@@ -25,7 +24,6 @@
 	<http://www.w3.org/ns/prov#wasDerivedFrom> <https://example.org/ebef/biotek_epoch_2> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef-acceptance/epoch_2_simulator/incubation> , <https://example.org/ebef-acceptance/epoch_2_simulator/absorbance_measurement> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 
@@ -55,7 +53,6 @@
 	<http://sbols.org/v3#hasNamespace> <https://example.org/ebef-acceptance> ;
 	<http://sbols.org/v3#name> "Simulated assay plate lot" ;
 	a <http://sbols.org/v3#Implementation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#materialKind> <https://sbol.io/ns/inventory#MicrobialCulture> .

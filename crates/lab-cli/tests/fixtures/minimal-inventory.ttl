@@ -18,7 +18,6 @@ ex:room a sbol:TopLevel, fac:Zone ;
 ex:cycler a sbol:TopLevel, fac:Asset ;
     sbol:displayId "cycler" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ;
-    fac:facility ex:facility ;
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:room ;
     fac:isActive true ;

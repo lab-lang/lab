@@ -93,6 +93,7 @@ Decision records preserve the reasoning and status behind the language rather th
 - [Project CLI](../crates/lab-cli/README.md) documents the current `lab` project loop.
 - [VS Code and Cursor](../editors/vscode/README.md) documents editor extension development.
 - The [`lab-compiler`](../crates/lab-compiler/README.md) crate owns the Rust compiler and aggregate IR, [`lab-facility`](../crates/lab-facility/README.md) owns facility-aware allocation services, and [`lab-adapters`](../crates/lab-adapters/README.md) owns concrete device projections; the [Python SDK](../crates/lab-python/README.md) exposes the same checked frontend through PyO3.
+- [SBOLInventory integration](integrations/sbol-inventory.md) describes zone-derived facility membership, design and evidence provenance, and package setup.
 - [Lab-native Opentrons build specialization](integrations/opentrons-build.md) records the source, dependency, and hardware-lowering boundary for manual and OT-2 output.
 - [PUDU workflow equivalence](integrations/pudu-workflow-equivalence.md) defines and executes the output comparison between the Golden Gate example and PUDU's documented OT-2 workflow.
 

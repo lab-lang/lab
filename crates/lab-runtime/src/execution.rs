@@ -1460,7 +1460,7 @@ ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
     sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
     fac:zoneKind fac:Room ; fac:isActive true .
 ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
-    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/facility> ;
     fac:assetKind fac:Instrument ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability <https://example.org/facility/star/liquid_handling> .
 <https://example.org/facility/star/liquid_handling>
@@ -1468,7 +1468,7 @@ ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
     fac:capabilityKind cap:LiquidHandling ; fac:qualification fac:Executable ;
     fac:controlMode fac:ReviewedFileControl ; fac:isActive true .
 ex:manual_workstation a sbol:TopLevel, fac:Asset ; sbol:displayId "manual_workstation" ;
-    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/facility> ;
     fac:assetKind fac:Workstation ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability <https://example.org/facility/manual_workstation/material_provisioning> .
 <https://example.org/facility/manual_workstation/material_provisioning>
@@ -1478,9 +1478,12 @@ ex:manual_workstation a sbol:TopLevel, fac:Asset ; sbol:displayId "manual_workst
 ex:design a sbol:Component ; sbol:displayId "design" ;
     sbol:hasNamespace <https://example.org/facility> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
+ex:registry a sbol:TopLevel, fac:MetadataDatabase ; sbol:displayId "registry" ;
+    sbol:hasNamespace <https://example.org/facility> .
+ex:design fac:retrievedFrom ex:registry .
 ex:input_lot a sbol:Implementation ; sbol:displayId "input_lot" ;
     sbol:hasNamespace <https://example.org/facility> ; sbol:built ex:design ;
-    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive true ;
+    fac:materialKind inv:DnaSample ; fac:isActive true ;
     fac:locatedIn ex:room .
 "#;
 

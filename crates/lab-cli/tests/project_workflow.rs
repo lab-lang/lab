@@ -571,7 +571,7 @@ ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
     sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
     fac:zoneKind fac:Room ; fac:isActive true .
 ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
-    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/facility> ;
     fac:assetKind fac:Workstation ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability <https://example.org/facility/operator/realization> .
 <https://example.org/facility/operator/realization>
@@ -749,7 +749,6 @@ fn build_freezes_exact_asset_offering_and_adapter_profile_bindings() {
         r#"ex:operator a sbol:TopLevel, fac:Asset ;
     sbol:displayId "operator" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ;
-    fac:facility ex:facility ;
     fac:assetKind fac:Workstation ;
     fac:locatedIn ex:room ;
     fac:isActive true ;
@@ -1864,7 +1863,6 @@ ex:inheco_odtc
     sbol:displayId "inheco_odtc" ;
     sbol:hasNamespace <https://example.org/golden-gate> ;
     sbol:name "Inheco ODTC thermocycler" ;
-    fac:facility ex:facility ;
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:automation_bench ;
     fac:isActive true ;

@@ -580,7 +580,7 @@ ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ; fac:facility ex:facility ;
     fac:zoneKind fac:Room ; fac:isActive true .
 ex:cycler a sbol:TopLevel, fac:Asset ; sbol:displayId "cycler" ;
-    sbol:hasNamespace <https://example.org/sbolinventory> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ;
     fac:assetKind fac:Instrument ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability <https://example.org/sbolinventory/cycler/thermal_cycling> .
 <https://example.org/sbolinventory/cycler/thermal_cycling>
@@ -685,13 +685,19 @@ ex:design a sbol:Component ; sbol:displayId "design" ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 ex:lot_b a sbol:Implementation ; sbol:displayId "lot_b" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
-    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive true .
+    fac:materialKind inv:DnaSample ; fac:locatedIn ex:room ; fac:isActive true .
 ex:lot_a a sbol:Implementation ; sbol:displayId "lot_a" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
-    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive true .
+    fac:materialKind inv:DnaSample ; fac:locatedIn ex:box ; fac:isActive true .
 ex:retired_lot a sbol:Implementation ; sbol:displayId "retired_lot" ;
     sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
-    fac:materialKind inv:DnaSample ; fac:facility ex:facility ; fac:isActive false .
+    fac:materialKind inv:DnaSample ; fac:locatedIn ex:room ; fac:isActive false .
+ex:box a sbol:TopLevel, fac:Asset ; sbol:displayId "box" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ; fac:assetKind fac:Container ;
+    fac:locatedIn ex:room ; fac:isActive true .
+ex:unlocated_lot a sbol:Implementation ; sbol:displayId "unlocated_lot" ;
+    sbol:hasNamespace <https://example.org/sbolinventory> ; sbol:built ex:design ;
+    fac:materialKind inv:DnaSample ; fac:isActive true .
 "#
         );
         write_inventory(package.path(), &contents);

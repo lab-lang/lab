@@ -50,7 +50,6 @@ ex:opentrons_ot2
     sbol:displayId "opentrons_ot2" ;
     sbol:hasNamespace <https://example.org/golden-gate> ;
     sbol:name "Opentrons OT-2 with Thermocycler Module" ;
-    fac:facility ex:facility ;
     fac:assetKind fac:Instrument ;
     fac:locatedIn ex:automation_bench ;
     fac:manufacturer "Opentrons" ;
@@ -255,7 +254,6 @@ ex:manual_workstation
     sbol:displayId "manual_workstation" ;
     sbol:hasNamespace <https://example.org/golden-gate> ;
     sbol:name "Golden Gate manual workstation" ;
-    fac:facility ex:facility ;
     fac:assetKind fac:Workstation ;
     fac:locatedIn ex:automation_bench ;
     fac:isActive true ;
@@ -469,7 +467,6 @@ lots:J23101_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:J23101 ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -479,7 +476,6 @@ lots:J23106_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:J23106 ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -489,7 +485,6 @@ lots:B0034_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:B0034 ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -499,7 +494,6 @@ lots:B0015_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:B0015 ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -509,7 +503,6 @@ lots:GFP_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:GFP ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -519,7 +512,6 @@ lots:RFP_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:RFP ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -529,7 +521,6 @@ lots:pSB1C3_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:pSB1C3 ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -539,7 +530,6 @@ lots:BsaI_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built build:BsaI ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -549,7 +539,6 @@ lots:T4_DNA_ligase_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:T4_DNA_ligase ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -559,7 +548,6 @@ lots:T4_DNA_ligase_buffer_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:T4_DNA_ligase_buffer ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -569,7 +557,6 @@ lots:nuclease_free_water_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:nuclease_free_water ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -579,7 +566,6 @@ lots:recovery_medium_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:recovery_medium ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -589,7 +575,6 @@ lots:DH5alpha_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built canvas:DH5alpha ;
     fac:materialKind inv:BacterialStock ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -599,7 +584,6 @@ lots:LB_chloramphenicol_agar_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:LB_chloramphenicol_agar ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -609,7 +593,6 @@ lots:chloramphenicol_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:chloramphenicol ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .
 
@@ -619,6 +602,5 @@ lots:reference_gfp_lot
     sbol:hasNamespace <https://example.org/golden-gate/lots> ;
     sbol:built materials:reference_gfp ;
     fac:materialKind inv:ProcuredMaterial ;
-    fac:facility ex:facility ;
     fac:locatedIn ex:stock_storage ;
     fac:isActive true .

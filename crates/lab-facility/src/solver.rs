@@ -1543,7 +1543,7 @@ mod tests {
         let manual = if include_manual {
             r#"
 ex:operator a sbol:TopLevel, fac:Asset ; sbol:displayId "operator" ;
-    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/facility> ;
     fac:assetKind fac:Human ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability ex:manual_realization .
 ex:manual_realization a sbol:Identified, fac:CapabilityOffering ;
@@ -1566,7 +1566,7 @@ ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
     sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
     fac:zoneKind fac:Room ; fac:isActive true .
 ex:robot a sbol:TopLevel, fac:Asset ; sbol:displayId "robot" ;
-    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/facility> ;
     fac:assetKind fac:Instrument ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability ex:liquid, ex:metered, ex:mixing, ex:thermal .
 ex:liquid a sbol:Identified, fac:CapabilityOffering ; sbol:displayId "liquid" ;

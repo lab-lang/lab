@@ -21,7 +21,6 @@ ex:room a sbol:TopLevel, fac:Zone ;
 ex:bench a sbol:TopLevel, fac:Asset ;
     sbol:displayId "bench" ;
     sbol:hasNamespace <https://example.org/manual-media> ;
-    fac:facility ex:facility ;
     fac:assetKind fac:Workstation ;
     fac:locatedIn ex:room ;
     fac:isActive true ;

@@ -165,6 +165,7 @@ fn ebef_derived_facility_composes_three_capabilities_without_claiming_hardware_c
     assert_eq!(
         used,
         BTreeSet::from([
+            ASSAY_COMPONENT.to_owned(),
             ASSAY_LOT.to_owned(),
             SIMULATED_EPOCH.to_owned(),
             SIMULATED_MICROLAB.to_owned(),

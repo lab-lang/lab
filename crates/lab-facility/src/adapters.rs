@@ -368,7 +368,7 @@ ex:room a sbol:TopLevel, fac:Zone ; sbol:displayId "room" ;
     sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
     fac:zoneKind fac:Room ; fac:isActive true .
 ex:star a sbol:TopLevel, fac:Asset ; sbol:displayId "star" ;
-    sbol:hasNamespace <https://example.org/facility> ; fac:facility ex:facility ;
+    sbol:hasNamespace <https://example.org/facility> ;
     fac:assetKind fac:Instrument ; fac:locatedIn ex:room ; fac:isActive true ;
     fac:capability <https://example.org/facility/star/liquid_handling> .
 <https://example.org/facility/star/liquid_handling>

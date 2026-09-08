@@ -3022,7 +3022,7 @@ dependencies = [
 [[package]]
 name = "sbol-core"
 version = "1.0.0"
-source = "git+https://github.com/SynBioDex/sbol-rs?rev=2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4#2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976#a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976"
 dependencies = [
  "sbol-rdf",
  "thiserror",
@@ -3031,7 +3031,7 @@ dependencies = [
 [[package]]
 name = "sbol-inventory"
 version = "0.1.0"
-source = "git+https://github.com/SynBioDex/sbol-rs?rev=2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4#2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976#a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976"
 dependencies = [
  "sbol3",
  "thiserror",
@@ -3040,7 +3040,7 @@ dependencies = [
 [[package]]
 name = "sbol-ontology"
 version = "1.0.0"
-source = "git+https://github.com/SynBioDex/sbol-rs?rev=2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4#2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976#a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976"
 dependencies = [
  "clap",
  "sha2",
@@ -3050,7 +3050,7 @@ dependencies = [
 [[package]]
 name = "sbol-rdf"
 version = "1.0.0"
-source = "git+https://github.com/SynBioDex/sbol-rs?rev=2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4#2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976#a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976"
 dependencies = [
  "oxjsonld",
  "oxrdf",
@@ -3061,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "sbol-rulegen"
 version = "1.0.0"
-source = "git+https://github.com/SynBioDex/sbol-rs?rev=2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4#2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976#a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976"
 dependencies = [
  "serde",
  "toml 1.1.4+spec-1.1.0",
@@ -3070,7 +3070,7 @@ dependencies = [
 [[package]]
 name = "sbol3"
 version = "1.0.0"
-source = "git+https://github.com/SynBioDex/sbol-rs?rev=2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4#2ecae3718ebb87dbdbf7112ed4d7f42c0155eea4"
+source = "git+https://github.com/SynBioDex/sbol-rs?rev=a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976#a0f0f86cdc53a4b1c3c202ebd2535eef7a81b976"
 dependencies = [
  "sbol-core",
  "sbol-ontology",

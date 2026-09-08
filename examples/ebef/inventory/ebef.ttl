@@ -4,7 +4,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/amsco_630ls/steam_sterilization> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#model> "AMSCO 630LS" .
@@ -21,7 +20,6 @@
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/anaerobic_chamber_1/anaerobic_environment_control> ;
 	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/anaerobic_chamber_1_interior> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Coy Laboratory Products" ;
@@ -63,7 +61,6 @@
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/anaerobic_chamber_2/anaerobic_environment_control> ;
 	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/anaerobic_chamber_2_interior> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Coy Laboratory Products" ;
@@ -104,7 +101,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/anaerobic_swinging_bucket_centrifuge/centrifugation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_2_interior> .
 <https://example.org/ebef/anaerobic_swinging_bucket_centrifuge/centrifugation> <http://sbols.org/v3#displayId> "centrifugation" ;
@@ -119,7 +115,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/azure_300/gel_imaging> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#model> "Azure 300" .
@@ -142,7 +137,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/biotek_epoch_2/absorbance_measurement> , <https://example.org/ebef/biotek_epoch_2/incubation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Agilent BioTek" ;
@@ -181,7 +175,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#StorageAsset> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/cold_storage_group/cold_storage> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/freezer_room> .
 <https://example.org/ebef/cold_storage_group/cold_storage> <http://sbols.org/v3#displayId> "cold_storage" ;
@@ -202,7 +195,6 @@
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gen1000_1/plant_growth> ;
 	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen1000_1_interior> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
@@ -245,7 +237,6 @@
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gen1000_2/plant_growth> ;
 	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen1000_2_interior> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
@@ -288,7 +279,6 @@
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gen2000/plant_growth> ;
 	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gen2000_interior> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
@@ -331,7 +321,6 @@
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#EnvironmentController> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/conviron_gr48/plant_growth> ;
 	<https://sbol.io/ns/facility#establishesZone> <https://example.org/ebef/conviron_gr48_interior> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Conviron" ;
@@ -373,7 +362,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/dragonfly_confocal/confocal_microscopy> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microscopy_lab> ;
 	<https://sbol.io/ns/facility#model> "Dragonfly spinning disk confocal" .
@@ -402,7 +390,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Workstation> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/electrophoresis_station/electrophoresis> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 <https://example.org/ebef/electrophoresis_station/electrophoresis> <http://sbols.org/v3#displayId> "electrophoresis" ;
@@ -417,7 +404,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_1/shaking_incubation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Eppendorf" ;
@@ -448,7 +434,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_2/shaking_incubation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Eppendorf" ;
@@ -474,7 +459,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/eppendorf_s44i_3/shaking_incubation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#manufacturer> "Eppendorf" ;
@@ -514,7 +498,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 <https://example.org/ebef/main_biosafety_cabinet/biosafety_containment> <http://sbols.org/v3#displayId> "biosafety_containment" ;
@@ -542,7 +525,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Workstation> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/media_prep_station/media_preparation> , <https://example.org/ebef/media_prep_station/ph_measurement> , <https://example.org/ebef/media_prep_station/water_purification> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/media_prep_room> .
 <https://example.org/ebef/media_prep_station/media_preparation> <http://sbols.org/v3#displayId> "media_preparation" ;
@@ -577,7 +559,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/microlab_prep/liquid_handling> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> ;
 	<https://sbol.io/ns/facility#manufacturer> "Hamilton" ;
@@ -611,7 +592,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/plant_autoclave/steam_sterilization> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> .
 <https://example.org/ebef/plant_autoclave/steam_sterilization> <http://sbols.org/v3#displayId> "steam_sterilization" ;
@@ -631,7 +611,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/plant_lab> .
 <https://example.org/ebef/plant_biosafety_cabinet/biosafety_containment> <http://sbols.org/v3#displayId> "biosafety_containment" ;
@@ -658,7 +637,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/plasma_cleaner/plasma_cleaning> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microscopy_lab> .
 <https://example.org/ebef/plasma_cleaner/plasma_cleaning> <http://sbols.org/v3#displayId> "plasma_cleaning" ;
@@ -673,7 +651,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/anaerobic_chamber_1_interior> .
 <https://example.org/ebef/potentiostat_96_well/electrochemical_measurement> <http://sbols.org/v3#displayId> "electrochemical_measurement" ;
@@ -693,7 +670,6 @@
 	<http://sbols.org/v3#name> "ProFlex thermocycler" ;
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Instrument> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> ;
 	<https://sbol.io/ns/facility#model> "ProFlex PCR System" .
@@ -703,7 +679,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#FunctionalUnit> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/proflex_block_1/thermal_cycling> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#partOf> <https://example.org/ebef/proflex> .
 <https://example.org/ebef/proflex_block_1/thermal_cycling> <http://sbols.org/v3#displayId> "thermal_cycling" ;
@@ -723,7 +698,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#FunctionalUnit> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/proflex_block_2/thermal_cycling> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#partOf> <https://example.org/ebef/proflex> .
 <https://example.org/ebef/proflex_block_2/thermal_cycling> <http://sbols.org/v3#displayId> "thermal_cycling" ;
@@ -743,7 +717,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#FunctionalUnit> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/proflex_block_3/thermal_cycling> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#partOf> <https://example.org/ebef/proflex> .
 <https://example.org/ebef/proflex_block_3/thermal_cycling> <http://sbols.org/v3#displayId> "thermal_cycling" ;
@@ -764,7 +737,6 @@
 	a <http://sbols.org/v3#TopLevel> , <https://sbol.io/ns/facility#Asset> ;
 	<https://sbol.io/ns/facility#assetKind> <https://sbol.io/ns/facility#Workstation> ;
 	<https://sbol.io/ns/facility#capability> <https://example.org/ebef/static_incubator_group/static_incubation> ;
-	<https://sbol.io/ns/facility#facility> <https://example.org/ebef/facility> ;
 	<https://sbol.io/ns/facility#isActive> true ;
 	<https://sbol.io/ns/facility#locatedIn> <https://example.org/ebef/microbiology_lab> .
 <https://example.org/ebef/static_incubator_group/static_incubation> <http://sbols.org/v3#displayId> "static_incubation" ;
