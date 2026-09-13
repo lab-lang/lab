@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <em>A compiler for the robotic laboratory. Write the experiment once, in Python or in Lab, and compile it for any lab.</em>
+  <em>A compiler for biological engineering. Describe experiments, check protocols, and create beautiful documents, in Python or Lab.</em>
 </p>
 
-It lets scientists describe the biological result they want, the constraints that must hold, and the evidence needed to accept it without binding that intent to a particular laboratory, instrument, or protocol implementation.
+Lab helps scientists describe the biological result they want, the constraints that must hold, and the evidence needed to accept it. Checking a protocol and producing a clear document for someone to read, share, and use at the bench are central goals. Where automation is useful, the compiler can also prepare supported work for available equipment.
 
 ## Two ways in
 
@@ -25,18 +25,19 @@ SBOL is not a third way in. It is the vocabulary designs are written and exchang
 
 Lab is working toward a world in which laboratory work is portable, inspectable, and reliable across manual benches, automation, and cloud labs.
 
-Today, protocols commonly entangle scientific intent with site-specific procedures. Lab separates them. A program describes biological designs, physical materials, workflows, and acceptance criteria; the compiler progressively specializes that program against the capabilities, policies, inventory, and hardware of a selected facility.
+Today, protocols commonly entangle scientific intent with site-specific procedures. Lab separates them. A program describes biological designs, physical materials, workflows, and acceptance criteria. The compiler checks their relationships; document generation presents the work clearly to a human reader. Facility planning and automation optionally specialize that description against the capabilities, policies, inventory, and hardware of a selected laboratory.
 
 One biological program should be adaptable to many valid execution environments without erasing what the scientist meant.
 
 ## Approach
 
-Lab treats laboratory automation as a compilation and control problem:
+Lab treats protocol checking, document generation, and automation as related uses of one scientific description:
 
 - the type system models biological artifacts, physical materials, durable effects, and evidence;
 - two frontends, Python and Lab, lower to one checked module, which is the portable boundary nothing downstream reaches behind;
 - **LAIR**, the Lab Automation Intermediate Representation, preserves meaning as programs are progressively lowered from portable intent to method-selected procedures and facility-bound device operations;
 - the compiler checks types, action contracts, and material ownership while keeping specialization decisions inspectable;
+- document generation separates content from typography; current facility builds produce typeset operator documents and manual run sheets as editable Typst sources and PDFs;
 - a reviewed runtime validates frozen facility plans, narrates them in dry-run, executes them in simulation or supported live modes, resumes from a plan-bound ledger, and writes resulting inventory provenance.
 
 Modeling these ideas in a type system, rather than in a library's conventions, lets the toolchain reason about concerns that ordinary APIs tend to hide: sample identity and custody, consumable materials, non-repeatable actions, probabilistic results, and evidence-backed acceptance. Writing in Python does not give any of that up, because the Python frontend is checked by the same compiler rather than layered over it.
@@ -51,6 +52,8 @@ The language, LAIR, facility model, adapters, and runtime are still evolving. Dr
 
 - [Documentation](docs/README.md)
 - [Python SDK](crates/lab-python/README.md) — typed SBOL designs, circuits in LOICA
+- [Write pipetting Methods in Python](docs/contributing/python-procedures.md): typed liquid operations, portable catalogs, and Rust validation
+- [Contribution boundaries](docs/contributing/extensions.md): scientific packages, Methods, profiles, and adapters
 - [Language design](docs/language/README.md)
 - [Golden Gate example](examples/golden-gate/README.md)
 - [Golden Gate in Python](examples/golden-gate-python/README.md) — the same checked program through the typed Python frontend

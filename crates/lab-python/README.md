@@ -117,7 +117,22 @@ print(refined.planning_problem)
 
 The Python classes serialize the LAIR-owned Method contract rather than implementing their own planner. Rust validates the complete Method catalog, constructs refined LAIR, and projects the exact `lab.planning-problem.v2` consumed by facility planning. Scalar parameters can participate in offering constraints; scalar and homogeneous ordered-list parameters can both become exact Procedure parameters for adapters. Set `include_standard=True` to compose custom Methods with the definitions bundled in the compiler.
 
-Declarative templates are ordinary JSON. A slot is an object whose only key is `$lab`, for example `{"$lab": {"kind": "integer", "id": "cycles"}}`. The closed slot kinds are `intent`, `artifact`, `parameter`, `scalar`, `integer`, `text`, `boolean`, `iri`, `input`, `output`, and `material`. `intent` and `artifact` expose the complete checked source action and owning design without another projection ABI. `parameter` inserts the complete tagged Procedure value; `scalar` inserts a complete typed property value; the scalar projections require an exact matching, unitless scalar. Input indices and output or material IDs are checked against the enclosing task before the rendered body is validated by its Procedure contract.
+For pipetting Methods, use `from lab.procedures import pipetting as p` to construct a typed template. The [Python Procedure guide](../../docs/contributing/python-procedures.md) and [complete authoring example](../../examples/contributing/scientific-package/methods/homogenize.py) cover task parameters, logical vessels, continuous fluid paths, distribution, techniques, and catalog generation. This API is available in the development checkout; install this checkout to use it.
+
+```python
+from lab.procedures import pipetting as p
+
+program = p.Template()
+sample = program.input("sample", port=0, initial_volume=p.volume_parameter("sample_volume"))
+product = program.product("product", output="prepared")
+with program.path("sample-path", policy=p.ISOLATED_DESTINATIONS) as path:
+    path.transfer("move", sample.position(0), product.position(0), volume=p.microlitres(30))
+    path.mix("mix", product.position(0), volume=p.microlitres(10), cycles=3)
+```
+
+Pass `program.to_template()` to `m.TemplateExecution(contract=p.CONTRACT, body=..., policy=...)` on a Method task declaring input port `0`, output `prepared`, and the `sample_volume` parameter. Python writes portable data; Rust resolves task values, validates the liquid operations, and derives capabilities during refinement. The existing `lab.procedures` read-view imports remain available.
+
+Declarative templates serialize as ordinary JSON. Advanced authors can still write the format directly. A slot is an object whose only key is `$lab`, for example `{"$lab": {"kind": "integer", "id": "cycles"}}`. The closed slot kinds are `intent`, `artifact`, `parameter`, `scalar`, `integer`, `text`, `boolean`, `iri`, `input`, `output`, and `material`. `intent` and `artifact` expose the complete checked source action and owning design. `parameter` inserts the complete tagged Procedure value; `scalar` inserts a complete typed property value; the integer, text, boolean, and IRI projections require an exact matching, unitless scalar. Catalog loading checks declared references and slot shapes; refinement checks resolved values and the rendered Procedure contract.
 
 The same typed authoring surface writes a persistent package catalog:
 

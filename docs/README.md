@@ -1,6 +1,6 @@
 # Lab documentation
 
-This directory records what Lab is becoming, what has been decided, and what the current implementation can honestly do.
+Lab helps scientists describe experiments, check protocols, and produce beautiful documents for people to read and use. Automation is an optional application of that description. This directory records the architecture, design decisions, contribution boundaries, and current implementation.
 
 The compiler has two frontends. Python is where most experiments are written, and its API is documented with the [Python SDK](../crates/lab-python/README.md). Lab is the native language, and it is what this directory describes: the specimens and design documents below are written in Lab because it names these ideas in the fewest words. Both frontends lower to the same checked module, so nothing downstream can tell which one a declaration came from.
 
@@ -13,6 +13,8 @@ If you are new to the language, start with the [repository introduction](../READ
 
 ## Language guide
 
+For contributions, start with [the extension guide](contributing/extensions.md). Scientists can [author pipetting Methods in Python](contributing/python-procedures.md) using typed liquid operations and checked task references. Native builders and adapters have separate contribution paths; neither requires working directly with the solver or Pliron.
+
 | Document | What it answers |
 | --- | --- |
 | [Language overview](language/README.md) | What are the major source-level concerns and compiler boundaries? |
@@ -22,7 +24,7 @@ If you are new to the language, start with the [repository introduction](../READ
 | [Implementation support](language/support.md) | Which features parse, resolve, type-check, lower, execute, or work in editors today? |
 | [Open questions](language/open-questions.md) | Which important language choices remain deliberately unresolved? |
 
-The support matrix is authoritative when a specimen or design document extends beyond the executable implementation.
+The support matrix records checking, lowering, and execution coverage separately. A checked protocol is useful for scientific review and manual work independently of device execution.
 
 ## Design decisions
 

@@ -4,9 +4,10 @@ These examples are part of the workspace's tests. Run commands from the reposito
 
 ## Describe science and use it from Python
 
-`scientific-package/src/science.lab` declares a `homogenize` action that consumes and returns the same physical material lineage. `methods/homogenize.json` implements it as a 30 µL transfer followed by three 10 µL mixes on one fluid path. The volumes describe this example's preparation, not a general biological recommendation.
+`scientific-package/src/science.lab` declares a `homogenize` action that consumes and returns the same physical material lineage. [`methods/homogenize.py`](scientific-package/methods/homogenize.py) uses `from lab.procedures import pipetting as p` to author a 30 µL transfer followed by three 10 µL mixes on one fluid path, then writes `methods/homogenize.json`. The volumes describe this example's preparation. The [Python Procedure guide](../../docs/contributing/python-procedures.md) explains the complete API and its validation boundary.
 
 ```sh
+crates/lab-python/.venv/bin/python examples/contributing/scientific-package/methods/homogenize.py
 cargo run --locked -p lab-cli -- check examples/contributing/scientific-package
 cargo run --locked -p lab-cli -- bindings python examples/contributing/scientific-package
 PYTHONPATH=examples/contributing/scientific-package/bindings/python \

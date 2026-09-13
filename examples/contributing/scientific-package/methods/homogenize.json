@@ -12,6 +12,7 @@
           }
         }
       ],
+      "parameters": [],
       "tasks": [
         {
           "id": "homogenize",
@@ -82,26 +83,22 @@
               }
             }
           ],
+          "materials": [],
           "execution": {
             "kind": "template",
             "contract": "https://www.lab-compiler.org/ns/procedure-contract#PipettingProgramV1",
             "body": {
-              "outputs": [
-                {
-                  "id": {
-                    "$lab": {
-                      "kind": "output",
-                      "id": "prepared"
-                    }
-                  }
-                }
-              ],
               "vessels": [
                 {
                   "id": "sample",
                   "role": {
                     "kind": "procedure_input",
-                    "input": 0
+                    "input": {
+                      "$lab": {
+                        "kind": "input",
+                        "index": 0
+                      }
+                    }
                   },
                   "positions": 1,
                   "initial_volume_each": {
@@ -127,8 +124,8 @@
               ],
               "steps": [
                 {
-                  "kind": "transfer",
                   "id": "move-sample",
+                  "kind": "transfer",
                   "source": {
                     "vessel": "sample",
                     "position": 0
@@ -147,28 +144,38 @@
                   "fluid_path_group": "sample-path"
                 },
                 {
-                  "kind": "mix",
                   "id": "mix-sample",
+                  "kind": "mix",
                   "targets": [
                     {
                       "vessel": "prepared",
                       "position": 0
                     }
                   ],
-                  "cycles": {
-                    "$lab": {
-                      "kind": "integer",
-                      "id": "mix_cycles"
-                    }
-                  },
                   "volume": {
                     "$lab": {
                       "kind": "scalar",
                       "id": "mix_volume"
                     }
                   },
+                  "cycles": {
+                    "$lab": {
+                      "kind": "integer",
+                      "id": "mix_cycles"
+                    }
+                  },
                   "fluid_path": "isolated_destinations",
                   "fluid_path_group": "sample-path"
+                }
+              ],
+              "outputs": [
+                {
+                  "id": {
+                    "$lab": {
+                      "kind": "output",
+                      "id": "prepared"
+                    }
+                  }
                 }
               ]
             },

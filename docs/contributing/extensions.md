@@ -7,6 +7,7 @@ Choose the integration path from the work you want to contribute:
 | User story | Owned changes | Executable example |
 | --- | --- | --- |
 | I want to describe new science and call it from Python | Lab package, Method document, generated bindings | [`scientific-package`](../../examples/contributing/scientific-package) |
+| I want to describe liquid operations in Python | Typed pipetting template, Method task, generated JSON catalog | [`homogenize.py`](../../examples/contributing/scientific-package/methods/homogenize.py) |
 | I want to encode a pipetting algorithm | One Rust builder registration, a Method selecting it, focused program tests | [`pipetting-extension`](../../examples/contributing/pipetting-extension/src/lib.rs) |
 | I want to add a Hamilton liquid class | A versioned class library and a STAR operational profile | [`hamilton-profile.toml`](../../examples/contributing/hamilton-profile.toml) |
 | I want to lower programs for another instrument | One adapter crate owning its descriptor and callbacks | [`preview-adapter`](../../examples/contributing/preview-adapter/src/lib.rs) |
@@ -54,6 +55,8 @@ The application service contributes the package modules, Methods, Procedures, in
 
 ## Method pack
 
+For pipetting, start with [Author a pipetting Method in Python](python-procedures.md). `from lab.procedures import pipetting as p` provides logical vessel handles, exact quantities, typed parameter references, and transfer, distribution, and mix operations. It emits the existing template contract, so a Method author does not need to handwrite nested JSON or change Rust.
+
 ```sh
 lab new method-pack liquid-methods
 cd liquid-methods
@@ -72,7 +75,7 @@ Each Procedure task chooses exactly one execution form. A `template` embeds a co
 }
 ```
 
-The closed slot kinds are `intent`, `artifact`, `parameter`, `scalar`, `integer`, `text`, `boolean`, `iri`, `input`, `output`, and `material`. `intent` inserts the complete checked action, including exact declaration identity, structured typed expressions, ownership, lineage, artifact context, and source coordinates. `artifact` inserts the complete owning design and fails when the action is not part of an artifact realization. Unknown references, wrong scalar projections, reserved `$lab` keys, and malformed slots fail during Method refinement, before facility planning. The rendered JSON must then satisfy the named Procedure contract.
+The closed slot kinds are `intent`, `artifact`, `parameter`, `scalar`, `integer`, `text`, `boolean`, `iri`, `input`, `output`, and `material`. `intent` inserts the complete checked action, including exact declaration identity, structured typed expressions, ownership, lineage, artifact context, and source coordinates. `artifact` inserts the complete owning design and fails when the action is not part of an artifact realization. Catalog loading rejects malformed slots and references to undeclared task values. Refinement resolves the values and checks scalar projections and the rendered Procedure contract before facility planning.
 
 If the Procedure shape itself is new, register one `ProcedureContractRegistration` with `ProcedureCompiler::with_contract`. That analyzer owns decoding, structural validation, capability derivation, feature derivation, and the material interface for the contract. Add a Rust `ProcedureProgramBuilderRegistration` only when the program cannot be expressed as declarative template data; compose it separately with `ProcedureCompiler::with_builder`.
 

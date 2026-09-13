@@ -1,8 +1,11 @@
-"""Typed read views for Lab's canonical Procedure programs.
+"""Typed views and authoring tools for Lab's canonical Procedure programs.
 
 Canonical programs are produced and validated by the Rust compiler before facility planning. This
 module gives Python callers the same versioned, device-neutral structures without reimplementing
 normalization, capability derivation, allocation, or adapter lowering.
+
+Use ``from lab.procedures import pipetting as p`` to author a portable pipetting template.
+The existing read-view classes and ``parse_program`` remain available from this package.
 """
 
 from __future__ import annotations
