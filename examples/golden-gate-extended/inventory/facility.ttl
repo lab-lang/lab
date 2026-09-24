@@ -602,6 +602,8 @@ lots:DH5alpha_lot
     sbol:built materials:DH5alpha ;
     fac:materialKind inv:BacterialStock ;
     fac:locatedIn ex:stock_storage ;
+    <https://www.lab-compiler.org/ns/inventory#aliquotVolumeUl> "100"^^xsd:decimal ;
+    <https://www.lab-compiler.org/ns/inventory#aliquotCount> 2 ;
     fac:isActive true .
 
 lots:BL21_lot
@@ -611,6 +613,8 @@ lots:BL21_lot
     sbol:built materials:BL21 ;
     fac:materialKind inv:BacterialStock ;
     fac:locatedIn ex:stock_storage ;
+    <https://www.lab-compiler.org/ns/inventory#aliquotVolumeUl> "100"^^xsd:decimal ;
+    <https://www.lab-compiler.org/ns/inventory#aliquotCount> 2 ;
     fac:isActive true .
 
 lots:LB_chloramphenicol_agar_lot

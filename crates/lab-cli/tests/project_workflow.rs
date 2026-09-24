@@ -92,6 +92,22 @@ fn quantity(value: &Value) -> f64 {
     value["value"]["value"].as_str().unwrap().parse().unwrap()
 }
 
+fn task_artifact(task: &Value) -> &str {
+    task["parameters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|parameter| {
+            parameter["id"]
+                .as_str()
+                .unwrap()
+                .ends_with("::parameter::artifact")
+        })
+        .unwrap()["value"]["value"]["value"]["value"]
+        .as_str()
+        .unwrap()
+}
+
 fn with_portable_manual_method_pins(manifest: String) -> String {
     manifest
         .replace(
@@ -152,7 +168,7 @@ fn assert_serial_dilutions_use_pipetting(
             task["operation"] == "https://www.lab-compiler.org/ns/procedure#SeriallyDiluteCulture"
         })
         .collect::<Vec<_>>();
-    assert_eq!(tasks.len(), 1);
+    assert_eq!(tasks.len(), 2);
     for task in tasks {
         assert_eq!(
             task["program"]["contract"],
@@ -214,7 +230,7 @@ fn assert_golden_gate_uses_thermal_program(
                 == "https://www.lab-compiler.org/ns/procedure#ThermalCycleGoldenGateReaction"
         })
         .collect::<Vec<_>>();
-    assert_eq!(tasks.len(), 3);
+    assert_eq!(tasks.len(), 2);
     for task in tasks {
         assert_eq!(
             task["program"]["contract"],
@@ -223,7 +239,12 @@ fn assert_golden_gate_uses_thermal_program(
         let program = &task["program"]["body"];
         assert_eq!(program["load"]["input"], 0);
         assert_eq!(program["load"]["outputs"], serde_json::json!(["product"]));
-        assert_eq!(program["load"]["volume_each"]["value"]["value"], "25");
+        let expected_volume = match task_artifact(task) {
+            "GVD0011" => 25.0,
+            "GVD0013" => 50.0,
+            artifact => panic!("unexpected assembly: {artifact}"),
+        };
+        assert_eq!(quantity(&program["load"]["volume_each"]), expected_volume);
         assert_eq!(program["stages"][0]["id"], "digest-ligate-cycle");
         assert_eq!(program["stages"][0]["steps"][0]["id"], "digest");
         assert_eq!(program["stages"][0]["steps"][1]["id"], "ligate");
@@ -1095,14 +1116,14 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
     let protocols = result["result"]["protocols"].as_array().unwrap();
     assert_eq!(
         protocols.len(),
-        12,
+        16,
         "every automated Procedure has a file, including recovery and plating"
     );
     for path in protocols {
         assert!(Path::new(path.as_str().unwrap()).is_file());
     }
     let manifests = task_manifests(&out_dir.join("assets/opentrons_ot2"));
-    assert_eq!(manifests.len(), 12);
+    assert_eq!(manifests.len(), 16);
     for (_, m) in &manifests {
         assert_eq!(m["schema_version"], "lab.opentrons-ot2-task.v1");
         assert!(!m["requirements"].as_array().unwrap().is_empty());
@@ -1124,7 +1145,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         );
     }
     let setups = operation(&manifests, "SetupGoldenGateReaction");
-    assert_eq!(setups.len(), 3);
+    assert_eq!(setups.len(), 2);
     for setup in setups {
         assert_eq!(
             setup["execution"]["staging_temperatures"]["sources"]
@@ -1142,7 +1163,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
                 .iter()
                 .map(|s| quantity(&s["volume"]))
                 .sum::<f64>(),
-            number(&regression["assembly"]["reaction_volume_ul"])
+            number(&regression["assembly"]["reaction_volume_ul"][task_artifact(&setup["task"])])
         );
         assert!(
             transfers
@@ -1155,7 +1176,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
             .collect::<Vec<_>>();
         assert_eq!(
             clears.len() as u64,
-            regression["assembly"]["bubble_clear"]["cycles"]
+            regression["assembly"]["bubble_clear"]["cycles"][task_artifact(&setup["task"])]
                 .as_u64()
                 .unwrap()
         );
@@ -1174,7 +1195,7 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
         }
     }
     let cycles = operation(&manifests, "ThermalCycleGoldenGateReaction");
-    assert_eq!(cycles.len(), 3);
+    assert_eq!(cycles.len(), 2);
     for cycle in cycles {
         let e = &cycle["execution"];
         assert_eq!(
@@ -1203,72 +1224,105 @@ fn facility_lowering_emits_the_complete_golden_gate_ot2_slice() {
             }
         }
     }
-    let prepare = operation(&manifests, "PrepareChemicalTransformation")[0];
-    let steps = prepare["execution"]["program"]["steps"].as_array().unwrap();
-    let cells = steps
-        .iter()
-        .find(|s| s["id"] == "add-competent-cells")
-        .unwrap();
-    assert_eq!(
-        quantity(&cells["volume_each"]),
-        number(&regression["transformation"]["competent_cells"]["volume_ul"])
-    );
-    assert_eq!(cells["destinations"].as_array().unwrap().len(), 3);
-    assert_eq!(cells["fluid_path_group"], steps[0]["fluid_path_group"]);
-    let dna = steps
-        .iter()
-        .filter(|s| s["kind"] == "transfer")
-        .collect::<Vec<_>>();
-    assert_eq!(
-        dna.len(),
-        9,
-        "three DNA sources for each of three replicates"
-    );
-    assert!(dna.iter().all(
-        |s| quantity(&s["volume"]) == number(&regression["transformation"]["dna"]["volume_ul"])
-    ));
-    let recovery = operation(&manifests, "AddRecoveryMedium")[0];
-    let add = &recovery["execution"]["program"]["steps"][0];
-    assert_eq!(
-        quantity(&add["volume_each"]),
-        number(&regression["transformation"]["recovery"]["medium_volume_ul"])
-    );
-    assert_eq!(
-        quantity(&add["technique"]["air_gap"]),
-        number(&regression["transformation"]["recovery"]["air_gap_ul"])
-    );
-    assert_eq!(add["destinations"].as_array().unwrap().len(), 3);
-    let heat = operation(&manifests, "HeatShockTransformation")[0];
-    assert_eq!(
-        heat["execution"]["volume_each_ul"].as_f64().unwrap(),
-        number(&regression["transformation"]["heat_shock"]["volume_ul"])
-    );
-    let incubation = operation(&manifests, "IncubateRecoveryCulture")[0];
-    assert_eq!(
-        incubation["execution"]["volume_each_ul"].as_f64().unwrap(),
-        number(&regression["transformation"]["recovery"]["incubation_volume_ul"])
-    );
-    let dilution = operation(&manifests, "SeriallyDiluteCulture")[0];
-    let dilution_steps = dilution["execution"]["program"]["steps"]
-        .as_array()
-        .unwrap();
-    let mixing = dilution_steps
-        .iter()
-        .filter(|s| s["kind"] == "mix")
-        .collect::<Vec<_>>();
-    assert_eq!(mixing.len(), 6);
-    assert!(
-        mixing
+    let preparations = operation(&manifests, "PrepareChemicalTransformation");
+    assert_eq!(preparations.len(), 2);
+    for prepare in preparations {
+        let replicates = regression["transformation"]["replicates"][task_artifact(&prepare["task"])]
+            .as_u64()
+            .unwrap() as usize;
+        let program = &prepare["execution"]["program"];
+        let source = program["vessels"]
+            .as_array()
+            .unwrap()
             .iter()
-            .all(|s| s["cycles"] == regression["plating"]["mix_cycles"]
-                && quantity(&s["volume"]) == number(&regression["plating"]["mix_volume_ul"]))
-    );
-    let plating = operation(&manifests, "PlateDilutedCulture")[0];
-    let spots = plating["execution"]["program"]["steps"].as_array().unwrap();
-    assert!(!spots.is_empty());
-    assert!(spots.iter().all(|s| s["kind"] == "distribute"
-        && quantity(&s["volume_each"]) == number(&regression["plating"]["colony_volume_ul"])
-        && s["technique"]["dispense"]["kind"] == "material_surface"));
+            .find(|v| v["role"]["kind"] == "procedure_input" && v["role"]["input"] == 1)
+            .unwrap();
+        assert_eq!(
+            source["positions"], 1,
+            "each construct has a separate stock vial"
+        );
+        assert_eq!(
+            quantity(&source["initial_volume_each"]),
+            number(&regression["transformation"]["competent_cells"]["source_volume_ul"])
+        );
+        let steps = program["steps"].as_array().unwrap();
+        let cells = steps
+            .iter()
+            .find(|s| s["id"] == "add-competent-cells")
+            .unwrap();
+        assert_eq!(
+            quantity(&cells["volume_each"]),
+            number(&regression["transformation"]["competent_cells"]["volume_ul"])
+        );
+        assert_eq!(cells["destinations"].as_array().unwrap().len(), replicates);
+        assert_eq!(cells["fluid_path_group"], steps[0]["fluid_path_group"]);
+        let dna = steps
+            .iter()
+            .filter(|s| s["kind"] == "transfer")
+            .collect::<Vec<_>>();
+        assert_eq!(dna.len(), replicates, "one DNA source for each replicate");
+        assert!(
+            dna.iter().all(|s| quantity(&s["volume"])
+                == number(&regression["transformation"]["dna"]["volume_ul"]))
+        );
+    }
+    let recoveries = operation(&manifests, "AddRecoveryMedium");
+    assert_eq!(recoveries.len(), 2);
+    for (recovery, replicates) in recoveries.into_iter().zip([3, 6]) {
+        let add = &recovery["execution"]["program"]["steps"][0];
+        assert_eq!(
+            quantity(&add["volume_each"]),
+            number(&regression["transformation"]["recovery"]["medium_volume_ul"])
+        );
+        assert_eq!(
+            quantity(&add["technique"]["air_gap"]),
+            number(&regression["transformation"]["recovery"]["air_gap_ul"])
+        );
+        assert_eq!(add["destinations"].as_array().unwrap().len(), replicates);
+    }
+    let heat_shocks = operation(&manifests, "HeatShockTransformation");
+    assert_eq!(heat_shocks.len(), 2);
+    for heat in heat_shocks {
+        assert_eq!(
+            heat["execution"]["volume_each_ul"].as_f64().unwrap(),
+            number(&regression["transformation"]["heat_shock"]["volume_ul"])
+        );
+    }
+    let incubations = operation(&manifests, "IncubateRecoveryCulture");
+    assert_eq!(incubations.len(), 2);
+    for incubation in incubations {
+        assert_eq!(
+            incubation["execution"]["volume_each_ul"].as_f64().unwrap(),
+            number(&regression["transformation"]["recovery"]["incubation_volume_ul"])
+        );
+    }
+    let dilutions = operation(&manifests, "SeriallyDiluteCulture");
+    assert_eq!(dilutions.len(), 2);
+    for (dilution, replicates) in dilutions.into_iter().zip([3, 6]) {
+        let steps = dilution["execution"]["program"]["steps"]
+            .as_array()
+            .unwrap();
+        let mixing = steps
+            .iter()
+            .filter(|s| s["kind"] == "mix")
+            .collect::<Vec<_>>();
+        assert_eq!(mixing.len(), replicates * 2);
+        assert!(
+            mixing
+                .iter()
+                .all(|s| s["cycles"] == regression["plating"]["mix_cycles"]
+                    && quantity(&s["volume"]) == number(&regression["plating"]["mix_volume_ul"]))
+        );
+    }
+    let platings = operation(&manifests, "PlateDilutedCulture");
+    assert_eq!(platings.len(), 2);
+    for (plating, replicates) in platings.into_iter().zip([3, 6]) {
+        let spots = plating["execution"]["program"]["steps"].as_array().unwrap();
+        assert_eq!(spots.len(), replicates * 2);
+        assert!(spots.iter().all(|s| s["kind"] == "distribute"
+            && quantity(&s["volume_each"]) == number(&regression["plating"]["colony_volume_ul"])
+            && s["technique"]["dispense"]["kind"] == "material_surface"));
+    }
     let allocated = read_json(out_dir.join("compiler/adapter-invocations.json"));
     let emitted = manifests
         .iter()
@@ -1336,7 +1390,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
             .iter()
             .map(|product| product["name"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["GVD0011", "GVD0013", "GVD0015", "GVD_strain",]
+        ["GVD0011", "GVD0013", "GFP_strain", "RFP_strain"]
     );
     let facility = &result["result"]["facility"];
     assert_eq!(
@@ -1344,10 +1398,10 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         "https://example.org/golden-gate/facility"
     );
     assert_eq!(facility["bundles"].as_array().unwrap().len(), 1);
-    assert_eq!(facility["protocols"].as_array().unwrap().len(), 12);
-    // Twelve adapter operator documents plus the run sheet for the plan's
+    assert_eq!(facility["protocols"].as_array().unwrap().len(), 16);
+    // Sixteen adapter operator documents plus the run sheet for the plan's
     // manual-control steps.
-    assert_eq!(facility["documents"].as_array().unwrap().len(), 13);
+    assert_eq!(facility["documents"].as_array().unwrap().len(), 17);
     for path in facility["protocols"]
         .as_array()
         .unwrap()
@@ -1371,7 +1425,7 @@ fn build_emits_facility_selected_protocol_bundles_and_documents() {
         index["facility"]["facility_solution"],
         "compiler/facility-solution.json"
     );
-    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 12);
+    assert_eq!(index["facility"]["protocols"].as_array().unwrap().len(), 16);
     assert!(
         index["facility"]["protocols"][0]
             .as_str()
@@ -1558,9 +1612,9 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         solution["facility"],
         "https://example.org/golden-gate/facility"
     );
-    assert_eq!(solution["selections"].as_array().unwrap().len(), 10);
+    assert_eq!(solution["selections"].as_array().unwrap().len(), 16);
     let requirements = solution_requirements(&solution);
-    assert_eq!(requirements.len(), 44);
+    assert_eq!(requirements.len(), 56);
     assert!(requirements.iter().all(|binding| {
         binding["capability_kind"] != "https://sbol.io/ns/capability#LiquidHandling"
     }));
@@ -1575,7 +1629,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(pipetting.len(), 12);
+    assert_eq!(pipetting.len(), 16);
     assert!(pipetting.iter().all(|binding| {
         binding["asset"] == "https://example.org/golden-gate/opentrons_ot2"
             && binding["adapter"]["driver"] == "opentrons.ot2"
@@ -1616,14 +1670,14 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
     assert!(route.get("scope").is_none());
     assert_eq!(route["id"], "opentrons-ot2-5dbf2ae84b40");
     assert_eq!(route["output"], "assets/opentrons_ot2");
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 41);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 50);
     let protocols = route["artifacts"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(protocols.len(), 12);
+    assert_eq!(protocols.len(), 16);
     assert!(protocols.iter().all(|artifact| {
         artifact["format"] == "opentrons.python-protocol"
             && artifact["sha256"].as_str().unwrap().len() == 64
@@ -1686,29 +1740,33 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
             .iter()
             .any(|id| id == &assembly_setup)
     );
-    let cell_provisions = (0..1)
-        .map(|index| node_id(&format!("std-lab-plasmid-provision-{index}::")))
-        .collect::<Vec<_>>();
-    let transform = execution_nodes
-        .iter()
-        .find(|node| node_has_requirement(node, "std-lab-plasmid-transform-0::"))
-        .unwrap();
-    let transform_dependencies = transform["after"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|dependency| dependency.as_str().unwrap())
-        .collect::<std::collections::BTreeSet<_>>();
-    assert!(transform_dependencies.contains(assembly_cycle.as_str()));
-    assert!(
-        cell_provisions
+    for index in 0..2 {
+        let assembly_setup = node_id(&format!(
+            "std-bio-build-realize-{index}::https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate::setup-reaction",
+        ));
+        let assembly_cycle = node_id(&format!(
+            "std-bio-build-realize-{index}::https://www.lab-compiler.org/ns/method#temperature-staged-golden-gate::cycle-reaction",
+        ));
+        let cell_provision = node_id(&format!("std-lab-plasmid-provision-{}::", index * 2));
+        let transform = execution_nodes
             .iter()
-            .all(|id| transform_dependencies.contains(id.as_str()))
-    );
-    for index in [2, 4, 6] {
-        assert!(
-            transform_dependencies.contains(format!("execute-{index:04}").as_str()),
-            "transformation waits for all three completed assemblies"
+            .find(|node| {
+                node_has_requirement(node, &format!("std-lab-plasmid-transform-{index}::"))
+            })
+            .unwrap();
+        let dependencies = transform["after"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|dependency| dependency.as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(dependencies.contains(assembly_cycle.as_str()));
+        assert!(dependencies.contains(assembly_setup.as_str()));
+        assert!(dependencies.contains(cell_provision.as_str()));
+        assert_eq!(
+            dependencies.len(),
+            3,
+            "each transformation uses its own DNA and cell supply"
         );
     }
     assert!(execution_plan.get("lowerings").is_none());
@@ -1716,7 +1774,7 @@ fn the_golden_gate_facility_plan_binds_canonical_pipetting_to_the_ot2() {
         .iter()
         .filter_map(|node| node.get("document"))
         .collect::<Vec<_>>();
-    assert_eq!(reviewed_protocols.len(), 12);
+    assert_eq!(reviewed_protocols.len(), 16);
     assert!(reviewed_protocols.iter().all(|document| {
         document["format"] == "opentrons.python-protocol"
             && document["sha256"].as_str().unwrap().len() == 64
@@ -1921,8 +1979,8 @@ ex:inheco_odtc
         .flat_map(|route| route["artifacts"].as_array().unwrap())
         .filter(|artifact| artifact["role"] == "automation_protocol")
         .collect::<Vec<_>>();
-    assert_eq!(lowered_requirements, 15);
-    assert_eq!(automation_artifacts.len(), 7);
+    assert_eq!(lowered_requirements, 14);
+    assert_eq!(automation_artifacts.len(), 6);
     assert!(automation_artifacts.iter().all(|artifact| {
         matches!(
             artifact["format"].as_str(),
@@ -1996,7 +2054,7 @@ ex:inheco_odtc
                 match run["profile"]["stages"][0]["repeats"].as_u64() {
                     Some(75) => {
                         assert_eq!(run["sample_count"], 1);
-                        assert_eq!(run["fill_volume_ul"], 25.0);
+                        assert!(matches!(run["fill_volume_ul"].as_f64(), Some(25.0 | 50.0)));
                     }
                     Some(1) => {
                         assert_eq!(run["sample_count"], 3);
@@ -2031,27 +2089,29 @@ ex:inheco_odtc
         .find(|route| route["driver"] == "hamilton.star")
         .unwrap();
     let star_output = out_dir.join(star_route["output"].as_str().unwrap());
-    // Three biological replicates through two dilutions each. Reading only the dilution count would
-    // silently emit half the experiment and report n=1.
+    // Preserve both construct groups through two dilutions per replicate.
     let star_manifests = task_manifests(&star_output);
-    let star_dilution = operation(&star_manifests, "SeriallyDiluteCulture")[0];
-    let vessels = star_dilution["execution"]["program"]["vessels"]
-        .as_array()
-        .unwrap();
-    assert_eq!(
-        vessels
-            .iter()
-            .find(|v| v["role"]["kind"] == "procedure_input")
-            .unwrap()["positions"],
-        3
-    );
-    assert_eq!(
-        vessels
-            .iter()
-            .find(|v| v["role"]["kind"] == "product")
-            .unwrap()["positions"],
-        6
-    );
+    let star_dilutions = operation(&star_manifests, "SeriallyDiluteCulture");
+    assert_eq!(star_dilutions.len(), 2);
+    for (dilution, replicates) in star_dilutions.into_iter().zip([3, 6]) {
+        let vessels = dilution["execution"]["program"]["vessels"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            vessels
+                .iter()
+                .find(|v| v["role"]["kind"] == "procedure_input")
+                .unwrap()["positions"],
+            replicates
+        );
+        assert_eq!(
+            vessels
+                .iter()
+                .find(|v| v["role"]["kind"] == "product")
+                .unwrap()["positions"],
+            replicates * 2
+        );
+    }
     for manifest in star_route["artifacts"]
         .as_array()
         .unwrap()
@@ -2155,6 +2215,19 @@ fn the_extended_golden_gate_example_uses_exact_material_lots_and_the_ot2() {
 
     let solution = read_json(plan_dir.join("compiler/facility-solution.json"));
     assert_eq!(solution["selections"].as_array().unwrap().len(), 32);
+    let provisions = solution["provisions"].as_array().unwrap();
+    assert_eq!(provisions.len(), 4);
+    let mut stock_aliquots = std::collections::BTreeSet::new();
+    for provision in provisions {
+        assert_eq!(provision["consumed_volume"]["value"]["value"], "40");
+        assert_eq!(provision["stock_volume_each"]["value"]["value"], "100");
+        let positions = provision["stock_positions"].as_array().unwrap();
+        assert_eq!(positions.len(), 1);
+        assert!(stock_aliquots.insert((
+            provision["material_lot"].as_str().unwrap(),
+            positions[0].as_u64().unwrap(),
+        )));
+    }
     let materials = solution_materials(&solution);
     let reference_input = materials
         .iter()
@@ -2336,7 +2409,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
 
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
     let protocols = result["result"]["protocols"].as_array().unwrap();
-    assert_eq!(protocols.len(), 7);
+    assert_eq!(protocols.len(), 6);
     assert!(
         protocols
             .iter()
@@ -2354,7 +2427,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
     assert_eq!(route["driver"], "opentrons.flex");
     assert!(route.get("scope").is_none());
-    assert_eq!(route["requirements"].as_array().unwrap().len(), 15);
+    assert_eq!(route["requirements"].as_array().unwrap().len(), 14);
     let target_root = out_dir.join(route["output"].as_str().unwrap());
     assert!(
         target_root
@@ -2368,7 +2441,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
     );
     assert!(
         target_root
-            .join("tasks/007-pipetting-program/automation_protocol.json")
+            .join("tasks/006-pipetting-program/automation_protocol.json")
             .is_file()
     );
     assert!(
@@ -2379,42 +2452,39 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         "an exact Flex dilution must not absorb transformation or plating"
     );
 
-    // The example runs three biological replicates through two dilutions each. An adapter that
-    // reads only the dilution count would emit half the experiment and silently report n=1.
-    let dilution: Value = serde_json::from_str(
-        &std::fs::read_to_string(
-            target_root.join("tasks/007-pipetting-program/invocation_manifest.json"),
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let execution = &dilution["execution"];
-    let vessels = execution["program"]["vessels"].as_array().unwrap();
-    let culture = vessels
-        .iter()
-        .find(|v| v["role"]["kind"] == "procedure_input")
-        .unwrap();
-    assert_eq!(
-        culture["positions"], 3,
-        "every biological replicate is staged"
-    );
-    assert_eq!(
-        vessels
+    // Preserve both construct groups through two dilutions per replicate.
+    let manifests = task_manifests(&target_root);
+    let dilutions = operation(&manifests, "SeriallyDiluteCulture");
+    assert_eq!(dilutions.len(), 2);
+    for (dilution, replicates) in dilutions.into_iter().zip([3, 6]) {
+        let execution = &dilution["execution"];
+        let vessels = execution["program"]["vessels"].as_array().unwrap();
+        let culture = vessels
             .iter()
-            .filter(|v| v["role"]["kind"] == "product")
-            .map(|v| v["positions"].as_u64().unwrap())
-            .sum::<u64>(),
-        6
-    );
-    assert_eq!(
-        execution["program"]["steps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|s| s["kind"] == "mix")
-            .count(),
-        6
-    );
+            .find(|v| v["role"]["kind"] == "procedure_input")
+            .unwrap();
+        assert_eq!(
+            culture["positions"], replicates,
+            "every biological replicate is staged"
+        );
+        assert_eq!(
+            vessels
+                .iter()
+                .filter(|v| v["role"]["kind"] == "product")
+                .map(|v| v["positions"].as_u64().unwrap())
+                .sum::<u64>(),
+            replicates * 2
+        );
+        assert_eq!(
+            execution["program"]["steps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|s| s["kind"] == "mix")
+                .count() as u64,
+            replicates * 2
+        );
+    }
 
     let manifest: Value = serde_json::from_str(
         &std::fs::read_to_string(
@@ -2464,7 +2534,7 @@ fn a_facility_binding_selects_the_flex_adapter_and_protocol_format() {
         .filter(|node| node["document"]["format"] == "opentrons.protocol-designer-json")
         .map(|node| &node["document"])
         .collect::<Vec<_>>();
-    assert_eq!(flex_documents.len(), 7);
+    assert_eq!(flex_documents.len(), 6);
     assert!(flex_documents.iter().all(|document| {
         document["format"] == "opentrons.protocol-designer-json"
             && out_dir.join(document["path"].as_str().unwrap()).is_file()

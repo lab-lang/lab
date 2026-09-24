@@ -1,4 +1,4 @@
-"""Three plasmids for a single three-way cotransformation.
+"""Reporter plasmids for independent GFP and RFP transformations.
 
 The sequences below are synthetic compiler fixtures, not qualified
 biological designs.
@@ -31,11 +31,6 @@ GVD0013_sequence = sequence_binding(
     "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGG"
     "AGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG",
 )
-GVD0015_sequence = sequence_binding(
-    "GVD0015_sequence",
-    "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACC"
-    "GAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG",
-)
 
 
 def build_plasmid(
@@ -44,6 +39,7 @@ def build_plasmid(
     sequence: lab.Binding,
     components: list[object],
 ) -> lab.BuildDeclaration[Plasmid]:
+    scale = 2 if name == "GVD0013" else 1
     return Plasmid.build(
         name=name,
         doc=documentation,
@@ -53,11 +49,11 @@ def build_plasmid(
         components=components,
         restriction_enzyme=BsaI,
         assembly_replicates=1,
-        reaction_volume=25 * uL,
-        part_volume=2 * uL,
-        enzyme_volume=2 * uL,
-        ligase_volume=4 * uL,
-        buffer_volume=2 * uL,
+        reaction_volume=25 * scale * uL,
+        part_volume=2 * scale * uL,
+        enzyme_volume=2 * scale * uL,
+        ligase_volume=4 * scale * uL,
+        buffer_volume=2 * scale * uL,
         assembly_cycles=75,
         digest_temperature=42 * C,
         digest_duration=2 * minutes,
@@ -85,10 +81,4 @@ GVD0013 = build_plasmid(
     "Synthetic Golden Gate fixture named `GVD0013`.",
     GVD0013_sequence,
     [J23106, B0034, RFP, B0015],
-)
-GVD0015 = build_plasmid(
-    "GVD0015",
-    "Synthetic Golden Gate fixture named `GVD0015`.",
-    GVD0015_sequence,
-    [J23106, B0034, GFP, B0015],
 )

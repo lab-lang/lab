@@ -10,6 +10,8 @@ lab run .lab/build --dry-run
 
 `lab build` emits portable experiment artifacts, consumes `inventory/facility.ttl`, binds the reachable requirements across the exact Opentrons OT-2 and manual-workstation offerings, and resolves the ordered reference plasmid through its exact MaterialLot. The Asset's installed adapter emits one reviewed protocol and operator document per automated Procedure. Each file requires the operator to stage the inputs at its documented locations; upstream material provenance does not imply preserved physical well locations between files. The build prints every emitted Asset bundle, protocol, document, and reviewed-plan path.
 
+The inventory declares two 100 µL aliquots each of DH5alpha and BL21. Each of the four transformation workflows reserves its own aliquot, with required volume inferred from its downstream liquid procedure. These stock facts preserve the example's source loads while making available quantities explicit.
+
 ## What it shows
 
 **Provenance per thing.** Two plasmids are assembled here and one is ordered from a repository. Being built is a fact about a particular plasmid rather than about plasmids, so `build plasmid` and `buy plasmid` declare the same kind of thing and only differ in where it came from. `buy restriction_enzyme BsaI:` carries its own datasheet: the temperature a digest runs at belongs to the enzyme, so no design repeats it.

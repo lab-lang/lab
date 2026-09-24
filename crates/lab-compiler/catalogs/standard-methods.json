@@ -1476,7 +1476,7 @@
             "kind": "scalar",
             "scalar_type": "integer"
           },
-          "default": 100
+          "default": 0
         },
         {
           "name": "recovery_aliquot_volume_ul",

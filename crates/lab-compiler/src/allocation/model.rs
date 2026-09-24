@@ -24,6 +24,8 @@ pub struct AllocatedProgram {
     pub inventory_sha256: String,
     pub facility: String,
     pub methods: Vec<AllocatedMethod>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provisions: Vec<crate::allocation::MaterialProvision>,
 }
 
 /// One selected Method and its facility-bound Procedure graph.

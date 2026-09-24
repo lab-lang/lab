@@ -7,7 +7,10 @@ writing Lab rather than a second dialect of it.
 """
 
 import re
+import shutil
+import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -65,6 +68,62 @@ class GoldenGateTests(unittest.TestCase):
     def test_declarations_are_named_after_their_python_bindings(self) -> None:
         self.assertEqual(plasmids.GVD0011.name, "GVD0011")
         self.assertEqual(inventory.BsaI.name, "BsaI")
+
+
+class CellRequirementTests(unittest.TestCase):
+    def test_separate_supplies_cover_all_nine_outputs(self) -> None:
+        plan = lab.plan_project(DESIGNS.parents[1])
+        requirements = plan.material_requirements
+        self.assertEqual([r.consumed_volume_ul for r in requirements], [Decimal(60), Decimal(120)])
+        self.assertEqual([r.stock_positions for r in requirements], [(0,), (1,)])
+        self.assertEqual([r.stock_volume_each_ul for r in requirements], [Decimal(1000)] * 2)
+
+    def test_requirements_follow_the_lab_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "golden-gate"
+            shutil.copytree(
+                DESIGNS.parents[1], project, ignore=shutil.ignore_patterns(".lab", "__pycache__")
+            )
+            strains = project / "src/designs/strains.lab"
+            strains.write_text(
+                strains.read_text()
+                .replace("transformation_replicates = 6", "transformation_replicates = 4")
+                .replace("cell_volume = 20 uL", "cell_volume = 30 uL")
+            )
+            requirements = lab.plan_project(project).material_requirements
+        self.assertEqual([r.consumed_volume_ul for r in requirements], [Decimal(90), Decimal(120)])
+        self.assertEqual([r.stock_positions for r in requirements], [(0,), (1,)])
+
+    def test_insufficient_stock_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "golden-gate"
+            shutil.copytree(
+                DESIGNS.parents[1], project, ignore=shutil.ignore_patterns(".lab", "__pycache__")
+            )
+            inventory = project / "inventory/facility.ttl"
+            inventory.write_text(
+                inventory.read_text().replace("#aliquotCount> 2", "#aliquotCount> 1")
+            )
+            with self.assertRaisesRegex(ValueError, "only 0 unreserved"):
+                lab.plan_project(project)
+
+    def test_small_aliquots_expand_sources_without_changing_output_doses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "golden-gate"
+            shutil.copytree(
+                DESIGNS.parents[1], project, ignore=shutil.ignore_patterns(".lab", "__pycache__")
+            )
+            inventory = project / "inventory/facility.ttl"
+            inventory.write_text(
+                inventory.read_text()
+                .replace('#aliquotVolumeUl> "1000"', '#aliquotVolumeUl> "100"')
+                .replace("#aliquotCount> 2", "#aliquotCount> 3")
+            )
+            plan = lab.plan_project(project)
+        self.assertEqual([r.stock_positions for r in plan.material_requirements], [(0,), (1, 2)])
+        self.assertEqual(
+            [r.consumed_volume_ul for r in plan.material_requirements], [Decimal(60), Decimal(120)]
+        )
 
 
 if __name__ == "__main__":

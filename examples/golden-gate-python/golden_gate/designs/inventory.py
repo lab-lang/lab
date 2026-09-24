@@ -7,10 +7,12 @@ from lab.bio.designs import (
     Antibiotic,
     Backbone,
     Chassis,
+    Medium,
     Part,
     Promoter,
     RestrictionEnzyme,
     competent,
+    poured,
 )
 from lab.units import C, cfu, minutes, ug
 

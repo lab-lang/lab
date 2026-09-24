@@ -130,6 +130,8 @@ pub enum FacilityProjectError {
     MaterialLots(#[source] MaterialLotCatalogError),
     #[error("failed to bind checked designs to SBOLInventory MaterialLots")]
     MaterialInventory(#[source] MaterialLotInventoryError),
+    #[error("invalid stock inventory: {0}")]
+    StockInventory(String),
     #[error("failed to lower the checked program into Design and Intent LAIR")]
     PortableLair(#[source] PortableLairError),
     #[error("failed to refine workflow intent into Method alternatives")]
@@ -397,13 +399,59 @@ fn semantic_material_inventory(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    build_material_lot_inventory(
+    let materials = build_material_lot_inventory(
         modules,
         snapshot.source_sha256(),
         snapshot.facility().as_str(),
         &lots_by_component,
     )
-    .map_err(FacilityProjectError::MaterialInventory)
+    .map_err(FacilityProjectError::MaterialInventory)?;
+    let stocks = snapshot
+        .stock_aliquots()
+        .map_err(FacilityProjectError::MaterialLots)?;
+    let known = materials
+        .materials()
+        .values()
+        .chain(materials.artifacts().values())
+        .filter_map(|candidate| match candidate {
+            lab_facility::MaterialLotCandidates::Identified { material_lots, .. } => {
+                Some(material_lots)
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect::<std::collections::BTreeSet<_>>();
+    let stocks = stocks
+        .into_iter()
+        .filter(|(lot, _)| known.contains(&lot.to_string()))
+        .map(|(lot, stock)| {
+            use lab_compiler::procedure::Volume;
+            Ok((
+                lot.to_string(),
+                lab_facility::MaterialStock {
+                    volume_each: Volume::parse_microlitres(stock.volume_each_ul)
+                        .map_err(|e| FacilityProjectError::StockInventory(e.to_string()))?,
+                    dead_volume_each: if lab_capability::ExactDecimal::parse(
+                        &stock.dead_volume_each_ul,
+                    )
+                    .map_err(|e| FacilityProjectError::StockInventory(e.to_string()))?
+                    .is_zero()
+                    {
+                        None
+                    } else {
+                        Some(
+                            Volume::parse_microlitres(stock.dead_volume_each_ul)
+                                .map_err(|e| FacilityProjectError::StockInventory(e.to_string()))?,
+                        )
+                    },
+                    count: stock.count,
+                },
+            ))
+        })
+        .collect::<Result<_, FacilityProjectError>>()?;
+    materials
+        .with_stocks(stocks)
+        .map_err(|e| FacilityProjectError::StockInventory(e.to_string()))
 }
 
 fn facility_planning_policy(

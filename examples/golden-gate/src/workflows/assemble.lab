@@ -1,4 +1,4 @@
-/*! Stage 1: assemble the three plasmids consumed by the transformation. */
+/*! Stage 1: assemble the GFP and RFP plasmids consumed by the transformations. */
 
 use std.bio.build
 use golden_gate.designs.plasmids
@@ -9,8 +9,4 @@ workflow assemble_GVD0011() -> Material<Plasmid>:
 
 workflow assemble_GVD0013() -> Material<Plasmid>:
   product <- realize GVD0013
-  return product
-
-workflow assemble_GVD0015() -> Material<Plasmid>:
-  product <- realize GVD0015
   return product

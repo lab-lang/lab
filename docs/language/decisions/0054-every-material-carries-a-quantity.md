@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, unimplemented. Extends
+Accepted; general material quantities and `draw` remain unimplemented. Downstream liquid-demand inference for provisioning is implemented in [0056](0056-provisioning-follows-downstream-demand.md). Extends
 [0006: Affine material flow in portable workflows](0006-affine-material-flow.md) and depends on
 [0053: Quantities carry dimensions and compose](0053-quantities-carry-dimensions-and-compose.md).
 

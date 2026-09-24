@@ -1,5 +1,5 @@
 /*!
- * Three plasmids for a single three-way cotransformation.
+ * Reporter plasmids for independent GFP and RFP transformations.
  *
  * The sequences below are synthetic compiler fixtures, not qualified
  * biological designs.
@@ -13,7 +13,6 @@ use golden_gate.designs.inventory
 
 GVD0011_sequence: DNA = dna("TTGACAGCTAGCTCAGTCCTAGGTATTATGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
 GVD0013_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGGCCTCCTCCGAGGACGTCATCAAGGAGTTCATGCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
-GVD0015_sequence: DNA = dna("TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAAATGACCATGATTACGCCAAGCTTGGTACCGAGCTCCCAGGCATCAAATAAAACGAAAGGCTCAGTCG")
 
 /** Synthetic Golden Gate fixture named `GVD0011`. */
 build plasmid GVD0011:
@@ -55,40 +54,12 @@ build plasmid GVD0013:
   restriction_enzyme = BsaI
   assembly_replicates = 1
 
-  reaction_volume = 25 uL
-  part_volume = 2 uL
-  enzyme_volume = 2 uL
-  ligase_volume = 4 uL
-  buffer_volume = 2 uL
-  assembly_cycles = 75
-  digest_temperature = 42 C
-  digest_duration = 2 min
-  ligate_temperature = 16 C
-  ligate_duration = 5 min
-  lid_temperature = 42 C
-  final_digest_temperature = 60 C
-  final_digest_duration = 10 min
-  heat_inactivation_temperature = 80 C
-  heat_inactivation_duration = 10 min
-  hold_temperature = 4 C
-
-  require topology == circular
-  accept sequence == design.sequence
-
-/** Synthetic Golden Gate fixture named `GVD0015`. */
-build plasmid GVD0015:
-  sbol_identity = "https://SBOL2Build.org/GVD0015"
-  sequence = GVD0015_sequence
-  backbone = pSB1C3
-  components = [J23106, B0034, GFP, B0015]
-  restriction_enzyme = BsaI
-  assembly_replicates = 1
-
-  reaction_volume = 25 uL
-  part_volume = 2 uL
-  enzyme_volume = 2 uL
-  ligase_volume = 4 uL
-  buffer_volume = 2 uL
+  // Six RFP replicates draw 30 uL. Double the assembly recipe proportionally.
+  reaction_volume = 50 uL
+  part_volume = 4 uL
+  enzyme_volume = 4 uL
+  ligase_volume = 8 uL
+  buffer_volume = 4 uL
   assembly_cycles = 75
   digest_temperature = 42 C
   digest_duration = 2 min

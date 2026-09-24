@@ -762,6 +762,7 @@ mod tests {
         let plan = AdapterInvocationPlan {
             schema_version: ADAPTER_INVOCATIONS_SCHEMA_VERSION.to_owned(),
             allocated: AllocatedProgram {
+                provisions: Vec::new(),
                 problem_sha256: "b".repeat(64),
                 inventory_sha256: "d".repeat(64),
                 facility: "https://example.org/facility".to_owned(),

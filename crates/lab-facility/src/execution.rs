@@ -247,6 +247,7 @@ pub fn build_execution_plan_from_invocations(
                             instructions: manual_instructions(
                                 task,
                                 task_requirements.iter().map(|(_, binding, _, _)| *binding),
+                                &invocations.allocated.provisions,
                             ),
                         },
                     });
@@ -354,7 +355,11 @@ pub fn build_execution_plan_from_invocations(
                         ExecutionPlanAction::Manual {
                             requirements: vec![requirement],
                             title: format!("Perform {}", task.operation),
-                            instructions: manual_instructions(task, std::iter::once(binding)),
+                            instructions: manual_instructions(
+                                task,
+                                std::iter::once(binding),
+                                &invocations.allocated.provisions,
+                            ),
                         },
                     )
                 } else {
@@ -656,6 +661,13 @@ pub fn manual_run_steps(invocations: &AdapterInvocationPlan) -> Vec<lab_runfmt::
                                 display_procedure_value(&parameter.value),
                             )
                         })
+                        .chain(invocations.allocated.provisions.iter()
+                            .filter(|p| task.materials.iter().any(|m| m.input == p.material))
+                            .map(|p| ("Stock reservation".into(), format!(
+                                "{} x {} uL of {}; lot {}; positions {:?}; {} uL consumed",
+                                p.stock_positions.len(), p.stock_volume_each.value(), p.symbol,
+                                p.material_lot, p.stock_positions, p.consumed_volume.value(),
+                            ))))
                         .collect(),
                 });
             }
@@ -719,6 +731,7 @@ fn display_property_value(value: &lab_capability::PropertyValue) -> String {
 fn manual_instructions<'a>(
     task: &AllocatedProcedureTask,
     bindings: impl IntoIterator<Item = &'a AllocatedRequirementBinding>,
+    provisions: &[lab_compiler::allocation::MaterialProvision],
 ) -> String {
     let resources = bindings
         .into_iter()
@@ -751,6 +764,16 @@ fn manual_instructions<'a>(
         instructions.push_str(" Procedure parameters: ");
         instructions.push_str(&parameters);
         instructions.push('.');
+    }
+    for provision in provisions
+        .iter()
+        .filter(|p| task.materials.iter().any(|m| m.input == p.material))
+    {
+        instructions.push_str(&format!(
+            " Reserve {} separate {} uL aliquot(s) of {} from lot {}, stock positions {:?}, for this call only; downstream consumption is {} uL.",
+            provision.stock_positions.len(), provision.stock_volume_each.value(), provision.symbol,
+            provision.material_lot, provision.stock_positions, provision.consumed_volume.value(),
+        ));
     }
     instructions
 }

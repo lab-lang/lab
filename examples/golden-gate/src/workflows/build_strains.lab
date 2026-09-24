@@ -1,5 +1,5 @@
 /*!
- * Stages 2 and 3: cotransform the three plasmids into DH5alpha, recover the
+ * Stages 2 and 3: transform one reporter plasmid into DH5alpha, recover the
  * cultures, serially dilute them, and spot the dilutions onto selective agar.
  */
 
@@ -9,16 +9,15 @@ use golden_gate.designs.inventory
 use golden_gate.designs.strains
 
 workflow build_GVD_strain(
-  GVD0011: Material<Plasmid>,
-  GVD0013: Material<Plasmid>,
-  GVD0015: Material<Plasmid>,
+  design: Strain,
+  plasmid: Material<Plasmid>,
 ) -> (
   strain: Material<Strain>,
   plate: Material<Medium is inoculated>,
 ):
-  dependencies = [GVD0011, GVD0013, GVD0015]
+  dependencies = [plasmid]
   cells <- provision DH5alpha
-  strain, culture <- transform GVD_strain from dependencies into cells
+  strain, culture <- transform design from dependencies into cells
   culture <- recover culture for 1 h
   culture <- dilute culture
   agar <- provision LB_chloramphenicol_agar

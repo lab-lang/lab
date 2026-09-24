@@ -15,10 +15,21 @@ use thiserror::Error;
 /// Exact candidate lots for the checked declarations in one program.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct MaterialLotInventory {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    stocks: BTreeMap<String, MaterialStock>,
     source_sha256: String,
     facility: String,
     materials: BTreeMap<String, MaterialLotCandidates>,
     artifacts: BTreeMap<String, MaterialLotCandidates>,
+}
+
+/// Uniform physical aliquots held by one active material lot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialStock {
+    pub volume_each: lab_compiler::procedure::Volume,
+    pub dead_volume_each: Option<lab_compiler::procedure::Volume>,
+    pub count: u32,
 }
 
 impl MaterialLotInventory {
@@ -30,6 +41,7 @@ impl MaterialLotInventory {
         artifacts: BTreeMap<String, MaterialLotCandidates>,
     ) -> Self {
         Self {
+            stocks: BTreeMap::new(),
             source_sha256: source_sha256.into(),
             facility: facility.into(),
             materials,
@@ -53,6 +65,19 @@ impl MaterialLotInventory {
         &self.artifacts
     }
 
+    pub fn with_stocks(
+        mut self,
+        stocks: BTreeMap<String, MaterialStock>,
+    ) -> Result<Self, MaterialLotInventoryValidationError> {
+        self.stocks = stocks;
+        self.validate()?;
+        Ok(self)
+    }
+
+    pub fn stocks(&self) -> &BTreeMap<String, MaterialStock> {
+        &self.stocks
+    }
+
     /// Resolve one operational symbol using the same material-first rule as facility planning.
     pub fn candidates(&self, symbol: &str) -> Option<&MaterialLotCandidates> {
         self.materials
@@ -67,6 +92,19 @@ impl MaterialLotInventory {
         }
         if AbsoluteIri::new(&self.facility).is_err() {
             return Err(MaterialLotInventoryValidationError::InvalidFacility);
+        }
+        for (lot, stock) in &self.stocks {
+            let known = self.materials.values().chain(self.artifacts.values()).any(|candidate| {
+                matches!(candidate, MaterialLotCandidates::Identified { material_lots, .. } if material_lots.contains(lot))
+            });
+            if !known
+                || stock
+                    .dead_volume_each
+                    .as_ref()
+                    .is_some_and(|dead| stock.volume_each.value() <= dead.value())
+            {
+                return Err(MaterialLotInventoryValidationError::InvalidStock { lot: lot.clone() });
+            }
         }
         validate_candidates("material", &self.materials)?;
         validate_candidates("artifact", &self.artifacts)?;
@@ -98,6 +136,8 @@ pub enum MaterialLotCandidates {
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum MaterialLotInventoryValidationError {
+    #[error("invalid or unreferenced stock aliquots for material lot {lot}")]
+    InvalidStock { lot: String },
     #[error("material inventory source_sha256 is not a canonical SHA-256 digest")]
     InvalidSourceDigest,
     #[error("material inventory facility is not an absolute IRI")]
@@ -121,6 +161,21 @@ pub fn validate_allocated_material_inventory(
         return Err(AllocatedMaterialInventoryValidationError::EvidenceMismatch);
     }
     allocated.validate(contracts)?;
+    for provision in &allocated.provisions {
+        let stock = material_inventory.stocks().get(&provision.material_lot);
+        if stock.is_none_or(|stock| {
+            stock.volume_each != provision.stock_volume_each
+                || stock.dead_volume_each != provision.stock_dead_volume_each
+                || provision
+                    .stock_positions
+                    .iter()
+                    .any(|position| *position >= stock.count)
+        }) {
+            return Err(AllocatedMaterialInventoryValidationError::StockMismatch {
+                lot: provision.material_lot.clone(),
+            });
+        }
+    }
     for material in allocated
         .methods
         .iter()
@@ -140,6 +195,8 @@ pub fn validate_allocated_material_inventory(
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum AllocatedMaterialInventoryValidationError {
+    #[error("reserved aliquots do not match stock inventory for {lot}")]
+    StockMismatch { lot: String },
     #[error("material inventory evidence is invalid: {0}")]
     InvalidMaterialInventory(#[from] MaterialLotInventoryValidationError),
     #[error(
@@ -393,6 +450,7 @@ mod tests {
 
     fn allocated_program(materials: Vec<SelectedMaterialBinding>) -> AllocatedProgram {
         AllocatedProgram {
+            provisions: Vec::new(),
             problem_sha256: "a".repeat(64),
             inventory_sha256: "b".repeat(64),
             facility: "https://example.org/facility".to_owned(),

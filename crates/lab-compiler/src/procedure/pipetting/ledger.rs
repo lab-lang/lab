@@ -264,10 +264,9 @@ fn ledger_can_value(vessel: &Vessel) -> bool {
 
 /// Proves every aspiration draws from a position whose volume the compiler can follow.
 ///
-/// A material source may leave its fill open, because the adapter computes a load that covers the
-/// planned withdrawals. Anything else arrived from an upstream task with a known volume, and
-/// leaving it unstated would exempt it from every volume check rather than merely leaving one
-/// number blank.
+/// Material sources may leave their fill open for adapter loading. Procedure inputs may defer
+/// their fill while planning derives demand; allocation must supply a concrete fill before
+/// execution. An input/output vessel must already state its incoming volume.
 fn validate_source_valuation(
     program: &PipettingProgramV1,
 ) -> Result<(), PipettingProgramValidationError> {
@@ -327,7 +326,10 @@ fn validate_source_valuation(
                             vessel: target.vessel.clone(),
                         });
                     }
-                    if !matches!(vessel.role, VesselRole::MaterialSource { .. }) {
+                    if !matches!(
+                        vessel.role,
+                        VesselRole::MaterialSource { .. } | VesselRole::ProcedureInput { .. }
+                    ) {
                         return Err(PipettingProgramValidationError::UnvaluedSourceAspiration {
                             step: id.clone(),
                             vessel: target.vessel.clone(),
@@ -350,7 +352,10 @@ fn validate_source_valuation(
                 vessel: source.vessel.clone(),
             });
         }
-        if !matches!(vessel.role, VesselRole::MaterialSource { .. }) {
+        if !matches!(
+            vessel.role,
+            VesselRole::MaterialSource { .. } | VesselRole::ProcedureInput { .. }
+        ) {
             return Err(PipettingProgramValidationError::UnvaluedSourceAspiration {
                 step: id.clone(),
                 vessel: source.vessel.clone(),
@@ -610,19 +615,23 @@ mod tests {
     }
 
     #[test]
-    fn an_unvalued_source_cannot_be_aspirated_unless_an_adapter_loads_it() {
-        // An unstated fill used to exempt a vessel from every volume check rather than leaving one
-        // number blank, so this is rejected outright.
+    fn procedure_input_demand_is_derived_before_stock_allocation() {
         let mut arrives_filled = limited(None, None, None, "10", AspirationStrategy::Liquid);
         arrives_filled.vessels[0].role = VesselRole::ProcedureInput { input: 0 };
-        let error = arrives_filled.validate().unwrap_err();
+        let validated = arrives_filled.validate().unwrap();
+        assert_eq!(
+            validated
+                .liquid_ledger()
+                .required_initial_volume(&location("source", 0))
+                .unwrap()
+                .to_string(),
+            "10"
+        );
         assert!(
-            matches!(
-                error,
-                PipettingProgramValidationError::UnvaluedSourceAspiration { ref vessel, .. }
-                    if vessel.as_str() == "source"
-            ),
-            "a value arriving from an upstream task has a knowable volume: {error}"
+            validated
+                .liquid_ledger()
+                .final_volume(&location("source", 0))
+                .is_none()
         );
 
         // A material source is the exception: the adapter computes a load covering the plan.
@@ -637,16 +646,24 @@ mod tests {
     }
 
     #[test]
-    fn a_mix_cannot_draw_from_a_source_the_plan_cannot_follow() {
+    fn a_mix_requires_a_known_input_output_volume() {
         // A mix draws and returns liquid in place, so its target needs a volume the ledger can
         // follow just as an aspiration source does.
         let program = PipettingProgramV1::new(
             Vec::new(),
-            vec![MaterialOutput { id: id("product") }],
+            vec![
+                MaterialOutput { id: id("product") },
+                MaterialOutput {
+                    id: id("source-output"),
+                },
+            ],
             vec![
                 Vessel {
                     id: id("source"),
-                    role: VesselRole::ProcedureInput { input: 0 },
+                    role: VesselRole::InputOutput {
+                        input: 0,
+                        output: id("source-output"),
+                    },
                     positions: 1,
                     working_capacity_each: None,
                     dead_volume_each: None,

@@ -1,4 +1,4 @@
-"""Three plasmids for a single three-way cotransformation."""
+"""Reporter plasmids for independent GFP and RFP transformations."""
 
 import lab
 from lab.bio.golden_gate import Plasmid
@@ -9,16 +9,16 @@ from .inventory import B0015, B0034, GFP, J23101, J23106, RFP, BsaI, designs, pS
 module = lab.Module("golden_gate.designs.plasmids", doc=__doc__)
 
 
-def plasmid_properties() -> dict[str, object]:
+def plasmid_properties(scale: int = 1) -> dict[str, object]:
     return {
         "backbone": pSB1C3,
         "restriction_enzyme": BsaI,
         "assembly_replicates": 1,
-        "reaction_volume": 25 * uL,
-        "part_volume": 2 * uL,
-        "enzyme_volume": 2 * uL,
-        "ligase_volume": 4 * uL,
-        "buffer_volume": 2 * uL,
+        "reaction_volume": 25 * scale * uL,
+        "part_volume": 2 * scale * uL,
+        "enzyme_volume": 2 * scale * uL,
+        "ligase_volume": 4 * scale * uL,
+        "buffer_volume": 2 * scale * uL,
         "assembly_cycles": 75,
         "digest_temperature": 42 * C,
         "digest_duration": 2 * minutes,
@@ -67,25 +67,6 @@ GVD0013_design = designs.plasmid(
 GVD0013 = Plasmid.build(
     design=GVD0013_design,
     doc="Synthetic Golden Gate fixture named `GVD0013`.",
-    properties=plasmid_properties(),
-    accept=[lambda built: built.sequence == built.design.sequence],
-)
-
-GVD0015_sequence = designs.dna_sequence(
-    elements=(
-        "TTTACGGCTAGCTCAGTCCTAGGTATAGTGCTAGCAAAGAGGAGAAA"
-        "ATGACCATGATTACGCCAAGCTTGGTACCGAGCTC"
-        "CCAGGCATCAAATAAAACGAAAGGCTCAGTCG"
-    ),
-)
-GVD0015_design = designs.plasmid(
-    identity="https://SBOL2Build.org/GVD0015",
-    components=[J23106, B0034, GFP, B0015],
-    sequence=GVD0015_sequence,
-)
-GVD0015 = Plasmid.build(
-    design=GVD0015_design,
-    doc="Synthetic Golden Gate fixture named `GVD0015`.",
-    properties=plasmid_properties(),
+    properties=plasmid_properties(scale=2),
     accept=[lambda built: built.sequence == built.design.sequence],
 )

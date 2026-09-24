@@ -2,6 +2,8 @@
 
 This audit compares Lab's Golden Gate transformation Procedures with PUDU's exact main transformation entrypoint, [`scripts/automated_ot2/run_sbol2transformation_with_params.py`](https://github.com/RudgeLab/PUDU/blob/main/scripts/automated_ot2/run_sbol2transformation_with_params.py). It does not use PUDU's older `workflow_example` fixtures and does not make the Golden Gate package depend on or refer to PUDU.
 
+This document records the earlier single-cotransformation example. The current Golden Gate entry instead transforms GFP and RFP separately, with three and six replicates and independent 1 mL cell sources. The comparison script requires exactly one instance of each transformation Procedure and rejects this two-group package; it does not silently compare only one group. The historical equivalence results below do not apply to the current example.
+
 ## Pinned source
 
 [`scripts/reference/pudu-transformation-entrypoint.json`](../../scripts/reference/pudu-transformation-entrypoint.json) pins PUDU revision `1214d2f9efd557aa84bc96502379554174355eae` and the SHA-256 digests of both the entrypoint and [`src/pudu/transformation.py`](https://github.com/RudgeLab/PUDU/blob/main/src/pudu/transformation.py). The comparison refuses a different revision, tracked source changes, or a digest mismatch.

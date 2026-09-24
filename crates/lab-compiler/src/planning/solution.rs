@@ -88,6 +88,8 @@ pub struct FacilityPlanningSolution {
     pub facility: String,
     pub policy: FacilityPlanningPolicy,
     pub selections: Vec<SelectedMethod>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provisions: Vec<crate::allocation::MaterialProvision>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -360,12 +362,16 @@ impl FacilityPlanningSolution {
                 }
             }
         }
+        crate::allocation::provisioned_programs(problem, self)
+            .map_err(FacilityPlanningSolutionValidationError::Provisioning)?;
         Ok(())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum FacilityPlanningSolutionValidationError {
+    #[error("invalid material provisioning: {0}")]
+    Provisioning(String),
     #[error(
         "facility solution declares schema `{found}`, expected `{FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION}`"
     )]

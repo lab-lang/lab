@@ -1273,6 +1273,95 @@ workflow main() -> Material<Plasmid>:
         )
         .unwrap();
         assert_eq!(reprojected, planned.adapter_invocations);
+        let provisions = &planned.solution().provisions;
+        assert_eq!(provisions.len(), 2);
+        assert_eq!(
+            provisions
+                .iter()
+                .map(|p| p.consumed_volume.value().to_string())
+                .collect::<Vec<_>>(),
+            ["60", "120"]
+        );
+        assert_eq!(
+            provisions
+                .iter()
+                .map(|p| p.stock_positions.clone())
+                .collect::<Vec<_>>(),
+            [vec![0], vec![1]]
+        );
+        assert!(
+            provisions
+                .iter()
+                .all(|p| p.stock_volume_each.value().to_string() == "1000")
+        );
+        assert_eq!(reprojected.allocated.provisions, *provisions);
+
+        let mut missing = planned.solution().clone();
+        missing.provisions.clear();
+        assert!(
+            missing
+                .validate_against(planned.problem())
+                .unwrap_err()
+                .to_string()
+                .contains("no stock reservation")
+        );
+        let mut wrong_demand = planned.solution().clone();
+        wrong_demand.provisions[0].consumed_volume =
+            lab_compiler::procedure::Volume::parse_microlitres("61").unwrap();
+        assert!(
+            wrong_demand
+                .validate_against(planned.problem())
+                .unwrap_err()
+                .to_string()
+                .contains("differs from the canonical transfers")
+        );
+
+        let contracts = lab_compiler::procedure::builtin_procedure_contracts();
+        let mut double_booked = reprojected.allocated.clone();
+        double_booked.provisions[1].stock_positions = vec![0];
+        assert!(
+            double_booked
+                .validate(contracts)
+                .unwrap_err()
+                .to_string()
+                .contains("reserved by more than one")
+        );
+        let mut unavailable = reprojected.allocated.clone();
+        unavailable.provisions[1].stock_positions = vec![2];
+        assert!(matches!(
+            lab_facility::validate_allocated_material_inventory(
+                &unavailable,
+                &planned.material_inventory,
+                contracts
+            ),
+            Err(lab_facility::AllocatedMaterialInventoryValidationError::StockMismatch { .. })
+        ));
+
+        let mut unfilled = reprojected.allocated.clone();
+        let consumer = &provisions[0].consumer;
+        let task = unfilled
+            .methods
+            .iter_mut()
+            .flat_map(|m| &mut m.tasks)
+            .find(|t| &t.id == consumer)
+            .unwrap();
+        let document = task.program.as_mut().unwrap();
+        let mut program: lab_compiler::procedure::PipettingProgramV1 =
+            serde_json::from_value(document.body.clone()).unwrap();
+        program
+            .vessels
+            .iter_mut()
+            .find(|v| v.id == provisions[0].vessel)
+            .unwrap()
+            .initial_volume_each = None;
+        document.body = serde_json::to_value(program).unwrap();
+        assert!(
+            unfilled
+                .validate(contracts)
+                .unwrap_err()
+                .to_string()
+                .contains("no allocated source fill")
+        );
         assert_eq!(
             planned.material_inventory.source_sha256(),
             planned.inventory.source_sha256()

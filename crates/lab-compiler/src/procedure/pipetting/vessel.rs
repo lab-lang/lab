@@ -40,6 +40,7 @@ pub struct Vessel {
     pub positions: u32,
     /// Exact liquid volume initially present in every position when it is known to the Method.
     /// Material sources may omit this value so the adapter can calculate a sufficient source load.
+    /// Procedure inputs may omit it during planning; allocation must resolve their source fill.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_volume_each: Option<Volume>,
     /// Largest liquid volume one position of this vessel can hold.

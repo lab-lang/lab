@@ -218,6 +218,8 @@ impl AllocatedProgram {
         }
         validate_allocated_method_dependencies(&self.methods)?;
         validate_allocated_material_linearity(&self.methods)?;
+        super::provision::validate_allocated_provisions(self)
+            .map_err(AllocatedProgramValidationError::Provisioning)?;
         Ok(())
     }
 }
@@ -631,6 +633,8 @@ fn is_relative_path(path: &Path) -> bool {
 /// A violation of the facility-bound semantic allocation contract.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum AllocatedProgramValidationError {
+    #[error("invalid material provisioning: {0}")]
+    Provisioning(String),
     #[error("allocated program contains an invalid {label} SHA-256 digest")]
     InvalidDigest { label: &'static str },
     #[error("allocated program names a facility that is not an absolute IRI")]
@@ -767,6 +771,7 @@ mod tests {
             &[(output.to_string(), PortType::Design)],
         );
         AllocatedProgram {
+            provisions: Vec::new(),
             problem_sha256: "a".repeat(64),
             inventory_sha256: "b".repeat(64),
             facility: "https://example.org/facility".to_owned(),

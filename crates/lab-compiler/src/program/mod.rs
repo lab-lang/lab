@@ -1370,6 +1370,7 @@ workflow main() -> Material<Specimen>:
         let requirement = &candidate.tasks[0].requirements[0];
         let source_intent = choice.source_intent.clone();
         let solution = FacilityPlanningSolution {
+            provisions: Vec::new(),
             schema_version: FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION.to_owned(),
             problem_sha256: problem.sha256(),
             inventory_sha256: "a".repeat(64),

@@ -56,6 +56,8 @@ pub(crate) fn apply_facility_solution(
     solution: &FacilityPlanningSolution,
 ) -> Result<(), AllocationApplicationError> {
     solution.validate_against(problem)?;
+    let provisioned = crate::allocation::provisioned_programs(problem, solution)
+        .map_err(FacilityPlanningSolutionValidationError::Provisioning)?;
     let block = module
         .get_region(context)
         .deref(context)
@@ -147,6 +149,12 @@ pub(crate) fn apply_facility_solution(
                 solution.inventory_sha256.clone(),
                 solution.facility.clone(),
             );
+            allocation_context.set_attr_provisions(
+                context,
+                pliron::builtin::attributes::StringAttr::new(
+                    serde_json::to_string(&solution.provisions).expect("reservations serialize"),
+                ),
+            );
             rewriter.append_operation(context, allocation_context.get_operation());
             inserted_context = true;
         }
@@ -191,6 +199,12 @@ pub(crate) fn apply_facility_solution(
                         .expect("verified material input identity is stable")
                 });
             let cloned = clone_operation(operation, context, &mut rewriter, &mut mapping);
+            if let Some(task) = Operation::get_op::<crate::procedure::ir::TaskOp>(cloned, context)
+                && let Some(program) =
+                    provisioned.get(&LocalId::new(task.node_id(context)).expect("valid task ID"))
+            {
+                task.set_semantic_program(context, program);
+            }
             method.append_body_operation(context, cloned);
             if let Some(input) = material_input_id {
                 let (procedure_node, binding) = material_bindings.get(&input).ok_or_else(|| {

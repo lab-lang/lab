@@ -8,6 +8,7 @@ mod adapters;
 mod execution;
 mod explain;
 mod inventory;
+mod provision;
 mod solver;
 
 pub use adapters::{
@@ -22,8 +23,8 @@ pub use execution::{
 pub use explain::explain_facility_planning_error;
 pub use inventory::{
     AllocatedMaterialInventoryValidationError, MaterialLotCandidates, MaterialLotInventory,
-    MaterialLotInventoryError, MaterialLotInventoryValidationError, build_material_lot_inventory,
-    validate_allocated_material_inventory,
+    MaterialLotInventoryError, MaterialLotInventoryValidationError, MaterialStock,
+    build_material_lot_inventory, validate_allocated_material_inventory,
 };
 pub use solver::{
     AlternativeMaterialBinding, AlternativeMethod, AlternativeRequirementBinding,

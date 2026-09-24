@@ -84,7 +84,7 @@ from .adapters import validate_profile as validate_adapter_profile
 # thing, and either spelling emits the same `use` line.
 from .bio.build import realize
 from .methods import RefinedProgram, refine
-from .planning import FacilityPlan, plan, plan_project
+from .planning import FacilityPlan, MaterialProvision, plan, plan_project
 from .plasmid import (
     assemble,
     capture,
@@ -153,6 +153,7 @@ __all__ = [
     "LabError",
     "List",
     "Material",
+    "MaterialProvision",
     "Module",
     "Network",
     "NetworkBinding",

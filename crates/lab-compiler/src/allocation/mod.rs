@@ -4,6 +4,10 @@ mod application;
 mod extraction;
 pub(crate) mod ir;
 mod model;
+mod provision;
+pub use provision::{
+    MaterialProvision, ProvisionDemand, bind_stock, provision_demands, provisioned_programs,
+};
 mod validation;
 
 pub use application::AllocationApplicationError;
