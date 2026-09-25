@@ -1,20 +1,32 @@
 # Golden Gate cloning on an Opentrons OT-2
 
-This is Lab's end-to-end facility example: a package describes a three-plasmid cotransformation biologically, compiles it into portable capability requirements, allocates those requirements against an SBOLInventory facility, and lowers the resulting OT-2 bindings into automation protocols.
+This is Lab's end-to-end facility example: a package describes separate GFP and RFP transformations, compiles them into portable capability requirements, allocates those requirements against an SBOLInventory facility, and lowers the resulting OT-2 bindings into automation protocols.
 
 The workflow covers Golden Gate assembly, chemical transformation and heat shock, recovery-medium addition and incubation, replicate-aware serial dilution, and selective plating.
 
 ## What it builds
 
-Three transcription units are assembled into the same backbone and cotransformed into DH5alpha. Every transformation replicate receives all three plasmids:
+Two reporter plasmids are assembled and transformed separately into DH5alpha:
 
 ```text
-GVD0011 (J23101 → GFP) ─┐
-GVD0013 (J23106 → RFP) ─┼─> GVD_strain (DH5alpha), 3 replicates
-GVD0015 (J23106 → GFP) ─┘
+GVD0011 (J23101 → GFP) ─> GFP_strain (DH5alpha), 3 replicates
+GVD0013 (J23106 → RFP) ─> RFP_strain (DH5alpha), 6 replicates
 ```
 
-The three assembly products are explicit material dependencies of the strain build. The compiler therefore derives the assembly-to-transformation order and retains each product's material provenance into the cotransformation without a separately maintained stage graph.
+Each strain receives only its own reporter plasmid. The assembly products are explicit material dependencies, so the compiler derives the assembly-to-transformation order and retains each product's provenance. The GFP assembly produces 25 µL; the RFP recipe is doubled proportionally to produce 50 µL for its six 5 µL DNA transfers.
+
+Each transformation group provisions its own competent cells with the existing Lab syntax:
+
+```lab
+cells <- provision DH5alpha
+strain, culture <- transform design from dependencies into cells
+```
+
+The planner follows that material into its consuming procedure and derives demand from the exact liquid transfers. The designs state three GFP replicates, six RFP replicates, and 20 µL of cells per reaction. The inventory lot states its packaging: two available 1 mL aliquots. Neither the total cell volume nor a source-vial count is an experiment parameter.
+
+`lab plan` and `lab build` report 60 µL consumed for GFP and 120 µL for RFP, reserving one separate stock aliquot for each provisioning call. The resulting nine outputs consume 180 µL. Reservations are retained in the facility solution and adapter invocations, and the manual run sheet identifies the stock aliquots to stage. Python clients can read the same compiler result through `plan.material_requirements`.
+
+Stock facts live on `lots:DH5alpha_lot` in `inventory/facility.ttl`, using Lab inventory extension properties `aliquotVolumeUl` and `aliquotCount`; optional `deadVolumeUl` describes inaccessible volume per aliquot. If smaller aliquots require more sources, the planner splits the cell distribution across those sources while preserving each output's dose. It rejects insufficient stock or an allocation the selected instrument cannot stage. Distinct provisioning calls reserve distinct aliquots; this is an immutable planning reservation, not a live inventory mutation.
 
 The DNA sequences are first-class values declared independently of the designs that reference them. Provenance is separate again: `buy` marks catalogued parts and reagents, while `build` marks the plasmids and strains this laboratory makes.
 
@@ -37,7 +49,7 @@ The package selects `inventory/facility.ttl`, a conformant SBOLInventory documen
 lab run .lab/build --dry-run
 ```
 
-The facility phase selects ten Method instances and binds 44 atomic requirements. Assembly setup and thermal cycling for each of the three plasmids are followed by transformation setup, heat shock, recovery-medium addition, recovery incubation, serial dilution, and selective plating. The adapter emits twelve separately staged Python protocols and twelve operator PDFs, plus the plan's manual run sheet. The package requires an adapter for every non-manual requirement, so a missing implementation is a planning error. `lab plan` writes this facility phase separately under `.lab/plan/`.
+The facility phase selects sixteen Method instances and binds 56 atomic requirements. Assembly setup and thermal cycling for each plasmid are followed by transformation setup, heat shock, recovery-medium addition, recovery incubation, serial dilution, and selective plating for each strain. The adapter emits sixteen separately staged Python protocols and sixteen operator PDFs, plus the plan's manual run sheet. The package requires an adapter for every non-manual requirement, so a missing implementation is a planning error. `lab plan` writes this facility phase separately under `.lab/plan/`.
 
 | Path | Contents |
 | --- | --- |

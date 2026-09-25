@@ -437,15 +437,15 @@ build:GVD0013
     sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000251> .
 
-build:GVD0015
+build:GFP_strain
     a sbol:Component ;
-    sbol:displayId "GVD0015" ;
+    sbol:displayId "GFP_strain" ;
     sbol:hasNamespace <https://SBOL2Build.org> ;
-    sbol:type <https://identifiers.org/SBO:0000251> .
+    sbol:type <https://identifiers.org/SBO:0000241> .
 
-build:GVD_strain
+build:RFP_strain
     a sbol:Component ;
-    sbol:displayId "GVD_strain" ;
+    sbol:displayId "RFP_strain" ;
     sbol:hasNamespace <https://SBOL2Build.org> ;
     sbol:type <https://identifiers.org/SBO:0000241> .
 
@@ -576,6 +576,8 @@ lots:DH5alpha_lot
     sbol:built canvas:DH5alpha ;
     fac:materialKind inv:BacterialStock ;
     fac:locatedIn ex:stock_storage ;
+    <https://www.lab-compiler.org/ns/inventory#aliquotVolumeUl> "1000"^^xsd:decimal ;
+    <https://www.lab-compiler.org/ns/inventory#aliquotCount> 2 ;
     fac:isActive true .
 
 lots:LB_chloramphenicol_agar_lot

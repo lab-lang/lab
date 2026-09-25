@@ -462,10 +462,28 @@ pub(crate) fn build(
             human_path(&facility.lowering),
             human_path(&facility.execution_plan)
         ));
+        append_material_requirements(&mut human, facility);
         append_facility_artifacts(&mut human, facility);
         append_unlowered_warning(&mut human, facility);
     }
     output.success("built", built, human)
+}
+
+fn append_material_requirements(human: &mut String, facility: &FacilityArtifactBuild) {
+    if facility.material_requirements.is_empty() {
+        return;
+    }
+    human.push_str("\n\nProvisioned materials:");
+    for provision in &facility.material_requirements {
+        human.push_str(&format!(
+            "\n  {}: {} uL consumed; {} x {} uL stock aliquot(s), reserved separately for {}",
+            provision.symbol,
+            provision.consumed_volume.value(),
+            provision.stock_positions.len(),
+            provision.stock_volume_each.value(),
+            provision.choice
+        ));
+    }
 }
 
 /// Says plainly when a plan allocated work to instruments but emitted nothing to run on them.
@@ -520,6 +538,7 @@ pub(crate) fn plan(
         human_path(&planned.adapter_invocations),
         human_path(&planned.execution_plan)
     );
+    append_material_requirements(&mut human, &planned);
     append_facility_artifacts(&mut human, &planned);
     output.success("planned", planned, human)
 }

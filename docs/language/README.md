@@ -99,3 +99,4 @@ The latest accepted design records are:
 - [`0053`](decisions/0053-quantities-carry-dimensions-and-compose.md): quantities carry dimensions, convert only where written, and compose under multiplication and division.
 - [`0054`](decisions/0054-every-material-carries-a-quantity.md): every material carries a quantity, and a divisible one is drawn from within ordinary affine ownership.
 - [`0055`](decisions/0055-solving-and-pliron-are-compiler-internals.md): bounded facility solving and Pliron remain internal implementation tools rather than contribution seams.
+- [`0056`](decisions/0056-provisioning-follows-downstream-demand.md): provisioning derives liquid demand from downstream consumers and reserves separate stock aliquots within the plan.

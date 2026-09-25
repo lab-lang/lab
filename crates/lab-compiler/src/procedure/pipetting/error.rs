@@ -95,7 +95,7 @@ pub enum PipettingProgramValidationError {
     )]
     ExceedsWorkingCapacity(Box<VolumeConflict>),
     #[error(
-        "pipetting step `{step}` aspirates from `{vessel}`, which states no initial volume; only a material source may leave its fill to the adapter"
+        "pipetting step `{step}` aspirates from `{vessel}`, which states no initial volume; only a material source or procedure input may defer its fill to allocation"
     )]
     UnvaluedSourceAspiration {
         step: ProcedureLocalId,

@@ -1,5 +1,8 @@
 //! The boundary between portable Lab packages and SBOLInventory facility graphs.
 
+mod stock;
+pub use stock::{ALIQUOT_COUNT, ALIQUOT_VOLUME_UL, DEAD_VOLUME_UL, StockAliquots};
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -399,6 +402,8 @@ pub enum FacilityAssetError {
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum MaterialLotCatalogError {
+    #[error("material lot {lot} has invalid stock annotations: {message}")]
+    InvalidStock { lot: String, message: String },
     #[error("validated MaterialLot `{identity}` does not have an IRI identity")]
     NonIriMaterialLot { identity: Resource },
     #[error("validated MaterialLot `{material_lot}` has a non-IRI sbol:built reference")]

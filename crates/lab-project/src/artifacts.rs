@@ -132,6 +132,7 @@ pub(crate) struct FacilityArtifactRequest<'a> {
 /// Paths and summary counts for one complete reviewed facility artifact directory.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FacilityArtifactBuild {
+    pub material_requirements: Vec<lab_compiler::allocation::MaterialProvision>,
     pub package: String,
     pub version: String,
     pub output: PathBuf,
@@ -663,6 +664,7 @@ fn build_facility_artifacts_inner(
         .map(|route| output_root.join(&route.output))
         .collect();
     Ok(FacilityArtifactBuild {
+        material_requirements: invocations.allocated.provisions.clone(),
         package: package.manifest.package.name.clone(),
         version: package.manifest.package.version.clone(),
         output: output_root.to_path_buf(),

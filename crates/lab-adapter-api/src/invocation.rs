@@ -45,6 +45,8 @@ struct CanonicalAdapterInvocationPlan<'a> {
     inventory_sha256: &'a str,
     facility: &'a str,
     methods: &'a [AllocatedMethod],
+    #[serde(skip_serializing_if = "<[lab_compiler::allocation::MaterialProvision]>::is_empty")]
+    provisions: &'a [lab_compiler::allocation::MaterialProvision],
     #[serde(skip_serializing_if = "<[AdapterInvocation]>::is_empty")]
     invocations: &'a [AdapterInvocation],
 }
@@ -59,6 +61,7 @@ impl AdapterInvocationPlan {
             inventory_sha256: &self.allocated.inventory_sha256,
             facility: &self.allocated.facility,
             methods: &self.allocated.methods,
+            provisions: &self.allocated.provisions,
             invocations: &self.invocations,
         })
         .expect("AdapterInvocationPlan contains only infallibly serializable values");
@@ -376,6 +379,7 @@ mod tests {
     fn manual_allocation() -> AllocatedProgram {
         let operation = "https://example.org/intent/manual";
         AllocatedProgram {
+            provisions: Vec::new(),
             problem_sha256: "a".repeat(64),
             inventory_sha256: "b".repeat(64),
             facility: "https://example.org/facility".to_owned(),
@@ -508,6 +512,7 @@ mod tests {
             plan
         );
         let canonical = CanonicalAdapterInvocationPlan {
+            provisions: &plan.allocated.provisions,
             schema_version: &plan.schema_version,
             problem_sha256: &plan.allocated.problem_sha256,
             allocated_lair_sha256: &plan.allocated_lair_sha256,

@@ -1,16 +1,20 @@
 use std.lab.plasmid
+use golden_gate.designs.strains
 use golden_gate.workflows.assemble
 use golden_gate.workflows.build_strains
 
 /**
- * Assemble all three GVD plasmids, then perform their three-replicate DH5alpha
- * cotransformation as one lineage-preserving workflow.
+ * Assemble GFP and RFP plasmids, then transform three GFP and six RFP
+ * replicates using separate DH5alpha cell supplies.
  */
-workflow main() -> Material<Strain>:
+workflow main() -> (
+  gfp: Material<Strain>,
+  rfp: Material<Strain>,
+):
   GVD0011 <- assemble_GVD0011
   GVD0013 <- assemble_GVD0013
-  GVD0015 <- assemble_GVD0015
-
-  strain, plate <- build_GVD_strain GVD0011 GVD0013 GVD0015
-  <- dispose plate
-  return strain
+  gfp, gfp_plate <- build_GVD_strain GFP_strain GVD0011
+  rfp, rfp_plate <- build_GVD_strain RFP_strain GVD0013
+  <- dispose gfp_plate
+  <- dispose rfp_plate
+  return gfp, rfp

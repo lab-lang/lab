@@ -118,6 +118,7 @@ pub enum AllocatedProgramExtractionError {
 
 #[derive(Clone)]
 struct AllocationContext {
+    provisions: Vec<crate::allocation::MaterialProvision>,
     problem_sha256: String,
     inventory_sha256: String,
     facility: String,
@@ -210,6 +211,7 @@ pub fn extract_allocated_program(
     }
 
     let allocated = AllocatedProgram {
+        provisions: allocation_context.provisions,
         problem_sha256: allocation_context.problem_sha256,
         inventory_sha256: allocation_context.inventory_sha256,
         facility: allocation_context.facility,
@@ -225,6 +227,16 @@ fn extract_context(
 ) -> Result<AllocationContext, AllocatedProgramExtractionError> {
     let owner = "allocation.context";
     Ok(AllocationContext {
+        provisions: encoded
+            .get_attr_provisions(context)
+            .map(|value| serde_json::from_str(value.as_str()))
+            .transpose()
+            .map_err(|error| AllocatedProgramExtractionError::InvalidAttribute {
+                owner: owner.into(),
+                attribute: "provisions",
+                message: error.to_string(),
+            })?
+            .unwrap_or_default(),
         problem_sha256: required_string(
             encoded.get_attr_problem_sha256(context),
             owner,

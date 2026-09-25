@@ -42,7 +42,8 @@ use crate::procedure::ir::{is_stable_local_id, semantic_port_type};
     attributes = (
         problem_sha256: StringAttr,
         inventory_sha256: StringAttr,
-        facility: StringAttr
+        facility: StringAttr,
+        provisions: StringAttr
     ),
     interfaces = [NOpdsInterface<0>, NResultsInterface<0>]
 )]

@@ -14,7 +14,10 @@
     "thermocycler_load_name": "thermocycler module"
   },
   "assembly": {
-    "reaction_volume_ul": 25,
+    "reaction_volume_ul": {
+      "GVD0011": 25,
+      "GVD0013": 50
+    },
     "source_temperature_c": 4,
     "deactivate_sources_before_thermal": true,
     "source_order": [
@@ -40,7 +43,10 @@
     },
     "bubble_clear": {
       "reuse_final_addition_tip": true,
-      "cycles": 2,
+      "cycles": {
+        "GVD0011": 2,
+        "GVD0013": 5
+      },
       "volume_ul": 20,
       "aspiration_bottom_offset_mm": 0,
       "dispense_bottom_offset_mm": 8,
@@ -81,9 +87,12 @@
     }
   },
   "transformation": {
-    "replicates": 3,
+    "replicates": {
+      "GFP_strain": 3,
+      "RFP_strain": 6
+    },
     "competent_cells": {
-      "source_volume_ul": 150,
+      "source_volume_ul": 1000,
       "volume_ul": 20,
       "source_mix_cycles": 3,
       "source_mix_volume_ul": 50,
@@ -101,7 +110,7 @@
       "touch_tip_after_bubble_clear": true
     },
     "heat_shock": {
-      "volume_ul": 35,
+      "volume_ul": 25,
       "steps": [
         {
           "temperature_c": 4,
@@ -124,7 +133,7 @@
       "air_gap_ul": 10,
       "incubation_temperature_c": 37,
       "incubation_seconds": 3600,
-      "incubation_volume_ul": 95
+      "incubation_volume_ul": 85
     }
   },
   "plating": {
@@ -166,6 +175,7 @@
       "A7",
       "B7",
       "C7"
-    ]
+    ],
+    "strain": "GFP_strain"
   }
 }

@@ -82,6 +82,7 @@ Decision records preserve the reasoning and status behind the language rather th
 | [0053: Quantities carry dimensions and compose](language/decisions/0053-quantities-carry-dimensions-and-compose.md) | a field may ask for a dimension, conversion is written, and products and quotients are computed |
 | [0054: Every material carries a quantity](language/decisions/0054-every-material-carries-a-quantity.md) | a divisible material is drawn from as one take and two introductions, needing no exception to affine flow |
 | [0055: Solving and Pliron are compiler internals](language/decisions/0055-solving-and-pliron-are-compiler-internals.md) | retain bounded facility search and verified LAIR without making either a contribution seam |
+| [0056: Provisioning follows downstream demand](language/decisions/0056-provisioning-follows-downstream-demand.md) | infer liquid demand from material consumers and allocate separate inventory aliquots for each provisioning call |
 
 ## Implementation and embedding
 

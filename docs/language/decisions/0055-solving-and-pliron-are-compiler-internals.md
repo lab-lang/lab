@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Clarifies [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md) after generic Intent lowering and explicit Procedure-program builders.
+Accepted. Clarifies [0045: LAIR represents method alternatives before facility allocation](0045-lair-method-refinement-and-facility-allocation.md) after generic Intent lowering and explicit Procedure-program builders. [0056](0056-provisioning-follows-downstream-demand.md) extends allocation with finite stock-aliquot assignments within one immutable plan.
 
 ## Context
 
@@ -39,7 +39,7 @@ It owns:
 - Procedure contract, feature, and adapter-profile feasibility; and
 - deterministic zero-solution explanations and multi-solution ambiguity reports.
 
-It does not own scheduling, batching, routing, stock reservation, material depletion, live inventory queries, cost or duration optimization, device commands, or automatic tie-breaking between scientifically distinct plans. Adapter scheduling occurs after allocation and is validated separately. A laboratory chooses between distinct valid instruments or Methods through explicit policy.
+It does not own scheduling, batching, routing, live stock reservation, material depletion, live inventory queries, cost or duration optimization, device commands, or automatic tie-breaking between scientifically distinct plans. Stock assignments within one plan are described in 0056; they do not acquire or deplete live inventory. Adapter scheduling occurs after allocation and is validated separately. A laboratory chooses between distinct valid instruments or Methods through explicit policy.
 
 Do not add a general constraint-solver dependency while the problem remains a finite product of independently enumerable candidates and the required result is only infeasible, unique, or ambiguous. Reconsider that choice when constraints couple choices globally, such as consumable quantities, shared capacity over time, reservations, or an explicit optimization objective. The serializable planning-problem and planning-solution contracts must remain the boundary so the search implementation can change without changing Methods, adapters, Python bindings, or LAIR.
 

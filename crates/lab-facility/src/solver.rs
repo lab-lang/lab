@@ -101,6 +101,8 @@ pub struct AlternativeRequirementBinding {
 
 #[derive(Debug, Error)]
 pub enum FacilityPlanningError {
+    #[error("material provisioning failed: {0}")]
+    Provisioning(String),
     #[error(transparent)]
     InvalidProblem(#[from] PlanningProblemValidationError),
     #[error(transparent)]
@@ -250,14 +252,70 @@ pub fn solve_facility_planning(
     let selections = alternatives
         .pop()
         .expect("a validated non-empty problem leaves one solution");
-    Ok(FacilityPlanningSolution {
+    let mut solution = FacilityPlanningSolution {
+        provisions: Vec::new(),
         schema_version: FACILITY_PLANNING_SOLUTION_SCHEMA_VERSION.to_owned(),
         problem_sha256: problem.sha256(),
         inventory_sha256: inventory.source_sha256().to_owned(),
         facility: inventory.facility().as_str().to_owned(),
         policy,
         selections,
-    })
+    };
+    crate::provision::reserve_stock(problem, &mut solution, material_inventory)
+        .map_err(FacilityPlanningError::Provisioning)?;
+    // Physical source expansion is checked by the same adapter feasibility path as every task.
+    let bound = lab_compiler::allocation::provisioned_programs(problem, &solution)
+        .map_err(FacilityPlanningError::Provisioning)?;
+    if let (Some(feasibility), Some(bindings)) = (adapter_feasibility, adapters) {
+        for choice in &problem.choices {
+            let selection = solution
+                .selections
+                .iter()
+                .find(|s| s.choice == choice.id)
+                .unwrap();
+            let candidate = choice
+                .candidates
+                .iter()
+                .find(|c| c.method == selection.method)
+                .unwrap();
+            for task in &candidate.tasks {
+                if let Some(program) = bound.get(&task.id) {
+                    let mut specialized = task.clone();
+                    specialized.program = Some(program.clone());
+                    let selected_task = selection.tasks.iter().find(|t| t.task == task.id).unwrap();
+                    let mut checked = BTreeSet::new();
+                    for requirement in &selected_task.requirements {
+                        if let Some(adapter) = &requirement.adapter
+                            && let Some(implementation) = &adapter.procedure_implementation
+                            && checked.insert((&requirement.asset, &adapter.driver, implementation))
+                        {
+                            let binding = bindings
+                                .bindings
+                                .iter()
+                                .find(|b| {
+                                    b.asset == requirement.asset && b.driver == adapter.driver
+                                })
+                                .ok_or_else(|| {
+                                    FacilityPlanningError::Provisioning(
+                                        "missing exact adapter binding".into(),
+                                    )
+                                })?;
+                            feasibility
+                                .check_program(
+                                    &adapter.driver,
+                                    implementation,
+                                    &binding.profile,
+                                    &specialized,
+                                    contracts,
+                                )
+                                .map_err(FacilityPlanningError::Provisioning)?;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(solution)
 }
 
 #[derive(Clone)]

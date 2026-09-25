@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
@@ -299,6 +300,41 @@ class AdapterInvocationPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class MaterialProvision:
+    """A downstream demand and its separately reserved inventory aliquots (volumes in uL)."""
+
+    choice: str
+    material: str
+    symbol: str
+    material_lot: str
+    consumer: str
+    vessel: str
+    required_volume_ul: Decimal
+    consumed_volume_ul: Decimal
+    stock_volume_each_ul: Decimal
+    stock_dead_volume_each_ul: Decimal
+    stock_positions: tuple[int, ...]
+
+
+def _provision(raw: dict[str, Any]) -> MaterialProvision:
+    return MaterialProvision(
+        choice=str(raw["choice"]),
+        material=str(raw["material"]),
+        symbol=str(raw["symbol"]),
+        material_lot=str(raw["material_lot"]),
+        consumer=str(raw["consumer"]),
+        vessel=str(raw["vessel"]),
+        required_volume_ul=Decimal(raw["required_volume"]["value"]["value"]),
+        consumed_volume_ul=Decimal(raw["consumed_volume"]["value"]["value"]),
+        stock_volume_each_ul=Decimal(raw["stock_volume_each"]["value"]["value"]),
+        stock_dead_volume_each_ul=Decimal(raw["stock_dead_volume_each"]["value"]["value"])
+        if raw.get("stock_dead_volume_each")
+        else Decimal(0),
+        stock_positions=tuple(raw["stock_positions"]),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class FacilityPlan:
     """One complete result from portable Intent through exact adapter invocations."""
 
@@ -314,6 +350,11 @@ class FacilityPlan:
     material_inventory: MaterialInventory
     adapter_invocations: AdapterInvocationPlan
     raw_invocation_plan: dict[str, Any]
+
+    @property
+    def material_requirements(self) -> tuple[MaterialProvision, ...]:
+        """Compiler-calculated demand and exact stock reservations, shared with `lab plan`."""
+        return tuple(_provision(item) for item in self.raw_invocation_plan.get("provisions", []))
 
     @property
     def invocation_plan(self) -> dict[str, Any]:
@@ -698,6 +739,7 @@ __all__ = [
     "MaterialCandidates",
     "MaterialInventory",
     "MaterialLotSource",
+    "MaterialProvision",
     "MethodSelection",
     "ProcedureTaskInput",
     "ProcedureTaskOutput",

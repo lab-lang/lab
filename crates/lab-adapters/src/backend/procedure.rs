@@ -503,6 +503,7 @@ mod canonical_interpreter_tests {
             .collect();
         let operation = task.operation.to_string();
         let allocated = AllocatedProgram {
+            provisions: Vec::new(),
             problem_sha256: "a".repeat(64),
             inventory_sha256: "b".repeat(64),
             facility: "https://example.org/facility".to_owned(),

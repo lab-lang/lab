@@ -50,7 +50,7 @@ fn facility_plan_typesets_every_document_to_pdf() {
         .filter(|artifact| artifact["role"] == "operator_document")
         .map(|artifact| artifact["path"].as_str().unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(documents.len(), 12);
+    assert_eq!(documents.len(), 16);
     assert_eq!(
         documents
             .iter()
